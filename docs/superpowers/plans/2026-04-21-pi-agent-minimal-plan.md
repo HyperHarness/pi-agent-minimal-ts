@@ -22,7 +22,7 @@
 
 ```json
 {
-  "name": "wiki_agent2",
+  "name": "pi-agent-minimal-ts",
   "version": "1.0.0",
   "private": true,
   "type": "module",
