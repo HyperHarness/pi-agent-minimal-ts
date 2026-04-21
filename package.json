@@ -1,0 +1,19 @@
+{
+  "name": "wiki_agent2",
+  "version": "1.0.0",
+  "private": true,
+  "type": "module",
+  "scripts": {
+    "build": "tsc -p tsconfig.json",
+    "test": "npm run build && node --test --test-isolation=none dist/test/**/*.test.js",
+    "agent": "npm run build && node dist/src/pi-agent.js"
+  },
+  "dependencies": {
+    "@mariozechner/pi-ai": "^0.68.0",
+    "@mariozechner/pi-agent-core": "^0.68.0"
+  },
+  "devDependencies": {
+    "@types/node": "^25.6.0",
+    "typescript": "^6.0.3"
+  }
+}
