@@ -21,6 +21,25 @@ It provides:
 npm install
 ```
 
+### Windows PowerShell note
+
+If PowerShell blocks `npm` with an error about `npm.ps1` or execution policies, configure PowerShell to prefer `npm.cmd` for your current user:
+
+1. Create or edit `C:\Users\<your-user>\Documents\WindowsPowerShell\Microsoft.PowerShell_profile.ps1`
+2. Add:
+
+```powershell
+Set-Alias -Name npm -Value npm.cmd -Scope Global
+```
+
+3. Allow user-level PowerShell profiles and local scripts:
+
+```powershell
+Set-ExecutionPolicy -Scope CurrentUser -ExecutionPolicy RemoteSigned
+```
+
+After reopening PowerShell, `npm` will resolve through `npm.cmd` instead of `npm.ps1`.
+
 ## Run
 
 Use environment variables:
