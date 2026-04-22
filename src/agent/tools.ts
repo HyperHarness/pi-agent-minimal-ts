@@ -313,7 +313,12 @@ export function createTools(workspaceDir: string, dependencies: ToolDependencies
             return;
           }
 
-          const browserSession = await browserSessionPromise;
+          let browserSession: PaperBrowserSession;
+          try {
+            browserSession = await browserSessionPromise;
+          } catch {
+            return;
+          }
           await browserSession.dispose?.();
         })();
         await cleanupPromise;

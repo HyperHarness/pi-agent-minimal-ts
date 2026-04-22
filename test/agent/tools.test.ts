@@ -660,3 +660,46 @@ test("createTools cleanup closes a lazily created default browser session exactl
     await rm(workspace, { recursive: true, force: true });
   }
 });
+
+test("createTools cleanup ignores a previously rejected browser session factory", async () => {
+  const cleanupTools = (
+    agentTools as {
+      cleanupTools?: (tools: ReturnType<typeof createTools>) => Promise<void>;
+    }
+  ).cleanupTools;
+  assert.equal(typeof cleanupTools, "function");
+
+  const workspace = await mkdtemp(path.join(tmpdir(), "pi-agent-tools-"));
+  const launchError = new Error("browser launch failed");
+
+  try {
+    const tools = createTools(workspace, {
+      browserSessionFactory: async () => {
+        throw launchError;
+      },
+    }) as ReadonlyArray<{
+      name: string;
+      execute?: DownloadPaperPdfTool["execute"];
+    }>;
+
+    const tool = tools.find((candidate) => candidate.name === "download_paper_pdf");
+    assert.ok(tool);
+    const execute = tool.execute;
+    assert.ok(execute);
+
+    await assert.rejects(
+      () =>
+        execute(
+          "tool-call-6",
+          { url: "https://www.science.org/doi/10.1126/science.adz8659" },
+          undefined,
+        ),
+      /browser launch failed/,
+    );
+
+    await assert.doesNotReject(() => cleanupTools!(tools as ReturnType<typeof createTools>));
+    await assert.doesNotReject(() => cleanupTools!(tools as ReturnType<typeof createTools>));
+  } finally {
+    await rm(workspace, { recursive: true, force: true });
+  }
+});
