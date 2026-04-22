@@ -273,12 +273,12 @@ test("download_arxiv_pdf returns the canonical PDF URL", async () => {
     assert.deepEqual(result.content, [
       {
         type: "text",
-        text: "https://arxiv.org/pdf/2401.01234v2.pdf",
+        text: "https://arxiv.org/pdf/2401.01234.pdf",
       },
     ]);
     assert.deepEqual(result.details, {
       id: "2401.01234v2",
-      pdfUrl: "https://arxiv.org/pdf/2401.01234v2.pdf",
+      pdfUrl: "https://arxiv.org/pdf/2401.01234.pdf",
     });
   } finally {
     await rm(workspace, { recursive: true, force: true });
