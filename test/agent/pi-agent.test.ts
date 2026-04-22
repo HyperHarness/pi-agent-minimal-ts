@@ -345,6 +345,29 @@ test("readInteractivePrompt treats closed readline as a normal stop signal", asy
   assert.equal(result, null);
 });
 
+test("readInteractivePrompt rethrows non-close errors", async () => {
+  const readInteractivePrompt = (
+    piAgent as {
+      readInteractivePrompt?: (repl: {
+        question: (prompt: string) => Promise<string>;
+      }) => Promise<string | null>;
+    }
+  ).readInteractivePrompt;
+  assert.equal(typeof readInteractivePrompt, "function");
+
+  const error = Object.assign(new Error("boom"), { code: "EFAIL" });
+  const repl = {
+    question: async () => {
+      throw error;
+    }
+  };
+
+  await assert.rejects(readInteractivePrompt!(repl), (caughtError: unknown) => {
+    assert.equal(caughtError, error);
+    return true;
+  });
+});
+
 test("consumePromptLines reuses one session across multiple stdin lines", async () => {
   const consumePromptLines = (
     piAgent as {

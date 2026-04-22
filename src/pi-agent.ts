@@ -218,6 +218,39 @@ export async function runSessionPrompt(
   return { action: "continue", newMessages: result.newMessages };
 }
 
+export async function readInteractivePrompt(
+  repl: {
+    question: (prompt: string) => Promise<string>;
+  }
+): Promise<string | null> {
+  try {
+    return await repl.question("> ");
+  } catch (error) {
+    if (typeof error === "object" && error !== null && "code" in error && error.code === "ERR_USE_AFTER_CLOSE") {
+      return null;
+    }
+
+    throw error;
+  }
+}
+
+export async function consumePromptLines(options: {
+  lines: AsyncIterable<string>;
+  onPrompt: (prompt: string) => Promise<{ action: "continue" | "stop" }> | { action: "continue" | "stop" };
+}): Promise<void> {
+  for await (const line of options.lines) {
+    const trimmedLine = line.trim();
+    if (!trimmedLine) {
+      continue;
+    }
+
+    const result = await options.onPrompt(trimmedLine);
+    if (result.action === "stop") {
+      break;
+    }
+  }
+}
+
 export async function runAgentTurn(options: RunAgentTurnOptions): Promise<RunAgentTurnResult> {
   const userMessage: UserMessage = {
     role: "user",
