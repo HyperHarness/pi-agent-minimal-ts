@@ -17,15 +17,11 @@ It provides:
 
 ## Install
 
-```powershell
-npm install
-```
+If you are running in Windows PowerShell, configure PowerShell first so `npm` resolves to `npm.cmd`, then install dependencies. In other environments, install dependencies directly with `npm install`.
 
-### Windows PowerShell note
+### Windows PowerShell
 
-If PowerShell blocks `npm` with an error about `npm.ps1` or execution policies, configure PowerShell to prefer `npm.cmd` for your current user:
-
-1. Create or edit `C:\Users\<your-user>\Documents\WindowsPowerShell\Microsoft.PowerShell_profile.ps1`
+1. Create or edit `C:\Users\<your-user>\Documents\WindowsPowerShell\Microsoft.PowerShell_profile.ps1`.
 2. Add:
 
 ```powershell
@@ -38,7 +34,20 @@ Set-Alias -Name npm -Value npm.cmd -Scope Global
 Set-ExecutionPolicy -Scope CurrentUser -ExecutionPolicy RemoteSigned
 ```
 
+4. Reopen PowerShell so the profile is loaded.
+5. Install dependencies:
+
+```powershell
+npm install
+```
+
 After reopening PowerShell, `npm` will resolve through `npm.cmd` instead of `npm.ps1`.
+
+### Other environments
+
+```powershell
+npm install
+```
 
 ## Run
 
