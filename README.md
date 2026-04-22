@@ -85,6 +85,51 @@ You can also set `PI_BASE_URL` instead of passing `--base-url`.
 
 Exit the REPL with `exit` or `quit`.
 
+## REPL Usage
+
+When the agent starts, it prints the selected model and waits for one prompt per line:
+
+```text
+model> openai/gpt-5.4
+> 
+```
+
+- `model> ...`: the provider/model selected for the current session
+- `> `: the REPL input prompt
+- `assistant> ...`: streamed or final assistant text
+- `[tool:start] ...` / `[tool:end] ...`: tool execution lifecycle messages
+
+Example interactive session:
+
+```text
+model> openai/gpt-5.4
+> what time is it in UTC?
+[tool:start] get_time
+[tool:end] get_time ok
+assistant> Wednesday, April 22, 2026 at 1:23:45 PM UTC
+> exit
+```
+
+The REPL keeps conversation history in memory for the current process, so later prompts in the same session can refer to earlier turns.
+
+### Non-interactive input
+
+The agent also accepts non-interactive stdin input. Each non-empty input line is treated as one prompt, which makes piping and scripting easier.
+
+```powershell
+@(
+  "hello",
+  "read README.md and summarize it",
+  "exit"
+) | npm run agent -- --provider openai --model gpt-5.4
+```
+
+In non-interactive mode:
+
+- blank lines are ignored
+- `exit` or `quit` stops the session cleanly
+- stdin EOF ends the process without the old `ERR_USE_AFTER_CLOSE` readline failure
+
 ## Built-in Tools
 
 - `get_time`: returns the current time, optionally for a given timezone
