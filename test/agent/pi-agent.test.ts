@@ -1,5 +1,8 @@
 import test from "node:test";
 import assert from "node:assert/strict";
+import { mkdtemp, rm, writeFile } from "node:fs/promises";
+import { tmpdir } from "node:os";
+import path from "node:path";
 import type { Api, AssistantMessage, Model, ToolResultMessage, UserMessage } from "@mariozechner/pi-ai";
 import {
   Type,
@@ -259,6 +262,69 @@ test("runAgentTurn reuses the same tools across prompts in one context", async (
     assert.equal(executionCount, 2);
   } finally {
     registration.unregister();
+  }
+});
+
+test("runAgentTurn rebuilds built-in tools when the workspace changes", async () => {
+  const registration = registerFauxProvider();
+  registration.setResponses([
+    fauxAssistantMessage([fauxToolCall("read_file", { path: "notes.txt" })], { stopReason: "toolUse" }),
+    fauxAssistantMessage([fauxText("Read the first workspace.")]),
+    fauxAssistantMessage([fauxToolCall("read_file", { path: "notes.txt" })], { stopReason: "toolUse" }),
+    fauxAssistantMessage([fauxText("Read the second workspace.")])
+  ]);
+
+  const workspaceA = await mkdtemp(path.join(tmpdir(), "pi-agent-workspace-a-"));
+  const workspaceB = await mkdtemp(path.join(tmpdir(), "pi-agent-workspace-b-"));
+  const relativePath = "notes.txt";
+  await writeFile(path.join(workspaceA, relativePath), "from workspace A", "utf8");
+  await writeFile(path.join(workspaceB, relativePath), "from workspace B", "utf8");
+
+  const context: AgentContext = {
+    systemPrompt: "You are a helpful assistant. Use tools when they are useful.",
+    messages: [],
+    tools: []
+  };
+
+  try {
+    const firstTurn = await runAgentTurn({
+      model: registration.getModel(),
+      workspaceDir: workspaceA,
+      context,
+      prompt: "Read notes.txt from the first workspace."
+    });
+    const firstToolResult = firstTurn.newMessages.find(
+      (message): message is ToolResultMessage =>
+        isToolResultMessage(message) && message.toolName === "read_file"
+    );
+    assert.ok(firstToolResult);
+    assert.equal(firstToolResult.isError, false);
+    assert.deepEqual(firstToolResult.content, [{ type: "text", text: "from workspace A" }]);
+
+    const firstWorkspaceTools = context.tools;
+    assert.ok(firstWorkspaceTools);
+
+    const secondTurn = await runAgentTurn({
+      model: registration.getModel(),
+      workspaceDir: workspaceB,
+      context,
+      prompt: "Read notes.txt from the second workspace."
+    });
+    const secondToolResult = secondTurn.newMessages.find(
+      (message): message is ToolResultMessage =>
+        isToolResultMessage(message) && message.toolName === "read_file"
+    );
+    assert.ok(secondToolResult);
+    assert.equal(secondToolResult.isError, false);
+    assert.deepEqual(secondToolResult.content, [{ type: "text", text: "from workspace B" }]);
+    assert.ok(context.tools);
+    assert.notStrictEqual(context.tools, firstWorkspaceTools);
+  } finally {
+    registration.unregister();
+    await Promise.all([
+      rm(workspaceA, { recursive: true, force: true }),
+      rm(workspaceB, { recursive: true, force: true })
+    ]);
   }
 });
 

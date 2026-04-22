@@ -1,4 +1,5 @@
 import { createInterface } from "node:readline/promises";
+import path from "node:path";
 import { pathToFileURL } from "node:url";
 import process from "node:process";
 import {
@@ -20,6 +21,7 @@ type LlmMessage = UserMessage | AssistantMessage | ToolResultMessage;
 type AgentMessageEventHandler = (event: AgentEvent) => Promise<void> | void;
 
 const DEFAULT_SYSTEM_PROMPT = "You are a helpful assistant. Use tools when they are useful.";
+const contextWorkspaceDirs = new WeakMap<AgentContext, string>();
 
 export interface CliArgs {
   provider?: string;
@@ -81,6 +83,10 @@ function getAssistantText(message: AssistantMessage): string {
 function normalizeBaseUrl(baseUrl: string | undefined): string | undefined {
   const trimmedBaseUrl = baseUrl?.trim();
   return trimmedBaseUrl ? trimmedBaseUrl : undefined;
+}
+
+function normalizeWorkspaceDir(workspaceDir: string): string {
+  return path.resolve(workspaceDir);
 }
 
 export function parseCliArgs(argv: string[]): CliArgs {
@@ -257,11 +263,14 @@ export async function runAgentTurn(options: RunAgentTurnOptions): Promise<RunAge
     content: options.prompt,
     timestamp: Date.now()
   };
+  const workspaceDir = normalizeWorkspaceDir(options.workspaceDir);
   const existingTools = options.context.tools ?? [];
+  const previousWorkspaceDir = contextWorkspaceDirs.get(options.context);
   const tools =
-    existingTools.length > 0
+    existingTools.length > 0 &&
+    (previousWorkspaceDir === undefined || previousWorkspaceDir === workspaceDir)
       ? existingTools
-      : [...createTools(options.workspaceDir)];
+      : [...createTools(workspaceDir)];
   const stream = agentLoop(
     [userMessage],
     { ...options.context, tools },
@@ -283,6 +292,7 @@ export async function runAgentTurn(options: RunAgentTurnOptions): Promise<RunAge
     options.context.messages = [...options.context.messages, ...newMessages];
   }
   options.context.tools = tools;
+  contextWorkspaceDirs.set(options.context, workspaceDir);
 
   return { newMessages };
 }
@@ -312,7 +322,7 @@ export async function main(argv = process.argv.slice(2)): Promise<void> {
   const context: AgentContext = {
     systemPrompt: DEFAULT_SYSTEM_PROMPT,
     messages: [],
-    tools: [...createTools(process.cwd())]
+    tools: []
   };
   const repl = createInterface({
     input: process.stdin,
