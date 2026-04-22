@@ -45,6 +45,18 @@ test("fetchWebPage rejects non-html responses", async () => {
   );
 });
 
+test("fetchWebPage rejects misleading non-html content types", async () => {
+  await assert.rejects(
+    () =>
+      fetchWebPage({
+        url: "https://example.test/page",
+        fetchImpl: async () =>
+          createHtmlResponse(200, "{\"ok\":true}", "application/json; charset=utf-8; note=text/html")
+      }),
+    /html/i
+  );
+});
+
 test("fetchWebPage truncates very large pages", async () => {
   const result = await fetchWebPage({
     url: "https://example.test/page",
