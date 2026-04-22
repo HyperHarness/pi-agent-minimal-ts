@@ -10,7 +10,7 @@ export function resolveFetchTimeoutMs(env: NodeJS.ProcessEnv = process.env): num
   }
 
   const parsedValue = Number(rawValue);
-  if (!Number.isFinite(parsedValue) || parsedValue <= 0) {
+  if (!Number.isFinite(parsedValue) || parsedValue <= 0 || Math.floor(parsedValue) <= 0) {
     throw new Error("Invalid PI_FETCH_TIMEOUT_MS value.");
   }
 
