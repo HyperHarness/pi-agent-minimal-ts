@@ -17,6 +17,10 @@ It provides:
 
 ## Install
 
+If you are on Windows, especially Windows PowerShell or Codex Desktop on Windows, read [docs/windows-powershell-codex-quickstart.md](docs/windows-powershell-codex-quickstart.md) before installing dependencies.
+
+If you are not on Windows, continue with the normal install steps below.
+
 Use the normal install path if you want browser-session paper downloads to work without extra setup:
 
 ```powershell
@@ -27,50 +31,6 @@ This lets Playwright install its managed browser during dependency setup. If you
 
 - set `PI_PAPER_CHROME_EXECUTABLE` to an existing local Chrome/Chromium executable
 - install a Playwright browser separately, for example `npx playwright install chromium`
-
-If you are running in Windows PowerShell and `npm` does not resolve correctly, configure PowerShell first so `npm` resolves to `npm.cmd`, then run the same non-elevated install command.
-
-### Windows PowerShell
-
-1. Create or edit `C:\Users\<your-user>\Documents\WindowsPowerShell\Microsoft.PowerShell_profile.ps1`.
-2. Add:
-
-```powershell
-Set-Alias -Name npm -Value npm.cmd -Scope Global
-```
-
-3. Allow user-level PowerShell profiles and local scripts:
-
-```powershell
-Set-ExecutionPolicy -Scope CurrentUser -ExecutionPolicy RemoteSigned
-```
-
-4. Reopen PowerShell so the profile is loaded.
-5. Install dependencies:
-
-```powershell
-npm install
-```
-
-After reopening PowerShell, `npm` will resolve through `npm.cmd` instead of `npm.ps1`.
-
-If you must skip install scripts in PowerShell, use `npm install --ignore-scripts` and then either set `PI_PAPER_CHROME_EXECUTABLE` or run `npx playwright install chromium` before using `download_paper_pdf`.
-
-If you plan to type non-ASCII prompts such as Chinese directly into the agent on Windows PowerShell, also switch the console to UTF-8 before starting the REPL:
-
-```powershell
-chcp 65001
-[Console]::InputEncoding = [System.Text.UTF8Encoding]::new()
-[Console]::OutputEncoding = [System.Text.UTF8Encoding]::new()
-```
-
-Without UTF-8 console encoding, PowerShell can turn non-ASCII input into `?` before it reaches Node. This is especially visible with `search_arxiv`, where a mangled query can trigger an arXiv HTTP 500 instead of a normal search.
-
-### Other environments
-
-```powershell
-npm install
-```
 
 ## Run
 
