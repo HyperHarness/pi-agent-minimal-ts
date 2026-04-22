@@ -99,6 +99,28 @@ You can also set `PI_BASE_URL` instead of passing `--base-url`.
 
 Exit the REPL with `exit` or `quit`.
 
+## Browser-Session Paper Downloads
+
+The paper download tool uses a dedicated Chrome profile at `.browser-profile/paper-access/` inside the workspace.
+
+Supported publishers:
+
+- `science.org`
+- `nature.com`
+- `journals.aps.org` / `aps.org`
+
+If Chrome is not discovered automatically, set `PI_PAPER_CHROME_EXECUTABLE` to the Chrome executable path before starting the agent.
+
+On the first run, the tool opens the paper page in that dedicated profile. If the session is not already authorized, complete the manual institutional login in Chrome, then rerun the same URL.
+
+Example prompt:
+
+```text
+Download this paper with download_paper_pdf: https://www.science.org/doi/10.1126/science.adz8659
+```
+
+Manual verification uses the URLs in `paper_url.txt`. Check that each URL belongs to one of the supported hosts above, then run the download against each URL and confirm the resulting PDF is written under `downloads/papers/`.
+
 ## Search And Fetch Configuration
 
 Optional environment variables for web search and page fetch tools:
@@ -186,6 +208,7 @@ In non-interactive mode:
 - `fetch_url`: fetches an HTML page and returns JSON text for the extracted content
 - `search_arxiv`: searches arXiv and returns JSON text for matching paper metadata
 - `download_arxiv_pdf`: returns the canonical arXiv PDF URL for a paper ID
+- `download_paper_pdf`: downloads a PDF from a supported browser-session publisher URL
 
 For `search_arxiv`, prefer concise English keyword queries. arXiv's API is much more reliable with English search terms than with natural-language Chinese prompts.
 
