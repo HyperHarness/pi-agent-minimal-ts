@@ -3,7 +3,7 @@ import assert from "node:assert/strict";
 import {
   getPublisherAdapter,
   resolvePdfPathFromHtml
-} from "../../src/agent/publisher-adapters/index.js";
+} from "../../../src/agent/publisher-adapters/index.js";
 
 test("getPublisherAdapter selects the science adapter", () => {
   const adapter = getPublisherAdapter("https://www.science.org/doi/10.1126/science.adz8659");
@@ -37,4 +37,24 @@ test("resolvePdfPathFromHtml returns a science PDF link from a landing page snip
   `);
 
   assert.equal(pdfPath, "/doi/pdf/10.1126/science.adz8659");
+});
+
+test("resolvePdfPathFromHtml returns a nature PDF link from a landing page snippet", () => {
+  const pdfPath = resolvePdfPathFromHtml("nature", `
+    <html><body>
+      <a href="/articles/s41586-019-1666-5.pdf">PDF</a>
+    </body></html>
+  `);
+
+  assert.equal(pdfPath, "/articles/s41586-019-1666-5.pdf");
+});
+
+test("resolvePdfPathFromHtml returns an APS PDF link from a landing page snippet", () => {
+  const pdfPath = resolvePdfPathFromHtml("aps", `
+    <html><body>
+      <a href="/doi/pdf/10.1103/PhysRevLett.134.090601">PDF</a>
+    </body></html>
+  `);
+
+  assert.equal(pdfPath, "/doi/pdf/10.1103/PhysRevLett.134.090601");
 });
