@@ -21,8 +21,9 @@
     "agent": "npm run build && node dist/src/pi-agent.js"
   },
   "dependencies": {
+    "@mariozechner/pi-agent-core": "^0.68.0",
     "@mariozechner/pi-ai": "^0.68.0",
-    "@mariozechner/pi-agent-core": "^0.68.0"
+    "playwright": "^1.52.0"
   },
   "devDependencies": {
     "@types/node": "^25.6.0",
