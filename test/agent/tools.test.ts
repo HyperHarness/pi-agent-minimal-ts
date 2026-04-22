@@ -63,6 +63,16 @@ type DownloadArxivPdfTool = {
   ) => Promise<ToolResult>;
 };
 
+type DownloadPaperPdfTool = {
+  execute: (
+    toolCallId: string,
+    args: { url: string },
+    signal: undefined,
+  ) => Promise<ToolResult>;
+};
+
+type CreateToolsDependencies = NonNullable<Parameters<typeof createTools>[1]>;
+
 function getReadFileTool(workspace: string): ReadFileTool {
   const tools = createTools(workspace) as ReadonlyArray<{
     name: string;
@@ -243,6 +253,7 @@ test("createTools exposes the full built-in tool set", async () => {
       "fetch_url",
       "search_arxiv",
       "download_arxiv_pdf",
+      "download_paper_pdf",
     ]);
 
     const webSearchTool = tools.find((tool) => tool.name === "web_search");
@@ -421,6 +432,55 @@ test("download_arxiv_pdf returns the canonical PDF URL", async () => {
       id: "2401.01234v2",
       pdfUrl: "https://arxiv.org/pdf/2401.01234.pdf",
     });
+  } finally {
+    await rm(workspace, { recursive: true, force: true });
+  }
+});
+
+test("download_paper_pdf delegates to the injected paper download service", async () => {
+  const workspace = await mkdtemp(path.join(tmpdir(), "pi-agent-tools-"));
+  const capturedCalls: Array<{ url: string; workspaceDir: string }> = [];
+
+  try {
+    const tools = createTools(workspace, {
+      downloadPaperPdf: async (
+        options: Parameters<NonNullable<CreateToolsDependencies["downloadPaperPdf"]>>[0],
+      ) => {
+        capturedCalls.push({ url: options.url, workspaceDir: options.workspaceDir });
+        return {
+          path: path.join(workspace, "downloads", "papers", "paper.pdf"),
+          publisher: "science",
+          articleUrl: options.url,
+          finalArticleUrl: options.url,
+          finalPdfUrl: "https://www.science.org/doi/pdf/10.1126/science.adz8659",
+        };
+      },
+    }) as ReadonlyArray<{
+      name: string;
+      execute?: DownloadPaperPdfTool["execute"];
+    }>;
+
+    const tool = tools.find((candidate) => candidate.name === "download_paper_pdf");
+    assert.ok(tool);
+    const execute = tool.execute;
+    assert.ok(execute);
+    assert.equal(typeof execute, "function");
+
+    const result = await execute(
+      "tool-call-1",
+      {
+        url: "https://www.science.org/doi/10.1126/science.adz8659",
+      },
+      undefined,
+    );
+
+    assert.deepEqual(capturedCalls, [
+      {
+        url: "https://www.science.org/doi/10.1126/science.adz8659",
+        workspaceDir: workspace,
+      },
+    ]);
+    assert.match(String(result.content?.[0]?.text), /paper\.pdf/);
   } finally {
     await rm(workspace, { recursive: true, force: true });
   }

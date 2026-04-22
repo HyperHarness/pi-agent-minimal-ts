@@ -3,6 +3,7 @@ import path from "node:path";
 import { Type, type Static } from "@mariozechner/pi-ai";
 import type { AgentTool } from "@mariozechner/pi-agent-core";
 import { buildArxivPdfUrl, searchArxiv } from "./arxiv.js";
+import { downloadPaperPdf } from "./paper-download.js";
 import { fetchWebPage } from "./web-fetch.js";
 import { searchWeb } from "./web-search.js";
 
@@ -36,12 +37,17 @@ const downloadArxivPdfParameters = Type.Object({
   id: Type.String({ description: "arXiv identifier to convert into a PDF URL." })
 });
 
+const downloadPaperPdfParameters = Type.Object({
+  url: Type.String({ description: "Publisher article URL to download as a PDF." })
+});
+
 type GetTimeParameters = Static<typeof getTimeParameters>;
 type ReadFileParameters = Static<typeof readFileParameters>;
 type WebSearchParameters = Static<typeof webSearchParameters>;
 type FetchUrlParameters = Static<typeof fetchUrlParameters>;
 type SearchArxivParameters = Static<typeof searchArxivParameters>;
 type DownloadArxivPdfParameters = Static<typeof downloadArxivPdfParameters>;
+type DownloadPaperPdfParameters = Static<typeof downloadPaperPdfParameters>;
 
 function assertPathInsideDirectory(rootDir: string, candidatePath: string): void {
   const relativePath = path.relative(rootDir, candidatePath);
@@ -91,12 +97,24 @@ type DownloadArxivPdfTool = AgentTool<
   typeof downloadArxivPdfParameters,
   { id: string; pdfUrl: string }
 >;
+type DownloadPaperPdfResult = Awaited<
+  ReturnType<typeof downloadPaperPdf>
+>;
+type DownloadPaperPdfDependency = (options: {
+  workspaceDir: string;
+  url: string;
+}) => Promise<DownloadPaperPdfResult>;
+type DownloadPaperPdfTool = AgentTool<
+  typeof downloadPaperPdfParameters,
+  DownloadPaperPdfResult
+>;
 
 export interface ToolDependencies {
   searchWeb?: typeof searchWeb;
   fetchWebPage?: typeof fetchWebPage;
   searchArxiv?: typeof searchArxiv;
   buildArxivPdfUrl?: typeof buildArxivPdfUrl;
+  downloadPaperPdf?: DownloadPaperPdfDependency;
 }
 
 export type AgentTools = readonly [
@@ -105,7 +123,8 @@ export type AgentTools = readonly [
   WebSearchTool,
   FetchUrlTool,
   SearchArxivTool,
-  DownloadArxivPdfTool
+  DownloadArxivPdfTool,
+  DownloadPaperPdfTool
 ];
 
 export function createTools(workspaceDir: string, dependencies: ToolDependencies = {}): AgentTools {
@@ -113,6 +132,11 @@ export function createTools(workspaceDir: string, dependencies: ToolDependencies
   const fetchWebPageImpl = dependencies.fetchWebPage ?? fetchWebPage;
   const searchArxivImpl = dependencies.searchArxiv ?? searchArxiv;
   const buildArxivPdfUrlImpl = dependencies.buildArxivPdfUrl ?? buildArxivPdfUrl;
+  const downloadPaperPdfImpl =
+    dependencies.downloadPaperPdf ??
+    (async () => {
+      throw new Error("downloadPaperPdf dependency is not configured.");
+    });
 
   const getTimeTool: GetTimeTool = {
     name: "get_time",
@@ -213,12 +237,33 @@ export function createTools(workspaceDir: string, dependencies: ToolDependencies
     }
   };
 
+  const downloadPaperPdfTool: DownloadPaperPdfTool = {
+    name: "download_paper_pdf",
+    label: "Download Paper PDF",
+    description:
+      "Uses an authorized Chrome browser session to download a paper PDF from a supported publisher.",
+    parameters: downloadPaperPdfParameters,
+    executionMode: "sequential",
+    execute: async (_toolCallId: string, args: DownloadPaperPdfParameters) => {
+      const result = await downloadPaperPdfImpl({
+        workspaceDir,
+        url: args.url
+      });
+
+      return {
+        content: [{ type: "text", text: JSON.stringify(result) }],
+        details: result
+      };
+    }
+  };
+
   return [
     getTimeTool,
     readFileTool,
     webSearchTool,
     fetchUrlTool,
     searchArxivTool,
-    downloadArxivPdfTool
+    downloadArxivPdfTool,
+    downloadPaperPdfTool
   ];
 }
