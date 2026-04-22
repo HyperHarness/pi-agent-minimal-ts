@@ -2,6 +2,7 @@ import { readFile, realpath } from "node:fs/promises";
 import path from "node:path";
 import { Type, type Static } from "@mariozechner/pi-ai";
 import type { AgentTool } from "@mariozechner/pi-agent-core";
+import { resolveDefaultPaperBrowserSessionFactory } from "./browser-session.js";
 import { buildArxivPdfUrl, searchArxiv } from "./arxiv.js";
 import { downloadPaperPdf } from "./paper-download.js";
 import { fetchWebPage } from "./web-fetch.js";
@@ -115,6 +116,7 @@ export interface ToolDependencies {
   searchArxiv?: typeof searchArxiv;
   buildArxivPdfUrl?: typeof buildArxivPdfUrl;
   downloadPaperPdf?: DownloadPaperPdfDependency;
+  browserSessionFactory?: ReturnType<typeof resolveDefaultPaperBrowserSessionFactory>;
 }
 
 export type AgentTools = readonly [
@@ -132,10 +134,18 @@ export function createTools(workspaceDir: string, dependencies: ToolDependencies
   const fetchWebPageImpl = dependencies.fetchWebPage ?? fetchWebPage;
   const searchArxivImpl = dependencies.searchArxiv ?? searchArxiv;
   const buildArxivPdfUrlImpl = dependencies.buildArxivPdfUrl ?? buildArxivPdfUrl;
+  const browserSessionFactoryImpl =
+    dependencies.browserSessionFactory ??
+    resolveDefaultPaperBrowserSessionFactory({ workspaceDir });
   const downloadPaperPdfImpl =
     dependencies.downloadPaperPdf ??
-    (async () => {
-      throw new Error("downloadPaperPdf dependency is not configured.");
+    (async (options: { workspaceDir: string; url: string }) => {
+      const browserSession = await browserSessionFactoryImpl();
+      return downloadPaperPdf({
+        workspaceDir: options.workspaceDir,
+        url: options.url,
+        browserSession
+      });
     });
 
   const getTimeTool: GetTimeTool = {

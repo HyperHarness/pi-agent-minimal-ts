@@ -485,3 +485,60 @@ test("download_paper_pdf delegates to the injected paper download service", asyn
     await rm(workspace, { recursive: true, force: true });
   }
 });
+
+test("download_paper_pdf uses the default browser-backed paper download path when not injected", async () => {
+  const workspace = await mkdtemp(path.join(tmpdir(), "pi-agent-tools-"));
+  const capturedCalls: Array<{ url: string; destinationPath: string }> = [];
+
+  try {
+    const dependencies: CreateToolsDependencies = {
+      browserSessionFactory: async () => ({
+        async openArticlePage(url: string) {
+          return {
+            finalArticleUrl: url,
+            html: '<html><body><a href="/doi/pdf/10.1126/science.adz8659">PDF</a></body></html>',
+            authorized: true,
+          };
+        },
+        async downloadPdf(url: string, destinationPath: string) {
+          capturedCalls.push({ url, destinationPath });
+        },
+      }),
+    };
+
+    const tools = createTools(workspace, dependencies) as ReadonlyArray<{
+      name: string;
+      execute?: DownloadPaperPdfTool["execute"];
+    }>;
+
+    const tool = tools.find((candidate) => candidate.name === "download_paper_pdf");
+    assert.ok(tool);
+    const execute = tool.execute;
+    assert.ok(execute);
+    assert.equal(typeof execute, "function");
+
+    const result = await execute(
+      "tool-call-2",
+      {
+        url: "https://www.science.org/doi/10.1126/science.adz8659",
+      },
+      undefined,
+    );
+
+    assert.deepEqual(capturedCalls, [
+      {
+        url: "https://www.science.org/doi/pdf/10.1126/science.adz8659",
+        destinationPath: path.join(workspace, "downloads", "papers", "downloaded-paper.pdf"),
+      },
+    ]);
+    assert.deepEqual(JSON.parse(String(result.content?.[0]?.text)), {
+      path: path.join(workspace, "downloads", "papers", "downloaded-paper.pdf"),
+      publisher: "science",
+      articleUrl: "https://www.science.org/doi/10.1126/science.adz8659",
+      finalArticleUrl: "https://www.science.org/doi/10.1126/science.adz8659",
+      finalPdfUrl: "https://www.science.org/doi/pdf/10.1126/science.adz8659",
+    });
+  } finally {
+    await rm(workspace, { recursive: true, force: true });
+  }
+});
