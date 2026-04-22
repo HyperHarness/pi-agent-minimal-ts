@@ -1,7 +1,7 @@
 import { mkdir } from "node:fs/promises";
 import path from "node:path";
 import { getPublisherAdapter } from "./publisher-adapters/index.js";
-import type { PaperBrowserSession } from "./browser-session.js";
+import { PaperBrowserSessionError, type PaperBrowserSession } from "./browser-session.js";
 
 export class PaperDownloadError extends Error {
   constructor(
@@ -39,11 +39,14 @@ export async function downloadPaperPdf(options: {
   try {
     articlePage = await options.browserSession.openArticlePage(options.url);
   } catch (error) {
-    const message = error instanceof Error ? error.message : "Unable to open the article page.";
-    const code = /authori[sz]ation|authori[sz]ed|login|access denied/i.test(message)
-      ? "authorization_failed"
-      : "browser_session_unavailable";
-    throw new PaperDownloadError(code, message);
+    if (error instanceof PaperBrowserSessionError) {
+      throw new PaperDownloadError(error.code, error.message);
+    }
+
+    throw new PaperDownloadError(
+      "browser_session_unavailable",
+      error instanceof Error ? error.message : "Unable to open the article page."
+    );
   }
 
   if (!articlePage.authorized) {
@@ -63,7 +66,14 @@ export async function downloadPaperPdf(options: {
 
   const finalPdfUrl = new URL(pdfPath, articlePage.finalArticleUrl).toString();
   const outputDir = path.join(options.workspaceDir, "downloads", "papers");
-  await mkdir(outputDir, { recursive: true });
+  try {
+    await mkdir(outputDir, { recursive: true });
+  } catch (error) {
+    throw new PaperDownloadError(
+      "download_failed",
+      error instanceof Error ? error.message : "Failed to prepare the download destination."
+    );
+  }
   const outputPath = path.join(outputDir, "downloaded-paper.pdf");
   try {
     await options.browserSession.downloadPdf(finalPdfUrl, outputPath);

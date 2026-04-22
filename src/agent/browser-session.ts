@@ -15,6 +15,17 @@ export interface OpenArticlePageResult {
   authorized: boolean;
 }
 
+export class PaperBrowserSessionError extends Error {
+  constructor(
+    readonly code: "browser_session_unavailable" | "authorization_failed",
+    message: string
+  ) {
+    super(message);
+    this.name = "PaperBrowserSessionError";
+    Object.setPrototypeOf(this, new.target.prototype);
+  }
+}
+
 export interface PaperBrowserSession {
   openArticlePage(url: string): Promise<OpenArticlePageResult>;
   downloadPdf(url: string, destinationPath: string): Promise<void>;

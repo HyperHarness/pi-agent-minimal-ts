@@ -1,5 +1,9 @@
 import test from "node:test";
 import assert from "node:assert/strict";
+import { mkdtemp } from "node:fs/promises";
+import os from "node:os";
+import path from "node:path";
+import { PaperBrowserSessionError } from "../../src/agent/browser-session.js";
 import { PaperDownloadError, downloadPaperPdf } from "../../src/agent/paper-download.js";
 
 function assertPaperDownloadError(error: unknown): asserts error is PaperDownloadError {
@@ -74,7 +78,10 @@ test("downloadPaperPdf wraps article authorization failures as authorization_fai
       url: "https://www.science.org/doi/10.1126/science.adz8659",
       browserSession: {
         openArticlePage: async () => {
-          throw new Error("authorization failed");
+          throw new PaperBrowserSessionError(
+            "authorization_failed",
+            "Publisher authorization failed."
+          );
         }
       } as never
     })
@@ -82,6 +89,45 @@ test("downloadPaperPdf wraps article authorization failures as authorization_fai
 
   assertPaperDownloadError(error);
   assert.equal(error.code, "authorization_failed");
+});
+
+test("downloadPaperPdf classifies an unauthorized page as manual_login_required", async () => {
+  const error = await captureRejection(() =>
+    downloadPaperPdf({
+      workspaceDir: process.cwd(),
+      url: "https://www.science.org/doi/10.1126/science.adz8659",
+      browserSession: {
+        openArticlePage: async () => ({
+          finalArticleUrl: "https://www.science.org/doi/10.1126/science.adz8659",
+          html: "<html><body>Login required</body></html>",
+          authorized: false
+        })
+      } as never
+    })
+  );
+
+  assertPaperDownloadError(error);
+  assert.equal(error.code, "manual_login_required");
+});
+
+test("downloadPaperPdf wraps output directory creation failures as download_failed", async () => {
+  const error = await captureRejection(() =>
+    downloadPaperPdf({
+      workspaceDir: path.join(process.cwd(), "package.json"),
+      url: "https://www.science.org/doi/10.1126/science.adz8659",
+      browserSession: {
+        openArticlePage: async () => ({
+          finalArticleUrl: "https://www.science.org/doi/10.1126/science.adz8659",
+          html: '<html><body><a href="/doi/pdf/10.1126/science.adz8659">PDF</a></body></html>',
+          authorized: true
+        }),
+        downloadPdf: async () => {}
+      } as never
+    })
+  );
+
+  assertPaperDownloadError(error);
+  assert.equal(error.code, "download_failed");
 });
 
 test("downloadPaperPdf wraps PDF download failures as download_failed", async () => {
@@ -104,4 +150,35 @@ test("downloadPaperPdf wraps PDF download failures as download_failed", async ()
 
   assertPaperDownloadError(error);
   assert.equal(error.code, "download_failed");
+});
+
+test("downloadPaperPdf returns output metadata for a successful download", async () => {
+  const workspaceDir = await mkdtemp(path.join(os.tmpdir(), "paper-download-"));
+  let downloadedUrl: string | undefined;
+  let downloadedPath: string | undefined;
+
+  const result = await downloadPaperPdf({
+    workspaceDir,
+    url: "https://www.science.org/doi/10.1126/science.adz8659",
+    browserSession: {
+      openArticlePage: async () => ({
+        finalArticleUrl: "https://www.science.org/doi/10.1126/science.adz8659",
+        html: '<html><body><a href="/doi/pdf/10.1126/science.adz8659">PDF</a></body></html>',
+        authorized: true
+      }),
+      downloadPdf: async (url, destinationPath) => {
+        downloadedUrl = url;
+        downloadedPath = destinationPath;
+      }
+    }
+  });
+
+  const expectedPath = path.join(workspaceDir, "downloads", "papers", "downloaded-paper.pdf");
+  assert.equal(result.path, expectedPath);
+  assert.equal(result.publisher, "science");
+  assert.equal(result.articleUrl, "https://www.science.org/doi/10.1126/science.adz8659");
+  assert.equal(result.finalArticleUrl, "https://www.science.org/doi/10.1126/science.adz8659");
+  assert.equal(result.finalPdfUrl, "https://www.science.org/doi/pdf/10.1126/science.adz8659");
+  assert.equal(downloadedUrl, result.finalPdfUrl);
+  assert.equal(downloadedPath, expectedPath);
 });
