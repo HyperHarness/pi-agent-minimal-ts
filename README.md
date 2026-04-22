@@ -1,4 +1,4 @@
-# wiki_agent2
+# pi-agent-minimal-ts
 
 Minimal TypeScript agent built on [`@mariozechner/pi-ai`](https://www.npmjs.com/package/@mariozechner/pi-ai) and [`@mariozechner/pi-agent-core`](https://www.npmjs.com/package/@mariozechner/pi-agent-core).
 
