@@ -257,7 +257,11 @@ export async function runAgentTurn(options: RunAgentTurnOptions): Promise<RunAge
     content: options.prompt,
     timestamp: Date.now()
   };
-  const tools = [...createTools(options.workspaceDir)];
+  const existingTools = options.context.tools ?? [];
+  const tools =
+    existingTools.length > 0
+      ? existingTools
+      : [...createTools(options.workspaceDir)];
   const stream = agentLoop(
     [userMessage],
     { ...options.context, tools },

@@ -17,13 +17,16 @@ It provides:
 
 ## Install
 
-Prefer a non-elevated install first:
+Use the normal install path if you want browser-session paper downloads to work without extra setup:
 
 ```powershell
-npm install --ignore-scripts
+npm install
 ```
 
-This project does not require install-time scripts to build or run, so `npm install --ignore-scripts` is the default recommendation when you want to avoid elevation or run inside a restricted environment. After installing dependencies this way, you can verify the setup with `npm run build` or `npm test`.
+This lets Playwright install its managed browser during dependency setup. If you skip install scripts with `npm install --ignore-scripts`, normal build/test workflows still work, but `download_paper_pdf` will require one of these before it can launch a browser:
+
+- set `PI_PAPER_CHROME_EXECUTABLE` to an existing local Chrome/Chromium executable
+- install a Playwright browser separately, for example `npx playwright install chromium`
 
 If you are running in Windows PowerShell and `npm` does not resolve correctly, configure PowerShell first so `npm` resolves to `npm.cmd`, then run the same non-elevated install command.
 
@@ -46,10 +49,12 @@ Set-ExecutionPolicy -Scope CurrentUser -ExecutionPolicy RemoteSigned
 5. Install dependencies:
 
 ```powershell
-npm install --ignore-scripts
+npm install
 ```
 
 After reopening PowerShell, `npm` will resolve through `npm.cmd` instead of `npm.ps1`.
+
+If you must skip install scripts in PowerShell, use `npm install --ignore-scripts` and then either set `PI_PAPER_CHROME_EXECUTABLE` or run `npx playwright install chromium` before using `download_paper_pdf`.
 
 If you plan to type non-ASCII prompts such as Chinese directly into the agent on Windows PowerShell, also switch the console to UTF-8 before starting the REPL:
 
@@ -64,7 +69,7 @@ Without UTF-8 console encoding, PowerShell can turn non-ASCII input into `?` bef
 ### Other environments
 
 ```powershell
-npm install --ignore-scripts
+npm install
 ```
 
 ## Run
@@ -119,7 +124,7 @@ Example prompt:
 Download this paper with download_paper_pdf: https://www.science.org/doi/10.1126/science.adz8659
 ```
 
-Manual verification uses the URLs in `paper_url.txt`. Check that each URL belongs to one of the supported hosts above, then run the download against each URL and confirm the resulting PDF is written to `downloads/papers/downloaded-paper.pdf`. Repeated runs overwrite that file unless you move or rename it between runs.
+For manual verification, put your own test URLs into a local scratch file such as `paper_url.txt` or keep them in your notes. This repository does not ship a tracked `paper_url.txt`. Check that each URL belongs to one of the supported hosts above, then run the download against each URL and confirm the resulting PDF is written to `downloads/papers/downloaded-paper.pdf`. Repeated runs overwrite that file unless you move or rename it between runs.
 
 ## Search And Fetch Configuration
 

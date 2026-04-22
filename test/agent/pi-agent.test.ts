@@ -2,6 +2,7 @@ import test from "node:test";
 import assert from "node:assert/strict";
 import type { Api, AssistantMessage, Model, ToolResultMessage, UserMessage } from "@mariozechner/pi-ai";
 import {
+  Type,
   fauxAssistantMessage,
   fauxText,
   fauxToolCall,
@@ -187,6 +188,75 @@ test("runAgentTurn executes a tool call and appends the resulting messages", asy
         (message) => isAssistantMessage(message) && messageHasText(message, "Done using the tool.")
       )
     );
+  } finally {
+    registration.unregister();
+  }
+});
+
+test("runAgentTurn reuses the same tools across prompts in one context", async () => {
+  const registration = registerFauxProvider();
+  registration.setResponses([
+    fauxAssistantMessage([fauxToolCall("remember_counter", {})], { stopReason: "toolUse" }),
+    fauxAssistantMessage([fauxText("First turn complete.")]),
+    fauxAssistantMessage([fauxToolCall("remember_counter", {})], { stopReason: "toolUse" }),
+    fauxAssistantMessage([fauxText("Second turn complete.")])
+  ]);
+
+  let executionCount = 0;
+  const rememberCounterTool: NonNullable<AgentContext["tools"]>[number] = {
+    name: "remember_counter",
+    label: "Remember Counter",
+    description: "Keeps a counter across prompts within one session.",
+    parameters: Type.Object({}),
+    execute: async () => {
+      executionCount += 1;
+      return {
+        content: [{ type: "text", text: `count:${executionCount}` }],
+        details: { count: executionCount }
+      };
+    }
+  };
+  const tools = [rememberCounterTool];
+  const context: AgentContext = {
+    systemPrompt: "You are a helpful assistant. Use tools when they are useful.",
+    messages: [],
+    tools
+  };
+
+  try {
+    const firstTurn = await runAgentTurn({
+      model: registration.getModel(),
+      workspaceDir: process.cwd(),
+      context,
+      prompt: "Use the counter tool once."
+    });
+    const firstToolResult = firstTurn.newMessages.find(
+      (message): message is ToolResultMessage =>
+        isToolResultMessage(message) && message.toolName === "remember_counter"
+    );
+    assert.ok(firstToolResult);
+    assert.equal(firstToolResult.isError, false);
+    assert.deepEqual(firstToolResult.details, { count: 1 });
+    assert.deepEqual(firstToolResult.content, [{ type: "text", text: "count:1" }]);
+    assert.strictEqual(context.tools, tools);
+
+    const secondTurn = await runAgentTurn({
+      model: registration.getModel(),
+      workspaceDir: process.cwd(),
+      context,
+      prompt: "Use the same counter tool again."
+    });
+    const secondToolResult = secondTurn.newMessages.find(
+      (message): message is ToolResultMessage =>
+        isToolResultMessage(message) && message.toolName === "remember_counter"
+    );
+    assert.ok(secondToolResult);
+    assert.equal(secondToolResult.isError, false);
+    assert.deepEqual(secondToolResult.details, { count: 2 });
+    assert.deepEqual(secondToolResult.content, [{ type: "text", text: "count:2" }]);
+    assert.strictEqual(context.tools, tools);
+
+    assert.equal(executionCount, 2);
   } finally {
     registration.unregister();
   }
