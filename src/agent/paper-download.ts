@@ -16,6 +16,7 @@ export class PaperDownloadError extends Error {
   ) {
     super(message);
     this.name = "PaperDownloadError";
+    Object.setPrototypeOf(this, new.target.prototype);
   }
 }
 
@@ -34,7 +35,16 @@ export async function downloadPaperPdf(options: {
     );
   }
 
-  const articlePage = await options.browserSession.openArticlePage(options.url);
+  let articlePage;
+  try {
+    articlePage = await options.browserSession.openArticlePage(options.url);
+  } catch (error) {
+    const message = error instanceof Error ? error.message : "Unable to open the article page.";
+    const code = /authori[sz]ation|authori[sz]ed|login|access denied/i.test(message)
+      ? "authorization_failed"
+      : "browser_session_unavailable";
+    throw new PaperDownloadError(code, message);
+  }
 
   if (!articlePage.authorized) {
     throw new PaperDownloadError(
@@ -55,7 +65,14 @@ export async function downloadPaperPdf(options: {
   const outputDir = path.join(options.workspaceDir, "downloads", "papers");
   await mkdir(outputDir, { recursive: true });
   const outputPath = path.join(outputDir, "downloaded-paper.pdf");
-  await options.browserSession.downloadPdf(finalPdfUrl, outputPath);
+  try {
+    await options.browserSession.downloadPdf(finalPdfUrl, outputPath);
+  } catch (error) {
+    throw new PaperDownloadError(
+      "download_failed",
+      error instanceof Error ? error.message : "Failed to download the PDF."
+    );
+  }
 
   return {
     path: outputPath,
