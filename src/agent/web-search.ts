@@ -30,15 +30,6 @@ function normalizeQuery(query: string): string {
   return normalizedQuery;
 }
 
-function normalizeMaxResults(maxResults: number | undefined): number {
-  const requestedMaxResults = maxResults ?? 5;
-  if (!Number.isFinite(requestedMaxResults)) {
-    return 5;
-  }
-
-  return Math.max(1, Math.min(10, Math.floor(requestedMaxResults)));
-}
-
 export async function searchWeb(
   options: SearchWebOptions
 ): Promise<WebSearchResult[]> {
@@ -50,7 +41,7 @@ export async function searchWeb(
 
   const requestBody = {
     query: normalizeQuery(options.query),
-    maxResults: normalizeMaxResults(options.maxResults)
+    maxResults: options.maxResults ?? 5
   };
   const headers = new Headers({
     "content-type": "application/json"
@@ -88,6 +79,6 @@ export async function searchWeb(
         typeof result.snippet === "string"
     );
   } finally {
-    timeout.clear();
+    timeout.dispose();
   }
 }

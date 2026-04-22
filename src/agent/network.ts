@@ -1,11 +1,11 @@
 export interface FetchTimeoutHandle {
   signal: AbortSignal;
-  clear: () => void;
+  dispose: () => void;
 }
 
 export function resolveFetchTimeoutMs(env: NodeJS.ProcessEnv = process.env): number {
   const rawValue = env.PI_FETCH_TIMEOUT_MS?.trim();
-  if (rawValue === undefined) {
+  if (!rawValue) {
     return 10_000;
   }
 
@@ -23,7 +23,7 @@ export function withRequestTimeout(timeoutMs: number): FetchTimeoutHandle {
 
   return {
     signal: controller.signal,
-    clear: () => globalThis.clearTimeout(timeoutId)
+    dispose: () => globalThis.clearTimeout(timeoutId)
   };
 }
 

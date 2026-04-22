@@ -29,6 +29,11 @@ test("resolveFetchTimeoutMs throws for invalid PI_FETCH_TIMEOUT_MS", () => {
   );
 });
 
+test("resolveFetchTimeoutMs returns the default when PI_FETCH_TIMEOUT_MS is missing or blank", () => {
+  assert.equal(resolveFetchTimeoutMs({}), 10_000);
+  assert.equal(resolveFetchTimeoutMs({ PI_FETCH_TIMEOUT_MS: "   " }), 10_000);
+});
+
 test("parseJsonResponse rejects non-JSON content types", async () => {
   const response = new Response("plain text", {
     status: 200,
@@ -65,7 +70,7 @@ test("searchWeb normalizes the provider request", async () => {
   assert.equal(requests[0]?.init?.headers instanceof Headers, true);
   assert.equal((requests[0]?.init?.headers as Headers).get("authorization"), "Bearer search-secret");
   const sentBody = JSON.parse(String(requests[0]?.init?.body));
-  assert.deepEqual(sentBody, { query: "latest ai news", maxResults: 10 });
+  assert.deepEqual(sentBody, { query: "latest ai news", maxResults: 12 });
   assert.deepEqual(result, [{ title: "Example", url: "https://example.test", snippet: "hello" }]);
 });
 
