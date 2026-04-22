@@ -81,6 +81,51 @@ test("searchWeb normalizes the provider request", async () => {
   assert.deepEqual(result, [{ title: "Example", url: "https://example.test", snippet: "hello" }]);
 });
 
+test("searchWeb accepts Tavily-style results that use content instead of snippet", async () => {
+  const result = await searchWeb({
+    query: "gold price today usd per ounce",
+    env: { PI_SEARCH_API_URL: "https://search.example.test/search" },
+    fetchImpl: async () =>
+      createJsonResponse(200, {
+        results: [
+          {
+            title: "Gold Price Today",
+            url: "https://example.test/gold",
+            content: "Gold Price Per Ounce. $4,783.30 USD."
+          }
+        ]
+      })
+  });
+
+  assert.deepEqual(result, [
+    {
+      title: "Gold Price Today",
+      url: "https://example.test/gold",
+      snippet: "Gold Price Per Ounce. $4,783.30 USD."
+    }
+  ]);
+});
+
+test("searchWeb uses max_results for Tavily endpoints", async () => {
+  const requests: FetchRequest[] = [];
+  const fetchImpl = async (input: RequestInfo | URL, init?: RequestInit) => {
+    requests.push({ url: String(input), init });
+    return createJsonResponse(200, { results: [] });
+  };
+
+  await searchWeb({
+    query: "gold price today usd per ounce",
+    maxResults: 3,
+    env: { PI_SEARCH_API_URL: "https://api.tavily.com/search" },
+    fetchImpl
+  });
+
+  const sentBody = JSON.parse(String(requests[0]?.init?.body));
+  assert.equal(sentBody.query, "gold price today usd per ounce");
+  assert.equal(sentBody.max_results, 3);
+  assert.equal("maxResults" in sentBody, false);
+});
+
 test("searchWeb rejects non-integer maxResults values", async () => {
   await assert.rejects(
     () =>

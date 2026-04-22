@@ -21,6 +21,35 @@ export interface WebSearchResult {
   snippet: string;
 }
 
+function isTavilyEndpoint(endpoint: string): boolean {
+  try {
+    return new URL(endpoint).hostname === "api.tavily.com";
+  } catch {
+    return false;
+  }
+}
+
+function normalizeSearchResult(result: unknown): WebSearchResult | null {
+  if (!result || typeof result !== "object") {
+    return null;
+  }
+
+  const title = "title" in result && typeof result.title === "string" ? result.title : null;
+  const url = "url" in result && typeof result.url === "string" ? result.url : null;
+  const snippet =
+    "snippet" in result && typeof result.snippet === "string"
+      ? result.snippet
+      : "content" in result && typeof result.content === "string"
+        ? result.content
+        : null;
+
+  if (!title || !url || !snippet) {
+    return null;
+  }
+
+  return { title, url, snippet };
+}
+
 function normalizeQuery(query: string): string {
   const normalizedQuery = query.trim();
   if (!normalizedQuery) {
@@ -51,9 +80,13 @@ export async function searchWeb(
     throw new Error("PI_SEARCH_API_URL is not configured.");
   }
 
+  const normalizedQuery = normalizeQuery(options.query);
+  const normalizedMaxResults = normalizeMaxResults(options.maxResults);
   const requestBody = {
-    query: normalizeQuery(options.query),
-    maxResults: normalizeMaxResults(options.maxResults)
+    query: normalizedQuery,
+    ...(isTavilyEndpoint(endpoint)
+      ? { max_results: normalizedMaxResults }
+      : { maxResults: normalizedMaxResults })
   };
   const headers = new Headers({
     "content-type": "application/json"
@@ -83,13 +116,10 @@ export async function searchWeb(
     const parsedResponse = (await parseJsonResponse(response)) as { results?: unknown };
     const results = Array.isArray(parsedResponse.results) ? parsedResponse.results : [];
 
-    return results.filter(
-      (result): result is WebSearchResult =>
-        !!result &&
-        typeof result.title === "string" &&
-        typeof result.url === "string" &&
-        typeof result.snippet === "string"
-    );
+    return results.flatMap((result) => {
+      const normalizedResult = normalizeSearchResult(result);
+      return normalizedResult ? [normalizedResult] : [];
+    });
   } finally {
     timeout.dispose();
   }
