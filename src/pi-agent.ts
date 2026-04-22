@@ -314,28 +314,35 @@ export async function main(argv = process.argv.slice(2)): Promise<void> {
     input: process.stdin,
     output: process.stdout
   });
+  const handlePrompt = async (prompt: string): Promise<SessionPromptResult> => {
+    return runSessionPrompt({
+      model: runtimeModel,
+      workspaceDir: process.cwd(),
+      context,
+      prompt,
+      onEvent: createReplEventHandler(process.stdout)
+    });
+  };
 
   process.stdout.write(`model> ${selection.provider}/${runtimeModel.id}\n`);
 
   try {
-    while (true) {
-      const prompt = await repl.question("> ");
-      const trimmedPrompt = prompt.trim();
+    if (process.stdin.isTTY) {
+      while (true) {
+        const prompt = await readInteractivePrompt(repl);
+        if (prompt === null) {
+          break;
+        }
 
-      if (!trimmedPrompt) {
-        continue;
+        const result = await handlePrompt(prompt);
+        if (result.action === "stop") {
+          break;
+        }
       }
-
-      if (trimmedPrompt === "exit" || trimmedPrompt === "quit") {
-        break;
-      }
-
-      await runAgentTurn({
-        model: runtimeModel,
-        workspaceDir: process.cwd(),
-        context,
-        prompt: trimmedPrompt,
-        onEvent: createReplEventHandler(process.stdout)
+    } else {
+      await consumePromptLines({
+        lines: repl,
+        onPrompt: handlePrompt
       });
     }
   } finally {
