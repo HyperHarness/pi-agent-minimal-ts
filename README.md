@@ -17,7 +17,15 @@ It provides:
 
 ## Install
 
-If you are running in Windows PowerShell, configure PowerShell first so `npm` resolves to `npm.cmd`, then install dependencies. In other environments, install dependencies directly with `npm install`.
+Prefer a non-elevated install first:
+
+```powershell
+npm install --ignore-scripts
+```
+
+This project does not require install-time scripts to build or run, so `npm install --ignore-scripts` is the default recommendation when you want to avoid elevation or run inside a restricted environment. After installing dependencies this way, you can verify the setup with `npm run build` or `npm test`.
+
+If you are running in Windows PowerShell and `npm` does not resolve correctly, configure PowerShell first so `npm` resolves to `npm.cmd`, then run the same non-elevated install command.
 
 ### Windows PowerShell
 
@@ -38,7 +46,7 @@ Set-ExecutionPolicy -Scope CurrentUser -ExecutionPolicy RemoteSigned
 5. Install dependencies:
 
 ```powershell
-npm install
+npm install --ignore-scripts
 ```
 
 After reopening PowerShell, `npm` will resolve through `npm.cmd` instead of `npm.ps1`.
@@ -46,7 +54,7 @@ After reopening PowerShell, `npm` will resolve through `npm.cmd` instead of `npm
 ### Other environments
 
 ```powershell
-npm install
+npm install --ignore-scripts
 ```
 
 ## Run
