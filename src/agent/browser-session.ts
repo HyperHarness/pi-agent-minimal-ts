@@ -30,6 +30,7 @@ export class PaperBrowserSessionError extends Error {
 export interface PaperBrowserSession {
   openArticlePage(url: string): Promise<OpenArticlePageResult>;
   downloadPdf(url: string, destinationPath: string): Promise<void>;
+  dispose?(): Promise<void>;
 }
 
 export function classifyArticleAuthorization(input: {
@@ -102,6 +103,7 @@ export function resolveDefaultPaperBrowserSessionFactory(options: {
         headless: false,
         acceptDownloads: true
       });
+      let disposePromise: Promise<void> | undefined;
 
       return {
         async openArticlePage(url: string): Promise<OpenArticlePageResult> {
@@ -144,6 +146,11 @@ export function resolveDefaultPaperBrowserSessionFactory(options: {
           } finally {
             await page.close().catch(() => {});
           }
+        },
+
+        async dispose(): Promise<void> {
+          disposePromise ??= context.close();
+          await disposePromise;
         }
       };
     } catch (error) {

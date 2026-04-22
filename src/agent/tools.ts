@@ -120,7 +120,12 @@ export interface ToolDependencies {
   browserSessionFactory?: ReturnType<typeof resolveDefaultPaperBrowserSessionFactory>;
 }
 
-export type AgentTools = readonly [
+interface ToolSetMetadata {
+  cleanup: () => Promise<void>;
+  workspaceDir: string;
+}
+
+export type AgentTools = [
   GetTimeTool,
   ReadFileTool,
   WebSearchTool,
@@ -128,16 +133,31 @@ export type AgentTools = readonly [
   SearchArxivTool,
   DownloadArxivPdfTool,
   DownloadPaperPdfTool
-];
+] & ToolSetMetadata;
+
+export async function cleanupTools(tools: ReadonlyArray<AgentTool<any>> | undefined): Promise<void> {
+  const cleanup = (tools as Partial<ToolSetMetadata> | undefined)?.cleanup;
+  if (typeof cleanup === "function") {
+    await cleanup();
+  }
+}
+
+export function getToolsWorkspaceDir(
+  tools: ReadonlyArray<AgentTool<any>> | undefined
+): string | undefined {
+  const workspaceDir = (tools as Partial<ToolSetMetadata> | undefined)?.workspaceDir;
+  return typeof workspaceDir === "string" ? workspaceDir : undefined;
+}
 
 export function createTools(workspaceDir: string, dependencies: ToolDependencies = {}): AgentTools {
+  const resolvedWorkspaceDir = path.resolve(workspaceDir);
   const searchWebImpl = dependencies.searchWeb ?? searchWeb;
   const fetchWebPageImpl = dependencies.fetchWebPage ?? fetchWebPage;
   const searchArxivImpl = dependencies.searchArxiv ?? searchArxiv;
   const buildArxivPdfUrlImpl = dependencies.buildArxivPdfUrl ?? buildArxivPdfUrl;
   const browserSessionFactoryImpl =
     dependencies.browserSessionFactory ??
-    resolveDefaultPaperBrowserSessionFactory({ workspaceDir });
+    resolveDefaultPaperBrowserSessionFactory({ workspaceDir: resolvedWorkspaceDir });
   let browserSessionPromise: Promise<PaperBrowserSession> | undefined;
   const getBrowserSession = async (): Promise<PaperBrowserSession> => {
     browserSessionPromise ??= browserSessionFactoryImpl();
@@ -181,7 +201,7 @@ export function createTools(workspaceDir: string, dependencies: ToolDependencies
     parameters: readFileParameters,
     executionMode: "sequential",
     execute: async (_toolCallId: string, args: ReadFileParameters) => {
-      const resolvedPath = await resolveWorkspacePath(workspaceDir, args.path);
+      const resolvedPath = await resolveWorkspacePath(resolvedWorkspaceDir, args.path);
       const content = await readFile(resolvedPath, "utf8");
 
       return {
@@ -262,7 +282,7 @@ export function createTools(workspaceDir: string, dependencies: ToolDependencies
     executionMode: "sequential",
     execute: async (_toolCallId: string, args: DownloadPaperPdfParameters) => {
       const result = await downloadPaperPdfImpl({
-        workspaceDir,
+        workspaceDir: resolvedWorkspaceDir,
         url: args.url
       });
 
@@ -273,7 +293,8 @@ export function createTools(workspaceDir: string, dependencies: ToolDependencies
     }
   };
 
-  return [
+  let cleanupPromise: Promise<void> | undefined;
+  const tools = [
     getTimeTool,
     readFileTool,
     webSearchTool,
@@ -281,5 +302,28 @@ export function createTools(workspaceDir: string, dependencies: ToolDependencies
     searchArxivTool,
     downloadArxivPdfTool,
     downloadPaperPdfTool
-  ];
+  ] as unknown as AgentTools;
+
+  Object.defineProperties(tools, {
+    cleanup: {
+      enumerable: false,
+      value: async () => {
+        cleanupPromise ??= (async () => {
+          if (browserSessionPromise === undefined) {
+            return;
+          }
+
+          const browserSession = await browserSessionPromise;
+          await browserSession.dispose?.();
+        })();
+        await cleanupPromise;
+      }
+    },
+    workspaceDir: {
+      enumerable: false,
+      value: resolvedWorkspaceDir
+    }
+  });
+
+  return tools;
 }

@@ -328,6 +328,78 @@ test("runAgentTurn rebuilds built-in tools when the workspace changes", async ()
   }
 });
 
+test("runAgentTurn cleans up the prior tool set before replacing it on workspace switch", async () => {
+  const registration = registerFauxProvider();
+  registration.setResponses([
+    fauxAssistantMessage([fauxToolCall("remember_counter", {})], { stopReason: "toolUse" }),
+    fauxAssistantMessage([fauxText("Used the custom tool.")]),
+    fauxAssistantMessage([fauxToolCall("read_file", { path: "notes.txt" })], { stopReason: "toolUse" }),
+    fauxAssistantMessage([fauxText("Used the rebuilt tool set.")])
+  ]);
+
+  const workspaceA = await mkdtemp(path.join(tmpdir(), "pi-agent-workspace-a-"));
+  const workspaceB = await mkdtemp(path.join(tmpdir(), "pi-agent-workspace-b-"));
+  await writeFile(path.join(workspaceB, "notes.txt"), "from workspace B", "utf8");
+
+  const cleanupCalls: number[] = [];
+  const customTools = [
+    {
+      name: "remember_counter",
+      label: "Remember Counter",
+      description: "Keeps a counter across prompts within one session.",
+      parameters: Type.Object({}),
+      execute: async () => ({
+        content: [{ type: "text", text: "count:1" }],
+        details: { count: 1 }
+      })
+    }
+  ] as NonNullable<AgentContext["tools"]>;
+  Object.assign(customTools, {
+    cleanup: async () => {
+      cleanupCalls.push(1);
+    }
+  });
+
+  const context: AgentContext = {
+    systemPrompt: "You are a helpful assistant. Use tools when they are useful.",
+    messages: [],
+    tools: customTools
+  };
+
+  try {
+    await runAgentTurn({
+      model: registration.getModel(),
+      workspaceDir: workspaceA,
+      context,
+      prompt: "Use the custom tool in the first workspace."
+    });
+
+    assert.deepEqual(cleanupCalls, []);
+
+    const secondTurn = await runAgentTurn({
+      model: registration.getModel(),
+      workspaceDir: workspaceB,
+      context,
+      prompt: "Switch workspaces and read notes.txt."
+    });
+    const secondToolResult = secondTurn.newMessages.find(
+      (message): message is ToolResultMessage =>
+        isToolResultMessage(message) && message.toolName === "read_file"
+    );
+    assert.ok(secondToolResult);
+    assert.equal(secondToolResult.isError, false);
+    assert.deepEqual(secondToolResult.content, [{ type: "text", text: "from workspace B" }]);
+    assert.deepEqual(cleanupCalls, [1]);
+    assert.notStrictEqual(context.tools, customTools);
+  } finally {
+    registration.unregister();
+    await Promise.all([
+      rm(workspaceA, { recursive: true, force: true }),
+      rm(workspaceB, { recursive: true, force: true })
+    ]);
+  }
+});
+
 test("runAgentTurn does not persist a failed turn into context history", async () => {
   const registration = registerFauxProvider();
   const prompt = "Try again later";

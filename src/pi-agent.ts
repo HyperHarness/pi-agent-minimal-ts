@@ -15,7 +15,7 @@ import {
 } from "@mariozechner/pi-ai";
 import { agentLoop, type AgentContext, type AgentEvent, type AgentMessage } from "@mariozechner/pi-agent-core";
 import { resolveInitialModel } from "./agent/model-resolver.js";
-import { createTools } from "./agent/tools.js";
+import { cleanupTools, createTools, getToolsWorkspaceDir } from "./agent/tools.js";
 
 type LlmMessage = UserMessage | AssistantMessage | ToolResultMessage;
 type AgentMessageEventHandler = (event: AgentEvent) => Promise<void> | void;
@@ -265,12 +265,17 @@ export async function runAgentTurn(options: RunAgentTurnOptions): Promise<RunAge
   };
   const workspaceDir = normalizeWorkspaceDir(options.workspaceDir);
   const existingTools = options.context.tools ?? [];
-  const previousWorkspaceDir = contextWorkspaceDirs.get(options.context);
-  const tools =
-    existingTools.length > 0 &&
-    (previousWorkspaceDir === undefined || previousWorkspaceDir === workspaceDir)
-      ? existingTools
-      : [...createTools(workspaceDir)];
+  const previousWorkspaceDir =
+    contextWorkspaceDirs.get(options.context) ?? getToolsWorkspaceDir(existingTools);
+  let tools = existingTools;
+
+  if (existingTools.length === 0) {
+    tools = createTools(workspaceDir);
+  } else if (previousWorkspaceDir !== undefined && previousWorkspaceDir !== workspaceDir) {
+    await cleanupTools(existingTools);
+    tools = createTools(workspaceDir);
+  }
+
   const stream = agentLoop(
     [userMessage],
     { ...options.context, tools },
@@ -361,6 +366,8 @@ export async function main(argv = process.argv.slice(2)): Promise<void> {
     }
   } finally {
     repl.close();
+    await cleanupTools(context.tools);
+    contextWorkspaceDirs.delete(context);
   }
 }
 

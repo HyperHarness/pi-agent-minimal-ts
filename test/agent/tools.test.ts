@@ -3,6 +3,7 @@ import assert from "node:assert/strict";
 import { mkdtemp, mkdir, rm, symlink, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import path from "node:path";
+import * as agentTools from "../../src/agent/tools.js";
 import { createTools } from "../../src/agent/tools.js";
 
 type ToolContentItem = {
@@ -599,6 +600,62 @@ test("download_paper_pdf reuses the default browser session for repeated executi
         destinationPath: path.join(workspace, "downloads", "papers", "downloaded-paper.pdf"),
       },
     ]);
+  } finally {
+    await rm(workspace, { recursive: true, force: true });
+  }
+});
+
+test("createTools cleanup closes a lazily created default browser session exactly once", async () => {
+  const cleanupTools = (
+    agentTools as {
+      cleanupTools?: (tools: ReturnType<typeof createTools>) => Promise<void>;
+    }
+  ).cleanupTools;
+  assert.equal(typeof cleanupTools, "function");
+
+  const workspace = await mkdtemp(path.join(tmpdir(), "pi-agent-tools-"));
+  const factoryCalls: number[] = [];
+  const disposeCalls: number[] = [];
+
+  try {
+    const tools = createTools(workspace, {
+      browserSessionFactory: async () => {
+        factoryCalls.push(1);
+        return {
+          async openArticlePage(url: string) {
+            return {
+              finalArticleUrl: url,
+              html: '<html><body><a href="/doi/pdf/10.1126/science.adz8659">PDF</a></body></html>',
+              authorized: true,
+            };
+          },
+          async downloadPdf() {},
+          async dispose() {
+            disposeCalls.push(1);
+          },
+        };
+      },
+    }) as ReadonlyArray<{
+      name: string;
+      execute?: DownloadPaperPdfTool["execute"];
+    }>;
+
+    const tool = tools.find((candidate) => candidate.name === "download_paper_pdf");
+    assert.ok(tool);
+    const execute = tool.execute;
+    assert.ok(execute);
+
+    await execute(
+      "tool-call-5",
+      { url: "https://www.science.org/doi/10.1126/science.adz8659" },
+      undefined,
+    );
+
+    await cleanupTools!(tools as ReturnType<typeof createTools>);
+    await cleanupTools!(tools as ReturnType<typeof createTools>);
+
+    assert.deepEqual(factoryCalls, [1]);
+    assert.deepEqual(disposeCalls, [1]);
   } finally {
     await rm(workspace, { recursive: true, force: true });
   }
