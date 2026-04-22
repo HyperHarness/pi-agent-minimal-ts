@@ -40,6 +40,11 @@ export interface RunAgentTurnResult {
   newMessages: AgentMessage[];
 }
 
+export interface SessionPromptResult {
+  action: "stop" | "continue";
+  newMessages: AgentMessage[];
+}
+
 function isLlmMessage(message: AgentMessage): message is LlmMessage {
   if (typeof message !== "object" || message === null || !("role" in message)) {
     return false;
@@ -190,6 +195,27 @@ function isFailedTurn(messages: AgentMessage[]): boolean {
     lastMessage.role === "assistant" &&
     (lastMessage.stopReason === "error" || lastMessage.stopReason === "aborted")
   );
+}
+
+export async function runSessionPrompt(
+  options: RunAgentTurnOptions
+): Promise<SessionPromptResult> {
+  const trimmedPrompt = options.prompt.trim();
+
+  if (!trimmedPrompt) {
+    return { action: "continue", newMessages: [] };
+  }
+
+  if (trimmedPrompt === "exit" || trimmedPrompt === "quit") {
+    return { action: "stop", newMessages: [] };
+  }
+
+  const result = await runAgentTurn({
+    ...options,
+    prompt: trimmedPrompt
+  });
+
+  return { action: "continue", newMessages: result.newMessages };
 }
 
 export async function runAgentTurn(options: RunAgentTurnOptions): Promise<RunAgentTurnResult> {
