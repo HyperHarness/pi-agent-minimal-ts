@@ -2,6 +2,7 @@ import { readFile, realpath } from "node:fs/promises";
 import path from "node:path";
 import { Type, type Static } from "@mariozechner/pi-ai";
 import type { AgentTool } from "@mariozechner/pi-agent-core";
+import type { PaperBrowserSession } from "./browser-session.js";
 import { resolveDefaultPaperBrowserSessionFactory } from "./browser-session.js";
 import { buildArxivPdfUrl, searchArxiv } from "./arxiv.js";
 import { downloadPaperPdf } from "./paper-download.js";
@@ -137,10 +138,15 @@ export function createTools(workspaceDir: string, dependencies: ToolDependencies
   const browserSessionFactoryImpl =
     dependencies.browserSessionFactory ??
     resolveDefaultPaperBrowserSessionFactory({ workspaceDir });
+  let browserSessionPromise: Promise<PaperBrowserSession> | undefined;
+  const getBrowserSession = async (): Promise<PaperBrowserSession> => {
+    browserSessionPromise ??= browserSessionFactoryImpl();
+    return browserSessionPromise;
+  };
   const downloadPaperPdfImpl =
     dependencies.downloadPaperPdf ??
     (async (options: { workspaceDir: string; url: string }) => {
-      const browserSession = await browserSessionFactoryImpl();
+      const browserSession = await getBrowserSession();
       return downloadPaperPdf({
         workspaceDir: options.workspaceDir,
         url: options.url,

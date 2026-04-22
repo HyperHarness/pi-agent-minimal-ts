@@ -542,3 +542,64 @@ test("download_paper_pdf uses the default browser-backed paper download path whe
     await rm(workspace, { recursive: true, force: true });
   }
 });
+
+test("download_paper_pdf reuses the default browser session for repeated executions", async () => {
+  const workspace = await mkdtemp(path.join(tmpdir(), "pi-agent-tools-"));
+  const factoryCalls: number[] = [];
+  const downloadCalls: Array<{ url: string; destinationPath: string }> = [];
+
+  try {
+    const dependencies: CreateToolsDependencies = {
+      browserSessionFactory: async () => {
+        factoryCalls.push(1);
+        return {
+          async openArticlePage(url: string) {
+            return {
+              finalArticleUrl: url,
+              html: '<html><body><a href="/doi/pdf/10.1126/science.adz8659">PDF</a></body></html>',
+              authorized: true,
+            };
+          },
+          async downloadPdf(url: string, destinationPath: string) {
+            downloadCalls.push({ url, destinationPath });
+          },
+        };
+      },
+    };
+
+    const tools = createTools(workspace, dependencies) as ReadonlyArray<{
+      name: string;
+      execute?: DownloadPaperPdfTool["execute"];
+    }>;
+
+    const tool = tools.find((candidate) => candidate.name === "download_paper_pdf");
+    assert.ok(tool);
+    const execute = tool.execute;
+    assert.ok(execute);
+
+    await execute(
+      "tool-call-3",
+      { url: "https://www.science.org/doi/10.1126/science.adz8659" },
+      undefined,
+    );
+    await execute(
+      "tool-call-4",
+      { url: "https://www.science.org/doi/10.1126/science.adz8659" },
+      undefined,
+    );
+
+    assert.deepEqual(factoryCalls, [1]);
+    assert.deepEqual(downloadCalls, [
+      {
+        url: "https://www.science.org/doi/pdf/10.1126/science.adz8659",
+        destinationPath: path.join(workspace, "downloads", "papers", "downloaded-paper.pdf"),
+      },
+      {
+        url: "https://www.science.org/doi/pdf/10.1126/science.adz8659",
+        destinationPath: path.join(workspace, "downloads", "papers", "downloaded-paper.pdf"),
+      },
+    ]);
+  } finally {
+    await rm(workspace, { recursive: true, force: true });
+  }
+});
