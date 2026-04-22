@@ -253,15 +253,9 @@ test("web_search delegates to the injected search client and returns JSON text w
 
 test("download_arxiv_pdf returns the canonical PDF URL", async () => {
   const workspace = await mkdtemp(path.join(tmpdir(), "pi-agent-tools-"));
-  const capturedIds: string[] = [];
 
   try {
-    const downloadArxivPdfTool = getDownloadArxivPdfTool(workspace, {
-      buildArxivPdfUrl: (id) => {
-        capturedIds.push(id);
-        return `https://arxiv.org/pdf/${id}.pdf`;
-      },
-    });
+    const downloadArxivPdfTool = getDownloadArxivPdfTool(workspace);
 
     const result = await downloadArxivPdfTool.execute(
       "call-7",
@@ -269,7 +263,6 @@ test("download_arxiv_pdf returns the canonical PDF URL", async () => {
       undefined,
     );
 
-    assert.deepEqual(capturedIds, ["2401.01234v2"]);
     assert.deepEqual(result.content, [
       {
         type: "text",
