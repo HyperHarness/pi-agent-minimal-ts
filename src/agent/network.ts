@@ -5,13 +5,13 @@ export interface FetchTimeoutHandle {
 
 export function resolveFetchTimeoutMs(env: NodeJS.ProcessEnv = process.env): number {
   const rawValue = env.PI_FETCH_TIMEOUT_MS?.trim();
-  if (!rawValue) {
+  if (rawValue === undefined) {
     return 10_000;
   }
 
   const parsedValue = Number(rawValue);
   if (!Number.isFinite(parsedValue) || parsedValue <= 0) {
-    return 10_000;
+    throw new Error("Invalid PI_FETCH_TIMEOUT_MS value.");
   }
 
   return Math.floor(parsedValue);
@@ -34,6 +34,11 @@ export function getBearerHeaders(apiKey: string): Headers {
 }
 
 export async function parseJsonResponse(response: Response): Promise<unknown> {
+  const contentType = response.headers.get("content-type")?.toLowerCase() ?? "";
+  if (!contentType.includes("json")) {
+    throw new Error("Expected JSON content-type.");
+  }
+
   try {
     return await response.json();
   } catch (error) {

@@ -9,23 +9,16 @@ import {
 export interface SearchWebOptions {
   query: string;
   maxResults?: number;
+  env?: SearchWebEnvironment;
+  fetchImpl?: (input: RequestInfo | URL, init?: RequestInit) => Promise<Response>;
 }
 
 export interface SearchWebEnvironment extends NodeJS.ProcessEnv {}
 
-export interface SearchWebRuntime {
-  env?: SearchWebEnvironment;
-  fetch?: (input: RequestInfo | URL, init?: RequestInit) => Promise<Response>;
-}
-
-export interface SearchWebResult {
+export interface WebSearchResult {
   title: string;
   url: string;
-  snippet?: string;
-}
-
-export interface SearchWebResponse {
-  results: SearchWebResult[];
+  snippet: string;
 }
 
 function normalizeQuery(query: string): string {
@@ -47,10 +40,9 @@ function normalizeMaxResults(maxResults: number | undefined): number {
 }
 
 export async function searchWeb(
-  options: SearchWebOptions,
-  runtime: SearchWebRuntime = {}
-): Promise<SearchWebResponse> {
-  const env = runtime.env ?? process.env;
+  options: SearchWebOptions
+): Promise<WebSearchResult[]> {
+  const env = options.env ?? process.env;
   const endpoint = env.PI_SEARCH_API_URL?.trim();
   if (!endpoint) {
     throw new Error("PI_SEARCH_API_URL is not configured.");
@@ -69,7 +61,7 @@ export async function searchWeb(
     bearerHeaders.forEach((value, key) => headers.set(key, value));
   }
 
-  const fetchImpl = runtime.fetch ?? globalThis.fetch.bind(globalThis);
+  const fetchImpl = options.fetchImpl ?? globalThis.fetch.bind(globalThis);
   const timeoutMs = resolveFetchTimeoutMs(env);
   const timeout = withRequestTimeout(timeoutMs);
 
@@ -85,17 +77,16 @@ export async function searchWeb(
       throw getResponseStatusError(response, "web search request");
     }
 
-    const parsedResponse = (await parseJsonResponse(response)) as Partial<SearchWebResponse>;
+    const parsedResponse = (await parseJsonResponse(response)) as { results?: unknown };
     const results = Array.isArray(parsedResponse.results) ? parsedResponse.results : [];
 
-    return {
-      results: results.filter(
-        (result): result is SearchWebResult =>
-          !!result &&
-          typeof result.title === "string" &&
-          typeof result.url === "string"
-      )
-    };
+    return results.filter(
+      (result): result is WebSearchResult =>
+        !!result &&
+        typeof result.title === "string" &&
+        typeof result.url === "string" &&
+        typeof result.snippet === "string"
+    );
   } finally {
     timeout.clear();
   }
