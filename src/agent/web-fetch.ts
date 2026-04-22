@@ -77,7 +77,8 @@ export async function fetchWebPage(
     }
 
     const contentType = response.headers.get("content-type")?.toLowerCase() ?? "";
-    if (!contentType.includes("text/html")) {
+    const mediaType = contentType.split(";", 1)[0]?.trim();
+    if (mediaType !== "text/html") {
       throw new Error("Expected text/html content-type.");
     }
 
