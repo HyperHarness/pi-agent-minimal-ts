@@ -41,9 +41,7 @@ function decodeHtmlEntities(text: string): string {
     .replace(/&lt;/gi, "<")
     .replace(/&gt;/gi, ">")
     .replace(/&quot;/gi, '"')
-    .replace(/&#39;/gi, "'")
-    .replace(/&#(\d+);/g, (_match, value: string) => String.fromCharCode(Number(value)))
-    .replace(/&#x([0-9a-f]+);/gi, (_match, value: string) => String.fromCharCode(Number.parseInt(value, 16)));
+    .replace(/&#39;/gi, "'");
 }
 
 function cleanHtml(html: string): string {
