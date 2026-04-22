@@ -23,6 +23,12 @@ test("getPublisherAdapter selects the aps adapter", () => {
   assert.equal(adapter.id, "aps");
 });
 
+test("getPublisherAdapter selects the aps adapter for aps.org", () => {
+  const adapter = getPublisherAdapter("https://aps.org/prl/abstract/10.1103/PhysRevLett.134.090601");
+
+  assert.equal(adapter.id, "aps");
+});
+
 test("resolvePdfPathFromHtml returns a science PDF link from a landing page snippet", () => {
   const pdfPath = resolvePdfPathFromHtml("science", `
     <html><body>

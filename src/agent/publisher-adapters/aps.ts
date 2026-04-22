@@ -3,7 +3,7 @@ import type { PublisherAdapter } from "./types.js";
 export const apsAdapter: PublisherAdapter = {
   id: "aps",
   matches(url: URL) {
-    return url.hostname === "journals.aps.org";
+    return url.hostname === "journals.aps.org" || url.hostname === "aps.org";
   },
   resolvePdfPathFromHtml(html: string) {
     const match = html.match(/href="([^"]*\/doi\/pdf\/[^"]+)"/i);
