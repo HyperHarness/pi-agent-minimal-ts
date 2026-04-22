@@ -109,7 +109,7 @@ Supported publishers:
 - `nature.com`
 - `journals.aps.org` / `aps.org`
 
-If Chrome is not discovered automatically, set `PI_PAPER_CHROME_EXECUTABLE` to the Chrome executable path before starting the agent.
+If the browser cannot be launched with the default Playwright/Chrome setup on your machine, set `PI_PAPER_CHROME_EXECUTABLE` to the Chrome executable path before starting the agent.
 
 On the first run, the tool opens the paper page in that dedicated profile. If the session is not already authorized, complete the manual institutional login in Chrome, then rerun the same URL.
 
@@ -119,7 +119,7 @@ Example prompt:
 Download this paper with download_paper_pdf: https://www.science.org/doi/10.1126/science.adz8659
 ```
 
-Manual verification uses the URLs in `paper_url.txt`. Check that each URL belongs to one of the supported hosts above, then run the download against each URL and confirm the resulting PDF is written under `downloads/papers/`.
+Manual verification uses the URLs in `paper_url.txt`. Check that each URL belongs to one of the supported hosts above, then run the download against each URL and confirm the resulting PDF is written to `downloads/papers/downloaded-paper.pdf`. Repeated runs overwrite that file unless you move or rename it between runs.
 
 ## Search And Fetch Configuration
 
