@@ -243,6 +243,87 @@ test("runAgentTurn does not persist a failed turn into context history", async (
   }
 });
 
+test("runSessionPrompt stops on exit and quit commands", async () => {
+  const runSessionPrompt = (
+    piAgent as {
+      runSessionPrompt?: (options: {
+        model: Model<Api>;
+        workspaceDir: string;
+        context: AgentContext;
+        prompt: string;
+      }) => Promise<{ action: "stop" | "continue"; newMessages: AgentMessage[] }>;
+    }
+  ).runSessionPrompt;
+  assert.equal(typeof runSessionPrompt, "function");
+
+  const model = new Proxy({} as Record<string, unknown>, {
+    get() {
+      throw new Error("model should not be called for session control commands");
+    }
+  }) as unknown as Model<Api>;
+
+  for (const prompt of ["exit", "quit"]) {
+    const context: AgentContext = {
+      systemPrompt: "You are a helpful assistant. Use tools when they are useful.",
+      messages: [],
+      tools: []
+    };
+
+    const result = await runSessionPrompt!({
+      model,
+      workspaceDir: process.cwd(),
+      context,
+      prompt
+    });
+
+    assert.deepEqual(result, { action: "stop", newMessages: [] });
+    assert.deepEqual(context.messages, []);
+  }
+});
+
+test("runSessionPrompt ignores empty prompts without calling the model", async () => {
+  const runSessionPrompt = (
+    piAgent as {
+      runSessionPrompt?: (options: {
+        model: Model<Api>;
+        workspaceDir: string;
+        context: AgentContext;
+        prompt: string;
+      }) => Promise<{ action: "stop" | "continue"; newMessages: AgentMessage[] }>;
+    }
+  ).runSessionPrompt;
+  assert.equal(typeof runSessionPrompt, "function");
+
+  const model = new Proxy({} as Record<string, unknown>, {
+    get() {
+      throw new Error("model should not be called for empty prompts");
+    }
+  }) as unknown as Model<Api>;
+
+  const context: AgentContext = {
+    systemPrompt: "You are a helpful assistant. Use tools when they are useful.",
+    messages: [
+      {
+        role: "user",
+        content: "Earlier prompt",
+        timestamp: 1
+      }
+    ],
+    tools: []
+  };
+  const previousMessages = [...context.messages];
+
+  const result = await runSessionPrompt!({
+    model,
+    workspaceDir: process.cwd(),
+    context,
+    prompt: "   \t  "
+  });
+
+  assert.deepEqual(result, { action: "continue", newMessages: [] });
+  assert.deepEqual(context.messages, previousMessages);
+});
+
 test("createReplEventHandler prints assistant error messages", () => {
   const handlerFactory = (
     piAgent as {
