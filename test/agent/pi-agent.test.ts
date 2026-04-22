@@ -324,6 +324,59 @@ test("runSessionPrompt ignores empty prompts without calling the model", async (
   assert.deepEqual(context.messages, previousMessages);
 });
 
+test("readInteractivePrompt treats closed readline as a normal stop signal", async () => {
+  const readInteractivePrompt = (
+    piAgent as {
+      readInteractivePrompt?: (repl: {
+        question: (prompt: string) => Promise<string>;
+      }) => Promise<string | null>;
+    }
+  ).readInteractivePrompt;
+  assert.equal(typeof readInteractivePrompt, "function");
+
+  const repl = {
+    question: async () => {
+      throw Object.assign(new Error("readline closed"), { code: "ERR_USE_AFTER_CLOSE" });
+    }
+  };
+
+  const result = await readInteractivePrompt!(repl);
+
+  assert.equal(result, null);
+});
+
+test("consumePromptLines reuses one session across multiple stdin lines", async () => {
+  const consumePromptLines = (
+    piAgent as {
+      consumePromptLines?: (options: {
+        lines: AsyncIterable<string>;
+        onPrompt: (prompt: string) => Promise<{ action: "continue" | "stop" }>;
+      }) => Promise<void>;
+    }
+  ).consumePromptLines;
+  assert.equal(typeof consumePromptLines, "function");
+
+  const processedPrompts: string[] = [];
+
+  async function* lines(): AsyncIterable<string> {
+    yield "";
+    yield "   ";
+    yield "hello";
+    yield "exit";
+    yield "ignored";
+  }
+
+  await consumePromptLines!({
+    lines: lines(),
+    onPrompt: async (prompt) => {
+      processedPrompts.push(prompt);
+      return prompt === "exit" ? { action: "stop" } : { action: "continue" };
+    }
+  });
+
+  assert.deepEqual(processedPrompts, ["hello", "exit"]);
+});
+
 test("createReplEventHandler prints assistant error messages", () => {
   const handlerFactory = (
     piAgent as {
