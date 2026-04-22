@@ -16,7 +16,9 @@ const readFileParameters = Type.Object({
 
 const webSearchParameters = Type.Object({
   query: Type.String({ description: "Search query string." }),
-  maxResults: Type.Optional(Type.Number({ description: "Maximum number of results to return." }))
+  maxResults: Type.Optional(
+    Type.Integer({ description: "Maximum number of results to return.", minimum: 1 })
+  )
 });
 
 const fetchUrlParameters = Type.Object({
@@ -25,7 +27,9 @@ const fetchUrlParameters = Type.Object({
 
 const searchArxivParameters = Type.Object({
   query: Type.String({ description: "Search query string for arXiv." }),
-  maxResults: Type.Optional(Type.Number({ description: "Maximum number of results to return." }))
+  maxResults: Type.Optional(
+    Type.Integer({ description: "Maximum number of results to return.", minimum: 1 })
+  )
 });
 
 const downloadArxivPdfParameters = Type.Object({

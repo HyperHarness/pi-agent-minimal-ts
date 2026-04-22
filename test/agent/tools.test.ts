@@ -39,6 +39,22 @@ type WebSearchTool = {
   ) => Promise<ToolResult>;
 };
 
+type FetchUrlTool = {
+  execute: (
+    toolCallId: string,
+    args: { url: string },
+    signal: undefined,
+  ) => Promise<ToolResult>;
+};
+
+type SearchArxivTool = {
+  execute: (
+    toolCallId: string,
+    args: { query: string; maxResults?: number },
+    signal: undefined,
+  ) => Promise<ToolResult>;
+};
+
 type DownloadArxivPdfTool = {
   execute: (
     toolCallId: string,
@@ -81,6 +97,34 @@ function getWebSearchTool(
   assert.ok(webSearchTool);
   assert.equal(typeof webSearchTool.execute, "function");
   return webSearchTool as WebSearchTool;
+}
+
+function getFetchUrlTool(
+  workspace: string,
+  dependencies?: Parameters<typeof createTools>[1],
+): FetchUrlTool {
+  const tools = createTools(workspace, dependencies) as ReadonlyArray<{
+    name: string;
+    execute?: FetchUrlTool["execute"];
+  }>;
+  const fetchUrlTool = tools.find((tool) => tool.name === "fetch_url");
+  assert.ok(fetchUrlTool);
+  assert.equal(typeof fetchUrlTool.execute, "function");
+  return fetchUrlTool as FetchUrlTool;
+}
+
+function getSearchArxivTool(
+  workspace: string,
+  dependencies?: Parameters<typeof createTools>[1],
+): SearchArxivTool {
+  const tools = createTools(workspace, dependencies) as ReadonlyArray<{
+    name: string;
+    execute?: SearchArxivTool["execute"];
+  }>;
+  const searchArxivTool = tools.find((tool) => tool.name === "search_arxiv");
+  assert.ok(searchArxivTool);
+  assert.equal(typeof searchArxivTool.execute, "function");
+  return searchArxivTool as SearchArxivTool;
 }
 
 function getDownloadArxivPdfTool(
@@ -190,7 +234,8 @@ test("createTools exposes the full built-in tool set", async () => {
   const workspace = await mkdtemp(path.join(tmpdir(), "pi-agent-tools-"));
 
   try {
-    const toolNames = createTools(workspace).map((tool) => tool.name);
+    const tools = createTools(workspace);
+    const toolNames = tools.map((tool) => tool.name);
     assert.deepEqual(toolNames, [
       "get_time",
       "read_file",
@@ -199,6 +244,23 @@ test("createTools exposes the full built-in tool set", async () => {
       "search_arxiv",
       "download_arxiv_pdf",
     ]);
+
+    const webSearchTool = tools.find((tool) => tool.name === "web_search");
+    const searchArxivTool = tools.find((tool) => tool.name === "search_arxiv");
+    assert.ok(webSearchTool);
+    assert.ok(searchArxivTool);
+    const webSearchMaxResults = (webSearchTool.parameters as {
+      properties?: { maxResults?: { type?: string; description?: string; minimum?: number } };
+    }).properties?.maxResults;
+    const searchArxivMaxResults = (searchArxivTool.parameters as {
+      properties?: { maxResults?: { type?: string; description?: string; minimum?: number } };
+    }).properties?.maxResults;
+    assert.equal(webSearchMaxResults?.type, "integer");
+    assert.equal(webSearchMaxResults?.description, "Maximum number of results to return.");
+    assert.equal(webSearchMaxResults?.minimum, 1);
+    assert.equal(searchArxivMaxResults?.type, "integer");
+    assert.equal(searchArxivMaxResults?.description, "Maximum number of results to return.");
+    assert.equal(searchArxivMaxResults?.minimum, 1);
   } finally {
     await rm(workspace, { recursive: true, force: true });
   }
@@ -251,6 +313,92 @@ test("web_search delegates to the injected search client and returns JSON text w
   }
 });
 
+test("fetch_url delegates to the injected fetch client and returns JSON text with details", async () => {
+  const workspace = await mkdtemp(path.join(tmpdir(), "pi-agent-tools-"));
+  const capturedCalls: Array<{ url: string }> = [];
+
+  try {
+    const fetchUrlTool = getFetchUrlTool(workspace, {
+      fetchWebPage: async (options) => {
+        capturedCalls.push(options);
+        return "Fetched page text";
+      },
+    });
+
+    const result = await fetchUrlTool.execute(
+      "call-7",
+      { url: "https://example.com/article" },
+      undefined,
+    );
+
+    assert.deepEqual(capturedCalls, [{ url: "https://example.com/article" }]);
+    assert.deepEqual(result.content, [
+      {
+        type: "text",
+        text: JSON.stringify("Fetched page text"),
+      },
+    ]);
+    assert.deepEqual(result.details, {
+      url: "https://example.com/article",
+    });
+  } finally {
+    await rm(workspace, { recursive: true, force: true });
+  }
+});
+
+test("search_arxiv delegates to the injected arXiv client and returns JSON text with details", async () => {
+  const workspace = await mkdtemp(path.join(tmpdir(), "pi-agent-tools-"));
+  const capturedCalls: Array<{ query: string; maxResults?: number }> = [];
+
+  try {
+    const searchArxivTool = getSearchArxivTool(workspace, {
+      searchArxiv: async (options) => {
+        capturedCalls.push(options);
+        return [
+          {
+            id: "2401.01234",
+            title: "Test Paper",
+            authors: ["Ada Lovelace"],
+            summary: "Paper summary",
+            absUrl: "https://arxiv.org/abs/2401.01234",
+            pdfUrl: "https://arxiv.org/pdf/2401.01234.pdf",
+          },
+        ];
+      },
+    });
+
+    const result = await searchArxivTool.execute(
+      "call-8",
+      { query: "tool adapters", maxResults: 3 },
+      undefined,
+    );
+
+    assert.deepEqual(capturedCalls, [{ query: "tool adapters", maxResults: 3 }]);
+    assert.deepEqual(result.content, [
+      {
+        type: "text",
+        text: JSON.stringify([
+          {
+            id: "2401.01234",
+            title: "Test Paper",
+            authors: ["Ada Lovelace"],
+            summary: "Paper summary",
+            absUrl: "https://arxiv.org/abs/2401.01234",
+            pdfUrl: "https://arxiv.org/pdf/2401.01234.pdf",
+          },
+        ]),
+      },
+    ]);
+    assert.deepEqual(result.details, {
+      query: "tool adapters",
+      maxResults: 3,
+      count: 1,
+    });
+  } finally {
+    await rm(workspace, { recursive: true, force: true });
+  }
+});
+
 test("download_arxiv_pdf returns the canonical PDF URL", async () => {
   const workspace = await mkdtemp(path.join(tmpdir(), "pi-agent-tools-"));
 
@@ -258,7 +406,7 @@ test("download_arxiv_pdf returns the canonical PDF URL", async () => {
     const downloadArxivPdfTool = getDownloadArxivPdfTool(workspace);
 
     const result = await downloadArxivPdfTool.execute(
-      "call-7",
+      "call-9",
       { id: "2401.01234v2" },
       undefined,
     );
