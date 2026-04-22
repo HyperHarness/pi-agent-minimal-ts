@@ -20,6 +20,23 @@ export class PaperDownloadError extends Error {
   }
 }
 
+function resolveFallbackPdfPath(input: {
+  publisherId: "science" | "nature" | "aps";
+  finalArticleUrl: string;
+}): string | null {
+  if (input.publisherId !== "aps") {
+    return null;
+  }
+
+  const match = new URL(input.finalArticleUrl).pathname.match(/^\/([^/]+)\/abstract\/(.+)$/i);
+  if (!match) {
+    return null;
+  }
+
+  const [, journalSlug, doi] = match;
+  return `/${journalSlug}/pdf/${doi}`;
+}
+
 export async function downloadPaperPdf(options: {
   workspaceDir: string;
   url: string;
@@ -52,11 +69,16 @@ export async function downloadPaperPdf(options: {
   if (!articlePage.authorized) {
     throw new PaperDownloadError(
       "manual_login_required",
-      "The browser session is not authorized for this publisher."
+      "The browser session needs manual login or verification for this publisher."
     );
   }
 
-  const pdfPath = adapter.resolvePdfPathFromHtml(articlePage.html);
+  const pdfPath =
+    adapter.resolvePdfPathFromHtml(articlePage.html) ??
+    resolveFallbackPdfPath({
+      publisherId: adapter.id,
+      finalArticleUrl: articlePage.finalArticleUrl
+    });
   if (!pdfPath) {
     throw new PaperDownloadError(
       "pdf_not_found",
@@ -78,6 +100,13 @@ export async function downloadPaperPdf(options: {
   try {
     await options.browserSession.downloadPdf(finalPdfUrl, outputPath);
   } catch (error) {
+    if (error instanceof PaperBrowserSessionError) {
+      throw new PaperDownloadError(
+        error.code === "authorization_failed" ? "manual_login_required" : error.code,
+        error.message
+      );
+    }
+
     throw new PaperDownloadError(
       "download_failed",
       error instanceof Error ? error.message : "Failed to download the PDF."

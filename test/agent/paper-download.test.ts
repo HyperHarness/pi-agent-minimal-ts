@@ -108,6 +108,7 @@ test("downloadPaperPdf classifies an unauthorized page as manual_login_required"
 
   assertPaperDownloadError(error);
   assert.equal(error.code, "manual_login_required");
+  assert.match(error.message, /login or verification/i);
 });
 
 test("downloadPaperPdf wraps output directory creation failures as download_failed", async () => {
@@ -152,6 +153,32 @@ test("downloadPaperPdf wraps PDF download failures as download_failed", async ()
   assert.equal(error.code, "download_failed");
 });
 
+test("downloadPaperPdf classifies PDF-stage verification blocks as manual_login_required", async () => {
+  const error = await captureRejection(() =>
+    downloadPaperPdf({
+      workspaceDir: process.cwd(),
+      url: "https://journals.aps.org/prl/abstract/10.1103/PhysRevLett.134.090601",
+      browserSession: {
+        openArticlePage: async () => ({
+          finalArticleUrl: "https://journals.aps.org/prl/abstract/10.1103/PhysRevLett.134.090601",
+          html: "<html><body>No direct PDF link in the article HTML.</body></html>",
+          authorized: true
+        }),
+        downloadPdf: async () => {
+          throw new PaperBrowserSessionError(
+            "authorization_failed",
+            "Cloudflare verification blocked the PDF request."
+          );
+        }
+      }
+    })
+  );
+
+  assertPaperDownloadError(error);
+  assert.equal(error.code, "manual_login_required");
+  assert.match(error.message, /cloudflare|verification/i);
+});
+
 test("downloadPaperPdf returns output metadata for a successful download", async () => {
   const workspaceDir = await mkdtemp(path.join(os.tmpdir(), "paper-download-"));
   let downloadedUrl: string | undefined;
@@ -181,4 +208,30 @@ test("downloadPaperPdf returns output metadata for a successful download", async
   assert.equal(result.finalPdfUrl, "https://www.science.org/doi/pdf/10.1126/science.adz8659");
   assert.equal(downloadedUrl, result.finalPdfUrl);
   assert.equal(downloadedPath, expectedPath);
+});
+
+test("downloadPaperPdf derives the APS canonical PDF URL when the article page has no PDF link", async () => {
+  const workspaceDir = await mkdtemp(path.join(os.tmpdir(), "paper-download-"));
+  let downloadedUrl: string | undefined;
+
+  const result = await downloadPaperPdf({
+    workspaceDir,
+    url: "https://journals.aps.org/prl/abstract/10.1103/PhysRevLett.134.090601",
+    browserSession: {
+      openArticlePage: async () => ({
+        finalArticleUrl: "https://journals.aps.org/prl/abstract/10.1103/PhysRevLett.134.090601",
+        html: "<html><body>No direct PDF link in the article HTML.</body></html>",
+        authorized: true
+      }),
+      downloadPdf: async (url) => {
+        downloadedUrl = url;
+      }
+    }
+  });
+
+  assert.equal(
+    result.finalPdfUrl,
+    "https://journals.aps.org/prl/pdf/10.1103/PhysRevLett.134.090601"
+  );
+  assert.equal(downloadedUrl, result.finalPdfUrl);
 });

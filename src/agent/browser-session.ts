@@ -1,3 +1,4 @@
+import { writeFile } from "node:fs/promises";
 import path from "node:path";
 import { chromium } from "playwright";
 
@@ -33,6 +34,45 @@ export interface PaperBrowserSession {
   dispose?(): Promise<void>;
 }
 
+const CHALLENGE_WAIT_TIMEOUT_MS = 5 * 60 * 1000;
+const CHALLENGE_POLL_INTERVAL_MS = 1_000;
+
+function isAntiBotChallengePage(html: string): boolean {
+  const normalizedHtml = html.toLowerCase();
+  const antiBotSignals = [
+    "security service to protect itself from malicious automated programs",
+    "during verification that you are not an automated program",
+    "verify you are not a robot"
+  ];
+
+  return antiBotSignals.some((signal) => normalizedHtml.includes(signal));
+}
+
+async function waitForAntiBotChallengeToClear(options: {
+  page: {
+    waitForTimeout: (timeout: number) => Promise<void>;
+    content: () => Promise<string>;
+  };
+  isCleared: () => Promise<boolean>;
+}): Promise<boolean> {
+  const deadline = Date.now() + CHALLENGE_WAIT_TIMEOUT_MS;
+
+  while (Date.now() < deadline) {
+    await options.page.waitForTimeout(CHALLENGE_POLL_INTERVAL_MS);
+
+    if (await options.isCleared()) {
+      return true;
+    }
+
+    const html = await options.page.content();
+    if (!isAntiBotChallengePage(html)) {
+      return false;
+    }
+  }
+
+  return false;
+}
+
 export function classifyArticleAuthorization(input: {
   finalUrl: string;
   html: string;
@@ -51,7 +91,10 @@ export function classifyArticleAuthorization(input: {
     "access through your institution",
     "purchase access",
     "institutional sign in",
-    "sign in through your institution"
+    "sign in through your institution",
+    "security service to protect itself from malicious automated programs",
+    "during verification that you are not an automated program",
+    "verify you are not a robot"
   ];
 
   if (
@@ -118,12 +161,28 @@ export function resolveDefaultPaperBrowserSessionFactory(options: {
               // Some publisher pages never go idle; use the settled DOM state we have.
             }
 
-            const finalArticleUrl = page.url();
-            const html = await page.content();
-            const authorization = classifyArticleAuthorization({
+            let finalArticleUrl = page.url();
+            let html = await page.content();
+            let authorization = classifyArticleAuthorization({
               finalUrl: finalArticleUrl,
               html
             });
+
+            if (!authorization.authorized && isAntiBotChallengePage(html)) {
+              await waitForAntiBotChallengeToClear({
+                page,
+                isCleared: async () => {
+                  finalArticleUrl = page.url();
+                  html = await page.content();
+                  authorization = classifyArticleAuthorization({
+                    finalUrl: finalArticleUrl,
+                    html
+                  });
+
+                  return authorization.authorized;
+                }
+              });
+            }
 
             return {
               finalArticleUrl,
@@ -139,9 +198,53 @@ export function resolveDefaultPaperBrowserSessionFactory(options: {
           const page = await context.newPage();
 
           try {
-            const downloadPromise = page.waitForEvent("download");
-            await page.goto(url, { waitUntil: "domcontentloaded" });
+            const downloadPromise =
+              typeof page.waitForEvent === "function"
+                ? page.waitForEvent("download", { timeout: 30_000 }).catch(() => null)
+                : Promise.resolve(null);
+            let response = await page.goto(url, { waitUntil: "domcontentloaded" });
+            let contentType = response?.headers()["content-type"]?.toLowerCase();
+
+            if (response && contentType?.includes("application/pdf")) {
+              const pdfBytes = await response.body();
+              await writeFile(destinationPath, pdfBytes);
+              return;
+            }
+
+            const html = await page.content();
+            if (isAntiBotChallengePage(html)) {
+              const challengeCleared = await waitForAntiBotChallengeToClear({
+                page,
+                isCleared: async () => {
+                  response = await page.goto(url, { waitUntil: "domcontentloaded" });
+                  contentType = response?.headers()["content-type"]?.toLowerCase();
+
+                  if (response && contentType?.includes("application/pdf")) {
+                    const pdfBytes = await response.body();
+                    await writeFile(destinationPath, pdfBytes);
+                    return true;
+                  }
+
+                  return false;
+                }
+              });
+
+              if (response && contentType?.includes("application/pdf")) {
+                return;
+              }
+
+              if (!challengeCleared) {
+                throw new PaperBrowserSessionError(
+                  "authorization_failed",
+                  "Cloudflare verification blocked the PDF request. Complete the verification in the browser and retry."
+                );
+              }
+            }
+
             const download = await downloadPromise;
+            if (!download) {
+              throw new Error("Timed out waiting for PDF download.");
+            }
             await download.saveAs(destinationPath);
           } finally {
             await page.close().catch(() => {});

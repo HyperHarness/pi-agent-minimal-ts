@@ -6,7 +6,7 @@ export const apsAdapter: PublisherAdapter = {
     return url.hostname === "journals.aps.org" || url.hostname === "aps.org";
   },
   resolvePdfPathFromHtml(html: string) {
-    const match = html.match(/href="([^"]*\/doi\/pdf\/[^"]+)"/i);
+    const match = html.match(/href="([^"]*\/(?:doi|[a-z]+)\/pdf\/[^"]+)"/i);
     return match?.[1] ?? null;
   }
 } as const;

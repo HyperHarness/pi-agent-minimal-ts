@@ -58,3 +58,13 @@ test("resolvePdfPathFromHtml returns an APS PDF link from a landing page snippet
 
   assert.equal(pdfPath, "/doi/pdf/10.1103/PhysRevLett.134.090601");
 });
+
+test("resolvePdfPathFromHtml returns an APS journal PDF link from a landing page snippet", () => {
+  const pdfPath = resolvePdfPathFromHtml("aps", `
+    <html><body>
+      <a href="/prl/pdf/10.1103/PhysRevLett.134.090601">PDF</a>
+    </body></html>
+  `);
+
+  assert.equal(pdfPath, "/prl/pdf/10.1103/PhysRevLett.134.090601");
+});
