@@ -121,6 +121,38 @@ test("searchWeb propagates fetch transport failures", async () => {
   );
 });
 
+test("searchWeb surfaces timeout-triggered fetch aborts", async () => {
+  let sawAbort = false;
+
+  await assert.rejects(
+    () =>
+      searchWeb({
+        query: "latest ai news",
+        env: {
+          PI_SEARCH_API_URL: "https://search.example.test/search",
+          PI_FETCH_TIMEOUT_MS: "1"
+        },
+        fetchImpl: async (_input: RequestInfo | URL, init?: RequestInit) =>
+          new Promise<Response>((_resolve, reject) => {
+            init?.signal?.addEventListener(
+              "abort",
+              () => {
+                sawAbort = true;
+                reject(new DOMException("The operation was aborted", "AbortError"));
+              },
+              { once: true }
+            );
+          })
+      }),
+    (error: unknown) => {
+      assert.equal(sawAbort, true);
+      assert.equal(error instanceof DOMException, true);
+      assert.equal((error as DOMException).name, "AbortError");
+      return true;
+    }
+  );
+});
+
 test("searchWeb throws when PI_SEARCH_API_URL is missing", async () => {
   await assert.rejects(
     () =>
