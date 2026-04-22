@@ -65,6 +65,10 @@ Use environment variables:
 $env:OPENAI_API_KEY="your-key"
 $env:PI_PROVIDER="openai"
 $env:PI_MODEL="gpt-5.4"
+$env:PI_SEARCH_API_URL="https://search.example.com/query"
+$env:PI_SEARCH_API_KEY="your-search-key"
+$env:PI_FETCH_USER_AGENT="pi-agent-minimal-ts/1.0"
+$env:PI_FETCH_TIMEOUT_MS="10000"
 npm run agent
 ```
 
@@ -84,6 +88,40 @@ npm run agent -- --provider openai --model gpt-5.4 --base-url https://your-proxy
 You can also set `PI_BASE_URL` instead of passing `--base-url`.
 
 Exit the REPL with `exit` or `quit`.
+
+## Search And Fetch Configuration
+
+Optional environment variables for web search and page fetch tools:
+
+- `PI_SEARCH_API_URL`: HTTP endpoint used by `web_search`
+- `PI_SEARCH_API_KEY`: optional bearer token sent to the search provider
+- `PI_FETCH_USER_AGENT`: optional `User-Agent` header for `fetch_url`
+- `PI_FETCH_TIMEOUT_MS`: optional timeout in milliseconds for both search and fetch requests
+
+The search provider contract is JSON over HTTP `POST`:
+
+Request body:
+
+```json
+{
+  "query": "latest pi-ai release notes",
+  "maxResults": 5
+}
+```
+
+Response body:
+
+```json
+{
+  "results": [
+    {
+      "title": "Release notes",
+      "url": "https://example.com/release-notes",
+      "snippet": "Summary text for the matching page."
+    }
+  ]
+}
+```
 
 ## REPL Usage
 
@@ -134,8 +172,19 @@ In non-interactive mode:
 
 - `get_time`: returns the current time, optionally for a given timezone
 - `read_file`: reads a UTF-8 text file from inside the current workspace
+- `web_search`: searches the configured provider and returns JSON text for matching results
+- `fetch_url`: fetches an HTML page and returns JSON text for the extracted content
+- `search_arxiv`: searches arXiv and returns JSON text for matching paper metadata
+- `download_arxiv_pdf`: returns the canonical arXiv PDF URL for a paper ID
 
 `read_file` rejects absolute paths and paths that resolve outside the workspace.
+
+Example prompts:
+
+- `Search the web for the latest OpenAI API pricing updates and summarize the top 3 results.`
+- `Fetch https://openai.com/api and extract the main text.`
+- `Find arXiv papers about retrieval-augmented generation from the last few years.`
+- `Give me the PDF link for arXiv paper 2401.01234.`
 
 ## Scripts
 
