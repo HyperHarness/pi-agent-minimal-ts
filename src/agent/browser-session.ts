@@ -41,14 +41,22 @@ export function classifyArticleAuthorization(input: {
 } {
   const finalUrl = input.finalUrl.toLowerCase();
   const html = input.html.toLowerCase();
-  const loginWallSignals = [
+  const urlSignals = [
     "showlogin",
+    "/login",
+    "/signin"
+  ];
+  const loginWallSignals = [
     "access through your institution",
     "purchase access",
-    "sign in"
+    "institutional sign in",
+    "sign in through your institution"
   ];
 
-  if (loginWallSignals.some((signal) => finalUrl.includes(signal) || html.includes(signal))) {
+  if (
+    urlSignals.some((signal) => finalUrl.includes(signal)) ||
+    loginWallSignals.some((signal) => html.includes(signal))
+  ) {
     return {
       authorized: false,
       failureCode: "authorization_failed"
