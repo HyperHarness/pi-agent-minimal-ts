@@ -53,3 +53,24 @@ test("buildArxivPdfUrl accepts legacy identifiers", () => {
 test("buildArxivPdfUrl rejects malformed identifiers", () => {
   assert.throws(() => buildArxivPdfUrl("not an arxiv id"), /arXiv/i);
 });
+
+test("searchArxiv rejects queries that were mangled into question marks before hitting arXiv", async () => {
+  let fetchCalled = false;
+
+  await assert.rejects(
+    () =>
+      searchArxiv({
+        query: "??????????????",
+        fetchImpl: async () => {
+          fetchCalled = true;
+          return new Response(sampleFeed, {
+            status: 200,
+            headers: { "content-type": "application/atom+xml" }
+          });
+        }
+      }),
+    /encoding|english|utf-8/i
+  );
+
+  assert.equal(fetchCalled, false);
+});

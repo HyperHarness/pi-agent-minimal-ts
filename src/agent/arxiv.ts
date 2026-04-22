@@ -15,6 +15,7 @@ export interface SearchArxivOptions {
 
 const MODERN_ARXIV_ID = /^\d{4}\.\d{4,5}(?:v\d+)?$/;
 const LEGACY_ARXIV_ID = /^[a-z-]+(?:\.[A-Z]{2})?\/\d{7}(?:v\d+)?$/i;
+const PROBABLY_MANGLED_QUERY = /^[?\uFFFD\s]+$/;
 
 function decodeXml(text: string): string {
   return text
@@ -67,6 +68,16 @@ export function buildArxivPdfUrl(id: string): string {
   return `https://arxiv.org/pdf/${normalizeArxivId(id)}.pdf`;
 }
 
+function assertQueryWasNotMangled(query: string): void {
+  if (!PROBABLY_MANGLED_QUERY.test(query)) {
+    return;
+  }
+
+  throw new Error(
+    "The arXiv query appears to have been mangled into question marks before reaching the tool. Use a UTF-8 terminal or English keywords for arXiv searches."
+  );
+}
+
 export async function searchArxiv(
   options: SearchArxivOptions
 ): Promise<ArxivSearchResult[]> {
@@ -74,6 +85,7 @@ export async function searchArxiv(
   if (!query) {
     throw new Error("arXiv query is required.");
   }
+  assertQueryWasNotMangled(query);
 
   const maxResults = options.maxResults ?? 5;
   if (!Number.isInteger(maxResults) || maxResults <= 0) {

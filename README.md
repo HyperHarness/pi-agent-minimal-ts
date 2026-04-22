@@ -51,6 +51,16 @@ npm install --ignore-scripts
 
 After reopening PowerShell, `npm` will resolve through `npm.cmd` instead of `npm.ps1`.
 
+If you plan to type non-ASCII prompts such as Chinese directly into the agent on Windows PowerShell, also switch the console to UTF-8 before starting the REPL:
+
+```powershell
+chcp 65001
+[Console]::InputEncoding = [System.Text.UTF8Encoding]::new()
+[Console]::OutputEncoding = [System.Text.UTF8Encoding]::new()
+```
+
+Without UTF-8 console encoding, PowerShell can turn non-ASCII input into `?` before it reaches Node. This is especially visible with `search_arxiv`, where a mangled query can trigger an arXiv HTTP 500 instead of a normal search.
+
 ### Other environments
 
 ```powershell
@@ -176,6 +186,8 @@ In non-interactive mode:
 - `fetch_url`: fetches an HTML page and returns JSON text for the extracted content
 - `search_arxiv`: searches arXiv and returns JSON text for matching paper metadata
 - `download_arxiv_pdf`: returns the canonical arXiv PDF URL for a paper ID
+
+For `search_arxiv`, prefer concise English keyword queries. arXiv's API is much more reliable with English search terms than with natural-language Chinese prompts.
 
 `read_file` rejects absolute paths and paths that resolve outside the workspace.
 
