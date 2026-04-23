@@ -28,6 +28,12 @@ const supportedSearchSource = {
   action: "authorized_download"
 } satisfies PaperSearchSource;
 
+const externalSearchSource = {
+  source: "external",
+  articleUrl: "https://example.com/paper",
+  action: "open_url_only"
+} satisfies PaperSearchSource;
+
 const invalidExternalSearchSource = {
   source: "external",
   canonicalId: "2401.01234",
@@ -84,6 +90,16 @@ const manualFallbackResult = {
   }
 } satisfies ManualFallbackPaperResult;
 
+const invalidPrimarySearchResult = {
+  title: "Agent Memory for Tools",
+  authors: ["Ada Lovelace"],
+  summary: "Merged result",
+  primarySource: "external",
+  primaryAction: "direct_download",
+  sources: [externalSearchSource, supportedSearchSource]
+  // @ts-expect-error primaryAction must align with primarySource
+} satisfies PaperSearchResult;
+
 type _PaperSearchResultPrimarySourceIsPaperSource = Assert<
   IsEqual<PaperSearchResult["primarySource"], PaperSource>
 >;
@@ -108,6 +124,29 @@ test("resolvePaperPdfPath uses source-specific filenames", async () => {
         canonicalId: "10.1126/science.adz8659"
       }),
       path.join(workspaceDir, "downloads", "papers", "science-10.1126-science.adz8659.pdf")
+    );
+
+    assert.equal(
+      resolvePaperPdfPath({
+        workspaceDir,
+        source: "nature",
+        canonicalId: "s41586-019-1666-5"
+      }),
+      path.join(workspaceDir, "downloads", "papers", "nature-s41586-019-1666-5.pdf")
+    );
+
+    assert.equal(
+      resolvePaperPdfPath({
+        workspaceDir,
+        source: "aps",
+        canonicalId: "10.1103/PhysRevLett.133.123456"
+      }),
+      path.join(
+        workspaceDir,
+        "downloads",
+        "papers",
+        "aps-10.1103-PhysRevLett.133.123456.pdf"
+      )
     );
   } finally {
     await rm(workspaceDir, { recursive: true, force: true });
@@ -231,7 +270,9 @@ test("writePaperRecord persists supported source records with pretty-printed fai
 });
 
 void supportedSearchSource;
+void externalSearchSource;
 void invalidExternalSearchSource;
 void invalidDownloadedPaperRecord;
 void invalidExternalPaperRecord;
+void invalidPrimarySearchResult;
 void manualFallbackResult;

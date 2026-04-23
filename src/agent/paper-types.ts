@@ -32,14 +32,26 @@ export type PaperSearchSource =
       pdfUrl?: never;
     };
 
-export interface PaperSearchResult {
+type PaperSearchPrimary =
+  | {
+      primarySource: "arxiv";
+      primaryAction: "direct_download";
+    }
+  | {
+      primarySource: SupportedPaperSource;
+      primaryAction: "authorized_download";
+    }
+  | {
+      primarySource: "external";
+      primaryAction: "open_url_only";
+    };
+
+export type PaperSearchResult = PaperSearchPrimary & {
   title: string;
   authors: string[];
   summary: string;
-  primarySource: PaperSource;
-  primaryAction: PaperAction;
   sources: PaperSearchSource[];
-}
+};
 
 type DownloadedArxivPaperRecord = {
   source: "arxiv";
