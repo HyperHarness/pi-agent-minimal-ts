@@ -1,4 +1,5 @@
 import assert from "node:assert/strict";
+import http from "node:http";
 import test from "node:test";
 import { createPaperBrowserManagerClient } from "../../src/agent/paper-browser-manager-client.js";
 
@@ -205,4 +206,122 @@ test("paper browser manager client close is idempotent", async () => {
   await client.close();
 
   assert.equal(closeCalls, 1);
+});
+
+test("paper browser manager client preserves typed manager errors across the HTTP boundary", async () => {
+  const server = http.createServer((request, response) => {
+    if (request.method === "GET" && request.url === "/health") {
+      response.writeHead(200, { "content-type": "application/json" });
+      response.end(
+        JSON.stringify({
+          ok: true,
+          browserConnected: true,
+          profileDir: "D:\\Codex\\pi-agent-minimal-ts\\.browser-profile\\paper-access"
+        })
+      );
+      return;
+    }
+
+    if (request.method === "POST" && request.url === "/download-pdf") {
+      response.writeHead(500, { "content-type": "application/json" });
+      response.end(
+        JSON.stringify({
+          ok: false,
+          error: {
+            code: "manual_login_required",
+            message: "Manual login required for this publisher."
+          }
+        })
+      );
+      return;
+    }
+
+    response.writeHead(404, { "content-type": "application/json" });
+    response.end(JSON.stringify({ ok: false, error: { message: "not found" } }));
+  });
+
+  await new Promise<void>((resolve) => {
+    server.listen(0, "127.0.0.1", resolve);
+  });
+
+  const address = server.address();
+  assert.ok(address && typeof address !== "string");
+  const endpoint = `http://127.0.0.1:${address.port}`;
+
+  const client = createPaperBrowserManagerClient({
+    workspaceDir: "D:\\Codex\\pi-agent-minimal-ts",
+    readMetadata: async () => ({
+      pid: 4242,
+      startedAt: "2026-04-23T12:00:00.000Z",
+      endpoint,
+      profileDir: "D:\\Codex\\pi-agent-minimal-ts\\.browser-profile\\paper-access"
+    }),
+    writeMetadata: async () => {},
+    clearMetadata: async () => {}
+  });
+
+  try {
+    await assert.rejects(
+      () =>
+        client.downloadPaperPdf({
+          url: "https://www.science.org/doi/10.1126/science.adz8659",
+          workspaceDir: "D:\\Codex\\pi-agent-minimal-ts"
+        }),
+      (error: unknown) => {
+        assert.ok(error instanceof Error);
+        assert.equal((error as { code?: string }).code, "manual_login_required");
+        assert.equal(error.message, "Manual login required for this publisher.");
+        return true;
+      }
+    );
+  } finally {
+    await new Promise<void>((resolve) => server.close(() => resolve()));
+  }
+});
+
+test("paper browser manager client retries after a failed endpoint resolution and closes a reopened manager", async () => {
+  let spawnCalls = 0;
+  let disposeCalls = 0;
+  const client = createPaperBrowserManagerClient({
+    workspaceDir: "D:\\Codex\\pi-agent-minimal-ts",
+    readMetadata: async () => null,
+    writeMetadata: async () => {},
+    clearMetadata: async () => {},
+    fetchJson: async (url) => {
+      if (url.endsWith("/health")) {
+        return {
+          ok: true,
+          browserConnected: true,
+          profileDir: "D:\\Codex\\pi-agent-minimal-ts\\.browser-profile\\paper-access"
+        };
+      }
+
+      throw new Error(`unexpected request: ${url}`);
+    },
+    spawnManager: async () => {
+      spawnCalls += 1;
+      if (spawnCalls === 1) {
+        throw new Error("first spawn failed");
+      }
+
+      return {
+        pid: 5000 + spawnCalls,
+        startedAt: "2026-04-23T12:10:00.000Z",
+        endpoint: `http://127.0.0.1:4313${spawnCalls}`,
+        profileDir: "D:\\Codex\\pi-agent-minimal-ts\\.browser-profile\\paper-access"
+      };
+    },
+    disposeManager: async () => {
+      disposeCalls += 1;
+    }
+  });
+
+  await assert.rejects(client.ensureManagerEndpoint(), /first spawn failed/);
+  assert.equal(await client.ensureManagerEndpoint(), "http://127.0.0.1:43132");
+  await client.close();
+  assert.equal(await client.ensureManagerEndpoint(), "http://127.0.0.1:43133");
+  await client.close();
+
+  assert.equal(spawnCalls, 3);
+  assert.equal(disposeCalls, 2);
 });

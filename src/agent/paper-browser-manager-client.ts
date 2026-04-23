@@ -18,6 +18,47 @@ type WriteMetadata = typeof writePaperBrowserManagerMetadata;
 type ClearMetadata = typeof clearPaperBrowserManagerMetadata;
 type SpawnManager = () => Promise<PaperBrowserManagerMetadata>;
 
+class PaperBrowserManagerRemoteError extends Error {
+  constructor(
+    readonly code: string,
+    message: string
+  ) {
+    super(message);
+    this.name = "PaperBrowserManagerRemoteError";
+    Object.setPrototypeOf(this, new.target.prototype);
+  }
+}
+
+function isRecord(value: unknown): value is Record<string, unknown> {
+  return typeof value === "object" && value !== null && !Array.isArray(value);
+}
+
+function toRemoteError(payload: unknown, fallbackMessage: string): Error {
+  if (!isRecord(payload)) {
+    return new Error(fallbackMessage);
+  }
+
+  const candidateError = isRecord(payload.error) ? payload.error : undefined;
+  const code =
+    typeof candidateError?.code === "string"
+      ? candidateError.code
+      : typeof payload.code === "string"
+        ? payload.code
+        : undefined;
+  const message =
+    typeof candidateError?.message === "string"
+      ? candidateError.message
+      : typeof payload.message === "string"
+        ? payload.message
+        : fallbackMessage;
+
+  if (!code) {
+    return new Error(message);
+  }
+
+  return new PaperBrowserManagerRemoteError(code, message);
+}
+
 export interface PaperBrowserManagerClient {
   ensureManagerEndpoint(): Promise<string>;
   openArticle(request: OpenArticleRequest): Promise<
@@ -63,7 +104,16 @@ async function defaultFetchJson(
 
   const text = await response.text();
   if (!response.ok) {
-    throw new Error(text || `Request failed with status ${response.status}.`);
+    let payload: unknown;
+    if (text) {
+      try {
+        payload = JSON.parse(text);
+      } catch {
+        payload = undefined;
+      }
+    }
+
+    throw toRemoteError(payload, text || `Request failed with status ${response.status}.`);
   }
 
   return text ? JSON.parse(text) : undefined;
@@ -124,8 +174,21 @@ export function createPaperBrowserManagerClient(
   }
 
   async function ensureManagerEndpoint(): Promise<string> {
-    resolvedEndpointPromise ??= resolveEndpoint();
-    return resolvedEndpointPromise;
+    if (resolvedEndpointPromise !== undefined) {
+      return resolvedEndpointPromise;
+    }
+
+    closePromise = undefined;
+    let ensurePromise: Promise<string>;
+    ensurePromise = resolveEndpoint().catch((error: unknown) => {
+      if (resolvedEndpointPromise === ensurePromise) {
+        resolvedEndpointPromise = undefined;
+      }
+
+      throw error;
+    });
+    resolvedEndpointPromise = ensurePromise;
+    return ensurePromise;
   }
 
   async function ensureResolvedMetadata(): Promise<PaperBrowserManagerMetadata> {
@@ -149,13 +212,14 @@ export function createPaperBrowserManagerClient(
       return;
     }
 
-    closePromise = (async () => {
+    const closingPromise = (async () => {
       resolvedEndpointPromise = undefined;
       resolvedMetadata = undefined;
       await options.disposeManager?.();
     })();
 
-    await closePromise;
+    closePromise = closingPromise;
+    await closingPromise;
   }
 
   return {
