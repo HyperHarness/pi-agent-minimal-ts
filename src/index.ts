@@ -3,3 +3,7 @@ export * from "./agent/model-resolver.js";
 export * from "./agent/browser-session.js";
 export * from "./agent/paper-download.js";
 export * from "./agent/tools.js";
+export * from "./agent/paper-browser-manager-types.js";
+export * from "./agent/paper-browser-manager-discovery.js";
+export * from "./agent/paper-browser-manager-client.js";
+export * from "./agent/paper-browser-manager-server.js";

@@ -8,6 +8,8 @@ import type {
 } from "./paper-browser-manager-types.js";
 import {
   clearPaperBrowserManagerMetadata,
+  discoverPaperBrowserManagerMetadata,
+  isPaperBrowserManagerMetadataStale,
   readPaperBrowserManagerMetadata,
   writePaperBrowserManagerMetadata
 } from "./paper-browser-manager-discovery.js";
@@ -16,6 +18,7 @@ type FetchJson = (url: string, init?: { method?: string; body?: string; headers?
 type ReadMetadata = typeof readPaperBrowserManagerMetadata;
 type WriteMetadata = typeof writePaperBrowserManagerMetadata;
 type ClearMetadata = typeof clearPaperBrowserManagerMetadata;
+type IsMetadataStale = typeof isPaperBrowserManagerMetadataStale;
 type SpawnManager = () => Promise<PaperBrowserManagerMetadata>;
 
 class PaperBrowserManagerRemoteError extends Error {
@@ -73,6 +76,7 @@ export interface PaperBrowserManagerClientOptions {
   readMetadata?: ReadMetadata;
   writeMetadata?: WriteMetadata;
   clearMetadata?: ClearMetadata;
+  isMetadataStale?: IsMetadataStale;
   fetchJson?: FetchJson;
   spawnManager?: SpawnManager;
   disposeManager?: () => Promise<void>;
@@ -140,14 +144,35 @@ export function createPaperBrowserManagerClient(
   const readMetadata = options.readMetadata ?? readPaperBrowserManagerMetadata;
   const writeMetadata = options.writeMetadata ?? writePaperBrowserManagerMetadata;
   const clearMetadata = options.clearMetadata ?? clearPaperBrowserManagerMetadata;
+  const isMetadataStale = options.isMetadataStale ?? isPaperBrowserManagerMetadataStale;
   const fetchJson = options.fetchJson ?? defaultFetchJson;
   const spawnManager = options.spawnManager;
   let resolvedEndpointPromise: Promise<string> | undefined;
   let resolvedMetadata: PaperBrowserManagerMetadata | undefined;
   let closePromise: Promise<void> | undefined;
 
+  async function disposeSpawnedManagerAfterFailedPersistence(error: unknown): Promise<never> {
+    resolvedMetadata = undefined;
+
+    try {
+      await options.disposeManager?.();
+    } catch (cleanupError) {
+      throw new AggregateError(
+        [error, cleanupError],
+        "Failed to persist paper browser manager metadata and clean up the spawned manager."
+      );
+    }
+
+    throw error;
+  }
+
   async function resolveEndpoint(): Promise<string> {
-    const storedMetadata = await readMetadata({ workspaceDir: options.workspaceDir });
+    const storedMetadata = await discoverPaperBrowserManagerMetadata({
+      workspaceDir: options.workspaceDir,
+      readMetadata,
+      clearMetadata,
+      isMetadataStale
+    });
 
     if (storedMetadata) {
       try {
@@ -168,7 +193,13 @@ export function createPaperBrowserManagerClient(
     }
 
     const startedMetadata = await spawnManager();
-    await writeMetadata({ workspaceDir: options.workspaceDir, metadata: startedMetadata });
+
+    try {
+      await writeMetadata({ workspaceDir: options.workspaceDir, metadata: startedMetadata });
+    } catch (error) {
+      return disposeSpawnedManagerAfterFailedPersistence(error);
+    }
+
     resolvedMetadata = startedMetadata;
     return startedMetadata.endpoint;
   }

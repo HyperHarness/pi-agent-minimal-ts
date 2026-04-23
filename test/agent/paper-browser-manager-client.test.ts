@@ -19,6 +19,7 @@ test("paper browser manager client reuses a healthy stored endpoint", async () =
     clearMetadata: async () => {
       throw new Error("should not clear healthy metadata");
     },
+    isMetadataStale: async () => false,
     fetchJson: async (url, init) => {
       calls.push({ url, init });
       return {
@@ -61,6 +62,7 @@ test("paper browser manager client clears stale metadata and persists the spawne
       calls.push("write");
       writtenMetadata.push(options.metadata);
     },
+    isMetadataStale: async () => false,
     fetchJson: async (url) => {
       calls.push(url);
       if (url.endsWith("/health")) {
@@ -92,6 +94,47 @@ test("paper browser manager client clears stale metadata and persists the spawne
       profileDir: "D:\\Codex\\pi-agent-minimal-ts\\.browser-profile\\paper-access"
     }
   ]);
+});
+
+test("paper browser manager client clears metadata marked stale by discovery before spawning a fresh manager", async () => {
+  const calls: string[] = [];
+  const client = createPaperBrowserManagerClient({
+    workspaceDir: "D:\\Codex\\pi-agent-minimal-ts",
+    readMetadata: async () => ({
+      pid: 4242,
+      startedAt: "2026-04-23T12:00:00.000Z",
+      endpoint: "http://127.0.0.1:43123",
+      profileDir: "D:\\Codex\\pi-agent-minimal-ts\\.browser-profile\\paper-access"
+    }),
+    isMetadataStale: async ({ metadata }) => {
+      calls.push(`stale:${metadata.pid}`);
+      return true;
+    },
+    clearMetadata: async () => {
+      calls.push("clear");
+    },
+    writeMetadata: async () => {
+      calls.push("write");
+    },
+    fetchJson: async (url) => {
+      calls.push(url);
+      throw new Error(`unexpected request: ${url}`);
+    },
+    spawnManager: async () => {
+      calls.push("spawn");
+      return {
+        pid: 4343,
+        startedAt: "2026-04-23T12:05:00.000Z",
+        endpoint: "http://127.0.0.1:43124",
+        profileDir: "D:\\Codex\\pi-agent-minimal-ts\\.browser-profile\\paper-access"
+      };
+    }
+  });
+
+  const endpoint = await client.ensureManagerEndpoint();
+
+  assert.equal(endpoint, "http://127.0.0.1:43124");
+  assert.deepEqual(calls, ["stale:4242", "clear", "spawn", "write"]);
 });
 
 test("paper browser manager client forwards openArticle and downloadPaperPdf requests", async () => {
@@ -257,7 +300,8 @@ test("paper browser manager client preserves typed manager errors across the HTT
       profileDir: "D:\\Codex\\pi-agent-minimal-ts\\.browser-profile\\paper-access"
     }),
     writeMetadata: async () => {},
-    clearMetadata: async () => {}
+    clearMetadata: async () => {},
+    isMetadataStale: async () => false
   });
 
   try {
@@ -324,4 +368,29 @@ test("paper browser manager client retries after a failed endpoint resolution an
 
   assert.equal(spawnCalls, 3);
   assert.equal(disposeCalls, 2);
+});
+
+test("paper browser manager client closes a spawned manager when metadata persistence fails", async () => {
+  let disposeCalls = 0;
+  const client = createPaperBrowserManagerClient({
+    workspaceDir: "D:\\Codex\\pi-agent-minimal-ts",
+    readMetadata: async () => null,
+    writeMetadata: async () => {
+      throw new Error("disk full");
+    },
+    clearMetadata: async () => {},
+    spawnManager: async () => ({
+      pid: 4343,
+      startedAt: "2026-04-23T12:05:00.000Z",
+      endpoint: "http://127.0.0.1:43124",
+      profileDir: "D:\\Codex\\pi-agent-minimal-ts\\.browser-profile\\paper-access"
+    }),
+    disposeManager: async () => {
+      disposeCalls += 1;
+    }
+  });
+
+  await assert.rejects(() => client.ensureManagerEndpoint(), /disk full/);
+
+  assert.equal(disposeCalls, 1);
 });

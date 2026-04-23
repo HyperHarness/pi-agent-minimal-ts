@@ -32,7 +32,7 @@ This lets Playwright install its managed browser during dependency setup. If you
 - set `PI_PAPER_CHROME_EXECUTABLE` to an existing local Chrome/Chromium executable
 - install a Playwright browser separately, for example `npx playwright install chromium`
 
-The manual-browser fallback is separate: it can launch an installed local Chrome or Edge directly for manual continuation when automatic download fails.
+The paper-browser manager is the primary model for both manual review and automatic downloads; it reuses one managed browser session instead of treating direct local browser launch as the default path.
 
 ## Run
 
@@ -66,9 +66,9 @@ You can also set `PI_BASE_URL` instead of passing `--base-url`.
 
 Exit the REPL with `exit` or `quit`.
 
-## Browser-Session Paper Downloads
+## Paper Browser Manager
 
-The paper download tool uses the shared browser profile at `.browser-profile/paper-access/` inside the workspace.
+The paper tools share one managed browser session per workspace. The manager owns the shared profile at `.browser-profile/paper-access/` and stores its localhost metadata at `.browser-profile/paper-access-manager.json`.
 
 Supported publishers:
 
@@ -76,27 +76,33 @@ Supported publishers:
 - `nature.com`
 - `journals.aps.org` / `aps.org`
 
-If the automatic browser session cannot be launched with the default Playwright/Chrome setup on your machine, set `PI_PAPER_CHROME_EXECUTABLE` to the Chrome executable path before starting the agent. The manual fallback can instead launch an installed local Chrome or Edge directly.
+Use the normal install path if you want the manager-backed paper tools to start their browser automatically:
 
-`download_paper_pdf` downloads the PDF automatically when possible. If automatic `download_paper_pdf` cannot complete and the tool can launch the local Chrome or Edge browser with that shared profile, it opens the original paper page and returns a structured `manual_fallback_opened` result for manual continuation. If that local browser launch also fails, the tool can still surface a hard error.
+- keep Playwright's install scripts enabled during `npm install`
+- or install a browser separately, for example `npx playwright install chromium`
+- or set `PI_PAPER_CHROME_EXECUTABLE` to an existing local Chrome/Chromium executable before starting the agent
 
-That fallback does not import the browser-downloaded file back into the workspace automatically. It is only a recovery path for manual continuation.
+`open_paper_page_for_login` and `download_paper_pdf` both reuse that same managed browser session. If the saved manager metadata points to a dead process or an unreachable localhost endpoint, the client clears the stale metadata automatically and starts a fresh manager.
 
-If you want to check whether that profile is already logged in without triggering the download flow, first open the paper page for manual review:
+`open_paper_page_for_login` opens the article page in the managed browser session for manual login or verification and stops there.
+
+`download_paper_pdf` tries the automatic download path first. If the download cannot complete or the downloaded file is not a valid PDF, the tool opens the same article in that same managed browser session and returns a structured `manual_fallback_opened` result for manual continuation.
+
+Successful downloads now use formatted filenames when possible, for example `science-10.1126-science.adz8659.pdf`, instead of always overwriting `downloaded-paper.pdf`. The tool still falls back to the source filename or `downloaded-paper.pdf` when it cannot derive a better name.
+
+If you want to confirm that the managed session is already logged in before attempting a download, open the paper page first:
 
 ```text
 Open this paper page with open_paper_page_for_login: https://www.science.org/doi/10.1126/science.adz8659
 ```
 
-That tool launches the local Chrome or Edge browser with the shared `.browser-profile/paper-access/` profile and stops there. It does not use Playwright for the page open, does not inspect the page HTML, and does not attempt any PDF download.
-
-Example prompt:
+Example automatic download prompt:
 
 ```text
 Download this paper with download_paper_pdf: https://www.science.org/doi/10.1126/science.adz8659
 ```
 
-For manual verification, put your own test URLs into a local scratch file such as `paper_url.txt` or keep them in your notes. This repository does not ship a tracked `paper_url.txt`. Check that each URL belongs to one of the supported hosts above, then run the download against each URL and confirm the automatic path writes the PDF to `downloads/papers/downloaded-paper.pdf`. Repeated successful automatic runs overwrite that file unless you move or rename it between runs.
+For manual verification, keep your own publisher test URLs in a local scratch file such as `paper_url.txt` or in your notes. This repository does not ship a tracked `paper_url.txt`. Check that each URL belongs to one of the supported hosts above, then run the download and confirm the automatic path writes the PDF under `downloads/papers/` with a publisher/article-derived filename when available.
 
 ## Search And Fetch Configuration
 
@@ -185,8 +191,8 @@ In non-interactive mode:
 - `fetch_url`: fetches an HTML page and returns JSON text for the extracted content
 - `search_arxiv`: searches arXiv and returns JSON text for matching paper metadata
 - `download_arxiv_pdf`: returns the canonical arXiv PDF URL for a paper ID
-- `open_paper_page_for_login`: opens the paper page in the local Chrome or Edge browser with the shared paper-access profile for manual login review without downloading anything
-- `download_paper_pdf`: downloads a PDF automatically from a supported browser-session publisher URL when possible, or opens the same paper in the local browser for manual continuation when automatic download fails and the local browser launch succeeds
+- `open_paper_page_for_login`: opens the paper page in the managed browser session for manual login review without downloading anything
+- `download_paper_pdf`: downloads a PDF automatically from a supported publisher URL when possible, or opens the same paper in the managed browser session for manual continuation when automatic download fails
 
 For `search_arxiv`, prefer concise English keyword queries. arXiv's API is much more reliable with English search terms than with natural-language Chinese prompts.
 

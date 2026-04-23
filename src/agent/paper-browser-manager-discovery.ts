@@ -53,10 +53,54 @@ function isPaperBrowserManagerMetadata(value: unknown): value is PaperBrowserMan
   );
 }
 
+function isErrnoException(error: unknown): error is NodeJS.ErrnoException {
+  return error instanceof Error;
+}
+
+async function defaultIsProcessAlive(pid: number): Promise<boolean> {
+  try {
+    process.kill(pid, 0);
+    return true;
+  } catch (error) {
+    if (isErrnoException(error) && error.code === "ESRCH") {
+      return false;
+    }
+
+    if (isErrnoException(error) && error.code === "EPERM") {
+      return true;
+    }
+
+    throw error;
+  }
+}
+
 export async function isPaperBrowserManagerMetadataStale(options: {
   metadata: PaperBrowserManagerMetadata;
   isProcessAlive?: (pid: number) => Promise<boolean>;
 }): Promise<boolean> {
-  const isProcessAlive = options.isProcessAlive ?? (async () => true);
+  const isProcessAlive = options.isProcessAlive ?? defaultIsProcessAlive;
   return !(await isProcessAlive(options.metadata.pid));
+}
+
+export async function discoverPaperBrowserManagerMetadata(options: {
+  workspaceDir: string;
+  readMetadata?: typeof readPaperBrowserManagerMetadata;
+  clearMetadata?: typeof clearPaperBrowserManagerMetadata;
+  isMetadataStale?: typeof isPaperBrowserManagerMetadataStale;
+}): Promise<PaperBrowserManagerMetadata | null> {
+  const readMetadata = options.readMetadata ?? readPaperBrowserManagerMetadata;
+  const clearMetadata = options.clearMetadata ?? clearPaperBrowserManagerMetadata;
+  const isMetadataStale = options.isMetadataStale ?? isPaperBrowserManagerMetadataStale;
+  const metadata = await readMetadata({ workspaceDir: options.workspaceDir });
+
+  if (!metadata) {
+    return null;
+  }
+
+  if (await isMetadataStale({ metadata })) {
+    await clearMetadata({ workspaceDir: options.workspaceDir });
+    return null;
+  }
+
+  return metadata;
 }
