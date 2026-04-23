@@ -33,7 +33,7 @@ test("paper browser manager protocol types accept representative values", () => 
     pid: 1234,
     startedAt: "2026-04-23T10:11:12.000Z",
     endpoint: "http://127.0.0.1:4040",
-    profileDir: "C:/work/papers/.browser-profile"
+    profileDir: "C:/work/papers/.browser-profile/paper-access"
   };
   const health: PaperBrowserManagerHealthResponse = {
     ok: true,
@@ -72,7 +72,7 @@ test("writePaperBrowserManagerMetadata persists pretty-printed JSON that readPap
     pid: 1234,
     startedAt: "2026-04-23T10:11:12.000Z",
     endpoint: "http://127.0.0.1:4040",
-    profileDir: path.join(workspaceDir, ".browser-profile")
+    profileDir: path.join(workspaceDir, ".browser-profile", "paper-access")
   };
 
   await writePaperBrowserManagerMetadata({ workspaceDir, metadata });
@@ -95,6 +95,22 @@ test("readPaperBrowserManagerMetadata returns null when the metadata file is unr
   assert.equal(await readPaperBrowserManagerMetadata({ workspaceDir }), null);
 });
 
+test("readPaperBrowserManagerMetadata returns null when syntactically valid JSON has the wrong shape", async () => {
+  const workspaceDir = await mkdtemp(path.join(os.tmpdir(), "paper-browser-manager-"));
+  const metadataPath = getPaperBrowserManagerMetadataPath(workspaceDir);
+  const invalidMetadata = {
+    pid: "1234",
+    startedAt: 1713867072000,
+    endpoint: 4040,
+    profileDir: 42
+  };
+
+  await mkdir(path.dirname(metadataPath), { recursive: true });
+  await writeFile(metadataPath, JSON.stringify(invalidMetadata, null, 2), "utf8");
+
+  assert.equal(await readPaperBrowserManagerMetadata({ workspaceDir }), null);
+});
+
 test("clearPaperBrowserManagerMetadata removes the metadata file", async () => {
   const workspaceDir = await mkdtemp(path.join(os.tmpdir(), "paper-browser-manager-"));
   const metadata = {
@@ -110,20 +126,23 @@ test("clearPaperBrowserManagerMetadata removes the metadata file", async () => {
   assert.equal(await readPaperBrowserManagerMetadata({ workspaceDir }), null);
 });
 
-test("isPaperBrowserManagerMetadataStale respects the injected process liveness check", () => {
+test("isPaperBrowserManagerMetadataStale respects the injected process liveness check", async () => {
   const metadata = {
     pid: 1234,
     startedAt: "2026-04-23T10:11:12.000Z",
     endpoint: "http://127.0.0.1:4040",
-    profileDir: "/tmp/browser-profile"
+    profileDir: "/tmp/browser-profile/paper-access"
   };
 
   assert.equal(
-    isPaperBrowserManagerMetadataStale({
+    await isPaperBrowserManagerMetadataStale({
       metadata,
-      isProcessAlive: () => false
+      isProcessAlive: async () => false
     }),
     true
   );
-  assert.equal(isPaperBrowserManagerMetadataStale({ metadata, isProcessAlive: () => true }), false);
+  assert.equal(
+    await isPaperBrowserManagerMetadataStale({ metadata, isProcessAlive: async () => true }),
+    false
+  );
 });

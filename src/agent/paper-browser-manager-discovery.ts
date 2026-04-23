@@ -21,7 +21,12 @@ export async function readPaperBrowserManagerMetadata(options: {
   const metadataPath = getPaperBrowserManagerMetadataPath(options.workspaceDir);
   try {
     const rawMetadata = await readFile(metadataPath, "utf8");
-    return JSON.parse(rawMetadata) as PaperBrowserManagerMetadata;
+    const parsedMetadata: unknown = JSON.parse(rawMetadata);
+    if (!isPaperBrowserManagerMetadata(parsedMetadata)) {
+      return null;
+    }
+
+    return parsedMetadata;
   } catch {
     return null;
   }
@@ -34,10 +39,24 @@ export async function clearPaperBrowserManagerMetadata(options: {
   await rm(metadataPath, { force: true });
 }
 
-export function isPaperBrowserManagerMetadataStale(options: {
+function isPaperBrowserManagerMetadata(value: unknown): value is PaperBrowserManagerMetadata {
+  if (typeof value !== "object" || value === null || Array.isArray(value)) {
+    return false;
+  }
+
+  const candidate = value as Record<string, unknown>;
+  return (
+    typeof candidate.pid === "number" &&
+    typeof candidate.startedAt === "string" &&
+    typeof candidate.endpoint === "string" &&
+    typeof candidate.profileDir === "string"
+  );
+}
+
+export async function isPaperBrowserManagerMetadataStale(options: {
   metadata: PaperBrowserManagerMetadata;
-  isProcessAlive?: (pid: number) => boolean;
-}): boolean {
-  const isProcessAlive = options.isProcessAlive ?? (() => true);
-  return !isProcessAlive(options.metadata.pid);
+  isProcessAlive?: (pid: number) => Promise<boolean>;
+}): Promise<boolean> {
+  const isProcessAlive = options.isProcessAlive ?? (async () => true);
+  return !(await isProcessAlive(options.metadata.pid));
 }
