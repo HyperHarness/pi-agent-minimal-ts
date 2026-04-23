@@ -1,5 +1,6 @@
 import test from "node:test";
 import assert from "node:assert/strict";
+import { createHash } from "node:crypto";
 import { mkdtemp, mkdir, rm, symlink, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import path from "node:path";
@@ -686,6 +687,137 @@ test("download_paper uses the injected paper manager client for supported-publis
     assert.deepEqual(events, [
       "openArticle:https://www.science.org/doi/10.1126/science.adz8659",
       "close",
+    ]);
+  } finally {
+    await rm(workspace, { recursive: true, force: true });
+  }
+});
+
+test("download_paper opens manual fallback when the manager client download is not a real PDF", async () => {
+  const workspace = await mkdtemp(path.join(tmpdir(), "pi-agent-tools-"));
+  const downloadedPath = path.join(workspace, "downloads", "papers", "science-invalid.pdf");
+  const articleUrl = "https://www.science.org/doi/10.1126/science.adz8659";
+  const events: string[] = [];
+
+  try {
+    await mkdir(path.dirname(downloadedPath), { recursive: true });
+    await writeFile(downloadedPath, "<html>not a pdf</html>", "utf8");
+
+    const tool = getDownloadPaperTool(workspace, {
+      paperBrowserManagerClient: {
+        async openArticle(request: { url: string }) {
+          events.push(`openArticle:${request.url}`);
+          return {
+            openedUrl: request.url,
+            profileDir: path.join(workspace, ".browser-profile", "paper-access"),
+          };
+        },
+        async downloadPaperPdf(request: { url: string }) {
+          events.push(`downloadPaperPdf:${request.url}`);
+          return {
+            status: "downloaded" as const,
+            publisher: "science" as const,
+            articleUrl: request.url,
+            finalArticleUrl: request.url,
+            finalPdfUrl: "https://www.science.org/doi/pdf/10.1126/science.adz8659",
+            path: downloadedPath,
+          };
+        },
+        async close() {},
+      },
+    } as unknown as CreateToolsDependencies);
+
+    const result = await tool.execute("tool-call-invalid-pdf", { url: articleUrl }, undefined);
+
+    assert.deepEqual(result.details, {
+      status: "manual_fallback_opened",
+      source: "science",
+      canonicalId: "10.1126/science.adz8659",
+      articleUrl,
+      fallbackUrl: articleUrl,
+      recordPath: path.join(
+        workspace,
+        "downloads",
+        "papers",
+        "index",
+        "science-10.1126-science.adz8659.json",
+      ),
+      failure: {
+        code: "download_failed",
+        message: "Downloaded file is not a valid PDF.",
+      },
+      profileDir: path.join(workspace, ".browser-profile", "paper-access"),
+      executablePath: undefined,
+    });
+    assert.deepEqual(events, [
+      `downloadPaperPdf:${articleUrl}`,
+      `openArticle:${articleUrl}`,
+    ]);
+  } finally {
+    await rm(workspace, { recursive: true, force: true });
+  }
+});
+
+test("download_paper opens manual fallback when canonicalId cannot be derived from manager client URLs", async () => {
+  const workspace = await mkdtemp(path.join(tmpdir(), "pi-agent-tools-"));
+  const downloadedPath = path.join(workspace, "downloads", "papers", "science-derived.pdf");
+  const articleUrl = "https://www.science.org/toc/science/current";
+  const events: string[] = [];
+  const fallbackCanonicalId = `www.science.org-${createHash("sha1").update(articleUrl).digest("hex").slice(0, 12)}`;
+
+  try {
+    await mkdir(path.dirname(downloadedPath), { recursive: true });
+    await writeFile(downloadedPath, "%PDF-1.4\n1 0 obj\n<<>>\nendobj\n", "utf8");
+
+    const tool = getDownloadPaperTool(workspace, {
+      paperBrowserManagerClient: {
+        async openArticle(request: { url: string }) {
+          events.push(`openArticle:${request.url}`);
+          return {
+            openedUrl: request.url,
+            profileDir: path.join(workspace, ".browser-profile", "paper-access"),
+          };
+        },
+        async downloadPaperPdf(request: { url: string }) {
+          events.push(`downloadPaperPdf:${request.url}`);
+          return {
+            status: "downloaded" as const,
+            publisher: "science" as const,
+            articleUrl: request.url,
+            finalArticleUrl: "https://www.science.org/toc/science/current",
+            finalPdfUrl: "https://www.science.org/action/showPdf?pii=adz8659",
+            path: downloadedPath,
+          };
+        },
+        async close() {},
+      },
+    } as unknown as CreateToolsDependencies);
+
+    const result = await tool.execute("tool-call-missing-canonical-id", { url: articleUrl }, undefined);
+
+    assert.deepEqual(result.details, {
+      status: "manual_fallback_opened",
+      source: "science",
+      canonicalId: fallbackCanonicalId,
+      articleUrl,
+      fallbackUrl: articleUrl,
+      recordPath: path.join(
+        workspace,
+        "downloads",
+        "papers",
+        "index",
+        `science-${fallbackCanonicalId}.json`,
+      ),
+      failure: {
+        code: "download_failed",
+        message: "Unable to resolve a canonical paper identifier from the publisher article URL.",
+      },
+      profileDir: path.join(workspace, ".browser-profile", "paper-access"),
+      executablePath: undefined,
+    });
+    assert.deepEqual(events, [
+      `downloadPaperPdf:${articleUrl}`,
+      `openArticle:${articleUrl}`,
     ]);
   } finally {
     await rm(workspace, { recursive: true, force: true });

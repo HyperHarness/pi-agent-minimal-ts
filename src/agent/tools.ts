@@ -7,7 +7,12 @@ import {
   resolveDefaultPaperBrowserSessionFactory,
   type PaperBrowserSession
 } from "./browser-session.js";
-import { downloadPaperPdf, resolvePublisherCanonicalId, resolvePublisherCanonicalIdFromArticleUrl } from "./paper-download.js";
+import {
+  PaperDownloadError,
+  downloadPaperPdf,
+  resolvePublisherCanonicalId,
+  resolvePublisherCanonicalIdFromArticleUrl
+} from "./paper-download.js";
 import { downloadPaper, searchPapers } from "./paper-manager.js";
 import {
   createPaperBrowserManagerClient,
@@ -131,6 +136,13 @@ function assertSupportedPaperPublisherUrl(input: string): void {
   }
 
   getPublisherAdapter(url.toString());
+}
+
+async function assertDownloadedFileIsPdf(pdfPath: string): Promise<void> {
+  const fileBytes = await readFile(pdfPath);
+  if (!fileBytes.subarray(0, 5).equals(Buffer.from("%PDF-"))) {
+    throw new PaperDownloadError("download_failed", "Downloaded file is not a valid PDF.");
+  }
 }
 
 export interface ToolDependencies {
@@ -315,6 +327,7 @@ export function createTools(workspaceDir: string, dependencies: ToolDependencies
         ...options,
         downloadPublisherPaperImpl: async (downloadOptions) => {
           const result = await paperBrowserManagerClient.downloadPaperPdf(downloadOptions);
+          await assertDownloadedFileIsPdf(result.path);
           const canonicalId =
             resolvePublisherCanonicalIdFromArticleUrl({
               publisher: result.publisher,
@@ -330,7 +343,10 @@ export function createTools(workspaceDir: string, dependencies: ToolDependencies
             });
 
           if (!canonicalId) {
-            throw new Error("Unable to resolve a canonical paper identifier from the publisher article URL.");
+            throw new PaperDownloadError(
+              "download_failed",
+              "Unable to resolve a canonical paper identifier from the publisher article URL."
+            );
           }
 
           return {
