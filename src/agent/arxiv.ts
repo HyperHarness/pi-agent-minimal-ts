@@ -13,6 +13,24 @@ export interface SearchArxivOptions {
   fetchImpl?: typeof fetch;
 }
 
+export interface ArxivLocator {
+  id: string;
+  absUrl: string;
+  pdfUrl: string;
+}
+
+export interface DownloadArxivPdfOptions {
+  input: string;
+  fetchImpl?: typeof fetch;
+}
+
+export interface DownloadArxivPdfResult {
+  canonicalId: string;
+  articleUrl: string;
+  finalPdfUrl: string;
+  pdfBytes: Buffer;
+}
+
 const MODERN_ARXIV_ID = /^\d{4}\.\d{4,5}(?:v\d+)?$/;
 const LEGACY_ARXIV_ID = /^[a-z-]+(?:\.[A-Z]{2})?\/\d{7}(?:v\d+)?$/i;
 const PROBABLY_MANGLED_QUERY = /^[?\uFFFD\s]+$/;
@@ -66,6 +84,63 @@ export function buildArxivAbsUrl(id: string): string {
 
 export function buildArxivPdfUrl(id: string): string {
   return `https://arxiv.org/pdf/${normalizeArxivId(id)}.pdf`;
+}
+
+function extractArxivIdFromUrl(input: string): string | null {
+  try {
+    const url = new URL(input);
+    if (url.hostname !== "arxiv.org") {
+      return null;
+    }
+
+    const path = url.pathname.replace(/\/+$/, "");
+    if (path.startsWith("/abs/")) {
+      return path.slice("/abs/".length);
+    }
+
+    if (path.startsWith("/pdf/")) {
+      return path.slice("/pdf/".length).replace(/\.pdf$/i, "");
+    }
+
+    return null;
+  } catch {
+    return null;
+  }
+}
+
+export function parseArxivLocator(input: string): ArxivLocator {
+  const rawId = extractArxivIdFromUrl(input.trim()) ?? input.trim();
+  const id = normalizeArxivId(rawId);
+
+  return {
+    id,
+    absUrl: buildArxivAbsUrl(id),
+    pdfUrl: buildArxivPdfUrl(id)
+  };
+}
+
+export async function downloadArxivPdf(
+  options: DownloadArxivPdfOptions
+): Promise<DownloadArxivPdfResult> {
+  const locator = parseArxivLocator(options.input);
+  const fetchImpl = options.fetchImpl ?? globalThis.fetch.bind(globalThis);
+  const response = await fetchImpl(locator.pdfUrl);
+
+  if (!response.ok) {
+    throw new Error(`arXiv PDF download failed with HTTP ${response.status}.`);
+  }
+
+  const pdfBytes = Buffer.from(await response.arrayBuffer());
+  if (pdfBytes.subarray(0, 5).toString("ascii") !== "%PDF-") {
+    throw new Error("Expected a PDF response from arXiv.");
+  }
+
+  return {
+    canonicalId: locator.id,
+    articleUrl: locator.absUrl,
+    finalPdfUrl: response.url || locator.pdfUrl,
+    pdfBytes
+  };
 }
 
 function assertQueryWasNotMangled(query: string): void {

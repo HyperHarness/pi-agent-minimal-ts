@@ -1,6 +1,11 @@
 import test from "node:test";
 import assert from "node:assert/strict";
-import { buildArxivPdfUrl, searchArxiv } from "../../src/agent/arxiv.js";
+import {
+  buildArxivPdfUrl,
+  downloadArxivPdf,
+  parseArxivLocator,
+  searchArxiv
+} from "../../src/agent/arxiv.js";
 
 const sampleFeed = `<?xml version="1.0" encoding="UTF-8"?>
 <feed xmlns="http://www.w3.org/2005/Atom">
@@ -52,6 +57,37 @@ test("buildArxivPdfUrl accepts legacy identifiers", () => {
 
 test("buildArxivPdfUrl rejects malformed identifiers", () => {
   assert.throws(() => buildArxivPdfUrl("not an arxiv id"), /arXiv/i);
+});
+
+test("parseArxivLocator canonicalizes arXiv PDF URLs", () => {
+  assert.deepEqual(parseArxivLocator("https://arxiv.org/pdf/2401.01234.pdf"), {
+    id: "2401.01234",
+    absUrl: "https://arxiv.org/abs/2401.01234",
+    pdfUrl: "https://arxiv.org/pdf/2401.01234.pdf"
+  });
+});
+
+test("parseArxivLocator strips arXiv version suffixes from abs URLs", () => {
+  assert.deepEqual(parseArxivLocator("https://arxiv.org/abs/2401.01234v2"), {
+    id: "2401.01234",
+    absUrl: "https://arxiv.org/abs/2401.01234",
+    pdfUrl: "https://arxiv.org/pdf/2401.01234.pdf"
+  });
+});
+
+test("downloadArxivPdf rejects non-PDF bodies", async () => {
+  await assert.rejects(
+    () =>
+      downloadArxivPdf({
+        input: "2401.01234",
+        fetchImpl: async () =>
+          new Response("<html>not a pdf</html>", {
+            status: 200,
+            headers: { "content-type": "text/html" }
+          })
+      }),
+    /pdf/i
+  );
 });
 
 test("searchArxiv rejects queries that were mangled into question marks before hitting arXiv", async () => {
