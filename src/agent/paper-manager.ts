@@ -328,13 +328,17 @@ function addCandidate(
   const candidateBestRank = rankedSource.rank;
   if (candidateBestRank < previousBestRank) {
     existing.title = formatTitle(candidate.title);
-    existing.authors = candidate.authors;
+    if (candidate.authors.length > 0) {
+      existing.authors = candidate.authors;
+    }
     existing.summary = candidate.summary;
   }
 
   if (candidateBestRank === previousBestRank && candidate.order < previousOrder) {
     existing.title = formatTitle(candidate.title);
-    existing.authors = candidate.authors;
+    if (candidate.authors.length > 0) {
+      existing.authors = candidate.authors;
+    }
     existing.summary = candidate.summary;
     existing.order = candidate.order;
   }

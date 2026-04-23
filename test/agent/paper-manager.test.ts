@@ -74,7 +74,7 @@ test("searchPapers merges duplicate titles and prefers supported publisher sourc
   assert.equal(results.length, 1);
   assert.deepEqual(results[0], {
     title: "Unified Paper Search",
-    authors: [],
+    authors: ["Ada Lovelace"],
     summary: "science summary",
     primarySource: "science",
     primaryAction: "authorized_download",
