@@ -634,34 +634,30 @@ test("download_paper_pdf opens manual fallback and returns non-error details for
   }
 });
 
-test("download_paper_pdf disposes the cached default browser session before opening manual fallback", async () => {
+test("download_paper_pdf uses the injected paper manager client for fallback without creating a browser session", async () => {
   const workspace = await mkdtemp(path.join(tmpdir(), "pi-agent-tools-"));
   const events: string[] = [];
 
   try {
     const tools = createTools(workspace, {
-      browserSessionFactory: async () => ({
-        async openArticlePage(url: string) {
-          events.push(`openArticlePage:${url}`);
+      paperBrowserManagerClient: {
+        async openArticle(request: { url: string }) {
+          events.push(`openArticle:${request.url}`);
           return {
-            finalArticleUrl: url,
-            html: "<html></html>",
-            authorized: false,
+            openedUrl: request.url,
+            profileDir: path.join(workspace, ".browser-profile", "paper-access")
           };
         },
-        async openPageForManualLogin(url: string) {
-          events.push(`sessionManualLogin:${url}`);
-          return {
-            openedUrl: url,
-          };
+        async downloadPaperPdf(): Promise<never> {
+          throw new PaperDownloadError(
+            "manual_login_required",
+            "The browser session needs manual login or verification for this publisher."
+          );
         },
-        async downloadPdf() {
-          throw new Error("downloadPdf should not run when authorization fails");
-        },
-        async dispose() {
-          events.push("dispose");
-        },
-      }),
+        async close() {
+          events.push("close");
+        }
+      },
       openPaperPageForLogin: async (options: { url: string; workspaceDir: string }) => {
         events.push(`fallbackOpen:${options.url}`);
         return {
@@ -692,9 +688,12 @@ test("download_paper_pdf disposes the cached default browser session before open
       "manual_fallback_opened",
     );
     assert.deepEqual(events, [
-      "openArticlePage:https://www.science.org/doi/10.1126/science.adz8659",
-      "dispose",
       "fallbackOpen:https://www.science.org/doi/10.1126/science.adz8659",
+    ]);
+    await agentTools.cleanupTools(tools as ReturnType<typeof createTools>);
+    assert.deepEqual(events, [
+      "fallbackOpen:https://www.science.org/doi/10.1126/science.adz8659",
+      "close",
     ]);
   } finally {
     await rm(workspace, { recursive: true, force: true });
@@ -1103,42 +1102,34 @@ test("download_paper_pdf still rejects when manual fallback cannot be opened", a
   }
 });
 
-test("download_paper_pdf uses the default browser-backed paper download path when not injected", async () => {
+test("open_paper_page_for_login delegates to the injected paper manager client", async () => {
   const workspace = await mkdtemp(path.join(tmpdir(), "pi-agent-tools-"));
-  const capturedCalls: Array<{ url: string; destinationPath: string }> = [];
+  const calls: Array<{ url: string }> = [];
 
   try {
-    const dependencies: CreateToolsDependencies = {
-      browserSessionFactory: async () => ({
-        async openArticlePage(url: string) {
+    const tools = createTools(workspace, {
+      paperBrowserManagerClient: {
+        async openArticle(request: { url: string }) {
+          calls.push(request);
           return {
-            finalArticleUrl: url,
-            html: '<html><body><a href="/doi/pdf/10.1126/science.adz8659">PDF</a></body></html>',
-            authorized: true,
+            openedUrl: request.url,
+            profileDir: path.join(workspace, ".browser-profile", "paper-access"),
           };
         },
-        async openPageForManualLogin(url: string) {
-          return {
-            openedUrl: url,
-          };
+        async downloadPaperPdf(): Promise<never> {
+          throw new Error("download should not be called");
         },
-        async downloadPdf(url: string, destinationPath: string) {
-          capturedCalls.push({ url, destinationPath });
-          await writeFile(destinationPath, Buffer.from("%PDF-default"));
-        },
-      }),
-    };
-
-    const tools = createTools(workspace, dependencies) as ReadonlyArray<{
+        async close() {},
+      },
+    } as unknown as CreateToolsDependencies) as ReadonlyArray<{
       name: string;
-      execute?: DownloadPaperPdfTool["execute"];
+      execute?: OpenPaperPageForLoginTool["execute"];
     }>;
 
-    const tool = tools.find((candidate) => candidate.name === "download_paper_pdf");
+    const tool = tools.find((candidate) => candidate.name === "open_paper_page_for_login");
     assert.ok(tool);
     const execute = tool.execute;
     assert.ok(execute);
-    assert.equal(typeof execute, "function");
 
     const result = await execute(
       "tool-call-2",
@@ -1148,15 +1139,84 @@ test("download_paper_pdf uses the default browser-backed paper download path whe
       undefined,
     );
 
-    assert.deepEqual(capturedCalls, [
+    assert.deepEqual(calls, [
       {
-        url: "https://www.science.org/doi/pdf/10.1126/science.adz8659",
-        destinationPath: path.join(workspace, "downloads", "papers", "downloaded-paper.pdf"),
+        url: "https://www.science.org/doi/10.1126/science.adz8659",
+      },
+    ]);
+    assert.deepEqual(JSON.parse(String(result.content?.[0]?.text)), {
+      openedUrl: "https://www.science.org/doi/10.1126/science.adz8659",
+      profileDir: path.join(workspace, ".browser-profile", "paper-access"),
+    });
+    assert.deepEqual(result.details, {
+      openedUrl: "https://www.science.org/doi/10.1126/science.adz8659",
+      profileDir: path.join(workspace, ".browser-profile", "paper-access"),
+    });
+  } finally {
+    await rm(workspace, { recursive: true, force: true });
+  }
+});
+
+test("download_paper_pdf delegates to the injected paper manager client", async () => {
+  const workspace = await mkdtemp(path.join(tmpdir(), "pi-agent-tools-"));
+  const calls: Array<{ url: string; workspaceDir: string }> = [];
+  const pdfPath = path.join(workspace, "downloads", "papers", "science-10.1126-science.adz8659.pdf");
+
+  try {
+    await mkdir(path.dirname(pdfPath), { recursive: true });
+    await writeFile(pdfPath, Buffer.from("%PDF-manager"));
+
+    const tools = createTools(workspace, {
+      paperBrowserManagerClient: {
+        async openArticle(): Promise<never> {
+          throw new Error("open should not be called");
+        },
+        async downloadPaperPdf(request: { url: string; workspaceDir: string }) {
+          calls.push(request);
+          return {
+            status: "downloaded",
+            path: pdfPath,
+            publisher: "science",
+            articleUrl: request.url,
+            finalArticleUrl: request.url,
+            finalPdfUrl: "https://www.science.org/doi/pdf/10.1126/science.adz8659",
+          };
+        },
+        async close() {},
+      },
+    } as unknown as CreateToolsDependencies) as ReadonlyArray<{
+      name: string;
+      execute?: DownloadPaperPdfTool["execute"];
+    }>;
+
+    const tool = tools.find((candidate) => candidate.name === "download_paper_pdf");
+    assert.ok(tool);
+    const execute = tool.execute;
+    assert.ok(execute);
+
+    const result = await execute(
+      "tool-call-3",
+      { url: "https://www.science.org/doi/10.1126/science.adz8659" },
+      undefined,
+    );
+
+    assert.deepEqual(calls, [
+      {
+        url: "https://www.science.org/doi/10.1126/science.adz8659",
+        workspaceDir: workspace,
       },
     ]);
     assert.deepEqual(JSON.parse(String(result.content?.[0]?.text)), {
       status: "downloaded",
-      path: path.join(workspace, "downloads", "papers", "downloaded-paper.pdf"),
+      path: pdfPath,
+      publisher: "science",
+      articleUrl: "https://www.science.org/doi/10.1126/science.adz8659",
+      finalArticleUrl: "https://www.science.org/doi/10.1126/science.adz8659",
+      finalPdfUrl: "https://www.science.org/doi/pdf/10.1126/science.adz8659",
+    });
+    assert.deepEqual(result.details, {
+      status: "downloaded",
+      path: pdfPath,
       publisher: "science",
       articleUrl: "https://www.science.org/doi/10.1126/science.adz8659",
       finalArticleUrl: "https://www.science.org/doi/10.1126/science.adz8659",
@@ -1167,74 +1227,7 @@ test("download_paper_pdf uses the default browser-backed paper download path whe
   }
 });
 
-test("download_paper_pdf reuses the default browser session for repeated executions", async () => {
-  const workspace = await mkdtemp(path.join(tmpdir(), "pi-agent-tools-"));
-  const factoryCalls: number[] = [];
-  const downloadCalls: Array<{ url: string; destinationPath: string }> = [];
-
-  try {
-    const dependencies: CreateToolsDependencies = {
-      browserSessionFactory: async () => {
-        factoryCalls.push(1);
-        return {
-          async openArticlePage(url: string) {
-            return {
-              finalArticleUrl: url,
-              html: '<html><body><a href="/doi/pdf/10.1126/science.adz8659">PDF</a></body></html>',
-              authorized: true,
-            };
-          },
-          async openPageForManualLogin(url: string) {
-            return {
-              openedUrl: url,
-            };
-          },
-          async downloadPdf(url: string, destinationPath: string) {
-            downloadCalls.push({ url, destinationPath });
-            await writeFile(destinationPath, Buffer.from("%PDF-reused"));
-          },
-        };
-      },
-    };
-
-    const tools = createTools(workspace, dependencies) as ReadonlyArray<{
-      name: string;
-      execute?: DownloadPaperPdfTool["execute"];
-    }>;
-
-    const tool = tools.find((candidate) => candidate.name === "download_paper_pdf");
-    assert.ok(tool);
-    const execute = tool.execute;
-    assert.ok(execute);
-
-    await execute(
-      "tool-call-3",
-      { url: "https://www.science.org/doi/10.1126/science.adz8659" },
-      undefined,
-    );
-    await execute(
-      "tool-call-4",
-      { url: "https://www.science.org/doi/10.1126/science.adz8659" },
-      undefined,
-    );
-
-    assert.deepEqual(factoryCalls, [1]);
-    assert.deepEqual(downloadCalls, [
-      {
-        url: "https://www.science.org/doi/pdf/10.1126/science.adz8659",
-        destinationPath: path.join(workspace, "downloads", "papers", "downloaded-paper.pdf"),
-      },
-      {
-        url: "https://www.science.org/doi/pdf/10.1126/science.adz8659",
-        destinationPath: path.join(workspace, "downloads", "papers", "downloaded-paper.pdf"),
-      },
-    ]);
-  } finally {
-    await rm(workspace, { recursive: true, force: true });
-  }
-});
-
-test("createTools cleanup closes a lazily created default browser session exactly once", async () => {
+test("createTools cleanup closes the injected paper manager client exactly once", async () => {
   const cleanupTools = (
     agentTools as {
       cleanupTools?: (tools: ReturnType<typeof createTools>) => Promise<void>;
@@ -1243,98 +1236,27 @@ test("createTools cleanup closes a lazily created default browser session exactl
   assert.equal(typeof cleanupTools, "function");
 
   const workspace = await mkdtemp(path.join(tmpdir(), "pi-agent-tools-"));
-  const factoryCalls: number[] = [];
-  const disposeCalls: number[] = [];
+  let closeCalls = 0;
 
   try {
     const tools = createTools(workspace, {
-      browserSessionFactory: async () => {
-        factoryCalls.push(1);
-        return {
-          async openArticlePage(url: string) {
-            return {
-              finalArticleUrl: url,
-              html: '<html><body><a href="/doi/pdf/10.1126/science.adz8659">PDF</a></body></html>',
-              authorized: true,
-            };
-          },
-          async openPageForManualLogin(url: string) {
-            return {
-              openedUrl: url,
-            };
-          },
-          async downloadPdf(_url: string, destinationPath: string) {
-            await writeFile(destinationPath, Buffer.from("%PDF-cleanup"));
-          },
-          async dispose() {
-            disposeCalls.push(1);
-          },
-        };
+      paperBrowserManagerClient: {
+        async openArticle(): Promise<never> {
+          throw new Error("open should not be called");
+        },
+        async downloadPaperPdf(): Promise<never> {
+          throw new Error("download should not be called");
+        },
+        async close() {
+          closeCalls += 1;
+        },
       },
-    }) as ReadonlyArray<{
-      name: string;
-      execute?: DownloadPaperPdfTool["execute"];
-    }>;
-
-    const tool = tools.find((candidate) => candidate.name === "download_paper_pdf");
-    assert.ok(tool);
-    const execute = tool.execute;
-    assert.ok(execute);
-
-    await execute(
-      "tool-call-5",
-      { url: "https://www.science.org/doi/10.1126/science.adz8659" },
-      undefined,
-    );
+    } as unknown as CreateToolsDependencies);
 
     await cleanupTools!(tools as ReturnType<typeof createTools>);
     await cleanupTools!(tools as ReturnType<typeof createTools>);
 
-    assert.deepEqual(factoryCalls, [1]);
-    assert.deepEqual(disposeCalls, [1]);
-  } finally {
-    await rm(workspace, { recursive: true, force: true });
-  }
-});
-
-test("createTools cleanup ignores a previously rejected browser session factory", async () => {
-  const cleanupTools = (
-    agentTools as {
-      cleanupTools?: (tools: ReturnType<typeof createTools>) => Promise<void>;
-    }
-  ).cleanupTools;
-  assert.equal(typeof cleanupTools, "function");
-
-  const workspace = await mkdtemp(path.join(tmpdir(), "pi-agent-tools-"));
-  const launchError = new Error("browser launch failed");
-
-  try {
-    const tools = createTools(workspace, {
-      browserSessionFactory: async () => {
-        throw launchError;
-      },
-    }) as ReadonlyArray<{
-      name: string;
-      execute?: DownloadPaperPdfTool["execute"];
-    }>;
-
-    const tool = tools.find((candidate) => candidate.name === "download_paper_pdf");
-    assert.ok(tool);
-    const execute = tool.execute;
-    assert.ok(execute);
-
-    await assert.rejects(
-      () =>
-        execute(
-          "tool-call-6",
-          { url: "https://www.science.org/doi/10.1126/science.adz8659" },
-          undefined,
-        ),
-      /browser launch failed/,
-    );
-
-    await assert.doesNotReject(() => cleanupTools!(tools as ReturnType<typeof createTools>));
-    await assert.doesNotReject(() => cleanupTools!(tools as ReturnType<typeof createTools>));
+    assert.equal(closeCalls, 1);
   } finally {
     await rm(workspace, { recursive: true, force: true });
   }

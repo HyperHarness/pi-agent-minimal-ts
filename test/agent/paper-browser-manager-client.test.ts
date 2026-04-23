@@ -1,0 +1,208 @@
+import assert from "node:assert/strict";
+import test from "node:test";
+import { createPaperBrowserManagerClient } from "../../src/agent/paper-browser-manager-client.js";
+
+test("paper browser manager client reuses a healthy stored endpoint", async () => {
+  const calls: Array<{ url: string; init?: { method?: string; body?: string } }> = [];
+  const client = createPaperBrowserManagerClient({
+    workspaceDir: "D:\\Codex\\pi-agent-minimal-ts",
+    readMetadata: async () => ({
+      pid: 4242,
+      startedAt: "2026-04-23T12:00:00.000Z",
+      endpoint: "http://127.0.0.1:43123",
+      profileDir: "D:\\Codex\\pi-agent-minimal-ts\\.browser-profile\\paper-access"
+    }),
+    writeMetadata: async () => {
+      throw new Error("should not rewrite healthy metadata");
+    },
+    clearMetadata: async () => {
+      throw new Error("should not clear healthy metadata");
+    },
+    fetchJson: async (url, init) => {
+      calls.push({ url, init });
+      return {
+        ok: true,
+        browserConnected: true,
+        profileDir: "D:\\Codex\\pi-agent-minimal-ts\\.browser-profile\\paper-access"
+      };
+    },
+    spawnManager: async () => {
+      throw new Error("should not spawn a healthy manager");
+    }
+  });
+
+  const endpoint = await client.ensureManagerEndpoint();
+
+  assert.equal(endpoint, "http://127.0.0.1:43123");
+  assert.deepEqual(calls, [{ url: "http://127.0.0.1:43123/health", init: undefined }]);
+});
+
+test("paper browser manager client clears stale metadata and persists the spawned manager metadata", async () => {
+  const calls: string[] = [];
+  const writtenMetadata: Array<{
+    pid: number;
+    startedAt: string;
+    endpoint: string;
+    profileDir: string;
+  }> = [];
+  const client = createPaperBrowserManagerClient({
+    workspaceDir: "D:\\Codex\\pi-agent-minimal-ts",
+    readMetadata: async () => ({
+      pid: 999999,
+      startedAt: "2026-04-23T12:00:00.000Z",
+      endpoint: "http://127.0.0.1:43123",
+      profileDir: "D:\\Codex\\pi-agent-minimal-ts\\.browser-profile\\paper-access"
+    }),
+    clearMetadata: async () => {
+      calls.push("clear");
+    },
+    writeMetadata: async (options) => {
+      calls.push("write");
+      writtenMetadata.push(options.metadata);
+    },
+    fetchJson: async (url) => {
+      calls.push(url);
+      if (url.endsWith("/health")) {
+        throw new Error("connect ECONNREFUSED");
+      }
+
+      throw new Error(`unexpected request: ${url}`);
+    },
+    spawnManager: async () => {
+      calls.push("spawn");
+      return {
+        pid: 4343,
+        startedAt: "2026-04-23T12:05:00.000Z",
+        endpoint: "http://127.0.0.1:43124",
+        profileDir: "D:\\Codex\\pi-agent-minimal-ts\\.browser-profile\\paper-access"
+      };
+    }
+  });
+
+  const endpoint = await client.ensureManagerEndpoint();
+
+  assert.equal(endpoint, "http://127.0.0.1:43124");
+  assert.deepEqual(calls, ["http://127.0.0.1:43123/health", "clear", "spawn", "write"]);
+  assert.deepEqual(writtenMetadata, [
+    {
+      pid: 4343,
+      startedAt: "2026-04-23T12:05:00.000Z",
+      endpoint: "http://127.0.0.1:43124",
+      profileDir: "D:\\Codex\\pi-agent-minimal-ts\\.browser-profile\\paper-access"
+    }
+  ]);
+});
+
+test("paper browser manager client forwards openArticle and downloadPaperPdf requests", async () => {
+  const requests: Array<{ url: string; init?: { method?: string; body?: string } }> = [];
+  const spawned: string[] = [];
+  const client = createPaperBrowserManagerClient({
+    workspaceDir: "D:\\Codex\\pi-agent-minimal-ts",
+    readMetadata: async () => null,
+    writeMetadata: async () => {},
+    clearMetadata: async () => {},
+    fetchJson: async (url, init) => {
+      requests.push({ url, init });
+      if (url.endsWith("/health")) {
+        return {
+          ok: true,
+          browserConnected: true,
+          profileDir: "D:\\Codex\\pi-agent-minimal-ts\\.browser-profile\\paper-access"
+        };
+      }
+
+      if (url.endsWith("/open-article")) {
+        return {
+          openedUrl: "https://www.science.org/doi/10.1126/science.adz8659"
+        };
+      }
+
+      if (url.endsWith("/download-pdf")) {
+        return {
+          status: "downloaded",
+          path: "D:\\Codex\\pi-agent-minimal-ts\\downloads\\papers\\science-10.1126-science.adz8659.pdf",
+          publisher: "science",
+          articleUrl: "https://www.science.org/doi/10.1126/science.adz8659",
+          finalArticleUrl: "https://www.science.org/doi/10.1126/science.adz8659",
+          finalPdfUrl: "https://www.science.org/doi/pdf/10.1126/science.adz8659"
+        };
+      }
+
+      throw new Error(`unexpected request: ${url}`);
+    },
+    spawnManager: async () => ({
+      pid: spawned.push("spawned"),
+      startedAt: "2026-04-23T12:01:00.000Z",
+      endpoint: "http://127.0.0.1:43125",
+      profileDir: "D:\\Codex\\pi-agent-minimal-ts\\.browser-profile\\paper-access"
+    })
+  });
+
+  const openResult = await client.openArticle({
+    url: "https://www.science.org/doi/10.1126/science.adz8659"
+  });
+  const downloadResult = await client.downloadPaperPdf({
+    url: "https://www.science.org/doi/10.1126/science.adz8659",
+    workspaceDir: "D:\\Codex\\pi-agent-minimal-ts"
+  });
+
+  assert.deepEqual(openResult, {
+    openedUrl: "https://www.science.org/doi/10.1126/science.adz8659",
+    profileDir: "D:\\Codex\\pi-agent-minimal-ts\\.browser-profile\\paper-access"
+  });
+  assert.equal(downloadResult.status, "downloaded");
+  assert.equal(spawned.length, 1);
+  assert.deepEqual(requests.map((request) => request.url), [
+    "http://127.0.0.1:43125/open-article",
+    "http://127.0.0.1:43125/download-pdf"
+  ]);
+  assert.deepEqual(requests[0]?.init, {
+    method: "POST",
+    body: JSON.stringify({
+      url: "https://www.science.org/doi/10.1126/science.adz8659"
+    })
+  });
+  assert.deepEqual(requests[1]?.init, {
+    method: "POST",
+    body: JSON.stringify({
+      url: "https://www.science.org/doi/10.1126/science.adz8659",
+      workspaceDir: "D:\\Codex\\pi-agent-minimal-ts"
+    })
+  });
+});
+
+test("paper browser manager client close is idempotent", async () => {
+  let closeCalls = 0;
+  const client = createPaperBrowserManagerClient({
+    workspaceDir: "D:\\Codex\\pi-agent-minimal-ts",
+    readMetadata: async () => null,
+    writeMetadata: async () => {},
+    clearMetadata: async () => {},
+    fetchJson: async (url) => {
+      if (url.endsWith("/health")) {
+        return {
+          ok: true,
+          browserConnected: true,
+          profileDir: "D:\\Codex\\pi-agent-minimal-ts\\.browser-profile\\paper-access"
+        };
+      }
+
+      throw new Error(`unexpected request: ${url}`);
+    },
+    spawnManager: async () => ({
+      pid: 4244,
+      startedAt: "2026-04-23T12:02:00.000Z",
+      endpoint: "http://127.0.0.1:43126",
+      profileDir: "D:\\Codex\\pi-agent-minimal-ts\\.browser-profile\\paper-access"
+    }),
+    disposeManager: async () => {
+      closeCalls += 1;
+    }
+  });
+
+  await client.ensureManagerEndpoint();
+  await client.close();
+  await client.close();
+
+  assert.equal(closeCalls, 1);
+});
