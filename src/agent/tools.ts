@@ -1,4 +1,4 @@
-﻿import { readFile, realpath } from "node:fs/promises";
+import { readFile, realpath } from "node:fs/promises";
 import path from "node:path";
 import { Type, type Static } from "@mariozechner/pi-ai";
 import type { AgentTool } from "@mariozechner/pi-agent-core";
@@ -7,8 +7,8 @@ import {
   resolveDefaultPaperBrowserSessionFactory,
   type PaperBrowserSession
 } from "./browser-session.js";
-import { buildArxivPdfUrl, searchArxiv } from "./arxiv.js";
-import { downloadPaperPdf } from "./paper-download.js";
+import { downloadPaperPdf, resolvePublisherCanonicalId, resolvePublisherCanonicalIdFromArticleUrl } from "./paper-download.js";
+import { downloadPaper, searchPapers } from "./paper-manager.js";
 import {
   createPaperBrowserManagerClient,
   type PaperBrowserManagerClient
@@ -37,19 +37,16 @@ const fetchUrlParameters = Type.Object({
   url: Type.String({ description: "HTTP or HTTPS URL to fetch." })
 });
 
-const searchArxivParameters = Type.Object({
-  query: Type.String({ description: "Search query string for arXiv." }),
+const searchPapersParameters = Type.Object({
+  query: Type.String({ description: "Search query string for papers." }),
   maxResults: Type.Optional(
     Type.Integer({ description: "Maximum number of results to return.", minimum: 1 })
   )
 });
 
-const downloadArxivPdfParameters = Type.Object({
-  id: Type.String({ description: "arXiv identifier to convert into a PDF URL." })
-});
-
-const downloadPaperPdfParameters = Type.Object({
-  url: Type.String({ description: "Publisher article URL to download as a PDF." })
+const downloadPaperParameters = Type.Object({
+  id: Type.Optional(Type.String({ description: "Paper identifier to download." })),
+  url: Type.Optional(Type.String({ description: "Paper URL to download." }))
 });
 
 const openPaperPageForLoginParameters = Type.Object({
@@ -60,9 +57,8 @@ type GetTimeParameters = Static<typeof getTimeParameters>;
 type ReadFileParameters = Static<typeof readFileParameters>;
 type WebSearchParameters = Static<typeof webSearchParameters>;
 type FetchUrlParameters = Static<typeof fetchUrlParameters>;
-type SearchArxivParameters = Static<typeof searchArxivParameters>;
-type DownloadArxivPdfParameters = Static<typeof downloadArxivPdfParameters>;
-type DownloadPaperPdfParameters = Static<typeof downloadPaperPdfParameters>;
+type SearchPapersParameters = Static<typeof searchPapersParameters>;
+type DownloadPaperParameters = Static<typeof downloadPaperParameters>;
 type OpenPaperPageForLoginParameters = Static<typeof openPaperPageForLoginParameters>;
 
 function assertPathInsideDirectory(rootDir: string, candidatePath: string): void {
@@ -105,37 +101,14 @@ type WebSearchTool = AgentTool<
   { query: string; maxResults: number; count: number }
 >;
 type FetchUrlTool = AgentTool<typeof fetchUrlParameters, { url: string }>;
-type SearchArxivTool = AgentTool<
-  typeof searchArxivParameters,
+type SearchPapersTool = AgentTool<
+  typeof searchPapersParameters,
   { query: string; maxResults: number; count: number }
 >;
-type DownloadArxivPdfTool = AgentTool<
-  typeof downloadArxivPdfParameters,
-  { id: string; pdfUrl: string }
+type DownloadPaperTool = AgentTool<
+  typeof downloadPaperParameters,
+  Awaited<ReturnType<typeof downloadPaper>>
 >;
-type DownloadPaperPdfResult = Awaited<ReturnType<typeof downloadPaperPdf>>;
-type DownloadPaperPdfClientResult = Awaited<ReturnType<PaperBrowserManagerClient["downloadPaperPdf"]>>;
-type DownloadPaperPdfSuccessResult = DownloadPaperPdfClientResult;
-type DownloadPaperPdfToolSourceResult = DownloadPaperPdfResult | DownloadPaperPdfClientResult;
-type DownloadPaperPdfFallbackResult = {
-  status: "manual_fallback_opened";
-  fallbackRequired: true;
-  articleUrl: string;
-  fallbackUrl: string;
-  profileDir?: string;
-  executablePath?: string;
-  failure: {
-    code: string;
-    message: string;
-  };
-};
-type DownloadPaperPdfToolResult =
-  | DownloadPaperPdfSuccessResult
-  | DownloadPaperPdfFallbackResult;
-type DownloadPaperPdfDependency = (options: {
-  workspaceDir: string;
-  url: string;
-}) => Promise<DownloadPaperPdfResult>;
 type OpenPaperPageForLoginResult = {
   url?: string;
   openedUrl: string;
@@ -146,33 +119,10 @@ type OpenPaperPageForLoginDependency = (options: {
   workspaceDir: string;
   url: string;
 }) => Promise<OpenPaperPageForLoginResult>;
-type DownloadPaperPdfTool = AgentTool<
-  typeof downloadPaperPdfParameters,
-  DownloadPaperPdfToolResult
->;
 type OpenPaperPageForLoginTool = AgentTool<
   typeof openPaperPageForLoginParameters,
   OpenPaperPageForLoginResult
 >;
-
-function isFallbackEligiblePaperDownloadError(error: unknown): error is Error & { code: string } {
-  if (!(error instanceof Error) || typeof (error as unknown as { code?: unknown }).code !== "string") {
-    return false;
-  }
-
-  return [
-    "browser_session_unavailable",
-    "manual_login_required",
-    "authorization_failed",
-    "pdf_not_found",
-    "download_failed"
-  ].includes((error as unknown as { code: string }).code);
-}
-
-async function pathLooksLikePdf(filePath: string): Promise<boolean> {
-  const handle = await readFile(filePath);
-  return handle.subarray(0, 5).toString("ascii") === "%PDF-";
-}
 
 function assertSupportedPaperPublisherUrl(input: string): void {
   const url = new URL(input);
@@ -186,10 +136,9 @@ function assertSupportedPaperPublisherUrl(input: string): void {
 export interface ToolDependencies {
   searchWeb?: typeof searchWeb;
   fetchWebPage?: typeof fetchWebPage;
-  searchArxiv?: typeof searchArxiv;
-  buildArxivPdfUrl?: typeof buildArxivPdfUrl;
+  searchPapers?: typeof searchPapers;
+  downloadPaper?: typeof downloadPaper;
   openPaperPageForLogin?: OpenPaperPageForLoginDependency;
-  downloadPaperPdf?: DownloadPaperPdfDependency;
   browserSessionFactory?: ReturnType<typeof resolveDefaultPaperBrowserSessionFactory>;
   paperBrowserManagerClient?: PaperBrowserManagerClient;
 }
@@ -204,10 +153,9 @@ export type AgentTools = [
   ReadFileTool,
   WebSearchTool,
   FetchUrlTool,
-  SearchArxivTool,
-  DownloadArxivPdfTool,
-  OpenPaperPageForLoginTool,
-  DownloadPaperPdfTool
+  SearchPapersTool,
+  DownloadPaperTool,
+  OpenPaperPageForLoginTool
 ] & ToolSetMetadata;
 
 export async function cleanupTools(tools: ReadonlyArray<AgentTool<any>> | undefined): Promise<void> {
@@ -228,13 +176,13 @@ export function createTools(workspaceDir: string, dependencies: ToolDependencies
   const resolvedWorkspaceDir = path.resolve(workspaceDir);
   const searchWebImpl = dependencies.searchWeb ?? searchWeb;
   const fetchWebPageImpl = dependencies.fetchWebPage ?? fetchWebPage;
-  const searchArxivImpl = dependencies.searchArxiv ?? searchArxiv;
-  const buildArxivPdfUrlImpl = dependencies.buildArxivPdfUrl ?? buildArxivPdfUrl;
+  const searchPapersImpl = dependencies.searchPapers ?? searchPapers;
   const browserSessionFactoryImpl =
     dependencies.browserSessionFactory ??
     resolveDefaultPaperBrowserSessionFactory({ workspaceDir: resolvedWorkspaceDir });
   let browserSessionPromise: Promise<PaperBrowserSession> | undefined;
   let paperManagerServerClose: (() => Promise<void>) | undefined;
+
   const getBrowserSession = async (): Promise<PaperBrowserSession> => {
     if (browserSessionPromise === undefined) {
       const sessionPromise = browserSessionFactoryImpl().catch((error: unknown) => {
@@ -249,6 +197,7 @@ export function createTools(workspaceDir: string, dependencies: ToolDependencies
 
     return browserSessionPromise;
   };
+
   const disposeBrowserSession = async (): Promise<void> => {
     if (browserSessionPromise === undefined) {
       return;
@@ -266,6 +215,7 @@ export function createTools(workspaceDir: string, dependencies: ToolDependencies
 
     await browserSession.dispose?.();
   };
+
   const isBrowserSessionAlive = async (browserSession: PaperBrowserSession): Promise<boolean> => {
     if (browserSession.isAlive === undefined) {
       return true;
@@ -277,6 +227,7 @@ export function createTools(workspaceDir: string, dependencies: ToolDependencies
       return false;
     }
   };
+
   const ensureLiveBrowserSession = async (): Promise<PaperBrowserSession> => {
     for (let attempt = 0; attempt < 2; attempt += 1) {
       const browserSession = await getBrowserSession();
@@ -289,6 +240,7 @@ export function createTools(workspaceDir: string, dependencies: ToolDependencies
 
     throw new Error("Paper browser session is unavailable.");
   };
+
   const spawnPaperManager = async () => {
     const manager = createPaperBrowserManagerServer({
       workspaceDir: resolvedWorkspaceDir,
@@ -339,6 +291,7 @@ export function createTools(workspaceDir: string, dependencies: ToolDependencies
       profileDir: getPaperBrowserProfileDir(resolvedWorkspaceDir)
     };
   };
+
   const paperBrowserManagerClient =
     dependencies.paperBrowserManagerClient ??
     createPaperBrowserManagerClient({
@@ -354,17 +307,46 @@ export function createTools(workspaceDir: string, dependencies: ToolDependencies
         await close();
       }
     });
-  const downloadPaperPdfImpl: (options: {
-    workspaceDir: string;
-    url: string;
-  }) => Promise<DownloadPaperPdfToolSourceResult> =
-    dependencies.downloadPaperPdf ??
-    (async (options: { workspaceDir: string; url: string }) =>
-      paperBrowserManagerClient.downloadPaperPdf(options));
+
+  const downloadPaperImpl =
+    dependencies.downloadPaper ??
+    ((options: Parameters<typeof downloadPaper>[0]) =>
+      downloadPaper({
+        ...options,
+        downloadPublisherPaperImpl: async (downloadOptions) => {
+          const result = await paperBrowserManagerClient.downloadPaperPdf(downloadOptions);
+          const canonicalId =
+            resolvePublisherCanonicalIdFromArticleUrl({
+              publisher: result.publisher,
+              articleUrl: result.finalArticleUrl
+            }) ??
+            resolvePublisherCanonicalId({
+              publisher: result.publisher,
+              url: result.finalPdfUrl
+            }) ??
+            resolvePublisherCanonicalId({
+              publisher: result.publisher,
+              url: result.articleUrl
+            });
+
+          if (!canonicalId) {
+            throw new Error("Unable to resolve a canonical paper identifier from the publisher article URL.");
+          }
+
+          return {
+            ...result,
+            canonicalId
+          };
+        },
+        openPublisherForLoginImpl: async (openOptions) =>
+          paperBrowserManagerClient.openArticle({ url: openOptions.url })
+      }));
+
   const openPaperPageForLoginImpl =
     dependencies.openPaperPageForLogin ??
     (async (options: { workspaceDir: string; url: string }) =>
       paperBrowserManagerClient.openArticle({ url: options.url }));
+
   let cleanupPromise: Promise<void> | undefined;
   const closePaperManager = async (): Promise<void> => {
     cleanupPromise ??= paperBrowserManagerClient.close();
@@ -439,13 +421,13 @@ export function createTools(workspaceDir: string, dependencies: ToolDependencies
     }
   };
 
-  const searchArxivTool: SearchArxivTool = {
-    name: "search_arxiv",
-    label: "Search arXiv",
-    description: "Searches arXiv and returns structured paper summaries.",
-    parameters: searchArxivParameters,
-    execute: async (_toolCallId: string, args: SearchArxivParameters) => {
-      const results = await searchArxivImpl({ query: args.query, maxResults: args.maxResults });
+  const searchPapersTool: SearchPapersTool = {
+    name: "search_papers",
+    label: "Search Papers",
+    description: "Searches papers and returns unified result summaries.",
+    parameters: searchPapersParameters,
+    execute: async (_toolCallId: string, args: SearchPapersParameters) => {
+      const results = await searchPapersImpl({ query: args.query, maxResults: args.maxResults });
       const maxResults = args.maxResults ?? 5;
 
       return {
@@ -455,17 +437,23 @@ export function createTools(workspaceDir: string, dependencies: ToolDependencies
     }
   };
 
-  const downloadArxivPdfTool: DownloadArxivPdfTool = {
-    name: "download_arxiv_pdf",
-    label: "Download arXiv PDF",
-    description: "Builds the canonical arXiv PDF URL for a paper identifier.",
-    parameters: downloadArxivPdfParameters,
-    execute: async (_toolCallId: string, args: DownloadArxivPdfParameters) => {
-      const pdfUrl = buildArxivPdfUrlImpl(args.id);
+  const downloadPaperTool: DownloadPaperTool = {
+    name: "download_paper",
+    label: "Download Paper",
+    description:
+      "Downloads a paper by id or URL through the unified paper manager, reusing the managed browser flow for supported publishers.",
+    parameters: downloadPaperParameters,
+    executionMode: "sequential",
+    execute: async (_toolCallId: string, args: DownloadPaperParameters) => {
+      const result = await downloadPaperImpl({
+        workspaceDir: resolvedWorkspaceDir,
+        ...(args.id ? { id: args.id } : {}),
+        ...(args.url ? { url: args.url } : {})
+      });
 
       return {
-        content: [{ type: "text", text: pdfUrl }],
-        details: { id: args.id, pdfUrl }
+        content: [{ type: "text", text: JSON.stringify(result) }],
+        details: result
       };
     }
   };
@@ -491,98 +479,14 @@ export function createTools(workspaceDir: string, dependencies: ToolDependencies
     }
   };
 
-  const downloadPaperPdfTool: DownloadPaperPdfTool = {
-    name: "download_paper_pdf",
-    label: "Download Paper PDF",
-    description:
-      "Downloads a paper PDF automatically from a supported publisher when possible, or opens the same paper in local Chrome or Edge for manual continuation when automatic download fails.",
-    parameters: downloadPaperPdfParameters,
-    executionMode: "sequential",
-    execute: async (_toolCallId: string, args: DownloadPaperPdfParameters) => {
-      try {
-        const automaticResult = await downloadPaperPdfImpl({
-          workspaceDir: resolvedWorkspaceDir,
-          url: args.url
-        });
-
-        if (!(await pathLooksLikePdf(automaticResult.path))) {
-          const fallback = await openPaperPageForLoginImpl({
-            workspaceDir: resolvedWorkspaceDir,
-            url: args.url
-          });
-
-          const fallbackResult: DownloadPaperPdfFallbackResult = {
-            status: "manual_fallback_opened",
-            fallbackRequired: true,
-            articleUrl: args.url,
-            fallbackUrl: fallback.openedUrl,
-            profileDir: fallback.profileDir,
-            executablePath: fallback.executablePath,
-            failure: {
-              code: "download_failed",
-              message: `Downloaded file is not a valid PDF: ${automaticResult.path}`
-            }
-          };
-
-          return {
-            content: [{ type: "text", text: JSON.stringify(fallbackResult) }],
-            details: fallbackResult
-          };
-        }
-
-        const successResult: DownloadPaperPdfSuccessResult =
-          "status" in automaticResult
-            ? automaticResult
-            : {
-                status: "downloaded",
-                ...automaticResult
-              };
-
-        return {
-          content: [{ type: "text", text: JSON.stringify(successResult) }],
-          details: successResult
-        };
-      } catch (error) {
-        if (!isFallbackEligiblePaperDownloadError(error)) {
-          throw error;
-        }
-
-        const fallback = await openPaperPageForLoginImpl({
-          workspaceDir: resolvedWorkspaceDir,
-          url: args.url
-        });
-
-        const fallbackResult: DownloadPaperPdfFallbackResult = {
-          status: "manual_fallback_opened",
-          fallbackRequired: true,
-          articleUrl: args.url,
-          fallbackUrl: fallback.openedUrl,
-          profileDir: fallback.profileDir,
-          executablePath: fallback.executablePath,
-          failure: {
-            code: error.code,
-            message: error.message
-          }
-        };
-
-        return {
-          content: [{ type: "text", text: JSON.stringify(fallbackResult) }],
-          details: fallbackResult
-        };
-      }
-    }
-  };
-
-
   const tools = [
     getTimeTool,
     readFileTool,
     webSearchTool,
     fetchUrlTool,
-    searchArxivTool,
-    downloadArxivPdfTool,
-    openPaperPageForLoginTool,
-    downloadPaperPdfTool
+    searchPapersTool,
+    downloadPaperTool,
+    openPaperPageForLoginTool
   ] as unknown as AgentTools;
 
   Object.defineProperties(tools, {
@@ -600,4 +504,3 @@ export function createTools(workspaceDir: string, dependencies: ToolDependencies
 
   return tools;
 }
-
