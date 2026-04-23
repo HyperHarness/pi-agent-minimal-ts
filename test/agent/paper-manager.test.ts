@@ -57,7 +57,7 @@ test("searchPapers merges duplicate titles and prefers supported publisher sourc
       return [
         createWebResult({
           title: " Unified  Paper Search ",
-          url: "https://www.science.org/doi/10.1126/science.adz8659",
+          url: "https://www.science.org/doi/pdf/10.1126/science.adz8659",
           snippet: "science summary"
         }),
         createWebResult({
@@ -79,12 +79,12 @@ test("searchPapers merges duplicate titles and prefers supported publisher sourc
     primarySource: "science",
     primaryAction: "authorized_download",
     sources: [
-      {
-        source: "science",
-        canonicalId: "10.1126/science.adz8659",
-        articleUrl: "https://www.science.org/doi/10.1126/science.adz8659",
-        action: "authorized_download"
-      },
+        {
+          source: "science",
+          canonicalId: "10.1126/science.adz8659",
+          articleUrl: "https://www.science.org/doi/pdf/10.1126/science.adz8659",
+          action: "authorized_download"
+        },
       {
         source: "arxiv",
         canonicalId: "2401.01234",

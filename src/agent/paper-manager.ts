@@ -138,7 +138,15 @@ function extractSupportedCanonicalId(source: SupportedPaperSource, url: URL): st
       return null;
     }
 
-    return decodeURIComponent(parts.slice(1).join("/").replace(/\.pdf$/i, ""));
+    const doiStartIndex =
+      parts[1] === "pdf" || parts[1] === "full" || parts[1] === "abs" || parts[1] === "epdf"
+        ? 2
+        : 1;
+    if (doiStartIndex >= parts.length) {
+      return null;
+    }
+
+    return decodeURIComponent(parts.slice(doiStartIndex).join("/").replace(/\.pdf$/i, ""));
   }
 
   if (source === "nature") {
