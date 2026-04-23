@@ -12,6 +12,15 @@ function sanitizeFilenameComponent(value: string): string {
     .replace(/^[-. ]+|[-. ]+$/g, "");
 }
 
+function sanitizeCanonicalId(value: string): string {
+  const sanitizedValue = sanitizeFilenameComponent(value);
+  if (!sanitizedValue) {
+    throw new Error("canonicalId must contain at least one filename-safe character.");
+  }
+
+  return sanitizedValue;
+}
+
 function getRecordIndexDir(workspaceDir: string): string {
   return path.join(workspaceDir, "downloads", "papers", "index");
 }
@@ -27,9 +36,7 @@ export function resolvePaperPdfPath(input: {
   source: Exclude<PaperSource, "external">;
   canonicalId: string;
 }): string {
-  const filename = `${sanitizeFilenameComponent(input.source)}-${sanitizeFilenameComponent(
-    input.canonicalId
-  )}.pdf`;
+  const filename = `${sanitizeFilenameComponent(input.source)}-${sanitizeCanonicalId(input.canonicalId)}.pdf`;
   return path.join(input.workspaceDir, "downloads", "papers", filename);
 }
 
@@ -42,12 +49,12 @@ export function resolvePaperRecordPath(input: {
   if (input.source !== "external" && !input.canonicalId) {
     throw new Error("canonicalId is required for supported paper sources.");
   }
-  const canonicalId = input.canonicalId!;
+  const canonicalId = input.canonicalId ? sanitizeCanonicalId(input.canonicalId) : undefined;
 
   const filename =
     input.source === "external"
       ? getExternalRecordFilename(input.articleUrl)
-      : `${sanitizeFilenameComponent(input.source)}-${sanitizeFilenameComponent(canonicalId)}.json`;
+      : `${sanitizeFilenameComponent(input.source)}-${canonicalId}.json`;
 
   return path.join(getRecordIndexDir(input.workspaceDir), filename);
 }

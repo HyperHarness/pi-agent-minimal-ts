@@ -86,6 +86,18 @@ test("resolvePaperPdfPath uses source-specific filenames", async () => {
   }
 });
 
+test("resolvePaperPdfPath rejects canonical ids that sanitize to an empty filename", () => {
+  assert.throws(
+    () =>
+      resolvePaperPdfPath({
+        workspaceDir: "C:\\workspace",
+        source: "science",
+        canonicalId: "   "
+      }),
+    /canonicalId/i
+  );
+});
+
 test("resolvePaperRecordPath uses canonical ids for supported sources and hostname hashes for external records", async () => {
   const workspaceDir = await mkdtemp(path.join(os.tmpdir(), "paper-store-"));
 
@@ -120,6 +132,19 @@ test("resolvePaperRecordPath uses canonical ids for supported sources and hostna
   } finally {
     await rm(workspaceDir, { recursive: true, force: true });
   }
+});
+
+test("resolvePaperRecordPath rejects canonical ids that sanitize to an empty filename", () => {
+  assert.throws(
+    () =>
+      resolvePaperRecordPath({
+        workspaceDir: "C:\\workspace",
+        source: "science",
+        canonicalId: "   ",
+        articleUrl: "https://www.science.org/doi/10.1126/science.adz8659"
+      }),
+    /canonicalId/i
+  );
 });
 
 test("writePaperRecord persists external_opened records under downloads/papers/index", async () => {
