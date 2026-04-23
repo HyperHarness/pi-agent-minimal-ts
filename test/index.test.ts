@@ -20,6 +20,14 @@ test("public entrypoint re-exports the reusable library APIs", () => {
   assert.equal(publicApi.main, main);
   assert.equal(publicApi.resolveInitialModel, resolveInitialModel);
   assert.equal(publicApi.createTools, createTools);
+  assert.equal(typeof publicApi.createPaperBrowserManagerClient, "function");
+  assert.equal(typeof publicApi.discoverPaperBrowserManagerMetadata, "function");
+  assert.equal(typeof publicApi.readPaperBrowserManagerMetadata, "function");
+  assert.equal(typeof publicApi.writePaperBrowserManagerMetadata, "function");
+  assert.equal(typeof publicApi.clearPaperBrowserManagerMetadata, "function");
+  assert.equal(typeof publicApi.isPaperBrowserManagerMetadataStale, "function");
+  assert.equal(typeof publicApi.createPaperBrowserManagerServer, "function");
+  assert.equal(typeof publicApi.startPaperBrowserManagerHttpServer, "function");
 });
 
 test("package.json exposes the library root export for publishing", async () => {

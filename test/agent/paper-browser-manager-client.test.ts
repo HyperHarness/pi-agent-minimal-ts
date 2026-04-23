@@ -394,3 +394,67 @@ test("paper browser manager client closes a spawned manager when metadata persis
 
   assert.equal(disposeCalls, 1);
 });
+
+test("paper browser manager client uses the spawned manager dispose hook for client close", async () => {
+  let returnedDisposeCalls = 0;
+  let fallbackDisposeCalls = 0;
+  const client = createPaperBrowserManagerClient({
+    workspaceDir: "D:\\Codex\\pi-agent-minimal-ts",
+    readMetadata: async () => null,
+    writeMetadata: async () => {},
+    clearMetadata: async () => {},
+    spawnManager: async () => ({
+      metadata: {
+        pid: 4245,
+        startedAt: "2026-04-23T12:03:00.000Z",
+        endpoint: "http://127.0.0.1:43127",
+        profileDir: "D:\\Codex\\pi-agent-minimal-ts\\.browser-profile\\paper-access"
+      },
+      dispose: async () => {
+        returnedDisposeCalls += 1;
+      }
+    }),
+    disposeManager: async () => {
+      fallbackDisposeCalls += 1;
+    }
+  });
+
+  assert.equal(await client.ensureManagerEndpoint(), "http://127.0.0.1:43127");
+  await client.close();
+  await client.close();
+
+  assert.equal(returnedDisposeCalls, 1);
+  assert.equal(fallbackDisposeCalls, 0);
+});
+
+test("paper browser manager client prefers the spawned manager dispose hook when metadata persistence fails", async () => {
+  let returnedDisposeCalls = 0;
+  let fallbackDisposeCalls = 0;
+  const client = createPaperBrowserManagerClient({
+    workspaceDir: "D:\\Codex\\pi-agent-minimal-ts",
+    readMetadata: async () => null,
+    writeMetadata: async () => {
+      throw new Error("disk full");
+    },
+    clearMetadata: async () => {},
+    spawnManager: async () => ({
+      metadata: {
+        pid: 4344,
+        startedAt: "2026-04-23T12:06:00.000Z",
+        endpoint: "http://127.0.0.1:43128",
+        profileDir: "D:\\Codex\\pi-agent-minimal-ts\\.browser-profile\\paper-access"
+      },
+      close: async () => {
+        returnedDisposeCalls += 1;
+      }
+    }),
+    disposeManager: async () => {
+      fallbackDisposeCalls += 1;
+    }
+  });
+
+  await assert.rejects(() => client.ensureManagerEndpoint(), /disk full/);
+
+  assert.equal(returnedDisposeCalls, 1);
+  assert.equal(fallbackDisposeCalls, 0);
+});

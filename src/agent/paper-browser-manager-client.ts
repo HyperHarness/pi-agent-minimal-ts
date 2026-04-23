@@ -19,7 +19,16 @@ type ReadMetadata = typeof readPaperBrowserManagerMetadata;
 type WriteMetadata = typeof writePaperBrowserManagerMetadata;
 type ClearMetadata = typeof clearPaperBrowserManagerMetadata;
 type IsMetadataStale = typeof isPaperBrowserManagerMetadataStale;
-type SpawnManager = () => Promise<PaperBrowserManagerMetadata>;
+type ManagerCleanup = () => Promise<void>;
+
+export interface SpawnedPaperBrowserManager {
+  metadata: PaperBrowserManagerMetadata;
+  dispose?: ManagerCleanup;
+  close?: ManagerCleanup;
+}
+
+export type PaperBrowserManagerSpawnResult = PaperBrowserManagerMetadata | SpawnedPaperBrowserManager;
+type SpawnManager = () => Promise<PaperBrowserManagerSpawnResult>;
 
 class PaperBrowserManagerRemoteError extends Error {
   constructor(
@@ -34,6 +43,47 @@ class PaperBrowserManagerRemoteError extends Error {
 
 function isRecord(value: unknown): value is Record<string, unknown> {
   return typeof value === "object" && value !== null && !Array.isArray(value);
+}
+
+function isPaperBrowserManagerMetadata(value: unknown): value is PaperBrowserManagerMetadata {
+  if (!isRecord(value)) {
+    return false;
+  }
+
+  return (
+    typeof value.pid === "number" &&
+    typeof value.startedAt === "string" &&
+    typeof value.endpoint === "string" &&
+    typeof value.profileDir === "string"
+  );
+}
+
+function isSpawnedPaperBrowserManager(value: unknown): value is SpawnedPaperBrowserManager {
+  if (!isRecord(value)) {
+    return false;
+  }
+
+  return (
+    isPaperBrowserManagerMetadata(value.metadata) &&
+    (value.dispose === undefined || typeof value.dispose === "function") &&
+    (value.close === undefined || typeof value.close === "function")
+  );
+}
+
+function getSpawnResultCleanup(value: PaperBrowserManagerSpawnResult): ManagerCleanup | undefined {
+  if (!isSpawnedPaperBrowserManager(value)) {
+    return undefined;
+  }
+
+  return value.dispose ?? value.close;
+}
+
+function getSpawnResultMetadata(value: PaperBrowserManagerSpawnResult): PaperBrowserManagerMetadata {
+  if (isSpawnedPaperBrowserManager(value)) {
+    return value.metadata;
+  }
+
+  return value;
 }
 
 function toRemoteError(payload: unknown, fallbackMessage: string): Error {
@@ -79,7 +129,7 @@ export interface PaperBrowserManagerClientOptions {
   isMetadataStale?: IsMetadataStale;
   fetchJson?: FetchJson;
   spawnManager?: SpawnManager;
-  disposeManager?: () => Promise<void>;
+  disposeManager?: ManagerCleanup;
 }
 
 function isHealthyManagerResponse(value: unknown): value is PaperBrowserManagerHealthResponse {
@@ -149,13 +199,21 @@ export function createPaperBrowserManagerClient(
   const spawnManager = options.spawnManager;
   let resolvedEndpointPromise: Promise<string> | undefined;
   let resolvedMetadata: PaperBrowserManagerMetadata | undefined;
+  let activeManagerCleanup: ManagerCleanup | undefined;
   let closePromise: Promise<void> | undefined;
 
-  async function disposeSpawnedManagerAfterFailedPersistence(error: unknown): Promise<never> {
+  async function cleanupManager(cleanup?: ManagerCleanup): Promise<void> {
+    await cleanup?.();
+  }
+
+  async function disposeSpawnedManagerAfterFailedPersistence(
+    error: unknown,
+    cleanup: ManagerCleanup | undefined
+  ): Promise<never> {
     resolvedMetadata = undefined;
 
     try {
-      await options.disposeManager?.();
+      await cleanupManager(cleanup ?? options.disposeManager);
     } catch (cleanupError) {
       throw new AggregateError(
         [error, cleanupError],
@@ -192,15 +250,18 @@ export function createPaperBrowserManagerClient(
       throw new Error("No paper browser manager is available.");
     }
 
-    const startedMetadata = await spawnManager();
+    const spawnResult = await spawnManager();
+    const startedMetadata = getSpawnResultMetadata(spawnResult);
+    const spawnedManagerCleanup = getSpawnResultCleanup(spawnResult);
 
     try {
       await writeMetadata({ workspaceDir: options.workspaceDir, metadata: startedMetadata });
     } catch (error) {
-      return disposeSpawnedManagerAfterFailedPersistence(error);
+      return disposeSpawnedManagerAfterFailedPersistence(error, spawnedManagerCleanup);
     }
 
     resolvedMetadata = startedMetadata;
+    activeManagerCleanup = spawnedManagerCleanup;
     return startedMetadata.endpoint;
   }
 
@@ -244,9 +305,11 @@ export function createPaperBrowserManagerClient(
     }
 
     const closingPromise = (async () => {
+      const cleanup = activeManagerCleanup ?? options.disposeManager;
       resolvedEndpointPromise = undefined;
       resolvedMetadata = undefined;
-      await options.disposeManager?.();
+      activeManagerCleanup = undefined;
+      await cleanupManager(cleanup);
     })();
 
     closePromise = closingPromise;

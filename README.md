@@ -32,7 +32,7 @@ This lets Playwright install its managed browser during dependency setup. If you
 - set `PI_PAPER_CHROME_EXECUTABLE` to an existing local Chrome/Chromium executable
 - install a Playwright browser separately, for example `npx playwright install chromium`
 
-The paper-browser manager is the primary model for both manual review and automatic downloads; it reuses one managed browser session instead of treating direct local browser launch as the default path.
+The paper-browser manager is the intended reuse path for both manual review and automatic downloads. It aims to reuse a managed browser session instead of treating direct local browser launch as the default path.
 
 ## Run
 
@@ -68,7 +68,7 @@ Exit the REPL with `exit` or `quit`.
 
 ## Paper Browser Manager
 
-The paper tools share one managed browser session per workspace. The manager owns the shared profile at `.browser-profile/paper-access/` and stores its localhost metadata at `.browser-profile/paper-access-manager.json`.
+The paper tools are designed to reuse a managed browser session per workspace when one is available. The manager owns the shared profile at `.browser-profile/paper-access/` and stores its localhost metadata at `.browser-profile/paper-access-manager.json`.
 
 Supported publishers:
 
@@ -82,7 +82,7 @@ Use the normal install path if you want the manager-backed paper tools to start 
 - or install a browser separately, for example `npx playwright install chromium`
 - or set `PI_PAPER_CHROME_EXECUTABLE` to an existing local Chrome/Chromium executable before starting the agent
 
-`open_paper_page_for_login` and `download_paper_pdf` both reuse that same managed browser session. If the saved manager metadata points to a dead process or an unreachable localhost endpoint, the client clears the stale metadata automatically and starts a fresh manager.
+`open_paper_page_for_login` and `download_paper_pdf` both try to reuse that same managed browser session. Stale manager metadata is recovered automatically: if the saved metadata points to a dead process or an unreachable localhost endpoint, the client clears it and starts a fresh manager. This is best-effort coordination rather than a hard lock against concurrent cold starts.
 
 `open_paper_page_for_login` opens the article page in the managed browser session for manual login or verification and stops there.
 
