@@ -9,6 +9,7 @@ import {
 } from "./browser-session.js";
 import { buildArxivPdfUrl, searchArxiv } from "./arxiv.js";
 import { downloadPaperPdf } from "./paper-download.js";
+import { getPublisherAdapter } from "./publisher-adapters/index.js";
 import { fetchWebPage } from "./web-fetch.js";
 import { searchWeb } from "./web-search.js";
 
@@ -110,6 +111,24 @@ type DownloadArxivPdfTool = AgentTool<
 type DownloadPaperPdfResult = Awaited<
   ReturnType<typeof downloadPaperPdf>
 >;
+type DownloadPaperPdfSuccessResult = DownloadPaperPdfResult & {
+  status: "downloaded";
+};
+type DownloadPaperPdfFallbackResult = {
+  status: "manual_fallback_opened";
+  fallbackRequired: true;
+  articleUrl: string;
+  fallbackUrl: string;
+  profileDir: string;
+  executablePath: string;
+  failure: {
+    code: string;
+    message: string;
+  };
+};
+type DownloadPaperPdfToolResult =
+  | DownloadPaperPdfSuccessResult
+  | DownloadPaperPdfFallbackResult;
 type DownloadPaperPdfDependency = (options: {
   workspaceDir: string;
   url: string;
@@ -123,12 +142,40 @@ type OpenPaperPageForLoginDependency = (options: {
 }) => Promise<OpenPaperPageForLoginResult>;
 type DownloadPaperPdfTool = AgentTool<
   typeof downloadPaperPdfParameters,
-  DownloadPaperPdfResult
+  DownloadPaperPdfToolResult
 >;
 type OpenPaperPageForLoginTool = AgentTool<
   typeof openPaperPageForLoginParameters,
   OpenPaperPageForLoginResult
 >;
+
+function isFallbackEligiblePaperDownloadError(error: unknown): error is Error & { code: string } {
+  if (!(error instanceof Error) || typeof (error as unknown as { code?: unknown }).code !== "string") {
+    return false;
+  }
+
+  return [
+    "browser_session_unavailable",
+    "manual_login_required",
+    "authorization_failed",
+    "pdf_not_found",
+    "download_failed"
+  ].includes((error as unknown as { code: string }).code);
+}
+
+async function pathLooksLikePdf(filePath: string): Promise<boolean> {
+  const handle = await readFile(filePath);
+  return handle.subarray(0, 5).toString("ascii") === "%PDF-";
+}
+
+function assertSupportedPaperPublisherUrl(input: string): void {
+  const url = new URL(input);
+  if (url.protocol !== "http:" && url.protocol !== "https:") {
+    throw new Error("Paper publisher URLs must use http or https.");
+  }
+
+  getPublisherAdapter(url.toString());
+}
 
 export interface ToolDependencies {
   searchWeb?: typeof searchWeb;
@@ -183,6 +230,23 @@ export function createTools(workspaceDir: string, dependencies: ToolDependencies
   const getBrowserSession = async (): Promise<PaperBrowserSession> => {
     browserSessionPromise ??= browserSessionFactoryImpl();
     return browserSessionPromise;
+  };
+  const disposeCachedBrowserSession = async (): Promise<void> => {
+    if (browserSessionPromise === undefined) {
+      return;
+    }
+
+    const cachedBrowserSessionPromise = browserSessionPromise;
+    browserSessionPromise = undefined;
+
+    let browserSession: PaperBrowserSession;
+    try {
+      browserSession = await cachedBrowserSessionPromise;
+    } catch {
+      return;
+    }
+
+    await browserSession.dispose?.();
   };
   const downloadPaperPdfImpl =
     dependencies.downloadPaperPdf ??
@@ -306,6 +370,7 @@ export function createTools(workspaceDir: string, dependencies: ToolDependencies
     parameters: openPaperPageForLoginParameters,
     executionMode: "sequential",
     execute: async (_toolCallId: string, args: OpenPaperPageForLoginParameters) => {
+      assertSupportedPaperPublisherUrl(args.url);
       const result = await openPaperPageForLoginImpl({
         workspaceDir: resolvedWorkspaceDir,
         url: args.url
@@ -322,19 +387,80 @@ export function createTools(workspaceDir: string, dependencies: ToolDependencies
     name: "download_paper_pdf",
     label: "Download Paper PDF",
     description:
-      "Uses an authorized Chrome browser session to download a paper PDF from a supported publisher.",
+      "Downloads a paper PDF automatically from a supported publisher when possible, or opens the same paper in local Chrome or Edge for manual continuation when automatic download fails and the browser launch succeeds.",
     parameters: downloadPaperPdfParameters,
     executionMode: "sequential",
     execute: async (_toolCallId: string, args: DownloadPaperPdfParameters) => {
-      const result = await downloadPaperPdfImpl({
-        workspaceDir: resolvedWorkspaceDir,
-        url: args.url
-      });
+      try {
+        const automaticResult = await downloadPaperPdfImpl({
+          workspaceDir: resolvedWorkspaceDir,
+          url: args.url
+        });
 
-      return {
-        content: [{ type: "text", text: JSON.stringify(result) }],
-        details: result
-      };
+        if (!(await pathLooksLikePdf(automaticResult.path))) {
+          await disposeCachedBrowserSession();
+          const fallback = await openPaperPageForLoginImpl({
+            workspaceDir: resolvedWorkspaceDir,
+            url: args.url
+          });
+
+          const fallbackResult: DownloadPaperPdfFallbackResult = {
+            status: "manual_fallback_opened",
+            fallbackRequired: true,
+            articleUrl: args.url,
+            fallbackUrl: fallback.openedUrl,
+            profileDir: fallback.profileDir,
+            executablePath: fallback.executablePath,
+            failure: {
+              code: "download_failed",
+              message: `Downloaded file is not a valid PDF: ${automaticResult.path}`
+            }
+          };
+
+          return {
+            content: [{ type: "text", text: JSON.stringify(fallbackResult) }],
+            details: fallbackResult
+          };
+        }
+
+        const successResult: DownloadPaperPdfSuccessResult = {
+          status: "downloaded",
+          ...automaticResult
+        };
+
+        return {
+          content: [{ type: "text", text: JSON.stringify(successResult) }],
+          details: successResult
+        };
+      } catch (error) {
+        if (!isFallbackEligiblePaperDownloadError(error)) {
+          throw error;
+        }
+
+        await disposeCachedBrowserSession();
+        const fallback = await openPaperPageForLoginImpl({
+          workspaceDir: resolvedWorkspaceDir,
+          url: args.url
+        });
+
+        const fallbackResult: DownloadPaperPdfFallbackResult = {
+          status: "manual_fallback_opened",
+          fallbackRequired: true,
+          articleUrl: args.url,
+          fallbackUrl: fallback.openedUrl,
+          profileDir: fallback.profileDir,
+          executablePath: fallback.executablePath,
+          failure: {
+            code: error.code,
+            message: error.message
+          }
+        };
+
+        return {
+          content: [{ type: "text", text: JSON.stringify(fallbackResult) }],
+          details: fallbackResult
+        };
+      }
     }
   };
 
@@ -355,17 +481,7 @@ export function createTools(workspaceDir: string, dependencies: ToolDependencies
       enumerable: false,
       value: async () => {
         cleanupPromise ??= (async () => {
-          if (browserSessionPromise === undefined) {
-            return;
-          }
-
-          let browserSession: PaperBrowserSession;
-          try {
-            browserSession = await browserSessionPromise;
-          } catch {
-            return;
-          }
-          await browserSession.dispose?.();
+          await disposeCachedBrowserSession();
         })();
         await cleanupPromise;
       }

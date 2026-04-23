@@ -57,6 +57,18 @@ test("resolveSystemChromeExecutablePath prefers the configured Chrome executable
   assert.equal(executablePath, "C:\\Custom\\Chrome\\chrome.exe");
 });
 
+test("resolveSystemChromeExecutablePath discovers the first installed system browser", () => {
+  const existingPaths = new Set([
+    "C:\\Program Files\\Microsoft\\Edge\\Application\\msedge.exe"
+  ]);
+
+  const executablePath = resolveSystemChromeExecutablePath({
+    platform: "win32",
+    fileExists: (candidatePath) => existingPaths.has(candidatePath)
+  });
+
+  assert.equal(executablePath, "C:\\Program Files\\Microsoft\\Edge\\Application\\msedge.exe");
+});
 test("openPageInSystemChromeForManualLogin launches Chrome with the shared profile", async () => {
   const spawned: Array<{
     executablePath: string;
@@ -68,9 +80,9 @@ test("openPageInSystemChromeForManualLogin launches Chrome with the shared profi
   const result = await openPageInSystemChromeForManualLogin({
     workspaceDir: "D:\\Codex\\pi-agent-minimal-ts",
     url: "https://www.science.org/doi/10.1126/science.adz8659",
-    env: {
-      PI_PAPER_CHROME_EXECUTABLE: "C:\\Program Files\\Google\\Chrome\\Application\\chrome.exe"
-    },
+    fileExists: (candidatePath) =>
+      candidatePath === "C:\\Program Files\\Google\\Chrome\\Application\\chrome.exe",
+    platform: "win32",
     spawnImpl: ((
       executablePath: string,
       args: readonly string[],
@@ -118,4 +130,17 @@ test("openPageInSystemChromeForManualLogin launches Chrome with the shared profi
     profileDir: path.join("D:\\Codex\\pi-agent-minimal-ts", ".browser-profile", "paper-access"),
     executablePath: "C:\\Program Files\\Google\\Chrome\\Application\\chrome.exe"
   });
+});
+
+test("openPageInSystemChromeForManualLogin rejects when no local browser is available", async () => {
+  await assert.rejects(
+    () =>
+      openPageInSystemChromeForManualLogin({
+        workspaceDir: "D:\\Codex\\pi-agent-minimal-ts",
+        url: "https://www.science.org/doi/10.1126/science.adz8659",
+        fileExists: () => false,
+        platform: "win32"
+      }),
+    /Unable to locate a local Chrome or Edge executable/i
+  );
 });
