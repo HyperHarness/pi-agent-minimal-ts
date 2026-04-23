@@ -1,6 +1,6 @@
 import test from "node:test";
 import assert from "node:assert/strict";
-import { mkdtemp, readFile, rm } from "node:fs/promises";
+import { mkdtemp, readFile, rm, writeFile } from "node:fs/promises";
 import os from "node:os";
 import path from "node:path";
 import { downloadPaper, searchPapers } from "../../src/agent/paper-manager.js";
@@ -371,6 +371,39 @@ test("downloadPaper still opens supported hosts for manual fallback when canonic
     assert.equal(result.fallbackUrl, articleUrl);
     assert.equal(result.failure.code, "manual_login_required");
     assert.equal(path.basename(result.recordPath).startsWith("nature-www.nature.com-"), true);
+  } finally {
+    await rm(workspaceDir, { recursive: true, force: true });
+  }
+});
+
+test("downloadPaper keeps successful publisher downloads as downloaded when the canonical id comes from the resolved PDF URL", async () => {
+  const workspaceDir = await mkdtemp(path.join(os.tmpdir(), "paper-manager-"));
+  const articleUrl = "https://www.nature.com/content/preview";
+
+  try {
+    const result = await downloadPaper({
+      workspaceDir,
+      url: articleUrl,
+      browserSessionFactory: async () => ({
+        openArticlePage: async () => ({
+          finalArticleUrl: articleUrl,
+          html: '<a href="/articles/s41586-024-12345-6.pdf">PDF</a>',
+          authorized: true
+        }),
+        openPageForManualLogin: async () => ({
+          openedUrl: articleUrl
+        }),
+        downloadPdf: async (_url: string, destinationPath: string) => {
+          await writeFile(destinationPath, Buffer.from("%PDF-1.7\nnature\n", "utf8"));
+        }
+      })
+    });
+
+    assert.equal(result.status, "downloaded");
+    assert.equal(result.source, "nature");
+    assert.equal(result.canonicalId, "s41586-024-12345-6");
+    assert.equal(result.articleUrl, articleUrl);
+    assert.equal(path.basename(result.path), "nature-s41586-024-12345-6.pdf");
   } finally {
     await rm(workspaceDir, { recursive: true, force: true });
   }

@@ -223,6 +223,10 @@ export async function downloadPublisherPaper(options: {
     }) ??
     resolvePublisherCanonicalId({
       publisher: result.publisher,
+      url: result.finalPdfUrl
+    }) ??
+    resolvePublisherCanonicalId({
+      publisher: result.publisher,
       url: options.url
     });
 
