@@ -48,7 +48,7 @@ type ClassifiedPaperUrl =
     }
   | {
       source: SupportedPaperSource;
-      canonicalId: string;
+      canonicalId?: string;
       articleUrl: string;
       action: "authorized_download";
     }
@@ -218,43 +218,35 @@ function classifySupportedSource(url: URL): Extract<
 > | null {
   if (url.hostname === "www.science.org" || url.hostname === "science.org") {
     const canonicalId = extractSupportedCanonicalId("science", url);
-    if (!canonicalId) {
-      return null;
-    }
-
     return {
       source: "science",
       action: "authorized_download",
-      canonicalId,
-      articleUrl: url.toString()
+      articleUrl: url.toString(),
+      ...(canonicalId ? { canonicalId } : {})
     };
   }
 
   if (url.hostname === "www.nature.com" || url.hostname === "nature.com") {
     const canonicalId = extractSupportedCanonicalId("nature", url);
-    if (!canonicalId) {
-      return null;
-    }
-
     return {
       source: "nature",
       action: "authorized_download",
-      canonicalId,
-      articleUrl: url.toString()
+      articleUrl: url.toString(),
+      ...(canonicalId ? { canonicalId } : {})
     };
   }
 
-  if (url.hostname === "journals.aps.org" || url.hostname === "aps.org") {
+  if (
+    url.hostname === "journals.aps.org" ||
+    url.hostname === "www.aps.org" ||
+    url.hostname === "aps.org"
+  ) {
     const canonicalId = extractSupportedCanonicalId("aps", url);
-    if (!canonicalId) {
-      return null;
-    }
-
     return {
       source: "aps",
       action: "authorized_download",
-      canonicalId,
-      articleUrl: url.toString()
+      articleUrl: url.toString(),
+      ...(canonicalId ? { canonicalId } : {})
     };
   }
 
@@ -291,10 +283,10 @@ function classifyWebSearchResult(
   return {
     source: classification.source,
     action: classification.action,
-    canonicalId: classification.canonicalId,
     articleUrl: classification.articleUrl,
     rank: SUPPORTED_SOURCE_PRIORITY[classification.source],
-    order
+    order,
+    ...(classification.canonicalId ? { canonicalId: classification.canonicalId } : {})
   };
 }
 

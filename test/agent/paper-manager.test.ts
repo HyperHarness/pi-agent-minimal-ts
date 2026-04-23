@@ -131,3 +131,34 @@ test("searchPapers maps unsupported hosts to external open_url_only results", as
     } satisfies PaperSearchResult
   ]);
 });
+
+test("searchPapers keeps supported hosts classified by hostname even when the path shape is unknown", async () => {
+  const results = await searchPapers({
+    query: "hostname classified paper",
+    searchArxivImpl: async () => [],
+    searchWebImpl: async () => [
+      createWebResult({
+        title: "Hostname Classified Paper",
+        url: "https://www.nature.com/content/preview",
+        snippet: "nature summary"
+      })
+    ]
+  });
+
+  assert.deepEqual(results, [
+    {
+      title: "Hostname Classified Paper",
+      authors: [],
+      summary: "nature summary",
+      primarySource: "nature",
+      primaryAction: "authorized_download",
+      sources: [
+        {
+          source: "nature",
+          articleUrl: "https://www.nature.com/content/preview",
+          action: "authorized_download"
+        }
+      ]
+    } satisfies PaperSearchResult
+  ]);
+});

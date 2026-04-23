@@ -20,7 +20,7 @@ export type PaperSearchSource =
   | {
       source: SupportedPaperSource;
       action: "authorized_download";
-      canonicalId: string;
+      canonicalId?: string;
       articleUrl: string;
       pdfUrl?: string;
     }
