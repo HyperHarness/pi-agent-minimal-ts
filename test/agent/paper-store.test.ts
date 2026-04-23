@@ -28,12 +28,19 @@ const supportedSearchSource = {
   action: "authorized_download"
 } satisfies PaperSearchSource;
 
-const supportedPaperRecord = {
+const invalidExternalSearchSource = {
+  source: "external",
+  canonicalId: "2401.01234",
+  articleUrl: "https://example.com/paper",
+  action: "open_url_only"
+  // @ts-expect-error external search sources must not expose supported-source identifiers
+} satisfies PaperSearchSource;
+
+const manualFallbackPaperRecord = {
   source: "science",
   canonicalId: "10.1126/science.adz8659",
   articleUrl: "https://www.science.org/doi/10.1126/science.adz8659",
-  pdfUrl: "https://www.science.org/doi/pdf/10.1126/science.adz8659",
-  downloadPath: "downloads/papers/science-10.1126-science.adz8659.pdf",
+  openedUrl: "https://www.science.org/doi/10.1126/science.adz8659",
   recordedAt: "2026-04-23T14:00:00.000Z",
   handlingMethod: "browser_session",
   status: "manual_fallback_opened",
@@ -41,6 +48,27 @@ const supportedPaperRecord = {
     code: "PAYWALL",
     message: "Browser session required."
   }
+} satisfies PaperRecord;
+
+const invalidDownloadedPaperRecord = {
+  source: "science",
+  canonicalId: "10.1126/science.adz8659",
+  articleUrl: "https://www.science.org/doi/10.1126/science.adz8659",
+  recordedAt: "2026-04-23T14:00:00.000Z",
+  handlingMethod: "browser_session",
+  status: "downloaded"
+  // @ts-expect-error downloaded records require a downloadPath and pdfUrl
+} satisfies PaperRecord;
+
+const invalidExternalPaperRecord = {
+  source: "external",
+  articleUrl: "https://example.com/paper",
+  openedUrl: "https://example.com/paper",
+  downloadPath: "downloads/papers/external.pdf",
+  recordedAt: "2026-04-23T14:00:00.000Z",
+  handlingMethod: "system_browser_open",
+  status: "external_opened"
+  // @ts-expect-error external-opened records must not carry download metadata
 } satisfies PaperRecord;
 
 const manualFallbackResult = {
@@ -180,7 +208,7 @@ test("writePaperRecord persists supported source records with pretty-printed fai
   try {
     const recordPath = await writePaperRecord({
       workspaceDir,
-      record: supportedPaperRecord
+      record: manualFallbackPaperRecord
     });
 
     const saved = await readFile(recordPath, "utf8");
@@ -196,11 +224,14 @@ test("writePaperRecord persists supported source records with pretty-printed fai
       )
     );
     assert.match(saved, /\n  "failure": \{\n    "code": "PAYWALL",\n    "message": "Browser session required\."\n  \}\n/);
-    assert.deepEqual(JSON.parse(saved), supportedPaperRecord);
+    assert.deepEqual(JSON.parse(saved), manualFallbackPaperRecord);
   } finally {
     await rm(workspaceDir, { recursive: true, force: true });
   }
 });
 
 void supportedSearchSource;
+void invalidExternalSearchSource;
+void invalidDownloadedPaperRecord;
+void invalidExternalPaperRecord;
 void manualFallbackResult;
