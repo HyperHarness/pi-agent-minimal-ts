@@ -1,7 +1,12 @@
 import test from "node:test";
 import assert from "node:assert/strict";
-import { searchPapers } from "../../src/agent/paper-manager.js";
+import { mkdtemp, readFile, rm } from "node:fs/promises";
+import os from "node:os";
+import path from "node:path";
+import { downloadPaper, searchPapers } from "../../src/agent/paper-manager.js";
 import type { ArxivSearchResult } from "../../src/agent/arxiv.js";
+import { PaperDownloadError } from "../../src/agent/paper-download.js";
+import { resolvePaperPdfPath, resolvePaperRecordPath } from "../../src/agent/paper-store.js";
 import type { WebSearchResult } from "../../src/agent/web-search.js";
 import type { PaperSearchResult, PaperSearchSource } from "../../src/agent/paper-types.js";
 
@@ -225,4 +230,161 @@ test("searchPapers reorders merged candidates when a higher-priority source appe
   assert.equal(results.length, 1);
   assert.equal(results[0].title, "Paper B");
   assert.equal(results[0].primarySource, "science");
+});
+
+test("downloadPaper downloads arXiv ids, writes the PDF file, and returns downloaded status", async () => {
+  const workspaceDir = await mkdtemp(path.join(os.tmpdir(), "paper-manager-"));
+  const pdfBytes = Buffer.from("%PDF-1.4\nmock pdf\n", "utf8");
+
+  try {
+    const result = await downloadPaper({
+      workspaceDir,
+      id: "2401.01234",
+      fetchImpl: async () =>
+        new Response(pdfBytes, {
+          status: 200,
+          headers: {
+            "content-type": "application/pdf"
+          }
+        })
+    });
+
+    const expectedPdfPath = resolvePaperPdfPath({
+      workspaceDir,
+      source: "arxiv",
+      canonicalId: "2401.01234"
+    });
+    const expectedRecordPath = resolvePaperRecordPath({
+      workspaceDir,
+      source: "arxiv",
+      canonicalId: "2401.01234",
+      articleUrl: "https://arxiv.org/abs/2401.01234"
+    });
+
+    assert.equal(result.status, "downloaded");
+    assert.equal(result.source, "arxiv");
+    assert.equal(result.canonicalId, "2401.01234");
+    assert.equal(result.articleUrl, "https://arxiv.org/abs/2401.01234");
+    assert.equal(result.path, expectedPdfPath);
+    assert.equal(result.recordPath, expectedRecordPath);
+    assert.equal(await readFile(expectedPdfPath, "utf8"), pdfBytes.toString("utf8"));
+
+    assert.deepEqual(JSON.parse(await readFile(expectedRecordPath, "utf8")), {
+      source: "arxiv",
+      articleUrl: "https://arxiv.org/abs/2401.01234",
+      recordedAt: JSON.parse(await readFile(expectedRecordPath, "utf8")).recordedAt,
+      handlingMethod: "direct_http",
+      status: "downloaded",
+      canonicalId: "2401.01234",
+      pdfUrl: "https://arxiv.org/pdf/2401.01234.pdf",
+      downloadPath: expectedPdfPath
+    });
+  } finally {
+    await rm(workspaceDir, { recursive: true, force: true });
+  }
+});
+
+test("downloadPaper preserves supported-publisher manual fallback results when automatic download fails", async () => {
+  const workspaceDir = await mkdtemp(path.join(os.tmpdir(), "paper-manager-"));
+  const articleUrl = "https://www.science.org/doi/10.1126/science.adz8659";
+
+  try {
+    const result = await downloadPaper({
+      workspaceDir,
+      url: articleUrl,
+      downloadPublisherPaperImpl: async () => {
+        throw new PaperDownloadError(
+          "authorization_failed",
+          "Publisher requires institutional login."
+        );
+      },
+      openPublisherForLoginImpl: async () => ({
+        openedUrl: articleUrl,
+        profileDir: path.join(workspaceDir, ".browser-profile", "paper-access"),
+        executablePath: "C:\\Program Files\\Google\\Chrome\\Application\\chrome.exe"
+      })
+    });
+
+    const expectedRecordPath = resolvePaperRecordPath({
+      workspaceDir,
+      source: "science",
+      canonicalId: "10.1126/science.adz8659",
+      articleUrl
+    });
+    const savedRecord = JSON.parse(await readFile(expectedRecordPath, "utf8"));
+
+    assert.deepEqual(result, {
+      status: "manual_fallback_opened",
+      source: "science",
+      canonicalId: "10.1126/science.adz8659",
+      articleUrl,
+      fallbackUrl: articleUrl,
+      recordPath: expectedRecordPath,
+      failure: {
+        code: "authorization_failed",
+        message: "Publisher requires institutional login."
+      },
+      profileDir: path.join(workspaceDir, ".browser-profile", "paper-access"),
+      executablePath: "C:\\Program Files\\Google\\Chrome\\Application\\chrome.exe"
+    });
+    assert.deepEqual(savedRecord, {
+      source: "science",
+      canonicalId: "10.1126/science.adz8659",
+      articleUrl,
+      openedUrl: articleUrl,
+      recordedAt: savedRecord.recordedAt,
+      handlingMethod: "browser_session",
+      status: "manual_fallback_opened",
+      failure: {
+        code: "authorization_failed",
+        message: "Publisher requires institutional login."
+      }
+    });
+  } finally {
+    await rm(workspaceDir, { recursive: true, force: true });
+  }
+});
+
+test("downloadPaper opens unsupported external URLs instead of rejecting them", async () => {
+  const workspaceDir = await mkdtemp(path.join(os.tmpdir(), "paper-manager-"));
+  const articleUrl = "https://example.com/paper";
+
+  try {
+    const result = await downloadPaper({
+      workspaceDir,
+      url: articleUrl,
+      openPageInSystemChromeImpl: async () => ({
+        url: articleUrl,
+        openedUrl: articleUrl,
+        profileDir: path.join(workspaceDir, ".browser-profile", "paper-access"),
+        executablePath: "C:\\Program Files\\Google\\Chrome\\Application\\chrome.exe"
+      })
+    });
+
+    const expectedRecordPath = resolvePaperRecordPath({
+      workspaceDir,
+      source: "external",
+      articleUrl
+    });
+    const savedRecord = JSON.parse(await readFile(expectedRecordPath, "utf8"));
+
+    assert.deepEqual(result, {
+      status: "external_opened",
+      source: "external",
+      articleUrl,
+      openedUrl: articleUrl,
+      recordPath: expectedRecordPath,
+      executablePath: "C:\\Program Files\\Google\\Chrome\\Application\\chrome.exe"
+    });
+    assert.deepEqual(savedRecord, {
+      source: "external",
+      articleUrl,
+      openedUrl: articleUrl,
+      recordedAt: savedRecord.recordedAt,
+      handlingMethod: "system_browser_open",
+      status: "external_opened"
+    });
+  } finally {
+    await rm(workspaceDir, { recursive: true, force: true });
+  }
 });

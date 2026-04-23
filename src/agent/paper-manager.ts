@@ -1,6 +1,23 @@
-import { searchArxiv, type ArxivSearchResult } from "./arxiv.js";
+import { mkdir, writeFile } from "node:fs/promises";
+import path from "node:path";
+import { downloadArxivPdf, searchArxiv, type ArxivSearchResult } from "./arxiv.js";
+import {
+  openPageInSystemChrome,
+  resolveDefaultPaperBrowserSessionFactory,
+  type OpenSystemChromePageResult,
+  type PaperBrowserSession
+} from "./browser-session.js";
+import {
+  PaperDownloadError,
+  downloadPublisherPaper,
+  resolvePublisherCanonicalId,
+  resolvePublisherCanonicalIdFromArticleUrl
+} from "./paper-download.js";
+import { resolvePaperPdfPath, writePaperRecord } from "./paper-store.js";
 import { searchWeb, type WebSearchResult } from "./web-search.js";
 import type {
+  PaperDownloadResult,
+  PaperFailure,
   PaperAction,
   PaperSearchResult,
   PaperSearchSource,
@@ -13,6 +30,29 @@ export interface SearchPapersOptions {
   maxResults?: number;
   searchArxivImpl?: typeof searchArxiv;
   searchWebImpl?: typeof searchWeb;
+}
+
+type DownloadPublisherPaperImplementation = (options: {
+  workspaceDir: string;
+  url: string;
+}) => Promise<Awaited<ReturnType<typeof downloadPublisherPaper>>>;
+
+type OpenPublisherForLoginImplementation = (
+  options: {
+    workspaceDir: string;
+    url: string;
+  }
+) => Promise<Pick<OpenSystemChromePageResult, "openedUrl" | "profileDir" | "executablePath">>;
+
+export interface DownloadPaperOptions {
+  workspaceDir: string;
+  id?: string;
+  url?: string;
+  fetchImpl?: typeof fetch;
+  browserSessionFactory?: () => Promise<PaperBrowserSession>;
+  downloadPublisherPaperImpl?: DownloadPublisherPaperImplementation;
+  openPublisherForLoginImpl?: OpenPublisherForLoginImplementation;
+  openPageInSystemChromeImpl?: typeof openPageInSystemChrome;
 }
 
 type RankedSearchSource = PaperSearchSource & {
@@ -130,50 +170,6 @@ function classifyArxivSearchResult(result: ArxivSearchResult, order: number): Ra
   };
 }
 
-function extractSupportedCanonicalId(source: SupportedPaperSource, url: URL): string | null {
-  const parts = url.pathname.split("/").filter(Boolean);
-
-  if (source === "science") {
-    if (parts[0] !== "doi" || parts.length < 2) {
-      return null;
-    }
-
-    const doiStartIndex =
-      parts[1] === "pdf" || parts[1] === "full" || parts[1] === "abs" || parts[1] === "epdf"
-        ? 2
-        : 1;
-    if (doiStartIndex >= parts.length) {
-      return null;
-    }
-
-    return decodeURIComponent(parts.slice(doiStartIndex).join("/").replace(/\.pdf$/i, ""));
-  }
-
-  if (source === "nature") {
-    if (parts[0] !== "articles" || parts.length < 2) {
-      return null;
-    }
-
-    return decodeURIComponent(parts.slice(1).join("/").replace(/\.pdf$/i, ""));
-  }
-
-  if (parts.length < 2) {
-    return null;
-  }
-
-  const abstractIndex = parts.indexOf("abstract");
-  if (abstractIndex >= 0 && abstractIndex + 1 < parts.length) {
-    return decodeURIComponent(parts.slice(abstractIndex + 1).join("/").replace(/\.pdf$/i, ""));
-  }
-
-  const pdfIndex = parts.indexOf("pdf");
-  if (pdfIndex >= 0 && pdfIndex + 1 < parts.length) {
-    return decodeURIComponent(parts.slice(pdfIndex + 1).join("/").replace(/\.pdf$/i, ""));
-  }
-
-  return null;
-}
-
 function classifyPaperUrl(
   input: string
 ): ClassifiedPaperUrl {
@@ -225,7 +221,10 @@ function classifySupportedSource(url: URL): Extract<
   { source: SupportedPaperSource; action: "authorized_download" }
 > | null {
   if (url.hostname === "www.science.org" || url.hostname === "science.org") {
-    const canonicalId = extractSupportedCanonicalId("science", url);
+    const canonicalId = resolvePublisherCanonicalId({
+      publisher: "science",
+      url: url.toString()
+    });
     return {
       source: "science",
       action: "authorized_download",
@@ -235,7 +234,10 @@ function classifySupportedSource(url: URL): Extract<
   }
 
   if (url.hostname === "www.nature.com" || url.hostname === "nature.com") {
-    const canonicalId = extractSupportedCanonicalId("nature", url);
+    const canonicalId = resolvePublisherCanonicalId({
+      publisher: "nature",
+      url: url.toString()
+    });
     return {
       source: "nature",
       action: "authorized_download",
@@ -248,7 +250,10 @@ function classifySupportedSource(url: URL): Extract<
     url.hostname === "journals.aps.org" ||
     url.hostname === "aps.org"
   ) {
-    const canonicalId = extractSupportedCanonicalId("aps", url);
+    const canonicalId = resolvePublisherCanonicalId({
+      publisher: "aps",
+      url: url.toString()
+    });
     return {
       source: "aps",
       action: "authorized_download",
@@ -385,6 +390,238 @@ function toPaperSearchResult(candidate: SearchCandidate): PaperSearchResult {
     primaryAction: "authorized_download",
     sources
   };
+}
+
+const FALLBACK_ELIGIBLE_DOWNLOAD_ERROR_CODES = new Set<PaperDownloadError["code"]>([
+  "browser_session_unavailable",
+  "manual_login_required",
+  "authorization_failed",
+  "pdf_not_found",
+  "download_failed"
+]);
+
+function assertExactlyOnePaperLocator(options: Pick<DownloadPaperOptions, "id" | "url">): void {
+  const providedCount = Number(Boolean(options.id)) + Number(Boolean(options.url));
+  if (providedCount !== 1) {
+    throw new Error("downloadPaper requires exactly one of id or url.");
+  }
+}
+
+function toPaperFailure(error: PaperDownloadError): PaperFailure {
+  return {
+    code: error.code,
+    message: error.message
+  };
+}
+
+function isFallbackEligibleDownloadError(error: unknown): error is PaperDownloadError {
+  return (
+    error instanceof PaperDownloadError && FALLBACK_ELIGIBLE_DOWNLOAD_ERROR_CODES.has(error.code)
+  );
+}
+
+async function downloadArxivPaper(options: {
+  workspaceDir: string;
+  input: string;
+  fetchImpl?: typeof fetch;
+}): Promise<PaperDownloadResult> {
+  const result = await downloadArxivPdf({
+    input: options.input,
+    fetchImpl: options.fetchImpl
+  });
+  const pdfPath = resolvePaperPdfPath({
+    workspaceDir: options.workspaceDir,
+    source: "arxiv",
+    canonicalId: result.canonicalId
+  });
+
+  await mkdir(path.dirname(pdfPath), { recursive: true });
+  await writeFile(pdfPath, result.pdfBytes);
+
+  const recordPath = await writePaperRecord({
+    workspaceDir: options.workspaceDir,
+    record: {
+      source: "arxiv",
+      articleUrl: result.articleUrl,
+      recordedAt: new Date().toISOString(),
+      handlingMethod: "direct_http",
+      status: "downloaded",
+      canonicalId: result.canonicalId,
+      pdfUrl: result.finalPdfUrl,
+      downloadPath: pdfPath
+    }
+  });
+
+  return {
+    status: "downloaded",
+    source: "arxiv",
+    canonicalId: result.canonicalId,
+    articleUrl: result.articleUrl,
+    finalPdfUrl: result.finalPdfUrl,
+    path: pdfPath,
+    recordPath
+  };
+}
+
+async function withBrowserSession<T>(
+  browserSessionFactory: () => Promise<PaperBrowserSession>,
+  action: (browserSession: PaperBrowserSession) => Promise<T>
+): Promise<T> {
+  const browserSession = await browserSessionFactory();
+
+  try {
+    return await action(browserSession);
+  } finally {
+    await browserSession.dispose?.().catch(() => {});
+  }
+}
+
+export async function downloadPaper(options: DownloadPaperOptions): Promise<PaperDownloadResult> {
+  assertExactlyOnePaperLocator(options);
+
+  if (options.id) {
+    return downloadArxivPaper({
+      workspaceDir: options.workspaceDir,
+      input: options.id,
+      fetchImpl: options.fetchImpl
+    });
+  }
+
+  const paperUrl = options.url as string;
+  const classification = classifyPaperUrl(paperUrl);
+
+  if (classification.source === "arxiv") {
+    return downloadArxivPaper({
+      workspaceDir: options.workspaceDir,
+      input: classification.canonicalId,
+      fetchImpl: options.fetchImpl
+    });
+  }
+
+  if (classification.source === "external") {
+    const openPageInSystemChromeImpl = options.openPageInSystemChromeImpl ?? openPageInSystemChrome;
+    const openResult = await openPageInSystemChromeImpl({
+      workspaceDir: options.workspaceDir,
+      url: classification.articleUrl
+    });
+    const recordPath = await writePaperRecord({
+      workspaceDir: options.workspaceDir,
+      record: {
+        source: "external",
+        articleUrl: classification.articleUrl,
+        openedUrl: openResult.openedUrl,
+        recordedAt: new Date().toISOString(),
+        handlingMethod: "system_browser_open",
+        status: "external_opened"
+      }
+    });
+
+    return {
+      status: "external_opened",
+      source: "external",
+      articleUrl: classification.articleUrl,
+      openedUrl: openResult.openedUrl,
+      recordPath,
+      executablePath: openResult.executablePath
+    };
+  }
+
+  const browserSessionFactory =
+    options.browserSessionFactory ??
+    resolveDefaultPaperBrowserSessionFactory({ workspaceDir: options.workspaceDir });
+  const downloadPublisherPaperImpl: DownloadPublisherPaperImplementation =
+    options.downloadPublisherPaperImpl ??
+    ((downloadOptions) =>
+      withBrowserSession(browserSessionFactory, (browserSession) =>
+        downloadPublisherPaper({
+          ...downloadOptions,
+          browserSession
+        })
+      ));
+
+  try {
+    const result = await downloadPublisherPaperImpl({
+      workspaceDir: options.workspaceDir,
+      url: classification.articleUrl
+    });
+    const recordPath = await writePaperRecord({
+      workspaceDir: options.workspaceDir,
+      record: {
+        source: result.publisher,
+        articleUrl: result.articleUrl,
+        recordedAt: new Date().toISOString(),
+        handlingMethod: "browser_session",
+        status: "downloaded",
+        canonicalId: result.canonicalId,
+        pdfUrl: result.finalPdfUrl,
+        downloadPath: result.path
+      }
+    });
+
+    return {
+      status: "downloaded",
+      source: result.publisher,
+      canonicalId: result.canonicalId,
+      articleUrl: result.articleUrl,
+      finalPdfUrl: result.finalPdfUrl,
+      path: result.path,
+      recordPath
+    };
+  } catch (error) {
+    if (!isFallbackEligibleDownloadError(error)) {
+      throw error;
+    }
+
+    const canonicalId = resolvePublisherCanonicalIdFromArticleUrl({
+      publisher: classification.source,
+      articleUrl: classification.articleUrl
+    });
+    if (!canonicalId) {
+      throw error;
+    }
+
+    const openPublisherForLoginImpl: OpenPublisherForLoginImplementation =
+      options.openPublisherForLoginImpl ??
+      ((openOptions) =>
+        openPageInSystemChrome({
+          workspaceDir: openOptions.workspaceDir,
+          url: openOptions.url
+        }).then(({ openedUrl, profileDir, executablePath }) => ({
+          openedUrl,
+          profileDir,
+          executablePath
+        })));
+    const fallbackResult = await openPublisherForLoginImpl({
+      workspaceDir: options.workspaceDir,
+      url: classification.articleUrl
+    });
+    const failure = toPaperFailure(error);
+    const recordPath = await writePaperRecord({
+      workspaceDir: options.workspaceDir,
+      record: {
+        source: classification.source,
+        canonicalId,
+        articleUrl: classification.articleUrl,
+        openedUrl: fallbackResult.openedUrl,
+        recordedAt: new Date().toISOString(),
+        handlingMethod: "browser_session",
+        status: "manual_fallback_opened",
+        failure
+      }
+    });
+
+    return {
+      status: "manual_fallback_opened",
+      source: classification.source,
+      canonicalId,
+      articleUrl: classification.articleUrl,
+      fallbackUrl: fallbackResult.openedUrl,
+      recordPath,
+      failure,
+      profileDir: fallbackResult.profileDir,
+      executablePath: fallbackResult.executablePath
+    };
+  }
 }
 
 export async function searchPapers(options: SearchPapersOptions): Promise<PaperSearchResult[]> {
