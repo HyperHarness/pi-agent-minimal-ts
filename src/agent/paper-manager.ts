@@ -1,3 +1,4 @@
+import { createHash } from "node:crypto";
 import { mkdir, writeFile } from "node:fs/promises";
 import path from "node:path";
 import { downloadArxivPdf, searchArxiv, type ArxivSearchResult } from "./arxiv.js";
@@ -42,7 +43,11 @@ type OpenPublisherForLoginImplementation = (
     workspaceDir: string;
     url: string;
   }
-) => Promise<Pick<OpenSystemChromePageResult, "openedUrl" | "profileDir" | "executablePath">>;
+) => Promise<{
+  openedUrl: string;
+  profileDir?: string;
+  executablePath?: string;
+}>;
 
 export interface DownloadPaperOptions {
   workspaceDir: string;
@@ -414,6 +419,19 @@ function toPaperFailure(error: PaperDownloadError): PaperFailure {
   };
 }
 
+function resolveFallbackCanonicalId(input: {
+  articleUrl: string;
+  canonicalId?: string;
+}): string {
+  if (input.canonicalId) {
+    return input.canonicalId;
+  }
+
+  const hostname = new URL(input.articleUrl).hostname.toLowerCase();
+  const hash = createHash("sha1").update(input.articleUrl).digest("hex").slice(0, 12);
+  return `${hostname}-${hash}`;
+}
+
 function isFallbackEligibleDownloadError(error: unknown): error is PaperDownloadError {
   return (
     error instanceof PaperDownloadError && FALLBACK_ELIGIBLE_DOWNLOAD_ERROR_CODES.has(error.code)
@@ -572,14 +590,14 @@ export async function downloadPaper(options: DownloadPaperOptions): Promise<Pape
       throw error;
     }
 
-    const canonicalId = resolvePublisherCanonicalIdFromArticleUrl({
-      publisher: classification.source,
-      articleUrl: classification.articleUrl
+    const canonicalId = resolveFallbackCanonicalId({
+      articleUrl: classification.articleUrl,
+      canonicalId:
+        resolvePublisherCanonicalIdFromArticleUrl({
+          publisher: classification.source,
+          articleUrl: classification.articleUrl
+        }) ?? classification.canonicalId
     });
-    if (!canonicalId) {
-      throw error;
-    }
-
     const openPublisherForLoginImpl: OpenPublisherForLoginImplementation =
       options.openPublisherForLoginImpl ??
       ((openOptions) =>
@@ -600,12 +618,12 @@ export async function downloadPaper(options: DownloadPaperOptions): Promise<Pape
       workspaceDir: options.workspaceDir,
       record: {
         source: classification.source,
-        canonicalId,
         articleUrl: classification.articleUrl,
         openedUrl: fallbackResult.openedUrl,
         recordedAt: new Date().toISOString(),
         handlingMethod: "browser_session",
         status: "manual_fallback_opened",
+        canonicalId,
         failure
       }
     });
@@ -613,10 +631,10 @@ export async function downloadPaper(options: DownloadPaperOptions): Promise<Pape
     return {
       status: "manual_fallback_opened",
       source: classification.source,
-      canonicalId,
       articleUrl: classification.articleUrl,
       fallbackUrl: fallbackResult.openedUrl,
       recordPath,
+      canonicalId,
       failure,
       profileDir: fallbackResult.profileDir,
       executablePath: fallbackResult.executablePath

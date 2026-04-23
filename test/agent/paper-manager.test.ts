@@ -345,6 +345,37 @@ test("downloadPaper preserves supported-publisher manual fallback results when a
   }
 });
 
+test("downloadPaper still opens supported hosts for manual fallback when canonical ids are unavailable", async () => {
+  const workspaceDir = await mkdtemp(path.join(os.tmpdir(), "paper-manager-"));
+  const articleUrl = "https://www.nature.com/content/preview";
+
+  try {
+    const result = await downloadPaper({
+      workspaceDir,
+      url: articleUrl,
+      downloadPublisherPaperImpl: async () => {
+        throw new PaperDownloadError(
+          "manual_login_required",
+          "Nature requires manual sign-in."
+        );
+      },
+      openPublisherForLoginImpl: async () => ({
+        openedUrl: articleUrl,
+        profileDir: path.join(workspaceDir, ".browser-profile", "paper-access")
+      })
+    });
+
+    assert.equal(result.status, "manual_fallback_opened");
+    assert.equal(result.source, "nature");
+    assert.equal(result.articleUrl, articleUrl);
+    assert.equal(result.fallbackUrl, articleUrl);
+    assert.equal(result.failure.code, "manual_login_required");
+    assert.equal(path.basename(result.recordPath).startsWith("nature-www.nature.com-"), true);
+  } finally {
+    await rm(workspaceDir, { recursive: true, force: true });
+  }
+});
+
 test("downloadPaper opens unsupported external URLs instead of rejecting them", async () => {
   const workspaceDir = await mkdtemp(path.join(os.tmpdir(), "paper-manager-"));
   const articleUrl = "https://example.com/paper";
