@@ -1,3 +1,5 @@
+import { spawn, type ChildProcess, type SpawnOptions } from "node:child_process";
+import { existsSync } from "node:fs";
 import { writeFile } from "node:fs/promises";
 import path from "node:path";
 import { chromium } from "playwright";
@@ -17,6 +19,30 @@ export interface OpenArticlePageResult {
   authorized: boolean;
 }
 
+export interface OpenManualLoginPageResult {
+  openedUrl: string;
+}
+
+export interface OpenSystemChromePageResult {
+  url: string;
+  openedUrl: string;
+  profileDir: string;
+  executablePath: string;
+}
+
+export interface OpenSystemChromePageOptions {
+  workspaceDir: string;
+  url: string;
+  env?: PaperBrowserEnvironment;
+  platform?: NodeJS.Platform;
+  fileExists?: (candidatePath: string) => boolean;
+  spawnImpl?: (
+    command: string,
+    args: readonly string[],
+    options: SpawnOptions
+  ) => Pick<ChildProcess, "unref">;
+}
+
 export class PaperBrowserSessionError extends Error {
   constructor(
     readonly code: "browser_session_unavailable" | "authorization_failed",
@@ -30,6 +56,7 @@ export class PaperBrowserSessionError extends Error {
 
 export interface PaperBrowserSession {
   openArticlePage(url: string): Promise<OpenArticlePageResult>;
+  openPageForManualLogin(url: string): Promise<OpenManualLoginPageResult>;
   downloadPdf(url: string, destinationPath: string): Promise<void>;
   dispose?(): Promise<void>;
 }
@@ -133,6 +160,70 @@ export function resolvePaperBrowserLaunchOptions(options: {
   };
 }
 
+export function resolveSystemChromeExecutablePath(options: {
+  env?: PaperBrowserEnvironment;
+  platform?: NodeJS.Platform;
+  fileExists?: (candidatePath: string) => boolean;
+}): string | undefined {
+  const env = options.env ?? process.env;
+  const configuredPath = normalizeChromeExecutablePath(env.PI_PAPER_CHROME_EXECUTABLE);
+  if (configuredPath) {
+    return configuredPath;
+  }
+
+  const platform = options.platform ?? process.platform;
+  const fileExists = options.fileExists ?? existsSync;
+  const candidates =
+    platform === "win32"
+      ? [
+          "C:\\Program Files\\Google\\Chrome\\Application\\chrome.exe",
+          "C:\\Program Files (x86)\\Google\\Chrome\\Application\\chrome.exe",
+          "C:\\Program Files\\Microsoft\\Edge\\Application\\msedge.exe",
+          "C:\\Program Files (x86)\\Microsoft\\Edge\\Application\\msedge.exe"
+        ]
+      : [];
+
+  return candidates.find((candidatePath) => fileExists(candidatePath));
+}
+
+export async function openPageInSystemChromeForManualLogin(
+  options: OpenSystemChromePageOptions
+): Promise<OpenSystemChromePageResult> {
+  const executablePath = resolveSystemChromeExecutablePath(options);
+  if (!executablePath) {
+    throw new Error(
+      "Unable to locate a local Chrome or Edge executable. Set PI_PAPER_CHROME_EXECUTABLE first."
+    );
+  }
+
+  const profileDir = getPaperBrowserProfileDir(path.resolve(options.workspaceDir));
+  const spawnImpl =
+    options.spawnImpl ??
+    ((command, args, spawnOptions) =>
+      spawn(command, [...args], spawnOptions) as Pick<ChildProcess, "unref">);
+  const args = [
+    "--new-window",
+    "--no-first-run",
+    "--no-default-browser-check",
+    `--user-data-dir=${profileDir}`,
+    options.url
+  ];
+
+  const child = spawnImpl(executablePath, args, {
+    detached: true,
+    stdio: "ignore",
+    windowsHide: false
+  });
+  child.unref();
+
+  return {
+    url: options.url,
+    openedUrl: options.url,
+    profileDir,
+    executablePath
+  };
+}
+
 export function resolveDefaultPaperBrowserSessionFactory(options: {
   workspaceDir: string;
   env?: PaperBrowserEnvironment;
@@ -192,6 +283,17 @@ export function resolveDefaultPaperBrowserSessionFactory(options: {
           } finally {
             await page.close().catch(() => {});
           }
+        },
+
+        async openPageForManualLogin(url: string): Promise<OpenManualLoginPageResult> {
+          const page = await context.newPage();
+
+          await page.goto(url, { waitUntil: "domcontentloaded" });
+          await page.bringToFront().catch(() => {});
+
+          return {
+            openedUrl: page.url()
+          };
         },
 
         async downloadPdf(url: string, destinationPath: string): Promise<void> {

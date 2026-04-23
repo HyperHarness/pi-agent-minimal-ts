@@ -3,6 +3,7 @@ import assert from "node:assert/strict";
 import { mkdtemp, mkdir, rm, symlink, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import path from "node:path";
+import { PaperDownloadError } from "../../src/agent/paper-download.js";
 import * as agentTools from "../../src/agent/tools.js";
 import { createTools } from "../../src/agent/tools.js";
 
@@ -254,6 +255,7 @@ test("createTools exposes the full built-in tool set", async () => {
       "fetch_url",
       "search_arxiv",
       "download_arxiv_pdf",
+      "open_paper_page_for_login",
       "download_paper_pdf",
     ]);
 
@@ -487,6 +489,230 @@ test("download_paper_pdf delegates to the injected paper download service", asyn
   }
 });
 
+test("download_paper_pdf returns downloaded status for a valid PDF result", async () => {
+  const workspace = await mkdtemp(path.join(tmpdir(), "pi-agent-tools-"));
+  const pdfPath = path.join(workspace, "downloads", "papers", "downloaded-paper.pdf");
+
+  try {
+    await mkdir(path.dirname(pdfPath), { recursive: true });
+    await writeFile(pdfPath, Buffer.from("%PDF-test"));
+
+    const tools = createTools(workspace, {
+      downloadPaperPdf: async (
+        options: Parameters<NonNullable<CreateToolsDependencies["downloadPaperPdf"]>>[0],
+      ) => ({
+        path: pdfPath,
+        publisher: "science",
+        articleUrl: options.url,
+        finalArticleUrl: options.url,
+        finalPdfUrl: "https://www.science.org/doi/pdf/10.1126/science.adz8659",
+      }),
+      openPaperPageForLogin: async () => {
+        throw new Error("manual fallback should not run for valid PDFs");
+      },
+    } as unknown as CreateToolsDependencies) as ReadonlyArray<{
+      name: string;
+      execute?: DownloadPaperPdfTool["execute"];
+    }>;
+
+    const tool = tools.find((candidate) => candidate.name === "download_paper_pdf");
+    assert.ok(tool);
+    const execute = tool.execute;
+    assert.ok(execute);
+
+    const result = await execute(
+      "tool-call-fallback-1",
+      { url: "https://www.science.org/doi/10.1126/science.adz8659" },
+      undefined,
+    );
+
+    assert.deepEqual(JSON.parse(String(result.content?.[0]?.text)), {
+      status: "downloaded",
+      path: pdfPath,
+      publisher: "science",
+      articleUrl: "https://www.science.org/doi/10.1126/science.adz8659",
+      finalArticleUrl: "https://www.science.org/doi/10.1126/science.adz8659",
+      finalPdfUrl: "https://www.science.org/doi/pdf/10.1126/science.adz8659",
+    });
+  } finally {
+    await rm(workspace, { recursive: true, force: true });
+  }
+});
+
+test("download_paper_pdf opens manual fallback and returns non-error details for fallback-eligible failures", async () => {
+  const workspace = await mkdtemp(path.join(tmpdir(), "pi-agent-tools-"));
+  const opened: Array<{ url: string; workspaceDir: string }> = [];
+
+  try {
+    const tools = createTools(workspace, {
+      downloadPaperPdf: async (): Promise<never> => {
+        throw new PaperDownloadError(
+          "manual_login_required",
+          "The browser session needs manual login or verification for this publisher.",
+        );
+      },
+      openPaperPageForLogin: async (options: { url: string; workspaceDir: string }) => {
+        opened.push(options);
+        return {
+          url: options.url,
+          openedUrl: options.url,
+          profileDir: path.join(options.workspaceDir, ".browser-profile", "paper-access"),
+          executablePath: "C:\\Program Files\\Google\\Chrome\\Application\\chrome.exe",
+        };
+      },
+    } as unknown as CreateToolsDependencies) as ReadonlyArray<{
+      name: string;
+      execute?: DownloadPaperPdfTool["execute"];
+    }>;
+
+    const tool = tools.find((candidate) => candidate.name === "download_paper_pdf");
+    assert.ok(tool);
+    const execute = tool.execute;
+    assert.ok(execute);
+
+    const result = await execute(
+      "tool-call-fallback-2",
+      { url: "https://www.science.org/doi/10.1126/science.adz8659" },
+      undefined,
+    );
+
+    assert.deepEqual(opened, [
+      {
+        url: "https://www.science.org/doi/10.1126/science.adz8659",
+        workspaceDir: workspace,
+      },
+    ]);
+    assert.deepEqual(JSON.parse(String(result.content?.[0]?.text)), {
+      status: "manual_fallback_opened",
+      fallbackRequired: true,
+      articleUrl: "https://www.science.org/doi/10.1126/science.adz8659",
+      fallbackUrl: "https://www.science.org/doi/10.1126/science.adz8659",
+      profileDir: path.join(workspace, ".browser-profile", "paper-access"),
+      executablePath: "C:\\Program Files\\Google\\Chrome\\Application\\chrome.exe",
+      failure: {
+        code: "manual_login_required",
+        message: "The browser session needs manual login or verification for this publisher.",
+      },
+    });
+  } finally {
+    await rm(workspace, { recursive: true, force: true });
+  }
+});
+
+test("download_paper_pdf opens manual fallback when the downloaded file is not a PDF", async () => {
+  const workspace = await mkdtemp(path.join(tmpdir(), "pi-agent-tools-"));
+  const fakePdfPath = path.join(workspace, "downloads", "papers", "downloaded-paper.pdf");
+  const opened: Array<{ url: string; workspaceDir: string }> = [];
+
+  try {
+    await mkdir(path.dirname(fakePdfPath), { recursive: true });
+    await writeFile(fakePdfPath, "<!doctype html>", "utf8");
+
+    const tools = createTools(workspace, {
+      downloadPaperPdf: async (
+        options: Parameters<NonNullable<CreateToolsDependencies["downloadPaperPdf"]>>[0],
+      ) => ({
+        path: fakePdfPath,
+        publisher: "nature",
+        articleUrl: options.url,
+        finalArticleUrl: options.url,
+        finalPdfUrl: "https://www.nature.com/articles/s41586-019-1666-5.pdf",
+      }),
+      openPaperPageForLogin: async (options: { url: string; workspaceDir: string }) => {
+        opened.push(options);
+        return {
+          url: options.url,
+          openedUrl: options.url,
+          profileDir: path.join(options.workspaceDir, ".browser-profile", "paper-access"),
+          executablePath: "C:\\Program Files\\Google\\Chrome\\Application\\chrome.exe",
+        };
+      },
+    } as unknown as CreateToolsDependencies) as ReadonlyArray<{
+      name: string;
+      execute?: DownloadPaperPdfTool["execute"];
+    }>;
+
+    const tool = tools.find((candidate) => candidate.name === "download_paper_pdf");
+    assert.ok(tool);
+    const execute = tool.execute;
+    assert.ok(execute);
+
+    const result = await execute(
+      "tool-call-fallback-3",
+      { url: "https://www.nature.com/articles/s41586-019-1666-5" },
+      undefined,
+    );
+
+    assert.deepEqual(opened, [
+      {
+        url: "https://www.nature.com/articles/s41586-019-1666-5",
+        workspaceDir: workspace,
+      },
+    ]);
+    assert.deepEqual(JSON.parse(String(result.content?.[0]?.text)), {
+      status: "manual_fallback_opened",
+      fallbackRequired: true,
+      articleUrl: "https://www.nature.com/articles/s41586-019-1666-5",
+      fallbackUrl: "https://www.nature.com/articles/s41586-019-1666-5",
+      profileDir: path.join(workspace, ".browser-profile", "paper-access"),
+      executablePath: "C:\\Program Files\\Google\\Chrome\\Application\\chrome.exe",
+      failure: {
+        code: "download_failed",
+        message: "Downloaded file is not a valid PDF: " + fakePdfPath,
+      },
+    });
+    assert.deepEqual(result.details, {
+      status: "manual_fallback_opened",
+      fallbackRequired: true,
+      articleUrl: "https://www.nature.com/articles/s41586-019-1666-5",
+      fallbackUrl: "https://www.nature.com/articles/s41586-019-1666-5",
+      profileDir: path.join(workspace, ".browser-profile", "paper-access"),
+      executablePath: "C:\\Program Files\\Google\\Chrome\\Application\\chrome.exe",
+      failure: {
+        code: "download_failed",
+        message: "Downloaded file is not a valid PDF: " + fakePdfPath,
+      },
+    });
+  } finally {
+    await rm(workspace, { recursive: true, force: true });
+  }
+});
+
+test("download_paper_pdf still rejects when manual fallback cannot be opened", async () => {
+  const workspace = await mkdtemp(path.join(tmpdir(), "pi-agent-tools-"));
+
+  try {
+    const tools = createTools(workspace, {
+      downloadPaperPdf: async (): Promise<never> => {
+        throw new PaperDownloadError("download_failed", "Timed out waiting for PDF download.");
+      },
+      openPaperPageForLogin: async (): Promise<never> => {
+        throw new Error("local browser launch failed");
+      },
+    } as unknown as CreateToolsDependencies) as ReadonlyArray<{
+      name: string;
+      execute?: DownloadPaperPdfTool["execute"];
+    }>;
+
+    const tool = tools.find((candidate) => candidate.name === "download_paper_pdf");
+    assert.ok(tool);
+    const execute = tool.execute;
+    assert.ok(execute);
+
+    await assert.rejects(
+      () =>
+        execute(
+          "tool-call-fallback-4",
+          { url: "https://journals.aps.org/prl/abstract/10.1103/PhysRevLett.134.090601" },
+          undefined,
+        ),
+      /local browser launch failed/i,
+    );
+  } finally {
+    await rm(workspace, { recursive: true, force: true });
+  }
+});
+
 test("download_paper_pdf uses the default browser-backed paper download path when not injected", async () => {
   const workspace = await mkdtemp(path.join(tmpdir(), "pi-agent-tools-"));
   const capturedCalls: Array<{ url: string; destinationPath: string }> = [];
@@ -499,6 +725,11 @@ test("download_paper_pdf uses the default browser-backed paper download path whe
             finalArticleUrl: url,
             html: '<html><body><a href="/doi/pdf/10.1126/science.adz8659">PDF</a></body></html>',
             authorized: true,
+          };
+        },
+        async openPageForManualLogin(url: string) {
+          return {
+            openedUrl: url,
           };
         },
         async downloadPdf(url: string, destinationPath: string) {
@@ -559,6 +790,11 @@ test("download_paper_pdf reuses the default browser session for repeated executi
               finalArticleUrl: url,
               html: '<html><body><a href="/doi/pdf/10.1126/science.adz8659">PDF</a></body></html>',
               authorized: true,
+            };
+          },
+          async openPageForManualLogin(url: string) {
+            return {
+              openedUrl: url,
             };
           },
           async downloadPdf(url: string, destinationPath: string) {
@@ -627,6 +863,11 @@ test("createTools cleanup closes a lazily created default browser session exactl
               finalArticleUrl: url,
               html: '<html><body><a href="/doi/pdf/10.1126/science.adz8659">PDF</a></body></html>',
               authorized: true,
+            };
+          },
+          async openPageForManualLogin(url: string) {
+            return {
+              openedUrl: url,
             };
           },
           async downloadPdf() {},

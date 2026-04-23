@@ -164,6 +164,9 @@ test("downloadPaperPdf classifies PDF-stage verification blocks as manual_login_
           html: "<html><body>No direct PDF link in the article HTML.</body></html>",
           authorized: true
         }),
+        openPageForManualLogin: async (url: string) => ({
+          openedUrl: url
+        }),
         downloadPdf: async () => {
           throw new PaperBrowserSessionError(
             "authorization_failed",
@@ -192,6 +195,9 @@ test("downloadPaperPdf returns output metadata for a successful download", async
         finalArticleUrl: "https://www.science.org/doi/10.1126/science.adz8659",
         html: '<html><body><a href="/doi/pdf/10.1126/science.adz8659">PDF</a></body></html>',
         authorized: true
+      }),
+      openPageForManualLogin: async (url: string) => ({
+        openedUrl: url
       }),
       downloadPdf: async (url, destinationPath) => {
         downloadedUrl = url;
@@ -222,6 +228,9 @@ test("downloadPaperPdf derives the APS canonical PDF URL when the article page h
         finalArticleUrl: "https://journals.aps.org/prl/abstract/10.1103/PhysRevLett.134.090601",
         html: "<html><body>No direct PDF link in the article HTML.</body></html>",
         authorized: true
+      }),
+      openPageForManualLogin: async (url: string) => ({
+        openedUrl: url
       }),
       downloadPdf: async (url) => {
         downloadedUrl = url;

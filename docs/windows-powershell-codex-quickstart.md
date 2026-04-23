@@ -144,28 +144,35 @@ Important execution note:
 - these files are outside the repository workspace
 - Codex will usually need approval before editing them
 - the agent should request approval and then continue, not stop after asking
+- after changing `default.rules`, fully restart Codex Desktop before judging whether the new rules worked
 
 ### Safe rules that should exist
 
 Ensure these allow rules exist in `%USERPROFILE%\.codex\rules\default.rules`:
 
 ```txt
-prefix_rule(pattern=["C:\\Windows\\System32\\WindowsPowerShell\\v1.0\\powershell.exe", "-Command", "git status"], decision="allow")
-prefix_rule(pattern=["C:\\Windows\\System32\\WindowsPowerShell\\v1.0\\powershell.exe", "-Command", "git diff"], decision="allow")
-prefix_rule(pattern=["C:\\Windows\\System32\\WindowsPowerShell\\v1.0\\powershell.exe", "-Command", "git log"], decision="allow")
-prefix_rule(pattern=["C:\\Windows\\System32\\WindowsPowerShell\\v1.0\\powershell.exe", "-Command", "git branch"], decision="allow")
-prefix_rule(pattern=["C:\\Windows\\System32\\WindowsPowerShell\\v1.0\\powershell.exe", "-Command", "git rev-parse"], decision="allow")
-prefix_rule(pattern=["C:\\Windows\\System32\\WindowsPowerShell\\v1.0\\powershell.exe", "-Command", "git show"], decision="allow")
-prefix_rule(pattern=["C:\\Windows\\System32\\WindowsPowerShell\\v1.0\\powershell.exe", "-Command", "git add"], decision="allow")
-prefix_rule(pattern=["C:\\Windows\\System32\\WindowsPowerShell\\v1.0\\powershell.exe", "-Command", "git restore --staged"], decision="allow")
-prefix_rule(pattern=["C:\\Windows\\System32\\WindowsPowerShell\\v1.0\\powershell.exe", "-Command", "git commit -m"], decision="allow")
-prefix_rule(pattern=["C:\\Windows\\System32\\WindowsPowerShell\\v1.0\\powershell.exe", "-Command", "git commit --amend --no-edit"], decision="allow")
-prefix_rule(pattern=["C:\\Windows\\System32\\WindowsPowerShell\\v1.0\\powershell.exe", "-Command", "git switch"], decision="allow")
-prefix_rule(pattern=["C:\\Windows\\System32\\WindowsPowerShell\\v1.0\\powershell.exe", "-Command", "git checkout -b"], decision="allow")
-prefix_rule(pattern=["C:\\Windows\\System32\\WindowsPowerShell\\v1.0\\powershell.exe", "-Command", "git push"], decision="allow")
+prefix_rule(pattern=["C:\\WINDOWS\\System32\\WindowsPowerShell\\v1.0\\powershell.exe", "-Command", "git status"], decision="allow")
+prefix_rule(pattern=["C:\\WINDOWS\\System32\\WindowsPowerShell\\v1.0\\powershell.exe", "-Command", "git diff"], decision="allow")
+prefix_rule(pattern=["C:\\WINDOWS\\System32\\WindowsPowerShell\\v1.0\\powershell.exe", "-Command", "git log"], decision="allow")
+prefix_rule(pattern=["C:\\WINDOWS\\System32\\WindowsPowerShell\\v1.0\\powershell.exe", "-Command", "git branch"], decision="allow")
+prefix_rule(pattern=["C:\\WINDOWS\\System32\\WindowsPowerShell\\v1.0\\powershell.exe", "-Command", "git rev-parse"], decision="allow")
+prefix_rule(pattern=["C:\\WINDOWS\\System32\\WindowsPowerShell\\v1.0\\powershell.exe", "-Command", "git show"], decision="allow")
+prefix_rule(pattern=["C:\\WINDOWS\\System32\\WindowsPowerShell\\v1.0\\powershell.exe", "-Command", "git add"], decision="allow")
+prefix_rule(pattern=["C:\\WINDOWS\\System32\\WindowsPowerShell\\v1.0\\powershell.exe", "-Command", "git restore --staged"], decision="allow")
+prefix_rule(pattern=["C:\\WINDOWS\\System32\\WindowsPowerShell\\v1.0\\powershell.exe", "-Command", "git commit -m"], decision="allow")
+prefix_rule(pattern=["C:\\WINDOWS\\System32\\WindowsPowerShell\\v1.0\\powershell.exe", "-Command", "git commit --amend --no-edit"], decision="allow")
+prefix_rule(pattern=["C:\\WINDOWS\\System32\\WindowsPowerShell\\v1.0\\powershell.exe", "-Command", "git switch"], decision="allow")
+prefix_rule(pattern=["C:\\WINDOWS\\System32\\WindowsPowerShell\\v1.0\\powershell.exe", "-Command", "git checkout -b"], decision="allow")
+prefix_rule(pattern=["C:\\WINDOWS\\System32\\WindowsPowerShell\\v1.0\\powershell.exe", "-Command", "git push"], decision="allow")
 ```
 
 These are prefix rules, so a narrow safe prefix like `git add` also covers `git add -u`, and `git push` also covers `git push -u origin`.
+
+Why the all-caps `C:\\WINDOWS` prefix matters:
+
+- the allow rule must match the actual launcher prefix Codex uses
+- on this setup, the effective PowerShell prefix used by Codex was `C:\\WINDOWS\\System32\\WindowsPowerShell\\v1.0\\powershell.exe`
+- if the rules file uses a different spelling such as `C:\\Windows\\...`, routine Git commands can still prompt for approval
 
 ### Commands that should not be permanently allowed
 
@@ -201,6 +208,17 @@ git branch -D
 9. Re-read both files after editing.
 10. Verify every desired safe rule is present once.
 11. Confirm no forbidden blanket or destructive rule was introduced.
+12. Restart Codex Desktop.
+13. In an existing Git repository, verify that read-only commands like the ones below run without approval prompts:
+
+```powershell
+git status --short --branch
+git diff --stat
+git log -1 --oneline
+git branch --show-current
+git rev-parse --show-toplevel
+git show --stat -1
+```
 
 ### Verification pitfalls to avoid
 
@@ -211,6 +229,13 @@ Example problem:
 - searching for `git branch` can also match `git branch -d`
 
 Use exact line matching or exact rule-string matching instead.
+
+If approval prompts still appear after restart:
+
+- re-read `%USERPROFILE%\.codex\rules\default.rules` and confirm the prefix is still exactly `C:\\WINDOWS\\System32\\WindowsPowerShell\\v1.0\\powershell.exe`
+- re-read `%USERPROFILE%\.codex\config.toml` and confirm `approval_policy = "on-request"` is still present
+- compare the exact command launcher prefix Codex is using with the prefix in the rule file instead of assuming they are equivalent
+- do not paste machine-specific usernames, session logs, or other local-only paths into shared documentation
 
 ## 6. If you want Codex to apply these rules for you
 

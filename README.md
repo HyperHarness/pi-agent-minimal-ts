@@ -78,6 +78,14 @@ If the browser cannot be launched with the default Playwright/Chrome setup on yo
 
 On the first run, the tool opens the paper page in that dedicated profile. If the session is not already authorized, complete the manual institutional login in Chrome, then rerun the same URL.
 
+If you want to check whether that profile is already logged in without triggering the download flow, first open the paper page for manual review:
+
+```text
+Open this paper page with open_paper_page_for_login: https://www.science.org/doi/10.1126/science.adz8659
+```
+
+That tool launches the local Chrome or Edge browser with the shared `.browser-profile/paper-access/` profile and stops there. It does not use Playwright for the page open, does not inspect the page HTML, and does not attempt any PDF download.
+
 Example prompt:
 
 ```text
@@ -173,6 +181,7 @@ In non-interactive mode:
 - `fetch_url`: fetches an HTML page and returns JSON text for the extracted content
 - `search_arxiv`: searches arXiv and returns JSON text for matching paper metadata
 - `download_arxiv_pdf`: returns the canonical arXiv PDF URL for a paper ID
+- `open_paper_page_for_login`: launches the local Chrome or Edge browser with the shared paper-access profile for manual login review
 - `download_paper_pdf`: downloads a PDF from a supported browser-session publisher URL
 
 For `search_arxiv`, prefer concise English keyword queries. arXiv's API is much more reliable with English search terms than with natural-language Chinese prompts.

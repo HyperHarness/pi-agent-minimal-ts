@@ -3,7 +3,10 @@ import path from "node:path";
 import { Type, type Static } from "@mariozechner/pi-ai";
 import type { AgentTool } from "@mariozechner/pi-agent-core";
 import type { PaperBrowserSession } from "./browser-session.js";
-import { resolveDefaultPaperBrowserSessionFactory } from "./browser-session.js";
+import {
+  openPageInSystemChromeForManualLogin,
+  resolveDefaultPaperBrowserSessionFactory
+} from "./browser-session.js";
 import { buildArxivPdfUrl, searchArxiv } from "./arxiv.js";
 import { downloadPaperPdf } from "./paper-download.js";
 import { fetchWebPage } from "./web-fetch.js";
@@ -43,6 +46,10 @@ const downloadPaperPdfParameters = Type.Object({
   url: Type.String({ description: "Publisher article URL to download as a PDF." })
 });
 
+const openPaperPageForLoginParameters = Type.Object({
+  url: Type.String({ description: "Publisher article URL to open for manual login review." })
+});
+
 type GetTimeParameters = Static<typeof getTimeParameters>;
 type ReadFileParameters = Static<typeof readFileParameters>;
 type WebSearchParameters = Static<typeof webSearchParameters>;
@@ -50,6 +57,7 @@ type FetchUrlParameters = Static<typeof fetchUrlParameters>;
 type SearchArxivParameters = Static<typeof searchArxivParameters>;
 type DownloadArxivPdfParameters = Static<typeof downloadArxivPdfParameters>;
 type DownloadPaperPdfParameters = Static<typeof downloadPaperPdfParameters>;
+type OpenPaperPageForLoginParameters = Static<typeof openPaperPageForLoginParameters>;
 
 function assertPathInsideDirectory(rootDir: string, candidatePath: string): void {
   const relativePath = path.relative(rootDir, candidatePath);
@@ -106,9 +114,20 @@ type DownloadPaperPdfDependency = (options: {
   workspaceDir: string;
   url: string;
 }) => Promise<DownloadPaperPdfResult>;
+type OpenPaperPageForLoginResult = Awaited<
+  ReturnType<typeof openPageInSystemChromeForManualLogin>
+>;
+type OpenPaperPageForLoginDependency = (options: {
+  workspaceDir: string;
+  url: string;
+}) => Promise<OpenPaperPageForLoginResult>;
 type DownloadPaperPdfTool = AgentTool<
   typeof downloadPaperPdfParameters,
   DownloadPaperPdfResult
+>;
+type OpenPaperPageForLoginTool = AgentTool<
+  typeof openPaperPageForLoginParameters,
+  OpenPaperPageForLoginResult
 >;
 
 export interface ToolDependencies {
@@ -116,6 +135,7 @@ export interface ToolDependencies {
   fetchWebPage?: typeof fetchWebPage;
   searchArxiv?: typeof searchArxiv;
   buildArxivPdfUrl?: typeof buildArxivPdfUrl;
+  openPaperPageForLogin?: OpenPaperPageForLoginDependency;
   downloadPaperPdf?: DownloadPaperPdfDependency;
   browserSessionFactory?: ReturnType<typeof resolveDefaultPaperBrowserSessionFactory>;
 }
@@ -132,6 +152,7 @@ export type AgentTools = [
   FetchUrlTool,
   SearchArxivTool,
   DownloadArxivPdfTool,
+  OpenPaperPageForLoginTool,
   DownloadPaperPdfTool
 ] & ToolSetMetadata;
 
@@ -173,6 +194,10 @@ export function createTools(workspaceDir: string, dependencies: ToolDependencies
         browserSession
       });
     });
+  const openPaperPageForLoginImpl =
+    dependencies.openPaperPageForLogin ??
+    (async (options: { workspaceDir: string; url: string }) =>
+      openPageInSystemChromeForManualLogin(options));
 
   const getTimeTool: GetTimeTool = {
     name: "get_time",
@@ -273,6 +298,26 @@ export function createTools(workspaceDir: string, dependencies: ToolDependencies
     }
   };
 
+  const openPaperPageForLoginTool: OpenPaperPageForLoginTool = {
+    name: "open_paper_page_for_login",
+    label: "Open Paper Page For Login",
+    description:
+      "Launches the local Chrome or Edge browser with the shared paper-access profile for manual login review without downloading anything.",
+    parameters: openPaperPageForLoginParameters,
+    executionMode: "sequential",
+    execute: async (_toolCallId: string, args: OpenPaperPageForLoginParameters) => {
+      const result = await openPaperPageForLoginImpl({
+        workspaceDir: resolvedWorkspaceDir,
+        url: args.url
+      });
+
+      return {
+        content: [{ type: "text", text: JSON.stringify(result) }],
+        details: result
+      };
+    }
+  };
+
   const downloadPaperPdfTool: DownloadPaperPdfTool = {
     name: "download_paper_pdf",
     label: "Download Paper PDF",
@@ -301,6 +346,7 @@ export function createTools(workspaceDir: string, dependencies: ToolDependencies
     fetchUrlTool,
     searchArxivTool,
     downloadArxivPdfTool,
+    openPaperPageForLoginTool,
     downloadPaperPdfTool
   ] as unknown as AgentTools;
 

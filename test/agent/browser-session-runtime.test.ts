@@ -125,6 +125,57 @@ test("openArticlePage waits for an anti-bot challenge page to clear before retur
   }
 });
 
+test("openPageForManualLogin opens a visible page without inspecting or closing it", async () => {
+  const originalLaunchPersistentContext = chromium.launchPersistentContext.bind(chromium);
+  const workspaceDir = await mkdtemp(path.join(os.tmpdir(), "paper-browser-manual-open-"));
+  let gotoCalls = 0;
+  let contentCalls = 0;
+  let closeCalls = 0;
+  let bringToFrontCalls = 0;
+
+  chromium.launchPersistentContext = (async () => ({
+    newPage: async () =>
+      ({
+        goto: async () => {
+          gotoCalls += 1;
+          return null;
+        },
+        url: () => "https://www.science.org/doi/10.1126/science.adz8659",
+        content: async () => {
+          contentCalls += 1;
+          return "<html></html>";
+        },
+        bringToFront: async () => {
+          bringToFrontCalls += 1;
+        },
+        close: async () => {
+          closeCalls += 1;
+        }
+      }) as never,
+    close: async () => {}
+  })) as unknown as typeof chromium.launchPersistentContext;
+
+  try {
+    const factory = resolveDefaultPaperBrowserSessionFactory({ workspaceDir });
+    const session = await factory();
+
+    const result = await session.openPageForManualLogin(
+      "https://www.science.org/doi/10.1126/science.adz8659"
+    );
+
+    assert.deepEqual(result, {
+      openedUrl: "https://www.science.org/doi/10.1126/science.adz8659"
+    });
+    assert.equal(gotoCalls, 1);
+    assert.equal(contentCalls, 0);
+    assert.equal(closeCalls, 0);
+    assert.equal(bringToFrontCalls, 1);
+  } finally {
+    chromium.launchPersistentContext = originalLaunchPersistentContext;
+    await rm(workspaceDir, { recursive: true, force: true });
+  }
+});
+
 test("downloadPdf saves an inline PDF response when no download event fires", async () => {
   const originalLaunchPersistentContext = chromium.launchPersistentContext.bind(chromium);
   const workspaceDir = await mkdtemp(path.join(os.tmpdir(), "paper-browser-inline-"));
