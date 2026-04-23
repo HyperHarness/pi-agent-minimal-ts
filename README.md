@@ -27,10 +27,12 @@ Use the normal install path if you want browser-session paper downloads to work 
 npm install
 ```
 
-This lets Playwright install its managed browser during dependency setup. If you skip install scripts with `npm install --ignore-scripts`, normal build/test workflows still work, but `download_paper_pdf` will require one of these before it can launch a browser:
+This lets Playwright install its managed browser during dependency setup. If you skip install scripts with `npm install --ignore-scripts`, normal build/test workflows still work, but the automatic `download_paper_pdf` path will require one of these before it can launch its browser session:
 
 - set `PI_PAPER_CHROME_EXECUTABLE` to an existing local Chrome/Chromium executable
 - install a Playwright browser separately, for example `npx playwright install chromium`
+
+The manual-browser fallback is separate: it can launch an installed local Chrome or Edge directly for manual continuation when automatic download fails.
 
 ## Run
 
@@ -66,7 +68,7 @@ Exit the REPL with `exit` or `quit`.
 
 ## Browser-Session Paper Downloads
 
-The paper download tool uses a dedicated Chrome profile at `.browser-profile/paper-access/` inside the workspace.
+The paper download tool uses the shared browser profile at `.browser-profile/paper-access/` inside the workspace.
 
 Supported publishers:
 
@@ -74,9 +76,11 @@ Supported publishers:
 - `nature.com`
 - `journals.aps.org` / `aps.org`
 
-If the browser cannot be launched with the default Playwright/Chrome setup on your machine, set `PI_PAPER_CHROME_EXECUTABLE` to the Chrome executable path before starting the agent.
+If the automatic browser session cannot be launched with the default Playwright/Chrome setup on your machine, set `PI_PAPER_CHROME_EXECUTABLE` to the Chrome executable path before starting the agent. The manual fallback can instead launch an installed local Chrome or Edge directly.
 
-On the first run, the tool opens the paper page in that dedicated profile. If the session is not already authorized, complete the manual institutional login in Chrome, then rerun the same URL.
+`download_paper_pdf` downloads the PDF automatically when possible. If automatic `download_paper_pdf` cannot complete and the tool can launch the local Chrome or Edge browser with that shared profile, it opens the original paper page and returns a structured `manual_fallback_opened` result for manual continuation. If that local browser launch also fails, the tool can still surface a hard error.
+
+That fallback does not import the browser-downloaded file back into the workspace automatically. It is only a recovery path for manual continuation.
 
 Example prompt:
 
@@ -84,7 +88,7 @@ Example prompt:
 Download this paper with download_paper_pdf: https://www.science.org/doi/10.1126/science.adz8659
 ```
 
-For manual verification, put your own test URLs into a local scratch file such as `paper_url.txt` or keep them in your notes. This repository does not ship a tracked `paper_url.txt`. Check that each URL belongs to one of the supported hosts above, then run the download against each URL and confirm the resulting PDF is written to `downloads/papers/downloaded-paper.pdf`. Repeated runs overwrite that file unless you move or rename it between runs.
+For manual verification, put your own test URLs into a local scratch file such as `paper_url.txt` or keep them in your notes. This repository does not ship a tracked `paper_url.txt`. Check that each URL belongs to one of the supported hosts above, then run the download against each URL and confirm the automatic path writes the PDF to `downloads/papers/downloaded-paper.pdf`. Repeated successful automatic runs overwrite that file unless you move or rename it between runs.
 
 ## Search And Fetch Configuration
 
@@ -173,7 +177,8 @@ In non-interactive mode:
 - `fetch_url`: fetches an HTML page and returns JSON text for the extracted content
 - `search_arxiv`: searches arXiv and returns JSON text for matching paper metadata
 - `download_arxiv_pdf`: returns the canonical arXiv PDF URL for a paper ID
-- `download_paper_pdf`: downloads a PDF from a supported browser-session publisher URL
+- `open_paper_page_for_login`: opens the paper page in the local Chrome or Edge browser with the shared paper-access profile for manual login review without downloading anything
+- `download_paper_pdf`: downloads a PDF automatically from a supported browser-session publisher URL when possible, or opens the same paper in the local browser for manual continuation when automatic download fails and the local browser launch succeeds
 
 For `search_arxiv`, prefer concise English keyword queries. arXiv's API is much more reliable with English search terms than with natural-language Chinese prompts.
 
