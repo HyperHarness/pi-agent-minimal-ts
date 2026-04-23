@@ -15,6 +15,35 @@ export interface PaperBrowserController {
   close(): Promise<void>;
 }
 
+export interface PaperBrowserManagerErrorPayload {
+  message: string;
+  code?: string;
+}
+
+export interface PaperBrowserManagerErrorResponse {
+  ok: false;
+  error: PaperBrowserManagerErrorPayload;
+}
+
+function toManagerErrorResponse(error: unknown): PaperBrowserManagerErrorResponse {
+  const message = error instanceof Error ? error.message : String(error);
+  const code =
+    typeof error === "object" &&
+    error !== null &&
+    "code" in error &&
+    typeof error.code === "string"
+      ? error.code
+      : undefined;
+
+  return {
+    ok: false,
+    error: {
+      message,
+      code
+    }
+  };
+}
+
 export function createPaperBrowserManagerServer(options: {
   workspaceDir: string;
   browserController: PaperBrowserController;
@@ -34,6 +63,10 @@ export function createPaperBrowserManagerServer(options: {
     async handleDownloadPdf(request: DownloadPdfRequest): Promise<DownloadPdfResponse> {
       await options.browserController.ensureBrowser();
       return options.browserController.downloadPaperPdf(request);
+    },
+
+    async close(): Promise<void> {
+      await options.browserController.close();
     }
   };
 }
@@ -94,10 +127,7 @@ export async function startPaperBrowserManagerHttpServer(options: {
         error: "Not found."
       });
     } catch (error) {
-      writeJson(response, 500, {
-        ok: false,
-        error: error instanceof Error ? error.message : String(error)
-      });
+      writeJson(response, 500, toManagerErrorResponse(error));
     }
   });
 
@@ -112,7 +142,7 @@ export async function startPaperBrowserManagerHttpServer(options: {
 
   return {
     endpoint: `http://127.0.0.1:${address.port}`,
-    close: async () =>
+    close: async () => {
       await new Promise<void>((resolve, reject) => {
         server.close((error) => {
           if (error) {
@@ -122,6 +152,8 @@ export async function startPaperBrowserManagerHttpServer(options: {
 
           resolve();
         });
-      })
+      });
+      await options.manager.close();
+    }
   };
 }

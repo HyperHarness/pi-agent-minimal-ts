@@ -42,6 +42,16 @@ function createControllerStub(overrides: Partial<PaperBrowserController> = {}): 
   };
 }
 
+class FakeCodedError extends Error {
+  constructor(
+    readonly code: string,
+    message: string
+  ) {
+    super(message);
+    this.name = "FakeCodedError";
+  }
+}
+
 test("manager health reports browser connection state after ensuring the browser", async () => {
   const callOrder: string[] = [];
   const manager = createPaperBrowserManagerServer({
@@ -138,6 +148,22 @@ test("manager download delegates to the shared browser controller after ensuring
     response.path,
     "D:\\Codex\\pi-agent-minimal-ts\\downloads\\papers\\nature-s41586-019-1666-5.pdf"
   );
+});
+
+test("manager close delegates to the shared browser controller", async () => {
+  let closeCalls = 0;
+  const manager = createPaperBrowserManagerServer({
+    workspaceDir: "D:\\Codex\\pi-agent-minimal-ts",
+    browserController: createControllerStub({
+      async close(): Promise<void> {
+        closeCalls += 1;
+      }
+    })
+  });
+
+  await manager.close();
+
+  assert.equal(closeCalls, 1);
 });
 
 test("createAttachedPaperBrowserSession opens a manual login page against an attached context", async () => {
@@ -240,4 +266,58 @@ test("manager HTTP server exposes JSON health, open-article, and download-pdf en
   } finally {
     await server.close();
   }
+});
+
+test("manager HTTP server returns a structured JSON error with code and message", async () => {
+  const manager = createPaperBrowserManagerServer({
+    workspaceDir: "D:\\Codex\\pi-agent-minimal-ts",
+    browserController: createControllerStub({
+      async ensureBrowser(): Promise<void> {
+        throw new FakeCodedError(
+          "browser_session_unavailable",
+          "Shared paper-access browser profile is already in use."
+        );
+      }
+    })
+  });
+  const server = await startPaperBrowserManagerHttpServer({
+    workspaceDir: "D:\\Codex\\pi-agent-minimal-ts",
+    manager
+  });
+
+  try {
+    const response = await fetch(`${server.endpoint}/health`);
+
+    assert.equal(response.status, 500);
+    assert.equal(response.headers.get("content-type"), "application/json");
+    assert.deepEqual(await response.json(), {
+      ok: false,
+      error: {
+        code: "browser_session_unavailable",
+        message: "Shared paper-access browser profile is already in use."
+      }
+    });
+  } finally {
+    await server.close();
+  }
+});
+
+test("manager HTTP server close releases the shared browser controller", async () => {
+  let closeCalls = 0;
+  const manager = createPaperBrowserManagerServer({
+    workspaceDir: "D:\\Codex\\pi-agent-minimal-ts",
+    browserController: createControllerStub({
+      async close(): Promise<void> {
+        closeCalls += 1;
+      }
+    })
+  });
+  const server = await startPaperBrowserManagerHttpServer({
+    workspaceDir: "D:\\Codex\\pi-agent-minimal-ts",
+    manager
+  });
+
+  await server.close();
+
+  assert.equal(closeCalls, 1);
 });
