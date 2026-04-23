@@ -246,7 +246,6 @@ function classifySupportedSource(url: URL): Extract<
 
   if (
     url.hostname === "journals.aps.org" ||
-    url.hostname === "www.aps.org" ||
     url.hostname === "aps.org"
   ) {
     const canonicalId = extractSupportedCanonicalId("aps", url);
@@ -332,6 +331,7 @@ function addCandidate(
       existing.authors = candidate.authors;
     }
     existing.summary = candidate.summary;
+    existing.order = candidate.order;
   }
 
   if (candidateBestRank === previousBestRank && candidate.order < previousOrder) {

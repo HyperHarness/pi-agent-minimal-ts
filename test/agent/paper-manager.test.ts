@@ -162,3 +162,67 @@ test("searchPapers keeps supported hosts classified by hostname even when the pa
     } satisfies PaperSearchResult
   ]);
 });
+
+test("searchPapers treats unsupported www.aps.org hosts as external results", async () => {
+  const results = await searchPapers({
+    query: "aps host parity",
+    searchArxivImpl: async () => [],
+    searchWebImpl: async () => [
+      createWebResult({
+        title: "APS Host Parity",
+        url: "https://www.aps.org/doi/10.1103/PhysRevLett.133.123456",
+        snippet: "aps summary"
+      })
+    ]
+  });
+
+  assert.deepEqual(results, [
+    {
+      title: "APS Host Parity",
+      authors: [],
+      summary: "aps summary",
+      primarySource: "external",
+      primaryAction: "open_url_only",
+      sources: [
+        {
+          source: "external",
+          articleUrl: "https://www.aps.org/doi/10.1103/PhysRevLett.133.123456",
+          action: "open_url_only"
+        }
+      ]
+    } satisfies PaperSearchResult
+  ]);
+});
+
+test("searchPapers reorders merged candidates when a higher-priority source appears later", async () => {
+  const results = await searchPapers({
+    query: "ordering",
+    maxResults: 1,
+    searchArxivImpl: async () => [
+      createArxivResult({
+        id: "2401.00001",
+        title: "Paper A",
+        authors: ["Ada Lovelace"],
+        summary: "arXiv summary A",
+        absUrl: "https://arxiv.org/abs/2401.00001",
+        pdfUrl: "https://arxiv.org/pdf/2401.00001.pdf"
+      })
+    ],
+    searchWebImpl: async () => [
+      createWebResult({
+        title: "Paper B",
+        url: "https://www.science.org/doi/10.1126/science.paper-b",
+        snippet: "science summary B"
+      }),
+      createWebResult({
+        title: "Paper A",
+        url: "https://www.science.org/doi/10.1126/science.paper-a",
+        snippet: "science summary A"
+      })
+    ]
+  });
+
+  assert.equal(results.length, 1);
+  assert.equal(results[0].title, "Paper B");
+  assert.equal(results[0].primarySource, "science");
+});
