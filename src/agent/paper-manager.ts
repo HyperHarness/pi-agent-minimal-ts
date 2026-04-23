@@ -601,7 +601,7 @@ export async function downloadPaper(options: DownloadPaperOptions): Promise<Pape
     const openPublisherForLoginImpl: OpenPublisherForLoginImplementation =
       options.openPublisherForLoginImpl ??
       ((openOptions) =>
-        openPageInSystemChrome({
+        (options.openPageInSystemChromeImpl ?? openPageInSystemChrome)({
           workspaceDir: openOptions.workspaceDir,
           url: openOptions.url
         }).then(({ openedUrl, profileDir, executablePath }) => ({

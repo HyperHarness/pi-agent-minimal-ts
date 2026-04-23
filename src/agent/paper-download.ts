@@ -30,19 +30,27 @@ function sanitizeFilenameComponent(value: string): string {
     .replace(/^[-. ]+|[-. ]+$/g, "");
 }
 
+function decodePublisherPathSegment(value: string): string {
+  try {
+    return decodeURIComponent(value);
+  } catch {
+    return value;
+  }
+}
+
 function extractNatureArticleId(urlString: string): string | null {
   const match = new URL(urlString).pathname.match(/^\/articles\/([^/?#]+?)(?:\.pdf)?$/i);
-  return match?.[1] ?? null;
+  return match?.[1] ? decodePublisherPathSegment(match[1]) : null;
 }
 
 function extractScienceDoi(urlString: string): string | null {
   const match = new URL(urlString).pathname.match(/^\/doi\/(?:(?:pdf|full|abs|epdf)\/)?(.+)$/i);
-  return match?.[1]?.replace(/\.pdf$/i, "") ?? null;
+  return match?.[1] ? decodePublisherPathSegment(match[1]).replace(/\.pdf$/i, "") : null;
 }
 
 function extractApsDoi(urlString: string): string | null {
   const match = new URL(urlString).pathname.match(/^\/(?:doi|[^/]+)\/(?:abstract|pdf)\/(.+)$/i);
-  return match?.[1]?.replace(/\.pdf$/i, "") ?? null;
+  return match?.[1] ? decodePublisherPathSegment(match[1]).replace(/\.pdf$/i, "") : null;
 }
 
 export function resolvePublisherCanonicalId(options: {

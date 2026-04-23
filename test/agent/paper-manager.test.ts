@@ -452,3 +452,69 @@ test("downloadPaper opens unsupported external URLs instead of rejecting them", 
     await rm(workspaceDir, { recursive: true, force: true });
   }
 });
+
+test("downloadPaper uses openPageInSystemChromeImpl for supported-publisher manual fallback when no login opener is injected", async () => {
+  const workspaceDir = await mkdtemp(path.join(os.tmpdir(), "paper-manager-"));
+  const articleUrl = "https://www.science.org/doi/10.1126/science.adz8659";
+  const fallbackUrl = `${articleUrl}?manual=1`;
+  const openCalls: Array<{
+    url: string;
+    openedUrl: string;
+    profileDir: string;
+    executablePath: string;
+  }> = [];
+
+  try {
+    const result = await downloadPaper({
+      workspaceDir,
+      url: articleUrl,
+      downloadPublisherPaperImpl: async () => {
+        throw new PaperDownloadError(
+          "manual_login_required",
+          "Publisher requires manual login."
+        );
+      },
+      openPageInSystemChromeImpl: async (options) => {
+        openCalls.push({
+          url: options.url,
+          openedUrl: fallbackUrl,
+          profileDir: path.join(workspaceDir, ".browser-profile", "paper-access"),
+          executablePath: "stubbed-chrome.exe"
+        });
+
+        return openCalls.at(-1) as {
+          url: string;
+          openedUrl: string;
+          profileDir: string;
+          executablePath: string;
+        };
+      }
+    });
+
+    const expectedRecordPath = resolvePaperRecordPath({
+      workspaceDir,
+      source: "science",
+      canonicalId: "10.1126/science.adz8659",
+      articleUrl
+    });
+
+    assert.equal(openCalls.length, 1);
+    assert.equal(openCalls[0]?.url, articleUrl);
+    assert.deepEqual(result, {
+      status: "manual_fallback_opened",
+      source: "science",
+      canonicalId: "10.1126/science.adz8659",
+      articleUrl,
+      fallbackUrl,
+      recordPath: expectedRecordPath,
+      failure: {
+        code: "manual_login_required",
+        message: "Publisher requires manual login."
+      },
+      profileDir: path.join(workspaceDir, ".browser-profile", "paper-access"),
+      executablePath: "stubbed-chrome.exe"
+    });
+  } finally {
+    await rm(workspaceDir, { recursive: true, force: true });
+  }
+});
