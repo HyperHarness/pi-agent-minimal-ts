@@ -206,7 +206,12 @@ test("downloadPaperPdf returns output metadata for a successful download", async
     }
   });
 
-  const expectedPath = path.join(workspaceDir, "downloads", "papers", "downloaded-paper.pdf");
+  const expectedPath = path.join(
+    workspaceDir,
+    "downloads",
+    "papers",
+    "science-10.1126-science.adz8659.pdf"
+  );
   assert.equal(result.path, expectedPath);
   assert.equal(result.publisher, "science");
   assert.equal(result.articleUrl, "https://www.science.org/doi/10.1126/science.adz8659");
@@ -242,5 +247,46 @@ test("downloadPaperPdf derives the APS canonical PDF URL when the article page h
     result.finalPdfUrl,
     "https://journals.aps.org/prl/pdf/10.1103/PhysRevLett.134.090601"
   );
+  assert.equal(
+    result.path,
+    path.join(
+      workspaceDir,
+      "downloads",
+      "papers",
+      "aps-10.1103-PhysRevLett.134.090601.pdf"
+    )
+  );
   assert.equal(downloadedUrl, result.finalPdfUrl);
+});
+
+test("downloadPaperPdf formats Nature output filenames from the article identifier", async () => {
+  const workspaceDir = await mkdtemp(path.join(os.tmpdir(), "paper-download-"));
+  let downloadedPath: string | undefined;
+
+  const result = await downloadPaperPdf({
+    workspaceDir,
+    url: "https://www.nature.com/articles/s41586-019-1666-5",
+    browserSession: {
+      openArticlePage: async () => ({
+        finalArticleUrl: "https://www.nature.com/articles/s41586-019-1666-5",
+        html: '<html><body><a href="/articles/s41586-019-1666-5.pdf">PDF</a></body></html>',
+        authorized: true
+      }),
+      openPageForManualLogin: async (url: string) => ({
+        openedUrl: url
+      }),
+      downloadPdf: async (_url, destinationPath) => {
+        downloadedPath = destinationPath;
+      }
+    }
+  });
+
+  const expectedPath = path.join(
+    workspaceDir,
+    "downloads",
+    "papers",
+    "nature-s41586-019-1666-5.pdf"
+  );
+  assert.equal(result.path, expectedPath);
+  assert.equal(downloadedPath, expectedPath);
 });

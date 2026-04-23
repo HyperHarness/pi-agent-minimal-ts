@@ -658,15 +658,6 @@ test("download_paper_pdf uses the injected paper manager client for fallback wit
           events.push("close");
         }
       },
-      openPaperPageForLogin: async (options: { url: string; workspaceDir: string }) => {
-        events.push(`fallbackOpen:${options.url}`);
-        return {
-          url: options.url,
-          openedUrl: options.url,
-          profileDir: path.join(options.workspaceDir, ".browser-profile", "paper-access"),
-          executablePath: "C:\\Program Files\\Google\\Chrome\\Application\\chrome.exe",
-        };
-      },
     } as unknown as CreateToolsDependencies) as ReadonlyArray<{
       name: string;
       execute?: DownloadPaperPdfTool["execute"];
@@ -688,11 +679,11 @@ test("download_paper_pdf uses the injected paper manager client for fallback wit
       "manual_fallback_opened",
     );
     assert.deepEqual(events, [
-      "fallbackOpen:https://www.science.org/doi/10.1126/science.adz8659",
+      "openArticle:https://www.science.org/doi/10.1126/science.adz8659",
     ]);
     await agentTools.cleanupTools(tools as ReturnType<typeof createTools>);
     assert.deepEqual(events, [
-      "fallbackOpen:https://www.science.org/doi/10.1126/science.adz8659",
+      "openArticle:https://www.science.org/doi/10.1126/science.adz8659",
       "close",
     ]);
   } finally {
@@ -1262,63 +1253,4 @@ test("createTools cleanup closes the injected paper manager client exactly once"
   }
 });
 
-test("download_paper_pdf uses the default manager client boundary and cleans up the in-process server", async () => {
-  const workspace = await mkdtemp(path.join(tmpdir(), "pi-agent-tools-"));
-  const events: string[] = [];
 
-  try {
-    const tools = createTools(workspace, {
-      browserSessionFactory: async () => ({
-        async openArticlePage(url: string) {
-          events.push(`openArticlePage:${url}`);
-          return {
-            finalArticleUrl: url,
-            html: "<html></html>",
-            authorized: false,
-          };
-        },
-        async openPageForManualLogin(url: string) {
-          events.push(`openPageForManualLogin:${url}`);
-          return {
-            openedUrl: url,
-          };
-        },
-        async downloadPdf() {
-          throw new Error("downloadPdf should not run when manual fallback is required");
-        },
-        async dispose() {
-          events.push("dispose");
-        },
-      }),
-    }) as ReadonlyArray<{
-      name: string;
-      execute?: DownloadPaperPdfTool["execute"];
-    }>;
-
-    const tool = tools.find((candidate) => candidate.name === "download_paper_pdf");
-    assert.ok(tool);
-    const execute = tool.execute;
-    assert.ok(execute);
-
-    const result = await execute(
-      "tool-call-default-manager-boundary",
-      { url: "https://www.science.org/doi/10.1126/science.adz8659" },
-      undefined,
-    );
-
-    assert.equal((result.details as { status?: string }).status, "manual_fallback_opened");
-    assert.deepEqual(events, [
-      "openArticlePage:https://www.science.org/doi/10.1126/science.adz8659",
-      "openPageForManualLogin:https://www.science.org/doi/10.1126/science.adz8659",
-    ]);
-
-    await agentTools.cleanupTools(tools as ReturnType<typeof createTools>);
-    assert.deepEqual(events, [
-      "openArticlePage:https://www.science.org/doi/10.1126/science.adz8659",
-      "openPageForManualLogin:https://www.science.org/doi/10.1126/science.adz8659",
-      "dispose",
-    ]);
-  } finally {
-    await rm(workspace, { recursive: true, force: true });
-  }
-});

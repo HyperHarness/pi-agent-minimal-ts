@@ -25,6 +25,18 @@ export interface PaperBrowserManagerErrorResponse {
   error: PaperBrowserManagerErrorPayload;
 }
 
+class PaperBrowserManagerHttpError extends Error {
+  constructor(
+    readonly statusCode: number,
+    readonly code: string,
+    message: string
+  ) {
+    super(message);
+    this.name = "PaperBrowserManagerHttpError";
+    Object.setPrototypeOf(this, new.target.prototype);
+  }
+}
+
 function toManagerErrorResponse(error: unknown): PaperBrowserManagerErrorResponse {
   const message = error instanceof Error ? error.message : String(error);
   const code =
@@ -42,6 +54,10 @@ function toManagerErrorResponse(error: unknown): PaperBrowserManagerErrorRespons
       code
     }
   };
+}
+
+function getManagerErrorStatusCode(error: unknown): number {
+  return error instanceof PaperBrowserManagerHttpError ? error.statusCode : 500;
 }
 
 export function createPaperBrowserManagerServer(options: {
@@ -62,7 +78,10 @@ export function createPaperBrowserManagerServer(options: {
 
     async handleDownloadPdf(request: DownloadPdfRequest): Promise<DownloadPdfResponse> {
       await options.browserController.ensureBrowser();
-      return options.browserController.downloadPaperPdf(request);
+      return options.browserController.downloadPaperPdf({
+        ...request,
+        workspaceDir: options.workspaceDir
+      });
     },
 
     async close(): Promise<void> {
@@ -83,7 +102,12 @@ async function readRequestBody(request: IncomingMessage): Promise<string> {
 
 async function readJsonRequest<T>(request: IncomingMessage): Promise<T> {
   const body = await readRequestBody(request);
-  return JSON.parse(body) as T;
+
+  try {
+    return JSON.parse(body) as T;
+  } catch {
+    throw new PaperBrowserManagerHttpError(400, "bad_request", "Malformed JSON request body.");
+  }
 }
 
 function writeJson(response: ServerResponse, statusCode: number, payload: unknown): void {
@@ -122,12 +146,9 @@ export async function startPaperBrowserManagerHttpServer(options: {
         return;
       }
 
-      writeJson(response, 404, {
-        ok: false,
-        error: "Not found."
-      });
+      throw new PaperBrowserManagerHttpError(404, "not_found", "Not found.");
     } catch (error) {
-      writeJson(response, 500, toManagerErrorResponse(error));
+      writeJson(response, getManagerErrorStatusCode(error), toManagerErrorResponse(error));
     }
   });
 

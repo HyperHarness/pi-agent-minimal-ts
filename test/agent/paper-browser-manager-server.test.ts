@@ -150,6 +150,39 @@ test("manager download delegates to the shared browser controller after ensuring
   );
 });
 
+test("manager download uses the manager workspace instead of a caller-supplied workspace", async () => {
+  const capturedRequests: DownloadPdfRequest[] = [];
+  const request = {
+    url: "https://www.nature.com/articles/s41586-019-1666-5",
+    workspaceDir: "D:\\unexpected-workspace"
+  };
+  const manager = createPaperBrowserManagerServer({
+    workspaceDir: "D:\\Codex\\pi-agent-minimal-ts",
+    browserController: createControllerStub({
+      async downloadPaperPdf(input: DownloadPdfRequest): Promise<DownloadPdfResponse> {
+        capturedRequests.push(input);
+        return {
+          status: "downloaded",
+          path: "D:\\Codex\\pi-agent-minimal-ts\\downloads\\papers\\nature-s41586-019-1666-5.pdf",
+          publisher: "nature",
+          articleUrl: input.url,
+          finalArticleUrl: input.url,
+          finalPdfUrl: `${input.url}.pdf`
+        };
+      }
+    })
+  });
+
+  await manager.handleDownloadPdf(request);
+
+  assert.deepEqual(capturedRequests, [
+    {
+      url: "https://www.nature.com/articles/s41586-019-1666-5",
+      workspaceDir: "D:\\Codex\\pi-agent-minimal-ts"
+    }
+  ]);
+});
+
 test("manager close delegates to the shared browser controller", async () => {
   let closeCalls = 0;
   const manager = createPaperBrowserManagerServer({
@@ -295,6 +328,51 @@ test("manager HTTP server returns a structured JSON error with code and message"
       error: {
         code: "browser_session_unavailable",
         message: "Shared paper-access browser profile is already in use."
+      }
+    });
+  } finally {
+    await server.close();
+  }
+});
+
+test("manager HTTP server returns a consistent structured error for unknown routes and malformed JSON", async () => {
+  const manager = createPaperBrowserManagerServer({
+    workspaceDir: "D:\\Codex\\pi-agent-minimal-ts",
+    browserController: createControllerStub()
+  });
+  const server = await startPaperBrowserManagerHttpServer({
+    workspaceDir: "D:\\Codex\\pi-agent-minimal-ts",
+    manager
+  });
+
+  try {
+    const notFoundResponse = await fetch(`${server.endpoint}/unknown-route`);
+
+    assert.equal(notFoundResponse.status, 404);
+    assert.equal(notFoundResponse.headers.get("content-type"), "application/json");
+    assert.deepEqual(await notFoundResponse.json(), {
+      ok: false,
+      error: {
+        code: "not_found",
+        message: "Not found."
+      }
+    });
+
+    const malformedJsonResponse = await fetch(`${server.endpoint}/open-article`, {
+      method: "POST",
+      headers: {
+        "content-type": "application/json"
+      },
+      body: "{"
+    });
+
+    assert.equal(malformedJsonResponse.status, 400);
+    assert.equal(malformedJsonResponse.headers.get("content-type"), "application/json");
+    assert.deepEqual(await malformedJsonResponse.json(), {
+      ok: false,
+      error: {
+        code: "bad_request",
+        message: "Malformed JSON request body."
       }
     });
   } finally {

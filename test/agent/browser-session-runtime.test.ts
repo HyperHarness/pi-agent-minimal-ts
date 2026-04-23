@@ -1,6 +1,6 @@
 import test from "node:test";
 import assert from "node:assert/strict";
-import { mkdtemp, readFile, rm } from "node:fs/promises";
+import { mkdir, mkdtemp, readFile, rm, writeFile } from "node:fs/promises";
 import os from "node:os";
 import path from "node:path";
 import { chromium } from "playwright";
@@ -74,6 +74,37 @@ test("PaperBrowserSessionError preserves the explicit code", () => {
 
   assert.equal(error.code, "browser_session_unavailable");
   assert.equal(error.message, "Chrome launch failed");
+});
+
+test("resolveDefaultPaperBrowserSessionFactory explains when the shared profile is already in use", async () => {
+  const originalLaunchPersistentContext = chromium.launchPersistentContext.bind(chromium);
+  const workspaceDir = await mkdtemp(path.join(os.tmpdir(), "paper-browser-profile-in-use-"));
+  const profileDir = path.join(workspaceDir, ".browser-profile", "paper-access");
+  await mkdir(path.join(profileDir, "Default"), { recursive: true });
+  await writeFile(path.join(profileDir, "lockfile"), "");
+  await writeFile(path.join(profileDir, "Default", "LOCK"), "");
+
+  chromium.launchPersistentContext = (async () => {
+    throw new Error("browserType.launchPersistentContext: Target page, context or browser has been closed");
+  }) as typeof chromium.launchPersistentContext;
+
+  try {
+    const factory = resolveDefaultPaperBrowserSessionFactory({ workspaceDir });
+
+    await assert.rejects(
+      () => factory(),
+      (error: unknown) => {
+        assert.ok(error instanceof PaperBrowserSessionError);
+        assert.equal(error.code, "browser_session_unavailable");
+        assert.match(error.message, /already open/i);
+        assert.match(error.message, /close/i);
+        return true;
+      }
+    );
+  } finally {
+    chromium.launchPersistentContext = originalLaunchPersistentContext;
+    await rm(workspaceDir, { recursive: true, force: true });
+  }
 });
 
 test("openArticlePage waits for an anti-bot challenge page to clear before returning", async () => {
@@ -176,6 +207,69 @@ test("openPageForManualLogin opens a visible page without inspecting or closing 
   }
 });
 
+test("default paper browser session reports alive when the browser context can open a probe page", async () => {
+  const originalLaunchPersistentContext = chromium.launchPersistentContext.bind(chromium);
+  const workspaceDir = await mkdtemp(path.join(os.tmpdir(), "paper-browser-alive-"));
+  let newPageCalls = 0;
+  let probeCloseCalls = 0;
+
+  chromium.launchPersistentContext = (async () => ({
+    newPage: async () => {
+      newPageCalls += 1;
+      return ({
+        close: async () => {
+          probeCloseCalls += 1;
+        }
+      }) as never;
+    },
+    close: async () => {}
+  })) as unknown as typeof chromium.launchPersistentContext;
+
+  try {
+    const factory = resolveDefaultPaperBrowserSessionFactory({ workspaceDir });
+    const session = await factory();
+
+    assert.equal(typeof session.isAlive, "function");
+    assert.equal(await session.isAlive?.(), true);
+    assert.equal(newPageCalls, 1);
+    assert.equal(probeCloseCalls, 1);
+  } finally {
+    chromium.launchPersistentContext = originalLaunchPersistentContext;
+    await rm(workspaceDir, { recursive: true, force: true });
+  }
+});
+
+test("default paper browser session reports not alive after the browser context has closed", async () => {
+  const originalLaunchPersistentContext = chromium.launchPersistentContext.bind(chromium);
+  const workspaceDir = await mkdtemp(path.join(os.tmpdir(), "paper-browser-dead-"));
+  let browserClosed = false;
+
+  chromium.launchPersistentContext = (async () => ({
+    newPage: async () => {
+      if (browserClosed) {
+        throw new Error("browserType.launchPersistentContext: Target page, context or browser has been closed");
+      }
+
+      return ({
+        close: async () => {}
+      }) as never;
+    },
+    close: async () => {}
+  })) as unknown as typeof chromium.launchPersistentContext;
+
+  try {
+    const factory = resolveDefaultPaperBrowserSessionFactory({ workspaceDir });
+    const session = await factory();
+    browserClosed = true;
+
+    assert.equal(typeof session.isAlive, "function");
+    assert.equal(await session.isAlive?.(), false);
+  } finally {
+    chromium.launchPersistentContext = originalLaunchPersistentContext;
+    await rm(workspaceDir, { recursive: true, force: true });
+  }
+});
+
 test("downloadPdf saves an inline PDF response when no download event fires", async () => {
   const originalLaunchPersistentContext = chromium.launchPersistentContext.bind(chromium);
   const workspaceDir = await mkdtemp(path.join(os.tmpdir(), "paper-browser-inline-"));
@@ -200,6 +294,47 @@ test("downloadPdf saves an inline PDF response when no download event fires", as
     const session = await factory();
 
     await session.downloadPdf("https://example.com/paper.pdf", destinationPath);
+
+    const writtenBytes = await readFile(destinationPath);
+    assert.deepEqual(writtenBytes, pdfBytes);
+  } finally {
+    chromium.launchPersistentContext = originalLaunchPersistentContext;
+    await rm(workspaceDir, { recursive: true, force: true });
+  }
+});
+
+test("downloadPdf falls back to the request API when Chrome navigation returns PDF viewer HTML", async () => {
+  const originalLaunchPersistentContext = chromium.launchPersistentContext.bind(chromium);
+  const workspaceDir = await mkdtemp(path.join(os.tmpdir(), "paper-browser-pdf-viewer-"));
+  const destinationPath = path.join(workspaceDir, "nature.pdf");
+  const htmlBytes = Buffer.from("<!doctype html><html><body>viewer</body></html>");
+  const pdfBytes = Buffer.from("%PDF-nature-test");
+
+  chromium.launchPersistentContext = (async () => ({
+    newPage: async () =>
+      ({
+        once() {},
+        waitForEvent: async () => null,
+        goto: async () => ({
+          headers: () => ({ "content-type": "application/pdf" }),
+          body: async () => htmlBytes
+        }),
+        request: {
+          get: async () => ({
+            headers: () => ({ "content-type": "application/pdf" }),
+            body: async () => pdfBytes
+          })
+        },
+        close: async () => {}
+      }) as never,
+    close: async () => {}
+  })) as unknown as typeof chromium.launchPersistentContext;
+
+  try {
+    const factory = resolveDefaultPaperBrowserSessionFactory({ workspaceDir });
+    const session = await factory();
+
+    await session.downloadPdf("https://www.nature.com/articles/s41586-019-1666-5.pdf", destinationPath);
 
     const writtenBytes = await readFile(destinationPath);
     assert.deepEqual(writtenBytes, pdfBytes);

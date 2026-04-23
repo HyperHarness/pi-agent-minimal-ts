@@ -58,6 +58,7 @@ export interface PaperBrowserSession {
   openArticlePage(url: string): Promise<OpenArticlePageResult>;
   openPageForManualLogin(url: string): Promise<OpenManualLoginPageResult>;
   downloadPdf(url: string, destinationPath: string): Promise<void>;
+  isAlive?(): Promise<boolean>;
   dispose?(): Promise<void>;
 }
 
@@ -192,6 +193,13 @@ function getPaperBrowserLockPaths(profileDir: string): string[] {
 
 function isPaperBrowserProfileLikelyInUse(profileDir: string): boolean {
   return getPaperBrowserLockPaths(profileDir).some((candidatePath) => existsSync(candidatePath));
+}
+
+function isClosedPaperBrowserError(error: unknown): boolean {
+  return (
+    error instanceof Error &&
+    /target page, context or browser has been closed|browser has been closed/i.test(error.message)
+  );
 }
 
 export function normalizeChromeExecutablePath(value: string | undefined): string | undefined {
@@ -447,6 +455,27 @@ export function resolveDefaultPaperBrowserSessionFactory(options: {
         openArticlePage: attachedSession.openArticlePage,
         openPageForManualLogin: attachedSession.openPageForManualLogin,
         downloadPdf: attachedSession.downloadPdf,
+
+        async isAlive(): Promise<boolean> {
+          let page:
+            | {
+                close(): Promise<void>;
+              }
+            | undefined;
+
+          try {
+            page = await context.newPage();
+            return true;
+          } catch (error) {
+            if (isClosedPaperBrowserError(error)) {
+              return false;
+            }
+
+            throw error;
+          } finally {
+            await page?.close().catch(() => {});
+          }
+        },
 
         async dispose(): Promise<void> {
           disposePromise ??= context.close();

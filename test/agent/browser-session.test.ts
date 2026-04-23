@@ -69,7 +69,7 @@ test("resolveSystemChromeExecutablePath discovers the first installed system bro
 
   assert.equal(executablePath, "C:\\Program Files\\Microsoft\\Edge\\Application\\msedge.exe");
 });
-test("openPageInSystemChromeForManualLogin launches Chrome with the shared profile", async () => {
+test("openPageInSystemChromeForManualLogin launches Chrome with the shared profile without forcing a new window", async () => {
   const spawned: Array<{
     executablePath: string;
     args: string[];
@@ -110,7 +110,6 @@ test("openPageInSystemChromeForManualLogin launches Chrome with the shared profi
     {
       executablePath: "C:\\Program Files\\Google\\Chrome\\Application\\chrome.exe",
       args: [
-        "--new-window",
         "--no-first-run",
         "--no-default-browser-check",
         "--user-data-dir=D:\\Codex\\pi-agent-minimal-ts\\.browser-profile\\paper-access",

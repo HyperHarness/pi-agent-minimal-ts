@@ -20,6 +20,60 @@ export class PaperDownloadError extends Error {
   }
 }
 
+function sanitizeFilenameComponent(value: string): string {
+  return value
+    .trim()
+    .replace(/[<>:"/\\|?*\u0000-\u001F]+/g, "-")
+    .replace(/\s+/g, "-")
+    .replace(/-+/g, "-")
+    .replace(/^[-. ]+|[-. ]+$/g, "");
+}
+
+function extractNatureArticleId(urlString: string): string | null {
+  const match = new URL(urlString).pathname.match(/^\/articles\/([^/?#]+?)(?:\.pdf)?$/i);
+  return match?.[1] ?? null;
+}
+
+function extractScienceDoi(urlString: string): string | null {
+  const match = new URL(urlString).pathname.match(/^\/doi\/(?:pdf\/)?(.+)$/i);
+  return match?.[1] ?? null;
+}
+
+function extractApsDoi(urlString: string): string | null {
+  const match = new URL(urlString).pathname.match(/^\/(?:doi|[^/]+)\/(?:abstract|pdf)\/(.+)$/i);
+  return match?.[1] ?? null;
+}
+
+function resolveFormattedPaperFilename(input: {
+  publisherId: "science" | "nature" | "aps";
+  finalArticleUrl: string;
+  finalPdfUrl: string;
+}): string | null {
+  const identifier =
+    input.publisherId === "nature"
+      ? extractNatureArticleId(input.finalArticleUrl) ?? extractNatureArticleId(input.finalPdfUrl)
+      : input.publisherId === "science"
+        ? extractScienceDoi(input.finalArticleUrl) ?? extractScienceDoi(input.finalPdfUrl)
+        : extractApsDoi(input.finalArticleUrl) ?? extractApsDoi(input.finalPdfUrl);
+  const sanitizedIdentifier = identifier ? sanitizeFilenameComponent(identifier) : "";
+  if (!sanitizedIdentifier) {
+    return null;
+  }
+
+  return `${input.publisherId}-${sanitizedIdentifier}.pdf`;
+}
+
+function resolveOriginalPdfFilename(finalPdfUrl: string): string | null {
+  const parsedUrl = new URL(finalPdfUrl);
+  const rawBasename = path.posix.basename(parsedUrl.pathname);
+  if (!rawBasename) {
+    return null;
+  }
+
+  const sanitizedBasename = sanitizeFilenameComponent(decodeURIComponent(rawBasename));
+  return sanitizedBasename.toLowerCase().endsWith(".pdf") ? sanitizedBasename : null;
+}
+
 function resolveFallbackPdfPath(input: {
   publisherId: "science" | "nature" | "aps";
   finalArticleUrl: string;
@@ -87,6 +141,14 @@ export async function downloadPaperPdf(options: {
   }
 
   const finalPdfUrl = new URL(pdfPath, articlePage.finalArticleUrl).toString();
+  const outputFilename =
+    resolveFormattedPaperFilename({
+      publisherId: adapter.id,
+      finalArticleUrl: articlePage.finalArticleUrl,
+      finalPdfUrl
+    }) ??
+    resolveOriginalPdfFilename(finalPdfUrl) ??
+    "downloaded-paper.pdf";
   const outputDir = path.join(options.workspaceDir, "downloads", "papers");
   try {
     await mkdir(outputDir, { recursive: true });
@@ -96,7 +158,7 @@ export async function downloadPaperPdf(options: {
       error instanceof Error ? error.message : "Failed to prepare the download destination."
     );
   }
-  const outputPath = path.join(outputDir, "downloaded-paper.pdf");
+  const outputPath = path.join(outputDir, outputFilename);
   try {
     await options.browserSession.downloadPdf(finalPdfUrl, outputPath);
   } catch (error) {

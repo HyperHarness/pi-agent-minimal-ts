@@ -1,4 +1,4 @@
-import { readFile, realpath } from "node:fs/promises";
+﻿import { readFile, realpath } from "node:fs/promises";
 import path from "node:path";
 import { Type, type Static } from "@mariozechner/pi-ai";
 import type { AgentTool } from "@mariozechner/pi-agent-core";
@@ -236,7 +236,17 @@ export function createTools(workspaceDir: string, dependencies: ToolDependencies
   let browserSessionPromise: Promise<PaperBrowserSession> | undefined;
   let paperManagerServerClose: (() => Promise<void>) | undefined;
   const getBrowserSession = async (): Promise<PaperBrowserSession> => {
-    browserSessionPromise ??= browserSessionFactoryImpl();
+    if (browserSessionPromise === undefined) {
+      const sessionPromise = browserSessionFactoryImpl().catch((error: unknown) => {
+        if (browserSessionPromise === sessionPromise) {
+          browserSessionPromise = undefined;
+        }
+
+        throw error;
+      });
+      browserSessionPromise = sessionPromise;
+    }
+
     return browserSessionPromise;
   };
   const disposeBrowserSession = async (): Promise<void> => {
@@ -256,25 +266,52 @@ export function createTools(workspaceDir: string, dependencies: ToolDependencies
 
     await browserSession.dispose?.();
   };
+  const isBrowserSessionAlive = async (browserSession: PaperBrowserSession): Promise<boolean> => {
+    if (browserSession.isAlive === undefined) {
+      return true;
+    }
+
+    try {
+      return await browserSession.isAlive();
+    } catch {
+      return false;
+    }
+  };
+  const ensureLiveBrowserSession = async (): Promise<PaperBrowserSession> => {
+    for (let attempt = 0; attempt < 2; attempt += 1) {
+      const browserSession = await getBrowserSession();
+      if (await isBrowserSessionAlive(browserSession)) {
+        return browserSession;
+      }
+
+      await disposeBrowserSession();
+    }
+
+    throw new Error("Paper browser session is unavailable.");
+  };
   const spawnPaperManager = async () => {
-    const browserSession = await getBrowserSession();
     const manager = createPaperBrowserManagerServer({
       workspaceDir: resolvedWorkspaceDir,
       browserController: {
-        async ensureBrowser(): Promise<void> {},
+        async ensureBrowser(): Promise<void> {
+          await ensureLiveBrowserSession();
+        },
         async health() {
+          const browserSession = await getBrowserSession();
           return {
-            browserConnected: true,
+            browserConnected: await isBrowserSessionAlive(browserSession),
             profileDir: getPaperBrowserProfileDir(resolvedWorkspaceDir)
           };
         },
         async openArticle(request) {
+          const browserSession = await getBrowserSession();
           const response = await browserSession.openPageForManualLogin(request.url);
           return {
             openedUrl: response.openedUrl
           };
         },
         async downloadPaperPdf(request) {
+          const browserSession = await getBrowserSession();
           const result = await downloadPaperPdf({
             workspaceDir: request.workspaceDir,
             url: request.url,
@@ -328,6 +365,11 @@ export function createTools(workspaceDir: string, dependencies: ToolDependencies
     dependencies.openPaperPageForLogin ??
     (async (options: { workspaceDir: string; url: string }) =>
       paperBrowserManagerClient.openArticle({ url: options.url }));
+  let cleanupPromise: Promise<void> | undefined;
+  const closePaperManager = async (): Promise<void> => {
+    cleanupPromise ??= paperBrowserManagerClient.close();
+    await cleanupPromise;
+  };
 
   const getTimeTool: GetTimeTool = {
     name: "get_time",
@@ -453,7 +495,7 @@ export function createTools(workspaceDir: string, dependencies: ToolDependencies
     name: "download_paper_pdf",
     label: "Download Paper PDF",
     description:
-      "Downloads a paper PDF automatically from a supported publisher when possible, or opens the same paper in the managed browser session for manual continuation when automatic download fails.",
+      "Downloads a paper PDF automatically from a supported publisher when possible, or opens the same paper in local Chrome or Edge for manual continuation when automatic download fails.",
     parameters: downloadPaperPdfParameters,
     executionMode: "sequential",
     execute: async (_toolCallId: string, args: DownloadPaperPdfParameters) => {
@@ -531,7 +573,7 @@ export function createTools(workspaceDir: string, dependencies: ToolDependencies
     }
   };
 
-  let cleanupPromise: Promise<void> | undefined;
+
   const tools = [
     getTimeTool,
     readFileTool,
@@ -547,10 +589,7 @@ export function createTools(workspaceDir: string, dependencies: ToolDependencies
     cleanup: {
       enumerable: false,
       value: async () => {
-        cleanupPromise ??= (async () => {
-          await paperBrowserManagerClient.close();
-        })();
-        await cleanupPromise;
+        await closePaperManager();
       }
     },
     workspaceDir: {
@@ -561,3 +600,4 @@ export function createTools(workspaceDir: string, dependencies: ToolDependencies
 
   return tools;
 }
+
