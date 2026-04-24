@@ -138,6 +138,35 @@ function assertSupportedPaperPublisherUrl(input: string): void {
   getPublisherAdapter(url.toString());
 }
 
+const PAPER_DOWNLOAD_ERROR_CODES = new Set<PaperDownloadError["code"]>([
+  "unsupported_publisher",
+  "browser_session_unavailable",
+  "manual_login_required",
+  "authorization_failed",
+  "pdf_not_found",
+  "download_failed"
+]);
+
+function normalizePaperDownloadError(error: unknown): unknown {
+  if (error instanceof PaperDownloadError) {
+    return error;
+  }
+
+  if (
+    typeof error === "object" &&
+    error !== null &&
+    "code" in error &&
+    typeof error.code === "string" &&
+    PAPER_DOWNLOAD_ERROR_CODES.has(error.code as PaperDownloadError["code"])
+  ) {
+    const message =
+      error instanceof Error ? error.message : `Paper download failed with code ${error.code}.`;
+    return new PaperDownloadError(error.code as PaperDownloadError["code"], message);
+  }
+
+  return error;
+}
+
 async function assertDownloadedFileIsPdf(pdfPath: string): Promise<void> {
   const fileBytes = await readFile(pdfPath);
   if (!fileBytes.subarray(0, 5).equals(Buffer.from("%PDF-"))) {
@@ -326,7 +355,13 @@ export function createTools(workspaceDir: string, dependencies: ToolDependencies
       downloadPaper({
         ...options,
         downloadPublisherPaperImpl: async (downloadOptions) => {
-          const result = await paperBrowserManagerClient.downloadPaperPdf(downloadOptions);
+          let result;
+          try {
+            result = await paperBrowserManagerClient.downloadPaperPdf(downloadOptions);
+          } catch (error) {
+            throw normalizePaperDownloadError(error);
+          }
+
           await assertDownloadedFileIsPdf(result.path);
           const canonicalId =
             resolvePublisherCanonicalIdFromArticleUrl({

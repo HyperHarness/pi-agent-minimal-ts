@@ -758,6 +758,64 @@ test("download_paper opens manual fallback when the manager client download is n
   }
 });
 
+test("download_paper opens manual fallback when the manager client returns a coded download error", async () => {
+  const workspace = await mkdtemp(path.join(tmpdir(), "pi-agent-tools-"));
+  const articleUrl = "https://journals.aps.org/prl/abstract/10.1103/PhysRevLett.134.090601";
+  const events: string[] = [];
+
+  try {
+    const tool = getDownloadPaperTool(workspace, {
+      paperBrowserManagerClient: {
+        async openArticle(request: { url: string }) {
+          events.push(`openArticle:${request.url}`);
+          return {
+            openedUrl: request.url,
+            profileDir: path.join(workspace, ".browser-profile", "paper-access"),
+          };
+        },
+        async downloadPaperPdf(request: { url: string }): Promise<never> {
+          events.push(`downloadPaperPdf:${request.url}`);
+          const error = new Error("Timed out waiting for PDF download.") as Error & {
+            code: string;
+          };
+          error.code = "download_failed";
+          throw error;
+        },
+        async close() {},
+      },
+    } as unknown as CreateToolsDependencies);
+
+    const result = await tool.execute("tool-call-remote-download-failed", { url: articleUrl }, undefined);
+
+    assert.deepEqual(result.details, {
+      status: "manual_fallback_opened",
+      source: "aps",
+      canonicalId: "10.1103/PhysRevLett.134.090601",
+      articleUrl,
+      fallbackUrl: articleUrl,
+      recordPath: path.join(
+        workspace,
+        "downloads",
+        "papers",
+        "index",
+        "aps-10.1103-PhysRevLett.134.090601.json",
+      ),
+      failure: {
+        code: "download_failed",
+        message: "Timed out waiting for PDF download.",
+      },
+      profileDir: path.join(workspace, ".browser-profile", "paper-access"),
+      executablePath: undefined,
+    });
+    assert.deepEqual(events, [
+      `downloadPaperPdf:${articleUrl}`,
+      `openArticle:${articleUrl}`,
+    ]);
+  } finally {
+    await rm(workspace, { recursive: true, force: true });
+  }
+});
+
 test("download_paper opens manual fallback when canonicalId cannot be derived from manager client URLs", async () => {
   const workspace = await mkdtemp(path.join(tmpdir(), "pi-agent-tools-"));
   const downloadedPath = path.join(workspace, "downloads", "papers", "science-derived.pdf");

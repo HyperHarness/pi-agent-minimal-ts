@@ -210,12 +210,16 @@ export function normalizeChromeExecutablePath(value: string | undefined): string
 export function resolvePaperBrowserLaunchOptions(options: {
   workspaceDir: string;
   env?: PaperBrowserEnvironment;
+  platform?: NodeJS.Platform;
+  fileExists?: (candidatePath: string) => boolean;
 }): PaperBrowserLaunchOptions {
-  const env = options.env ?? process.env;
-
   return {
     userDataDir: getPaperBrowserProfileDir(options.workspaceDir),
-    executablePath: normalizeChromeExecutablePath(env.PI_PAPER_CHROME_EXECUTABLE)
+    executablePath: resolveSystemChromeExecutablePath({
+      env: options.env,
+      platform: options.platform,
+      fileExists: options.fileExists
+    })
   };
 }
 

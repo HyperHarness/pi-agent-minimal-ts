@@ -45,6 +45,21 @@ test("resolvePaperBrowserLaunchOptions uses the dedicated profile path", () => {
   );
 });
 
+test("resolvePaperBrowserLaunchOptions discovers an installed system browser by default", () => {
+  const options = resolvePaperBrowserLaunchOptions({
+    workspaceDir: "D:\\Codex\\pi-agent-minimal-ts",
+    env: {},
+    platform: "win32",
+    fileExists: (candidatePath) =>
+      candidatePath === "C:\\Program Files\\Google\\Chrome\\Application\\chrome.exe"
+  });
+
+  assert.equal(
+    options.executablePath,
+    "C:\\Program Files\\Google\\Chrome\\Application\\chrome.exe"
+  );
+});
+
 test("resolveSystemChromeExecutablePath prefers the configured Chrome executable", () => {
   const executablePath = resolveSystemChromeExecutablePath({
     env: {
