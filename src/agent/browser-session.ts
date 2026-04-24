@@ -282,6 +282,12 @@ export async function openPageInSystemChromeForManualLogin(
   };
 }
 
+export async function openPageInSystemChrome(
+  options: OpenSystemChromePageOptions
+): Promise<OpenSystemChromePageResult> {
+  return openPageInSystemChromeForManualLogin(options);
+}
+
 export function createAttachedPaperBrowserSession(options: {
   context: AttachedPaperBrowserContext;
 }): AttachedPaperBrowserSession {

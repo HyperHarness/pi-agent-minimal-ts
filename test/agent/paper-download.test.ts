@@ -4,7 +4,11 @@ import { mkdtemp } from "node:fs/promises";
 import os from "node:os";
 import path from "node:path";
 import { PaperBrowserSessionError } from "../../src/agent/browser-session.js";
-import { PaperDownloadError, downloadPaperPdf } from "../../src/agent/paper-download.js";
+import {
+  PaperDownloadError,
+  downloadPaperPdf,
+  resolvePublisherCanonicalId
+} from "../../src/agent/paper-download.js";
 
 function assertPaperDownloadError(error: unknown): asserts error is PaperDownloadError {
   assert.ok(error instanceof PaperDownloadError);
@@ -289,4 +293,14 @@ test("downloadPaperPdf formats Nature output filenames from the article identifi
   );
   assert.equal(result.path, expectedPath);
   assert.equal(downloadedPath, expectedPath);
+});
+
+test("resolvePublisherCanonicalId decodes percent-encoded Science DOI path segments", () => {
+  const canonicalId = resolvePublisherCanonicalId({
+    publisher: "science",
+    url: "https://www.science.org/doi/10.1126%2Fscience.adz8659"
+  });
+
+  assert.equal(canonicalId, "10.1126/science.adz8659");
+  assert.notEqual(canonicalId, "10.1126%2Fscience.adz8659");
 });

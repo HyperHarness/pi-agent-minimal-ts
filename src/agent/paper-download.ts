@@ -2,6 +2,7 @@ import { mkdir } from "node:fs/promises";
 import path from "node:path";
 import { getPublisherAdapter } from "./publisher-adapters/index.js";
 import { PaperBrowserSessionError, type PaperBrowserSession } from "./browser-session.js";
+import type { SupportedPaperSource } from "./paper-types.js";
 
 export class PaperDownloadError extends Error {
   constructor(
@@ -29,19 +30,52 @@ function sanitizeFilenameComponent(value: string): string {
     .replace(/^[-. ]+|[-. ]+$/g, "");
 }
 
+function decodePublisherPathSegment(value: string): string {
+  try {
+    return decodeURIComponent(value);
+  } catch {
+    return value;
+  }
+}
+
 function extractNatureArticleId(urlString: string): string | null {
   const match = new URL(urlString).pathname.match(/^\/articles\/([^/?#]+?)(?:\.pdf)?$/i);
-  return match?.[1] ?? null;
+  return match?.[1] ? decodePublisherPathSegment(match[1]) : null;
 }
 
 function extractScienceDoi(urlString: string): string | null {
-  const match = new URL(urlString).pathname.match(/^\/doi\/(?:pdf\/)?(.+)$/i);
-  return match?.[1] ?? null;
+  const match = new URL(urlString).pathname.match(/^\/doi\/(?:(?:pdf|full|abs|epdf)\/)?(.+)$/i);
+  return match?.[1] ? decodePublisherPathSegment(match[1]).replace(/\.pdf$/i, "") : null;
 }
 
 function extractApsDoi(urlString: string): string | null {
   const match = new URL(urlString).pathname.match(/^\/(?:doi|[^/]+)\/(?:abstract|pdf)\/(.+)$/i);
-  return match?.[1] ?? null;
+  return match?.[1] ? decodePublisherPathSegment(match[1]).replace(/\.pdf$/i, "") : null;
+}
+
+export function resolvePublisherCanonicalId(options: {
+  publisher: SupportedPaperSource;
+  url: string;
+}): string | null {
+  if (options.publisher === "nature") {
+    return extractNatureArticleId(options.url);
+  }
+
+  if (options.publisher === "science") {
+    return extractScienceDoi(options.url);
+  }
+
+  return extractApsDoi(options.url);
+}
+
+export function resolvePublisherCanonicalIdFromArticleUrl(options: {
+  publisher: SupportedPaperSource;
+  articleUrl: string;
+}): string | null {
+  return resolvePublisherCanonicalId({
+    publisher: options.publisher,
+    url: options.articleUrl
+  });
 }
 
 function resolveFormattedPaperFilename(input: {
@@ -181,5 +215,38 @@ export async function downloadPaperPdf(options: {
     articleUrl: options.url,
     finalArticleUrl: articlePage.finalArticleUrl,
     finalPdfUrl
+  };
+}
+
+export async function downloadPublisherPaper(options: {
+  workspaceDir: string;
+  url: string;
+  browserSession: PaperBrowserSession;
+}) {
+  const result = await downloadPaperPdf(options);
+  const canonicalId =
+    resolvePublisherCanonicalIdFromArticleUrl({
+      publisher: result.publisher,
+      articleUrl: result.finalArticleUrl
+    }) ??
+    resolvePublisherCanonicalId({
+      publisher: result.publisher,
+      url: result.finalPdfUrl
+    }) ??
+    resolvePublisherCanonicalId({
+      publisher: result.publisher,
+      url: options.url
+    });
+
+  if (!canonicalId) {
+    throw new PaperDownloadError(
+      "download_failed",
+      "Unable to resolve a canonical paper identifier from the publisher article URL."
+    );
+  }
+
+  return {
+    ...result,
+    canonicalId
   };
 }

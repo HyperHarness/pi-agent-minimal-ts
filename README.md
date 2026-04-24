@@ -27,12 +27,12 @@ Use the normal install path if you want browser-session paper downloads to work 
 npm install
 ```
 
-This lets Playwright install its managed browser during dependency setup. If you skip install scripts with `npm install --ignore-scripts`, normal build/test workflows still work, but the automatic `download_paper_pdf` path will require one of these before it can launch its browser session:
+This lets Playwright install its managed browser during dependency setup. If you skip install scripts with `npm install --ignore-scripts`, normal build/test workflows still work, but the managed-browser paper flow used by `download_paper` and `open_paper_page_for_login` will require one of these before it can launch its browser session:
 
 - set `PI_PAPER_CHROME_EXECUTABLE` to an existing local Chrome/Chromium executable
 - install a Playwright browser separately, for example `npx playwright install chromium`
 
-The paper-browser manager is the intended reuse path for both manual review and automatic downloads. It aims to reuse a managed browser session instead of treating direct local browser launch as the default path.
+The paper-browser manager is the intended reuse path for supported publisher review and downloads. It aims to reuse a managed browser session instead of treating direct local browser launch as the default path.
 
 ## Run
 
@@ -82,11 +82,15 @@ Use the normal install path if you want the manager-backed paper tools to start 
 - or install a browser separately, for example `npx playwright install chromium`
 - or set `PI_PAPER_CHROME_EXECUTABLE` to an existing local Chrome/Chromium executable before starting the agent
 
-`open_paper_page_for_login` and `download_paper_pdf` both try to reuse that same managed browser session. Stale manager metadata is recovered automatically: if the saved metadata points to a dead process or an unreachable localhost endpoint, the client clears it and starts a fresh manager. This is best-effort coordination rather than a hard lock against concurrent cold starts.
+`open_paper_page_for_login` and the supported-publisher path in `download_paper` both try to reuse that same managed browser session. Stale manager metadata is recovered automatically: if the saved metadata points to a dead process or an unreachable localhost endpoint, the client clears it and starts a fresh manager. This is best-effort coordination rather than a hard lock against concurrent cold starts.
 
 `open_paper_page_for_login` opens the article page in the managed browser session for manual login or verification and stops there.
 
-`download_paper_pdf` tries the automatic download path first. If the download cannot complete or the downloaded file is not a valid PDF, the tool opens the same article in that same managed browser session and returns a structured `manual_fallback_opened` result for manual continuation.
+`download_paper` handles three cases:
+
+- arXiv IDs or arXiv URLs download directly into `downloads/papers/`
+- supported publisher URLs on `science.org`, `nature.com`, and `journals.aps.org` / `aps.org` reuse the managed browser session for download, with `manual_fallback_opened` if manual continuation is needed
+- unsupported external URLs are opened for manual continuation instead of attempting a managed download
 
 Successful downloads now use formatted filenames when possible, for example `science-10.1126-science.adz8659.pdf`, instead of always overwriting `downloaded-paper.pdf`. The tool still falls back to the source filename or `downloaded-paper.pdf` when it cannot derive a better name.
 
@@ -99,7 +103,7 @@ Open this paper page with open_paper_page_for_login: https://www.science.org/doi
 Example automatic download prompt:
 
 ```text
-Download this paper with download_paper_pdf: https://www.science.org/doi/10.1126/science.adz8659
+Download this paper with download_paper: https://www.science.org/doi/10.1126/science.adz8659
 ```
 
 For manual verification, keep your own publisher test URLs in a local scratch file such as `paper_url.txt` or in your notes. This repository does not ship a tracked `paper_url.txt`. Check that each URL belongs to one of the supported hosts above, then run the download and confirm the automatic path writes the PDF under `downloads/papers/` with a publisher/article-derived filename when available.
@@ -189,12 +193,11 @@ In non-interactive mode:
 - `read_file`: reads a UTF-8 text file from inside the current workspace
 - `web_search`: searches the configured provider and returns JSON text for matching results
 - `fetch_url`: fetches an HTML page and returns JSON text for the extracted content
-- `search_arxiv`: searches arXiv and returns JSON text for matching paper metadata
-- `download_arxiv_pdf`: returns the canonical arXiv PDF URL for a paper ID
+- `search_papers`: searches arXiv first, then expands discovery with `web_search`, merges overlapping results, and classifies supported publishers versus external sources
+- `download_paper`: downloads arXiv papers into `downloads/papers/`, uses the managed browser flow for supported publishers, and opens unsupported external URLs for manual continuation
 - `open_paper_page_for_login`: opens the paper page in the managed browser session for manual login review without downloading anything
-- `download_paper_pdf`: downloads a PDF automatically from a supported publisher URL when possible, or opens the same paper in the managed browser session for manual continuation when automatic download fails
 
-For `search_arxiv`, prefer concise English keyword queries. arXiv's API is much more reliable with English search terms than with natural-language Chinese prompts.
+For `search_papers`, concise English keyword queries still work best because the first search stage uses arXiv before expanding through `web_search`.
 
 `read_file` rejects absolute paths and paths that resolve outside the workspace.
 
@@ -202,8 +205,9 @@ Example prompts:
 
 - `Search the web for the latest OpenAI API pricing updates and summarize the top 3 results.`
 - `Fetch https://openai.com/api and extract the main text.`
-- `Find arXiv papers about retrieval-augmented generation from the last few years.`
-- `Give me the PDF link for arXiv paper 2401.01234.`
+- `Search papers about retrieval-augmented generation from the last few years and highlight which results are arXiv, supported publisher papers, or external sources.`
+- `Download arXiv paper 2401.01234 with download_paper.`
+- `Download this paper with download_paper: https://www.science.org/doi/10.1126/science.adz8659`
 
 ## Scripts
 
