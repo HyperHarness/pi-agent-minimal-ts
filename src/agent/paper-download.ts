@@ -49,8 +49,14 @@ function extractScienceDoi(urlString: string): string | null {
 }
 
 function extractApsDoi(urlString: string): string | null {
-  const match = new URL(urlString).pathname.match(/^\/(?:doi|[^/]+)\/(?:abstract|pdf)\/(.+)$/i);
-  return match?.[1] ? decodePublisherPathSegment(match[1]).replace(/\.pdf$/i, "") : null;
+  const path = new URL(urlString).pathname;
+  const directDoiMatch = path.match(/^\/doi\/(.+)$/i);
+  if (directDoiMatch?.[1]) {
+    return decodePublisherPathSegment(directDoiMatch[1]).replace(/\.pdf$/i, "");
+  }
+
+  const journalMatch = path.match(/^\/[^/]+\/(?:abstract|pdf)\/(.+)$/i);
+  return journalMatch?.[1] ? decodePublisherPathSegment(journalMatch[1]).replace(/\.pdf$/i, "") : null;
 }
 
 export function resolvePublisherCanonicalId(options: {

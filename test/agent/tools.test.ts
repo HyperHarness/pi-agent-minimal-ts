@@ -78,6 +78,14 @@ type OpenPaperPageForLoginTool = {
   ) => Promise<ToolResult>;
 };
 
+type DownloadLatestApsPapersTool = {
+  execute: (
+    toolCallId: string,
+    args: { query: string; maxResults?: number },
+    signal: undefined,
+  ) => Promise<ToolResult>;
+};
+
 type CreateToolsDependencies = NonNullable<Parameters<typeof createTools>[1]>;
 
 function getReadFileTool(workspace: string): ReadFileTool {
@@ -172,6 +180,22 @@ function getOpenPaperPageForLoginTool(
   assert.ok(openPaperPageForLoginTool);
   assert.equal(typeof openPaperPageForLoginTool.execute, "function");
   return openPaperPageForLoginTool as OpenPaperPageForLoginTool;
+}
+
+function getDownloadLatestApsPapersTool(
+  workspace: string,
+  dependencies?: Parameters<typeof createTools>[1],
+): DownloadLatestApsPapersTool {
+  const tools = createTools(workspace, dependencies) as ReadonlyArray<{
+    name: string;
+    execute?: DownloadLatestApsPapersTool["execute"];
+  }>;
+  const downloadLatestApsPapersTool = tools.find(
+    (tool) => tool.name === "download_latest_aps_papers",
+  );
+  assert.ok(downloadLatestApsPapersTool);
+  assert.equal(typeof downloadLatestApsPapersTool.execute, "function");
+  return downloadLatestApsPapersTool as DownloadLatestApsPapersTool;
 }
 
 async function createDirectoryLink(targetDir: string, linkDir: string): Promise<void> {
@@ -276,6 +300,7 @@ test("createTools exposes the unified built-in tool set", async () => {
       "fetch_url",
       "search_papers",
       "download_paper",
+      "download_latest_aps_papers",
       "open_paper_page_for_login",
     ]);
 
@@ -753,6 +778,268 @@ test("download_paper opens manual fallback when the manager client download is n
       `downloadPaperPdf:${articleUrl}`,
       `openArticle:${articleUrl}`,
     ]);
+  } finally {
+    await rm(workspace, { recursive: true, force: true });
+  }
+});
+
+test("download_latest_aps_papers delegates to the injected batch paper manager dependency", async () => {
+  const workspace = await mkdtemp(path.join(tmpdir(), "pi-agent-tools-"));
+  const capturedCalls: Array<{ workspaceDir: string; query: string; maxResults?: number }> = [];
+  const batchResult = {
+    query: "superconducting quantum computing",
+    requested: 3,
+    results: [
+      {
+        title: "On-chip direct-current source for scalable superconducting quantum computing",
+        articleUrl: "https://journals.aps.org/doi/10.1103/PhysRevApplied.24.034057",
+        download: {
+          status: "manual_fallback_opened" as const,
+          source: "aps" as const,
+          canonicalId: "10.1103/PhysRevApplied.24.034057",
+          articleUrl: "https://journals.aps.org/doi/10.1103/PhysRevApplied.24.034057",
+          fallbackUrl: "https://journals.aps.org/doi/10.1103/PhysRevApplied.24.034057",
+          recordPath: path.join(workspace, "downloads", "papers", "index", "aps-10.1103-PhysRevApplied.24.034057.json"),
+          failure: {
+            code: "download_failed",
+            message: "Timed out waiting for PDF download.",
+          },
+        },
+      },
+    ],
+  };
+
+  try {
+    const tool = getDownloadLatestApsPapersTool(workspace, {
+      downloadLatestApsPapers: async (options) => {
+        capturedCalls.push(options);
+        return batchResult;
+      },
+    });
+
+    const result = await tool.execute(
+      "tool-call-latest-aps",
+      { query: "superconducting quantum computing", maxResults: 3 },
+      undefined,
+    );
+
+    assert.deepEqual(capturedCalls, [
+      {
+        workspaceDir: workspace,
+        query: "superconducting quantum computing",
+        maxResults: 3,
+      },
+    ]);
+    assert.deepEqual(result.content, [{ type: "text", text: JSON.stringify(batchResult) }]);
+    assert.deepEqual(result.details, batchResult);
+  } finally {
+    await rm(workspace, { recursive: true, force: true });
+  }
+});
+
+test("download_latest_aps_papers uses the managed paper browser client for default downloads", async () => {
+  const workspace = await mkdtemp(path.join(tmpdir(), "pi-agent-tools-"));
+  const articleUrl = "https://journals.aps.org/doi/10.1103/k3d5-v43c";
+  const events: string[] = [];
+
+  try {
+    const tool = getDownloadLatestApsPapersTool(workspace, {
+      browserSessionFactory: async () => {
+        throw new Error("browserSessionFactory should not be called");
+      },
+      searchApsPapers: async () => [
+        {
+          title: "Superconducting qubits in the millions",
+          authors: [],
+          summary: "Published 2026-04-22 in Physical Review Applied.",
+          primarySource: "aps",
+          primaryAction: "authorized_download",
+          sources: [
+            {
+              source: "aps",
+              action: "authorized_download",
+              canonicalId: "10.1103/k3d5-v43c",
+              articleUrl,
+            },
+          ],
+        },
+      ],
+      paperBrowserManagerClient: {
+        async openArticle(request: { url: string }) {
+          events.push(`openArticle:${request.url}`);
+          return {
+            openedUrl: request.url,
+            profileDir: path.join(workspace, ".browser-profile", "paper-access"),
+          };
+        },
+        async downloadPaperPdf(request: { url: string }): Promise<never> {
+          events.push(`downloadPaperPdf:${request.url}`);
+          const error = new Error("Timed out waiting for PDF download.") as Error & {
+            code: string;
+          };
+          error.code = "download_failed";
+          throw error;
+        },
+        async close() {},
+      },
+    } as unknown as CreateToolsDependencies);
+
+    const result = await tool.execute(
+      "tool-call-latest-aps-managed",
+      { query: "超导量子计算", maxResults: 1 },
+      undefined,
+    );
+
+    assert.deepEqual(events, [
+      `downloadPaperPdf:${articleUrl}`,
+      `openArticle:${articleUrl}`,
+    ]);
+    const details = result.details as {
+      results: Array<{ download: PaperDownloadResult }>;
+    };
+    assert.equal(details.results[0]?.download.status, "manual_fallback_opened");
+  } finally {
+    await rm(workspace, { recursive: true, force: true });
+  }
+});
+
+test("download_latest_aps_papers opens one manual APS article tab per fallback result", async () => {
+  const workspace = await mkdtemp(path.join(tmpdir(), "pi-agent-tools-"));
+  const articleUrls = [
+    "https://journals.aps.org/prapplied/abstract/10.1103/k3d5-v43c",
+    "https://journals.aps.org/prapplied/abstract/10.1103/rp4w-3n7l",
+    "https://journals.aps.org/prapplied/abstract/10.1103/4ssz-6ctb",
+  ];
+  const opened: string[] = [];
+
+  try {
+    const tool = getDownloadLatestApsPapersTool(workspace, {
+      searchApsPapers: async () =>
+        articleUrls.map((articleUrl, index) => ({
+          title: `APS superconducting qubit paper ${index + 1}`,
+          authors: [],
+          summary: "Published in Physical Review Applied.",
+          primarySource: "aps",
+          primaryAction: "authorized_download",
+          sources: [
+            {
+              source: "aps",
+              action: "authorized_download",
+              canonicalId: articleUrl.slice(articleUrl.lastIndexOf("/") + 1),
+              articleUrl,
+            },
+          ],
+        })),
+      paperBrowserManagerClient: {
+        async openArticle(request: { url: string }) {
+          opened.push(request.url);
+          return {
+            openedUrl: `${request.url}?manual=1`,
+            profileDir: path.join(workspace, ".browser-profile", "paper-access"),
+          };
+        },
+        async downloadPaperPdf(request: { url: string }): Promise<never> {
+          const error = new Error(`No automatic PDF for ${request.url}`) as Error & {
+            code: string;
+          };
+          error.code = "pdf_not_found";
+          throw error;
+        },
+        async close() {},
+      },
+    } as unknown as CreateToolsDependencies);
+
+    const result = await tool.execute(
+      "tool-call-latest-aps-three-tabs",
+      { query: "超导量子计算", maxResults: 3 },
+      undefined,
+    );
+
+    assert.deepEqual(opened, articleUrls);
+    const details = result.details as {
+      results: Array<{ articleUrl: string; download: PaperDownloadResult }>;
+    };
+    assert.deepEqual(
+      details.results.map((entry) => ({
+        articleUrl: entry.articleUrl,
+        status: entry.download.status,
+      })),
+      articleUrls.map((articleUrl) => ({
+        articleUrl,
+        status: "manual_fallback_opened",
+      })),
+    );
+  } finally {
+    await rm(workspace, { recursive: true, force: true });
+  }
+});
+
+test("download_latest_aps_papers stops automatic attempts after the first Cloudflare-blocked APS fallback", async () => {
+  const workspace = await mkdtemp(path.join(tmpdir(), "pi-agent-tools-"));
+  const articleUrls = [
+    "https://journals.aps.org/prapplied/abstract/10.1103/k3d5-v43c",
+    "https://journals.aps.org/prapplied/abstract/10.1103/rp4w-3n7l",
+    "https://journals.aps.org/prapplied/abstract/10.1103/4ssz-6ctb",
+  ];
+  const downloadAttempts: string[] = [];
+  const opened: string[] = [];
+
+  try {
+    const tool = getDownloadLatestApsPapersTool(workspace, {
+      searchApsPapers: async () =>
+        articleUrls.map((articleUrl, index) => ({
+          title: `APS superconducting qubit paper ${index + 1}`,
+          authors: [],
+          summary: "Published in Physical Review Applied.",
+          primarySource: "aps",
+          primaryAction: "authorized_download",
+          sources: [
+            {
+              source: "aps",
+              action: "authorized_download",
+              canonicalId: articleUrl.slice(articleUrl.lastIndexOf("/") + 1),
+              articleUrl,
+            },
+          ],
+        })),
+      paperBrowserManagerClient: {
+        async openArticle(request: { url: string }) {
+          opened.push(request.url);
+          return {
+            openedUrl:
+              opened.length === 1 ? `${request.url}?__cf_chl_rt_tk=blocked` : request.url,
+            profileDir: path.join(workspace, ".browser-profile", "paper-access"),
+          };
+        },
+        async downloadPaperPdf(request: { url: string }): Promise<never> {
+          downloadAttempts.push(request.url);
+          const error = new Error("Timed out waiting for PDF download.") as Error & {
+            code: string;
+          };
+          error.code = "download_failed";
+          throw error;
+        },
+        async close() {},
+      },
+    } as unknown as CreateToolsDependencies);
+
+    const result = await tool.execute(
+      "tool-call-latest-aps-cloudflare-skip",
+      { query: "超导量子计算", maxResults: 3 },
+      undefined,
+    );
+
+    assert.deepEqual(downloadAttempts, [articleUrls[0]]);
+    assert.deepEqual(opened, articleUrls);
+    const details = result.details as {
+      results: Array<{ download: PaperDownloadResult }>;
+    };
+    assert.deepEqual(
+      details.results.map((entry) =>
+        entry.download.status === "manual_fallback_opened" ? entry.download.failure.code : undefined
+      ),
+      ["download_failed", "recent_cloudflare_block", "recent_cloudflare_block"],
+    );
   } finally {
     await rm(workspace, { recursive: true, force: true });
   }

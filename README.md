@@ -92,6 +92,8 @@ Use the normal install path if you want the manager-backed paper tools to start 
 - supported publisher URLs on `science.org`, `nature.com`, and `journals.aps.org` / `aps.org` reuse the managed browser session for download, with `manual_fallback_opened` if manual continuation is needed
 - unsupported external URLs are opened for manual continuation instead of attempting a managed download
 
+`download_latest_aps_papers` is the direct batch path for prompts such as "search and download the latest 3 APS papers about superconducting quantum computing." It searches APS/Physical Review metadata through Crossref's `10.1103` DOI prefix, then attempts each APS download through the same managed browser flow. Each result is either a downloaded PDF record or a `manual_fallback_opened` APS page for the user to finish manually.
+
 Successful downloads now use formatted filenames when possible, for example `science-10.1126-science.adz8659.pdf`, instead of always overwriting `downloaded-paper.pdf`. The tool still falls back to the source filename or `downloaded-paper.pdf` when it cannot derive a better name.
 
 If you want to confirm that the managed session is already logged in before attempting a download, open the paper page first:
@@ -106,6 +108,12 @@ Example automatic download prompt:
 Download this paper with download_paper: https://www.science.org/doi/10.1126/science.adz8659
 ```
 
+Example APS batch prompt:
+
+```text
+Search and download the latest 3 APS papers about superconducting quantum computing with download_latest_aps_papers.
+```
+
 For manual verification, keep your own publisher test URLs in a local scratch file such as `paper_url.txt` or in your notes. This repository does not ship a tracked `paper_url.txt`. Check that each URL belongs to one of the supported hosts above, then run the download and confirm the automatic path writes the PDF under `downloads/papers/` with a publisher/article-derived filename when available.
 
 ## Search And Fetch Configuration
@@ -116,6 +124,7 @@ Optional environment variables for web search and page fetch tools:
 - `PI_SEARCH_API_KEY`: optional bearer token sent to the search provider
 - `PI_FETCH_USER_AGENT`: optional `User-Agent` header for `fetch_url`
 - `PI_FETCH_TIMEOUT_MS`: optional timeout in milliseconds for both search and fetch requests
+- `PI_PAPER_CLOUDFLARE_COOLDOWN_MS`: optional APS/Cloudflare cooldown window for batch paper downloads; defaults to 30 minutes
 
 The search provider contract is JSON over HTTP `POST`:
 
@@ -195,9 +204,12 @@ In non-interactive mode:
 - `fetch_url`: fetches an HTML page and returns JSON text for the extracted content
 - `search_papers`: searches arXiv first, then expands discovery with `web_search`, merges overlapping results, and classifies supported publishers versus external sources
 - `download_paper`: downloads arXiv papers into `downloads/papers/`, uses the managed browser flow for supported publishers, and opens unsupported external URLs for manual continuation
+- `download_latest_aps_papers`: searches APS/Physical Review metadata for the latest matching papers and attempts each APS download, returning downloaded PDFs or opened APS pages for manual download
 - `open_paper_page_for_login`: opens the paper page in the managed browser session for manual login review without downloading anything
 
 For `search_papers`, concise English keyword queries still work best because the first search stage uses arXiv before expanding through `web_search`.
+
+For APS batch downloads, the agent records recent Cloudflare blocks in `.browser-profile/paper-access-state.json`. If APS was blocked recently, `download_latest_aps_papers` skips automatic PDF attempts and opens the article pages directly. The default cooldown is 30 minutes, matching Cloudflare's default Challenge Passage lifetime; override it with `PI_PAPER_CLOUDFLARE_COOLDOWN_MS` when needed.
 
 `read_file` rejects absolute paths and paths that resolve outside the workspace.
 
@@ -208,6 +220,7 @@ Example prompts:
 - `Search papers about retrieval-augmented generation from the last few years and highlight which results are arXiv, supported publisher papers, or external sources.`
 - `Download arXiv paper 2401.01234 with download_paper.`
 - `Download this paper with download_paper: https://www.science.org/doi/10.1126/science.adz8659`
+- `Search and download the latest 3 APS papers about superconducting quantum computing with download_latest_aps_papers.`
 
 ## Scripts
 

@@ -3,7 +3,11 @@ import assert from "node:assert/strict";
 import { mkdtemp, readFile, rm, writeFile } from "node:fs/promises";
 import os from "node:os";
 import path from "node:path";
-import { downloadPaper, searchPapers } from "../../src/agent/paper-manager.js";
+import {
+  downloadLatestApsPapers,
+  downloadPaper,
+  searchPapers
+} from "../../src/agent/paper-manager.js";
 import type { ArxivSearchResult } from "../../src/agent/arxiv.js";
 import { PaperDownloadError } from "../../src/agent/paper-download.js";
 import { resolvePaperPdfPath, resolvePaperRecordPath } from "../../src/agent/paper-store.js";
@@ -514,6 +518,242 @@ test("downloadPaper uses openPageInSystemChromeImpl for supported-publisher manu
       profileDir: path.join(workspaceDir, ".browser-profile", "paper-access"),
       executablePath: "stubbed-chrome.exe"
     });
+  } finally {
+    await rm(workspaceDir, { recursive: true, force: true });
+  }
+});
+
+test("downloadLatestApsPapers searches APS and attempts each requested download", async () => {
+  const workspaceDir = await mkdtemp(path.join(os.tmpdir(), "paper-manager-"));
+  const firstUrl = "https://journals.aps.org/doi/10.1103/PhysRevApplied.24.034057";
+  const secondUrl = "https://journals.aps.org/doi/10.1103/PhysRevLett.135.030801";
+  const searchCalls: Array<{ query: string; maxResults?: number }> = [];
+  const downloadCalls: Array<{ workspaceDir: string; url?: string }> = [];
+
+  try {
+    const result = await downloadLatestApsPapers({
+      workspaceDir,
+      query: "superconducting quantum computing",
+      maxResults: 2,
+      searchApsPapersImpl: async (options) => {
+        searchCalls.push(options);
+        return [
+          {
+            title: "On-chip direct-current source for scalable superconducting quantum computing",
+            authors: ["Grace Hopper"],
+            summary: "Published 22 September 2025 in Physical Review Applied.",
+            primarySource: "aps",
+            primaryAction: "authorized_download",
+            sources: [
+              {
+                source: "aps",
+                action: "authorized_download",
+                articleUrl: firstUrl,
+                canonicalId: "10.1103/PhysRevApplied.24.034057"
+              }
+            ]
+          },
+          {
+            title: "Complete Self-Testing of a System of Remote Superconducting Qubits",
+            authors: ["Ada Lovelace"],
+            summary: "Published 15 July 2025 in Physical Review Letters.",
+            primarySource: "aps",
+            primaryAction: "authorized_download",
+            sources: [
+              {
+                source: "aps",
+                action: "authorized_download",
+                articleUrl: secondUrl,
+                canonicalId: "10.1103/PhysRevLett.135.030801"
+              }
+            ]
+          }
+        ];
+      },
+      downloadPaperImpl: async (options) => {
+        downloadCalls.push(options);
+        if (options.url === firstUrl) {
+          return {
+            status: "downloaded",
+            source: "aps",
+            canonicalId: "10.1103/PhysRevApplied.24.034057",
+            articleUrl: firstUrl,
+            finalPdfUrl: "https://journals.aps.org/prapplied/pdf/10.1103/PhysRevApplied.24.034057",
+            path: path.join(workspaceDir, "downloads", "papers", "aps-10.1103-PhysRevApplied.24.034057.pdf"),
+            recordPath: path.join(workspaceDir, "downloads", "papers", "index", "aps-10.1103-PhysRevApplied.24.034057.json")
+          };
+        }
+
+        return {
+          status: "manual_fallback_opened",
+          source: "aps",
+          canonicalId: "10.1103/PhysRevLett.135.030801",
+          articleUrl: secondUrl,
+          fallbackUrl: secondUrl,
+          recordPath: path.join(workspaceDir, "downloads", "papers", "index", "aps-10.1103-PhysRevLett.135.030801.json"),
+          failure: {
+            code: "download_failed",
+            message: "Timed out waiting for PDF download."
+          }
+        };
+      }
+    });
+
+    assert.deepEqual(searchCalls, [
+      { query: "superconducting quantum computing", maxResults: 2 }
+    ]);
+    assert.deepEqual(downloadCalls, [
+      { workspaceDir, url: firstUrl },
+      { workspaceDir, url: secondUrl }
+    ]);
+    assert.equal(result.query, "superconducting quantum computing");
+    assert.equal(result.requested, 2);
+    assert.equal(result.results.length, 2);
+    assert.equal(result.results[0]?.title, "On-chip direct-current source for scalable superconducting quantum computing");
+    assert.equal(result.results[0]?.download.status, "downloaded");
+    assert.equal(result.results[1]?.download.status, "manual_fallback_opened");
+  } finally {
+    await rm(workspaceDir, { recursive: true, force: true });
+  }
+});
+
+test("downloadLatestApsPapers skips remaining automatic APS downloads after a Cloudflare fallback", async () => {
+  const workspaceDir = await mkdtemp(path.join(os.tmpdir(), "paper-manager-"));
+  const articleUrls = [
+    "https://journals.aps.org/prapplied/abstract/10.1103/k3d5-v43c",
+    "https://journals.aps.org/prapplied/abstract/10.1103/rp4w-3n7l",
+    "https://journals.aps.org/prapplied/abstract/10.1103/4ssz-6ctb"
+  ];
+  const downloadCalls: Array<{
+    workspaceDir: string;
+    url?: string;
+    forceManualOpen?: { code: string; message: string };
+  }> = [];
+
+  try {
+    const result = await downloadLatestApsPapers({
+      workspaceDir,
+      query: "superconducting quantum computing",
+      maxResults: 3,
+      now: () => new Date("2026-04-24T10:00:00.000Z"),
+      searchApsPapersImpl: async () =>
+        articleUrls.map((articleUrl, index) => ({
+          title: `APS superconducting qubit paper ${index + 1}`,
+          authors: [],
+          summary: "Published in Physical Review Applied.",
+          primarySource: "aps",
+          primaryAction: "authorized_download",
+          sources: [
+            {
+              source: "aps",
+              action: "authorized_download",
+              canonicalId: articleUrl.slice(articleUrl.lastIndexOf("/") + 1),
+              articleUrl
+            }
+          ]
+        })),
+      downloadPaperImpl: async (options) => {
+        downloadCalls.push(options);
+        const canonicalId = options.url?.slice(options.url.lastIndexOf("/") + 1) ?? "unknown";
+        return {
+          status: "manual_fallback_opened",
+          source: "aps",
+          canonicalId,
+          articleUrl: options.url as string,
+          fallbackUrl:
+            options.forceManualOpen === undefined
+              ? `${options.url}?__cf_chl_rt_tk=blocked`
+              : options.url as string,
+          recordPath: path.join(workspaceDir, "downloads", "papers", "index", `aps-${canonicalId}.json`),
+          failure: options.forceManualOpen ?? {
+            code: "download_failed",
+            message: "Timed out waiting for PDF download."
+          }
+        };
+      }
+    });
+
+    assert.equal(result.results.length, 3);
+    assert.equal(downloadCalls[0]?.forceManualOpen, undefined);
+    assert.equal(downloadCalls[1]?.forceManualOpen?.code, "recent_cloudflare_block");
+    assert.equal(downloadCalls[2]?.forceManualOpen?.code, "recent_cloudflare_block");
+  } finally {
+    await rm(workspaceDir, { recursive: true, force: true });
+  }
+});
+
+test("downloadLatestApsPapers skips all automatic APS downloads when a recent Cloudflare block is recorded", async () => {
+  const workspaceDir = await mkdtemp(path.join(os.tmpdir(), "paper-manager-"));
+  const articleUrls = [
+    "https://journals.aps.org/prapplied/abstract/10.1103/k3d5-v43c",
+    "https://journals.aps.org/prapplied/abstract/10.1103/rp4w-3n7l",
+    "https://journals.aps.org/prapplied/abstract/10.1103/4ssz-6ctb"
+  ];
+  const downloadCalls: Array<{
+    url?: string;
+    forceManualOpen?: { code: string; message: string };
+  }> = [];
+
+  try {
+    await downloadLatestApsPapers({
+      workspaceDir,
+      query: "superconducting quantum computing",
+      maxResults: 3,
+      now: () => new Date("2026-04-24T10:15:00.000Z"),
+      readPublisherAccessStateImpl: async () => ({
+        cloudflareBlocks: {
+          aps: {
+            blockedAt: "2026-04-24T10:00:00.000Z"
+          }
+        }
+      }),
+      writePublisherAccessStateImpl: async () => {
+        throw new Error("state should not be rewritten when only reading a recent block");
+      },
+      searchApsPapersImpl: async () =>
+        articleUrls.map((articleUrl, index) => ({
+          title: `APS superconducting qubit paper ${index + 1}`,
+          authors: [],
+          summary: "Published in Physical Review Applied.",
+          primarySource: "aps",
+          primaryAction: "authorized_download",
+          sources: [
+            {
+              source: "aps",
+              action: "authorized_download",
+              canonicalId: articleUrl.slice(articleUrl.lastIndexOf("/") + 1),
+              articleUrl
+            }
+          ]
+        })),
+      downloadPaperImpl: async (options) => {
+        downloadCalls.push(options);
+        const canonicalId = options.url?.slice(options.url.lastIndexOf("/") + 1) ?? "unknown";
+        return {
+          status: "manual_fallback_opened",
+          source: "aps",
+          canonicalId,
+          articleUrl: options.url as string,
+          fallbackUrl: options.url as string,
+          recordPath: path.join(workspaceDir, "downloads", "papers", "index", `aps-${canonicalId}.json`),
+          failure: options.forceManualOpen ?? {
+            code: "download_failed",
+            message: "Unexpected automatic attempt."
+          }
+        };
+      }
+    });
+
+    assert.deepEqual(
+      downloadCalls.map((call) => ({
+        url: call.url,
+        code: call.forceManualOpen?.code
+      })),
+      articleUrls.map((url) => ({
+        url,
+        code: "recent_cloudflare_block"
+      }))
+    );
   } finally {
     await rm(workspaceDir, { recursive: true, force: true });
   }

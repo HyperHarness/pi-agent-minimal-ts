@@ -2,6 +2,7 @@ import { createHash } from "node:crypto";
 import { mkdir, writeFile } from "node:fs/promises";
 import path from "node:path";
 import { downloadArxivPdf, searchArxiv, type ArxivSearchResult } from "./arxiv.js";
+import { searchApsPapers, type SearchApsPapersOptions } from "./aps-search.js";
 import {
   openPageInSystemChrome,
   resolveDefaultPaperBrowserSessionFactory,
@@ -15,6 +16,14 @@ import {
   resolvePublisherCanonicalIdFromArticleUrl
 } from "./paper-download.js";
 import { resolvePaperPdfPath, writePaperRecord } from "./paper-store.js";
+import {
+  DEFAULT_CLOUDFLARE_COOLDOWN_MS,
+  getRecentCloudflareBlock,
+  readPublisherAccessState,
+  setCloudflareBlock,
+  writePublisherAccessState,
+  type PublisherAccessState
+} from "./publisher-access-state.js";
 import { searchWeb, type WebSearchResult } from "./web-search.js";
 import type {
   PaperDownloadResult,
@@ -53,11 +62,34 @@ export interface DownloadPaperOptions {
   workspaceDir: string;
   id?: string;
   url?: string;
+  forceManualOpen?: PaperFailure;
   fetchImpl?: typeof fetch;
   browserSessionFactory?: () => Promise<PaperBrowserSession>;
   downloadPublisherPaperImpl?: DownloadPublisherPaperImplementation;
   openPublisherForLoginImpl?: OpenPublisherForLoginImplementation;
   openPageInSystemChromeImpl?: typeof openPageInSystemChrome;
+}
+
+export interface DownloadLatestApsPapersOptions {
+  workspaceDir: string;
+  query: string;
+  maxResults?: number;
+  cloudflareCooldownMs?: number;
+  now?: () => Date;
+  readPublisherAccessStateImpl?: typeof readPublisherAccessState;
+  writePublisherAccessStateImpl?: typeof writePublisherAccessState;
+  searchApsPapersImpl?: (options: SearchApsPapersOptions) => Promise<PaperSearchResult[]>;
+  downloadPaperImpl?: typeof downloadPaper;
+}
+
+export interface DownloadLatestApsPapersResult {
+  query: string;
+  requested: number;
+  results: Array<{
+    title: string;
+    articleUrl: string;
+    download: PaperDownloadResult;
+  }>;
 }
 
 type RankedSearchSource = PaperSearchSource & {
@@ -438,6 +470,65 @@ function isFallbackEligibleDownloadError(error: unknown): error is PaperDownload
   );
 }
 
+function isLikelyCloudflareFallback(result: PaperDownloadResult): boolean {
+  if (result.status !== "manual_fallback_opened") {
+    return false;
+  }
+
+  const fallbackUrl = result.fallbackUrl.toLowerCase();
+  const message = result.failure.message.toLowerCase();
+  return (
+    fallbackUrl.includes("__cf_chl") ||
+    message.includes("cloudflare") ||
+    message.includes("verification")
+  );
+}
+
+async function openSupportedPublisherForManualFallback(input: {
+  workspaceDir: string;
+  classification: Extract<ClassifiedPaperUrl, { source: SupportedPaperSource }>;
+  failure: PaperFailure;
+  openPublisherForLoginImpl: OpenPublisherForLoginImplementation;
+}): Promise<PaperDownloadResult> {
+  const canonicalId = resolveFallbackCanonicalId({
+    articleUrl: input.classification.articleUrl,
+    canonicalId:
+      resolvePublisherCanonicalIdFromArticleUrl({
+        publisher: input.classification.source,
+        articleUrl: input.classification.articleUrl
+      }) ?? input.classification.canonicalId
+  });
+  const fallbackResult = await input.openPublisherForLoginImpl({
+    workspaceDir: input.workspaceDir,
+    url: input.classification.articleUrl
+  });
+  const recordPath = await writePaperRecord({
+    workspaceDir: input.workspaceDir,
+    record: {
+      source: input.classification.source,
+      articleUrl: input.classification.articleUrl,
+      openedUrl: fallbackResult.openedUrl,
+      recordedAt: new Date().toISOString(),
+      handlingMethod: "browser_session",
+      status: "manual_fallback_opened",
+      canonicalId,
+      failure: input.failure
+    }
+  });
+
+  return {
+    status: "manual_fallback_opened",
+    source: input.classification.source,
+    articleUrl: input.classification.articleUrl,
+    fallbackUrl: fallbackResult.openedUrl,
+    recordPath,
+    canonicalId,
+    failure: input.failure,
+    profileDir: fallbackResult.profileDir,
+    executablePath: fallbackResult.executablePath
+  };
+}
+
 async function downloadArxivPaper(options: {
   workspaceDir: string;
   input: string;
@@ -544,6 +635,27 @@ export async function downloadPaper(options: DownloadPaperOptions): Promise<Pape
     };
   }
 
+  const openPublisherForLoginImpl: OpenPublisherForLoginImplementation =
+    options.openPublisherForLoginImpl ??
+    ((openOptions) =>
+      (options.openPageInSystemChromeImpl ?? openPageInSystemChrome)({
+        workspaceDir: openOptions.workspaceDir,
+        url: openOptions.url
+      }).then(({ openedUrl, profileDir, executablePath }) => ({
+        openedUrl,
+        profileDir,
+        executablePath
+      })));
+
+  if (options.forceManualOpen) {
+    return openSupportedPublisherForManualFallback({
+      workspaceDir: options.workspaceDir,
+      classification,
+      failure: options.forceManualOpen,
+      openPublisherForLoginImpl
+    });
+  }
+
   const browserSessionFactory =
     options.browserSessionFactory ??
     resolveDefaultPaperBrowserSessionFactory({ workspaceDir: options.workspaceDir });
@@ -590,56 +702,94 @@ export async function downloadPaper(options: DownloadPaperOptions): Promise<Pape
       throw error;
     }
 
-    const canonicalId = resolveFallbackCanonicalId({
-      articleUrl: classification.articleUrl,
-      canonicalId:
-        resolvePublisherCanonicalIdFromArticleUrl({
-          publisher: classification.source,
-          articleUrl: classification.articleUrl
-        }) ?? classification.canonicalId
-    });
-    const openPublisherForLoginImpl: OpenPublisherForLoginImplementation =
-      options.openPublisherForLoginImpl ??
-      ((openOptions) =>
-        (options.openPageInSystemChromeImpl ?? openPageInSystemChrome)({
-          workspaceDir: openOptions.workspaceDir,
-          url: openOptions.url
-        }).then(({ openedUrl, profileDir, executablePath }) => ({
-          openedUrl,
-          profileDir,
-          executablePath
-        })));
-    const fallbackResult = await openPublisherForLoginImpl({
+    return openSupportedPublisherForManualFallback({
       workspaceDir: options.workspaceDir,
-      url: classification.articleUrl
+      classification,
+      failure: toPaperFailure(error),
+      openPublisherForLoginImpl
     });
-    const failure = toPaperFailure(error);
-    const recordPath = await writePaperRecord({
-      workspaceDir: options.workspaceDir,
-      record: {
-        source: classification.source,
-        articleUrl: classification.articleUrl,
-        openedUrl: fallbackResult.openedUrl,
-        recordedAt: new Date().toISOString(),
-        handlingMethod: "browser_session",
-        status: "manual_fallback_opened",
-        canonicalId,
-        failure
-      }
-    });
-
-    return {
-      status: "manual_fallback_opened",
-      source: classification.source,
-      articleUrl: classification.articleUrl,
-      fallbackUrl: fallbackResult.openedUrl,
-      recordPath,
-      canonicalId,
-      failure,
-      profileDir: fallbackResult.profileDir,
-      executablePath: fallbackResult.executablePath
-    };
   }
+}
+
+export async function downloadLatestApsPapers(
+  options: DownloadLatestApsPapersOptions
+): Promise<DownloadLatestApsPapersResult> {
+  const query = options.query.trim();
+  if (!query) {
+    throw new Error("Query is required.");
+  }
+
+  const maxResults = options.maxResults ?? 3;
+  if (!Number.isInteger(maxResults) || maxResults <= 0) {
+    throw new Error("maxResults must be a positive integer.");
+  }
+
+  const searchApsPapersImpl = options.searchApsPapersImpl ?? searchApsPapers;
+  const downloadPaperImpl = options.downloadPaperImpl ?? downloadPaper;
+  const readPublisherAccessStateImpl =
+    options.readPublisherAccessStateImpl ?? readPublisherAccessState;
+  const writePublisherAccessStateImpl =
+    options.writePublisherAccessStateImpl ?? writePublisherAccessState;
+  const now = options.now ?? (() => new Date());
+  const cloudflareCooldownMs =
+    options.cloudflareCooldownMs ?? DEFAULT_CLOUDFLARE_COOLDOWN_MS;
+  let publisherAccessState: PublisherAccessState = await readPublisherAccessStateImpl({
+    workspaceDir: options.workspaceDir
+  });
+  let recentCloudflareBlockAt = getRecentCloudflareBlock({
+    state: publisherAccessState,
+    publisher: "aps",
+    now: now(),
+    cooldownMs: cloudflareCooldownMs
+  });
+  const papers = await searchApsPapersImpl({
+    query,
+    maxResults
+  });
+  const results: DownloadLatestApsPapersResult["results"] = [];
+
+  for (const paper of papers.slice(0, maxResults)) {
+    const apsSource = paper.sources.find((source) => source.source === "aps");
+    if (!apsSource) {
+      continue;
+    }
+
+    const download = await downloadPaperImpl({
+      workspaceDir: options.workspaceDir,
+      url: apsSource.articleUrl,
+      ...(recentCloudflareBlockAt
+        ? {
+            forceManualOpen: {
+              code: "recent_cloudflare_block",
+              message: `Skipping automatic APS download because Cloudflare blocked APS access at ${recentCloudflareBlockAt}. Complete the opened page manually, or retry automatic download after the cooldown window.`
+            }
+          }
+        : {})
+    });
+    if (!recentCloudflareBlockAt && isLikelyCloudflareFallback(download)) {
+      recentCloudflareBlockAt = now().toISOString();
+      publisherAccessState = setCloudflareBlock({
+        state: publisherAccessState,
+        publisher: "aps",
+        blockedAt: recentCloudflareBlockAt
+      });
+      await writePublisherAccessStateImpl({
+        workspaceDir: options.workspaceDir,
+        state: publisherAccessState
+      });
+    }
+    results.push({
+      title: paper.title,
+      articleUrl: apsSource.articleUrl,
+      download
+    });
+  }
+
+  return {
+    query,
+    requested: maxResults,
+    results
+  };
 }
 
 export async function searchPapers(options: SearchPapersOptions): Promise<PaperSearchResult[]> {
