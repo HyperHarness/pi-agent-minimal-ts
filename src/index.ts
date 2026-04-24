@@ -10,3 +10,4 @@ export * from "./agent/paper-browser-manager-types.js";
 export * from "./agent/paper-browser-manager-discovery.js";
 export * from "./agent/paper-browser-manager-client.js";
 export * from "./agent/paper-browser-manager-server.js";
+export * from "./agent/codex-approval-doctor.js";

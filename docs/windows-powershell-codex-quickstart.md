@@ -139,6 +139,14 @@ Target files:
 - `%USERPROFILE%\.codex\rules\default.rules`
 - `%USERPROFILE%\.codex\config.toml`
 
+Quick self-check from this repository:
+
+```powershell
+npm run doctor:approval
+```
+
+The doctor reads the project guidance, `%USERPROFILE%\.codex\config.toml`, `%USERPROFILE%\.codex\rules\default.rules`, and the current PowerShell startup environment. It reports a concrete conclusion, missing or mismatched Git prefix rules, and the exact safe rule lines expected by this project.
+
 Important execution note:
 
 - these files are outside the repository workspace

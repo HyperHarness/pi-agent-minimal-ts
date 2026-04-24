@@ -214,6 +214,7 @@ Example prompts:
 - `npm run build`: compile TypeScript to `dist/`
 - `npm test`: run the automated test suite
 - `npm run agent`: build and start the agent
+- `npm run doctor:approval`: diagnose Windows PowerShell Codex approval rules for routine Git commands
 
 ## Test
 
