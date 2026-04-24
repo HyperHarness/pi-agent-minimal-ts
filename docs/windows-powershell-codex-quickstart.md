@@ -147,6 +147,16 @@ npm run doctor:approval
 
 The doctor reads the project guidance, `%USERPROFILE%\.codex\config.toml`, `%USERPROFILE%\.codex\rules\default.rules`, and the current PowerShell startup environment. It reports a concrete conclusion, missing or mismatched Git prefix rules, and the exact safe rule lines expected by this project.
 
+To append missing safe rules automatically:
+
+```powershell
+npm run doctor:approval -- --apply
+```
+
+The apply mode only appends exact allowlisted prefixes. It does not add broad rules such as `git` or `git commit`.
+
+If the doctor reports `Windows sandbox is unelevated`, safe prefix rules can still be correct while Git write commands fail inside the sandbox with errors such as `.git/index.lock`. In that case a follow-up prompt for `git add`, `git commit`, or `git push` is a sandbox escalation prompt, not a missing `default.rules` entry. Persist the external-execution approval in the Codex prompt, or change the Windows sandbox policy and restart Codex Desktop before re-testing.
+
 Important execution note:
 
 - these files are outside the repository workspace

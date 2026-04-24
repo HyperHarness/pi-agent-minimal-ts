@@ -34,6 +34,29 @@ function findExactModel<TModel extends ModelIdentity>(
   return availableModels.find((model) => model.provider === provider && model.id === modelId);
 }
 
+function createCustomModelFromProviderTemplate<TModel extends ModelIdentity>(
+  availableModels: TModel[],
+  provider: string,
+  modelId: string
+): TModel | undefined {
+  const defaultModel = DEFAULT_MODELS.find(([defaultProvider]) => defaultProvider === provider);
+  const template =
+    defaultModel === undefined
+      ? availableModels.find((model) => model.provider === provider)
+      : findExactModel(availableModels, provider, defaultModel[1]) ??
+        availableModels.find((model) => model.provider === provider);
+
+  if (!template) {
+    return undefined;
+  }
+
+  return {
+    ...template,
+    id: modelId,
+    name: modelId
+  };
+}
+
 function getExplicitRequest(options: ModelResolverOptions<ModelIdentity>) {
   if (options.cliProvider && options.cliModel) {
     return { provider: options.cliProvider, modelId: options.cliModel };
@@ -57,7 +80,15 @@ export function resolveInitialModel<TModel extends ModelIdentity>(
       explicitRequest.provider,
       explicitRequest.modelId
     );
-    if (!model) {
+    const resolvedModel =
+      model ??
+      createCustomModelFromProviderTemplate(
+        options.availableModels,
+        explicitRequest.provider,
+        explicitRequest.modelId
+      );
+
+    if (!resolvedModel) {
       throw new Error(
         `Requested model not found: ${explicitRequest.provider}/${explicitRequest.modelId}`
       );
@@ -65,7 +96,7 @@ export function resolveInitialModel<TModel extends ModelIdentity>(
 
     return {
       provider: explicitRequest.provider,
-      model
+      model: resolvedModel
     };
   }
 

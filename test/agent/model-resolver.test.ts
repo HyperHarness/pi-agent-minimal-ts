@@ -36,7 +36,7 @@ test("resolveInitialModel prefers explicit provider and model", () => {
   assert.equal(result.model.id, "claude-opus-4-6");
 });
 
-test("resolveInitialModel throws when an explicit requested model is not found", () => {
+test("resolveInitialModel throws when an explicit requested provider is not found", () => {
   const availableModels = [
     createModel("openai", "gpt-5.4"),
     createModel("anthropic", "claude-opus-4-6")
@@ -44,14 +44,36 @@ test("resolveInitialModel throws when an explicit requested model is not found",
 
   assert.throws(() => {
     resolveInitialModel({
-      cliProvider: "anthropic",
-      cliModel: "claude-haiku-9-9",
+      cliProvider: "unknown-provider",
+      cliModel: "unknown-model",
       envProvider: "openai",
       envModel: "gpt-5.4",
       availableModels,
       hasConfiguredAuth: () => true
     });
-  }, /Requested model not found: anthropic\/claude-haiku-9-9/i);
+  }, /Requested model not found: unknown-provider\/unknown-model/i);
+});
+
+test("resolveInitialModel derives an explicit missing model from the provider template", () => {
+  const availableModels = [
+    createModel("openai", "gpt-5.4"),
+    createModel("anthropic", "claude-opus-4-6")
+  ];
+
+  const result = resolveInitialModel({
+    cliProvider: "openai",
+    cliModel: "gpt-5.5",
+    envProvider: undefined,
+    envModel: undefined,
+    availableModels,
+    hasConfiguredAuth: () => true
+  });
+
+  assert.equal(result.provider, "openai");
+  assert.equal(result.model.id, "gpt-5.5");
+  assert.equal(result.model.name, "gpt-5.5");
+  assert.equal(result.model.api, "openai-completions");
+  assert.equal(result.model.baseUrl, "https://example.test/v1");
 });
 
 test("resolveInitialModel ignores a partial CLI override and honors a complete env pair", () => {

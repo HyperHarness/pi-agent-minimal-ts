@@ -215,6 +215,7 @@ Example prompts:
 - `npm test`: run the automated test suite
 - `npm run agent`: build and start the agent
 - `npm run doctor:approval`: diagnose Windows PowerShell Codex approval rules for routine Git commands
+- `npm run doctor:approval -- --apply`: append missing safe approval rules without allowing broad `git` prefixes
 
 ## Test
 

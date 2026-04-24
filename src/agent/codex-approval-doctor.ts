@@ -1,4 +1,4 @@
-import { readFile } from "node:fs/promises";
+import { mkdir, readFile, writeFile } from "node:fs/promises";
 import os from "node:os";
 import path from "node:path";
 import { spawnSync } from "node:child_process";
@@ -7,8 +7,9 @@ export type ApprovalDoctorStatus = "ok" | "warning" | "error";
 export type ApprovalDoctorFindingLevel = "ok" | "warning" | "error";
 
 export interface ExpectedCodexGitApprovalRule {
-  powerShellPath: string;
-  gitPrefix: string;
+  kind: "powershell-wrapper" | "direct-git";
+  pattern: string[];
+  commandLabel: string;
 }
 
 export interface CodexApprovalDoctorInput {
@@ -38,29 +39,43 @@ export interface CodexApprovalDoctorResult {
 }
 
 interface ParsedRule {
-  powerShellPath: string;
-  commandPrefix: string;
+  pattern: string[];
 }
 
 const WINDOWS_POWERSHELL_RULE_PATH = "C:\\\\WINDOWS\\\\System32\\\\WindowsPowerShell\\\\v1.0\\\\powershell.exe";
 const RULE_LINE_PATTERN =
-  /^\s*prefix_rule\(pattern=\["([^"]+)",\s*"-Command",\s*"([^"]+)"\],\s*decision="allow"\)\s*$/;
+  /^\s*prefix_rule\(pattern=\[(.+)\],\s*decision="allow"\)\s*$/;
+const QUOTED_PATTERN_PART = /"([^"]*)"/g;
 
 export const EXPECTED_CODEX_GIT_APPROVAL_RULES: ExpectedCodexGitApprovalRule[] = [
-  { powerShellPath: WINDOWS_POWERSHELL_RULE_PATH, gitPrefix: "git status" },
-  { powerShellPath: WINDOWS_POWERSHELL_RULE_PATH, gitPrefix: "git diff" },
-  { powerShellPath: WINDOWS_POWERSHELL_RULE_PATH, gitPrefix: "git add" },
-  { powerShellPath: WINDOWS_POWERSHELL_RULE_PATH, gitPrefix: "git commit -m" },
-  { powerShellPath: WINDOWS_POWERSHELL_RULE_PATH, gitPrefix: "git switch" },
-  { powerShellPath: WINDOWS_POWERSHELL_RULE_PATH, gitPrefix: "git checkout -b" },
-  { powerShellPath: WINDOWS_POWERSHELL_RULE_PATH, gitPrefix: "git branch -d" },
-  { powerShellPath: WINDOWS_POWERSHELL_RULE_PATH, gitPrefix: "git push" },
-  { powerShellPath: WINDOWS_POWERSHELL_RULE_PATH, gitPrefix: "git log" },
-  { powerShellPath: WINDOWS_POWERSHELL_RULE_PATH, gitPrefix: "git branch" },
-  { powerShellPath: WINDOWS_POWERSHELL_RULE_PATH, gitPrefix: "git rev-parse" },
-  { powerShellPath: WINDOWS_POWERSHELL_RULE_PATH, gitPrefix: "git show" },
-  { powerShellPath: WINDOWS_POWERSHELL_RULE_PATH, gitPrefix: "git restore --staged" },
-  { powerShellPath: WINDOWS_POWERSHELL_RULE_PATH, gitPrefix: "git commit --amend --no-edit" }
+  { kind: "powershell-wrapper", pattern: [WINDOWS_POWERSHELL_RULE_PATH, "-Command", "git status"], commandLabel: "git status" },
+  { kind: "powershell-wrapper", pattern: [WINDOWS_POWERSHELL_RULE_PATH, "-Command", "git diff"], commandLabel: "git diff" },
+  { kind: "powershell-wrapper", pattern: [WINDOWS_POWERSHELL_RULE_PATH, "-Command", "git add"], commandLabel: "git add" },
+  { kind: "powershell-wrapper", pattern: [WINDOWS_POWERSHELL_RULE_PATH, "-Command", "git commit -m"], commandLabel: "git commit -m" },
+  { kind: "powershell-wrapper", pattern: [WINDOWS_POWERSHELL_RULE_PATH, "-Command", "git switch"], commandLabel: "git switch" },
+  { kind: "powershell-wrapper", pattern: [WINDOWS_POWERSHELL_RULE_PATH, "-Command", "git checkout -b"], commandLabel: "git checkout -b" },
+  { kind: "powershell-wrapper", pattern: [WINDOWS_POWERSHELL_RULE_PATH, "-Command", "git branch -d"], commandLabel: "git branch -d" },
+  { kind: "powershell-wrapper", pattern: [WINDOWS_POWERSHELL_RULE_PATH, "-Command", "git push"], commandLabel: "git push" },
+  { kind: "powershell-wrapper", pattern: [WINDOWS_POWERSHELL_RULE_PATH, "-Command", "git log"], commandLabel: "git log" },
+  { kind: "powershell-wrapper", pattern: [WINDOWS_POWERSHELL_RULE_PATH, "-Command", "git branch"], commandLabel: "git branch" },
+  { kind: "powershell-wrapper", pattern: [WINDOWS_POWERSHELL_RULE_PATH, "-Command", "git rev-parse"], commandLabel: "git rev-parse" },
+  { kind: "powershell-wrapper", pattern: [WINDOWS_POWERSHELL_RULE_PATH, "-Command", "git show"], commandLabel: "git show" },
+  { kind: "powershell-wrapper", pattern: [WINDOWS_POWERSHELL_RULE_PATH, "-Command", "git restore --staged"], commandLabel: "git restore --staged" },
+  { kind: "powershell-wrapper", pattern: [WINDOWS_POWERSHELL_RULE_PATH, "-Command", "git commit --amend --no-edit"], commandLabel: "git commit --amend --no-edit" },
+  { kind: "direct-git", pattern: ["git", "status"], commandLabel: "git status" },
+  { kind: "direct-git", pattern: ["git", "diff"], commandLabel: "git diff" },
+  { kind: "direct-git", pattern: ["git", "add"], commandLabel: "git add" },
+  { kind: "direct-git", pattern: ["git", "commit", "-m"], commandLabel: "git commit -m" },
+  { kind: "direct-git", pattern: ["git", "switch"], commandLabel: "git switch" },
+  { kind: "direct-git", pattern: ["git", "checkout", "-b"], commandLabel: "git checkout -b" },
+  { kind: "direct-git", pattern: ["git", "branch", "-d"], commandLabel: "git branch -d" },
+  { kind: "direct-git", pattern: ["git", "push"], commandLabel: "git push" },
+  { kind: "direct-git", pattern: ["git", "log"], commandLabel: "git log" },
+  { kind: "direct-git", pattern: ["git", "branch"], commandLabel: "git branch" },
+  { kind: "direct-git", pattern: ["git", "rev-parse"], commandLabel: "git rev-parse" },
+  { kind: "direct-git", pattern: ["git", "show"], commandLabel: "git show" },
+  { kind: "direct-git", pattern: ["git", "restore", "--staged"], commandLabel: "git restore --staged" },
+  { kind: "direct-git", pattern: ["git", "commit", "--amend", "--no-edit"], commandLabel: "git commit --amend --no-edit" }
 ];
 
 const FORBIDDEN_GIT_APPROVAL_PREFIXES = [
@@ -81,7 +96,12 @@ const FORBIDDEN_GIT_APPROVAL_PREFIXES = [
 ];
 
 function buildRuleLine(rule: ExpectedCodexGitApprovalRule): string {
-  return `prefix_rule(pattern=["${rule.powerShellPath}", "-Command", "${rule.gitPrefix}"], decision="allow")`;
+  return `prefix_rule(pattern=[${rule.pattern.map((part) => `"${part}"`).join(", ")}], decision="allow")`;
+}
+
+function parsePattern(rawPattern: string): string[] {
+  QUOTED_PATTERN_PART.lastIndex = 0;
+  return Array.from(rawPattern.matchAll(QUOTED_PATTERN_PART), (match) => match[1]);
 }
 
 function parseRules(rulesText: string | undefined): ParsedRule[] {
@@ -99,8 +119,7 @@ function parseRules(rulesText: string | undefined): ParsedRule[] {
 
       return [
         {
-          powerShellPath: match[1],
-          commandPrefix: match[2]
+          pattern: parsePattern(match[1])
         }
       ];
     });
@@ -114,12 +133,45 @@ function extractApprovalPolicy(configText: string | undefined): string | undefin
   return /^\s*approval_policy\s*=\s*"([^"]+)"\s*$/m.exec(configText)?.[1];
 }
 
+function extractWindowsSandbox(configText: string | undefined): string | undefined {
+  if (configText === undefined) {
+    return undefined;
+  }
+
+  let insideWindowsSection = false;
+  for (const line of configText.split(/\r?\n/)) {
+    if (/^\s*\[/.test(line)) {
+      insideWindowsSection = /^\s*\[windows\]\s*$/.test(line);
+      continue;
+    }
+
+    if (!insideWindowsSection) {
+      continue;
+    }
+
+    const sandbox = /^\s*sandbox\s*=\s*"([^"]+)"\s*$/.exec(line)?.[1];
+    if (sandbox !== undefined) {
+      return sandbox;
+    }
+  }
+
+  return undefined;
+}
+
 function ruleKey(rule: ExpectedCodexGitApprovalRule): string {
-  return `${rule.powerShellPath}\0${rule.gitPrefix}`;
+  return rule.pattern.join("\0");
 }
 
 function parsedRuleKey(rule: ParsedRule): string {
-  return `${rule.powerShellPath}\0${rule.commandPrefix}`;
+  return rule.pattern.join("\0");
+}
+
+function parsedCommandLabel(rule: ParsedRule): string {
+  if (rule.pattern.length === 3 && rule.pattern[1] === "-Command") {
+    return rule.pattern[2];
+  }
+
+  return rule.pattern.join(" ");
 }
 
 function createStatus(findings: CodexApprovalFinding[]): ApprovalDoctorStatus {
@@ -166,21 +218,25 @@ export function analyzeCodexApproval(input: CodexApprovalDoctorInput): CodexAppr
     (rule) => !parsedRuleKeys.has(ruleKey(rule))
   );
   const caseMismatchRules = missingRules.filter((expectedRule) =>
+    expectedRule.kind === "powershell-wrapper" &&
     parsedRules.some(
       (parsedRule) =>
-        parsedRule.commandPrefix === expectedRule.gitPrefix &&
-        parsedRule.powerShellPath.toLowerCase() === expectedRule.powerShellPath.toLowerCase() &&
-        parsedRule.powerShellPath !== expectedRule.powerShellPath
+        parsedRule.pattern.length === 3 &&
+        parsedRule.pattern[1] === "-Command" &&
+        parsedRule.pattern[2] === expectedRule.pattern[2] &&
+        parsedRule.pattern[0].toLowerCase() === expectedRule.pattern[0].toLowerCase() &&
+        parsedRule.pattern[0] !== expectedRule.pattern[0]
     )
   );
   const trulyMissingRules = missingRules.filter(
     (expectedRule) =>
-      !caseMismatchRules.some((caseMismatchRule) => caseMismatchRule.gitPrefix === expectedRule.gitPrefix)
+      !caseMismatchRules.some((caseMismatchRule) => caseMismatchRule.commandLabel === expectedRule.commandLabel)
   );
   const forbiddenRules = parsedRules.filter((rule) =>
-    FORBIDDEN_GIT_APPROVAL_PREFIXES.includes(rule.commandPrefix)
+    FORBIDDEN_GIT_APPROVAL_PREFIXES.includes(parsedCommandLabel(rule))
   );
   const approvalPolicy = extractApprovalPolicy(input.codexConfigText);
+  const windowsSandbox = extractWindowsSandbox(input.codexConfigText);
 
   if (input.platform !== "win32") {
     addFinding(
@@ -235,18 +291,31 @@ export function analyzeCodexApproval(input: CodexApprovalDoctorInput): CodexAppr
       );
     }
 
-    if (trulyMissingRules.length > 0) {
+    const missingWrapperRules = trulyMissingRules.filter((rule) => rule.kind === "powershell-wrapper");
+    const missingDirectGitRules = trulyMissingRules.filter((rule) => rule.kind === "direct-git");
+
+    if (missingWrapperRules.length > 0) {
       addFinding(
         findings,
         "error",
-        "Missing safe Git allow rules",
-        `Missing prefixes: ${trulyMissingRules.map((rule) => rule.gitPrefix).join(", ")}.`,
+        "Missing PowerShell wrapper Git allow rules",
+        `Missing prefixes: ${missingWrapperRules.map((rule) => rule.commandLabel).join(", ")}.`,
         `Append the missing exact prefix_rule lines to ${input.codexRulesPath}, then fully restart Codex Desktop.`
       );
     }
 
+    if (missingDirectGitRules.length > 0) {
+      addFinding(
+        findings,
+        "error",
+        "Missing direct Git inner allow rules",
+        `Missing prefixes: ${missingDirectGitRules.map((rule) => rule.commandLabel).join(", ")}.`,
+        `Append the missing exact direct Git prefix_rule lines to ${input.codexRulesPath}. These cover approval UIs that match the inner command instead of the PowerShell wrapper.`
+      );
+    }
+
     if (caseMismatchRules.length === 0 && trulyMissingRules.length === 0) {
-      addOk(findings, "Safe Git allow rules are present", "All expected routine Git prefix rules are present exactly.");
+      addOk(findings, "Safe Git allow rules are present", "All expected wrapper and direct routine Git prefix rules are present exactly.");
     }
 
     if (forbiddenRules.length > 0) {
@@ -254,7 +323,7 @@ export function analyzeCodexApproval(input: CodexApprovalDoctorInput): CodexAppr
         findings,
         "error",
         "Unsafe Git allow rules detected",
-        `These broad or destructive prefixes are allowed: ${forbiddenRules.map((rule) => rule.commandPrefix).join(", ")}.`,
+        `These broad or destructive prefixes are allowed: ${forbiddenRules.map(parsedCommandLabel).join(", ")}.`,
         "Remove broad/destructive Git allow rules. Keep only narrow routine prefixes."
       );
     }
@@ -277,6 +346,16 @@ export function analyzeCodexApproval(input: CodexApprovalDoctorInput): CodexAppr
       "Project approval documentation is incomplete",
       `${input.windowsQuickstartPath} exists but does not contain the expected approval troubleshooting section.`,
       "Add or restore the Codex Desktop approval-rule section in the Windows quickstart."
+    );
+  }
+
+  if (windowsSandbox === "unelevated") {
+    addFinding(
+      findings,
+      "warning",
+      "Windows sandbox is unelevated",
+      "Git write commands can still fail inside the sandbox when they need to update .git/index.lock or other Git metadata, even when safe Git approval rules are present.",
+      "Treat follow-up prompts for git add, git commit, or git push as sandbox escalation prompts, not missing default.rules entries. Persist the external-execution approval in the Codex prompt or change the Windows sandbox policy, then restart Codex Desktop before re-testing."
     );
   }
 
@@ -305,6 +384,27 @@ export function analyzeCodexApproval(input: CodexApprovalDoctorInput): CodexAppr
     input,
     findings
   };
+}
+
+export function buildMissingCodexApprovalRulesPatch(rulesText: string | undefined): string {
+  const parsedRuleKeys = new Set(parseRules(rulesText).map(parsedRuleKey));
+  return EXPECTED_CODEX_GIT_APPROVAL_RULES.filter((rule) => !parsedRuleKeys.has(ruleKey(rule)))
+    .map(buildRuleLine)
+    .join("\n");
+}
+
+export async function appendMissingCodexApprovalRules(rulesPath: string): Promise<string> {
+  const currentRulesText = (await readOptionalText(rulesPath)) ?? "";
+  const patch = buildMissingCodexApprovalRulesPatch(currentRulesText);
+
+  if (!patch) {
+    return "";
+  }
+
+  const separator = currentRulesText.trim().length === 0 || currentRulesText.endsWith("\n") ? "" : "\n";
+  await mkdir(path.dirname(rulesPath), { recursive: true });
+  await writeFile(rulesPath, `${currentRulesText}${separator}${patch}\n`, "utf8");
+  return patch;
 }
 
 async function readOptionalText(filePath: string): Promise<string | undefined> {
