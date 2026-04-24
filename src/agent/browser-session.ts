@@ -356,6 +356,7 @@ export function createAttachedPaperBrowserSession(options: {
 
     async downloadPdf(url: string, destinationPath: string): Promise<void> {
       const page = await options.context.newPage();
+      let shouldClosePage = true;
 
       try {
         const fetchPdfBytesFromRequest = async (): Promise<Buffer | null> => {
@@ -436,8 +437,13 @@ export function createAttachedPaperBrowserSession(options: {
           throw new Error("Timed out waiting for PDF download.");
         }
         await download.saveAs(destinationPath);
+      } catch (error) {
+        shouldClosePage = false;
+        throw error;
       } finally {
-        await page.close().catch(() => {});
+        if (shouldClosePage) {
+          await page.close().catch(() => {});
+        }
       }
     }
   };

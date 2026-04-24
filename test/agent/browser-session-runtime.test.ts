@@ -449,3 +449,40 @@ test("downloadPdf reports manual verification when the anti-bot challenge never 
     await rm(workspaceDir, { recursive: true, force: true });
   }
 });
+
+test("downloadPdf leaves a failed publisher page open for manual download", async () => {
+  const originalLaunchPersistentContext = chromium.launchPersistentContext.bind(chromium);
+  const workspaceDir = await mkdtemp(path.join(os.tmpdir(), "paper-browser-pdf-manual-"));
+  const destinationPath = path.join(workspaceDir, "science.pdf");
+  let closeCalls = 0;
+
+  chromium.launchPersistentContext = (async () => ({
+    newPage: async () =>
+      ({
+        waitForEvent: async () => null,
+        goto: async () => ({
+          headers: () => ({ "content-type": "text/html; charset=utf-8" }),
+          body: async () => Buffer.from("<html><body>Article page</body></html>")
+        }),
+        content: async () => "<html><body>Article page</body></html>",
+        close: async () => {
+          closeCalls += 1;
+        }
+      }) as never,
+    close: async () => {}
+  })) as unknown as typeof chromium.launchPersistentContext;
+
+  try {
+    const factory = resolveDefaultPaperBrowserSessionFactory({ workspaceDir });
+    const session = await factory();
+
+    await assert.rejects(
+      () => session.downloadPdf("https://www.science.org/doi/pdf/10.1126/science.adz8659", destinationPath),
+      /Timed out waiting for PDF download/i
+    );
+    assert.equal(closeCalls, 0);
+  } finally {
+    chromium.launchPersistentContext = originalLaunchPersistentContext;
+    await rm(workspaceDir, { recursive: true, force: true });
+  }
+});
