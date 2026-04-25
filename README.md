@@ -21,18 +21,18 @@ If you are on Windows, especially Windows PowerShell or Codex Desktop on Windows
 
 If you are not on Windows, continue with the normal install steps below.
 
-Use the normal install path if you want browser-session paper downloads to work without extra setup:
+Use the normal install path if you want managed-browser paper tools to work without extra setup:
 
 ```powershell
 npm install
 ```
 
-This lets Playwright install its managed browser during dependency setup. If you skip install scripts with `npm install --ignore-scripts`, normal build/test workflows still work, but the managed-browser paper flow used by `download_paper` and `open_paper_page_for_login` will require one of these before it can launch its browser session:
+This lets Playwright install its managed browser during dependency setup. If you skip install scripts with `npm install --ignore-scripts`, normal build/test workflows still work, but `open_paper_page_for_login` and explicit Playwright paper fallback paths will require one of these before they can launch a browser session:
 
 - set `PI_PAPER_CHROME_EXECUTABLE` to an existing local Chrome/Chromium executable
 - install a Playwright browser separately, for example `npx playwright install chromium`
 
-The paper-browser manager is the intended reuse path for supported publisher review and downloads. It aims to reuse a managed browser session instead of treating direct local browser launch as the default path.
+For supported publisher and other external `download_paper` URLs, set up the paper downloader extension below. arXiv direct downloads do not require the extension or Playwright.
 
 ## Run
 
@@ -66,9 +66,9 @@ You can also set `PI_BASE_URL` instead of passing `--base-url`.
 
 Exit the REPL with `exit` or `quit`.
 
-## Paper Browser Manager
+## Paper Tools
 
-The paper tools are designed to reuse a managed browser session per workspace when one is available. The manager owns the shared profile at `.browser-profile/paper-access/` and stores its localhost metadata at `.browser-profile/paper-access-manager.json`.
+Publisher and external `download_paper` URLs use the browser extension bridge by default when it is configured. The managed Playwright/browser session remains available for `open_paper_page_for_login` and explicit fallback paths. The manager owns the shared profile at `.browser-profile/paper-access/` and stores its localhost metadata at `.browser-profile/paper-access-manager.json`.
 
 Supported publishers:
 
@@ -86,27 +86,27 @@ Supported publishers:
 6. Run `powershell -ExecutionPolicy Bypass -File scripts/register-paper-extension-host.ps1 -ExtensionId <id>`.
 7. Restart the browser.
 
-Use the normal install path if you want the manager-backed paper tools to start their browser automatically:
+Use the normal install path if you want `open_paper_page_for_login` or explicit Playwright fallback paths to start their browser automatically:
 
 - keep Playwright's install scripts enabled during `npm install`
 - or install a browser separately, for example `npx playwright install chromium`
 - or set `PI_PAPER_CHROME_EXECUTABLE` to an existing local Chrome/Chromium executable before starting the agent
 
-`open_paper_page_for_login` and the supported-publisher path in `download_paper` both try to reuse that same managed browser session. Stale manager metadata is recovered automatically: if the saved metadata points to a dead process or an unreachable localhost endpoint, the client clears it and starts a fresh manager. This is best-effort coordination rather than a hard lock against concurrent cold starts.
+`open_paper_page_for_login` tries to reuse that same managed browser session. Stale manager metadata is recovered automatically: if the saved metadata points to a dead process or an unreachable localhost endpoint, the client clears it and starts a fresh manager. This is best-effort coordination rather than a hard lock against concurrent cold starts.
 
 `open_paper_page_for_login` opens the article page in the managed browser session for manual login or verification and stops there.
 
 `download_paper` handles three cases:
 
 - arXiv IDs or arXiv URLs download directly into `downloads/papers/`
-- supported publisher URLs on `science.org`, `nature.com`, and `journals.aps.org` / `aps.org` reuse the managed browser session for download, with `manual_fallback_opened` if manual continuation is needed
-- unsupported external URLs are opened for manual continuation instead of attempting a managed download
+- supported publisher URLs on `science.org`, `nature.com`, and `journals.aps.org` / `aps.org` use the extension bridge when configured; without the bridge they return `extension_unavailable` unless an internal Playwright fallback is explicitly enabled
+- unsupported external URLs also use the extension bridge when configured; without the bridge they return `extension_unavailable`
 
 Before any arXiv, supported-publisher, or external URL action, the paper manager checks `downloads/papers/index/` for an existing `downloaded` record with a PDF file that still exists under `downloads/papers/`. When it finds one, it returns `already_downloaded` with the existing file path and skips the network or browser action. Manual fallback and plain `external_opened` records do not count as completed downloads.
 
 For unsupported external URLs, use `register_manual_paper_download` after downloading the PDF manually. Give it the original external URL and a relative workspace path to the PDF, for example `downloads/inbox/paper.pdf`. The tool verifies the file is a PDF, copies it into `downloads/papers/`, records a SHA-256 hash, and updates the external index record to `downloaded` so future attempts for that URL return `already_downloaded`.
 
-`download_latest_aps_papers` is the direct batch path for prompts such as "search and download the latest 3 APS papers about superconducting quantum computing." It searches APS/Physical Review metadata through Crossref's `10.1103` DOI prefix, then attempts each APS download through the same managed browser flow. Each result is either a downloaded PDF record or a `manual_fallback_opened` APS page for the user to finish manually.
+`download_latest_aps_papers` is the direct batch path for prompts such as "search and download the latest 3 APS papers about superconducting quantum computing." It searches APS/Physical Review metadata through Crossref's `10.1103` DOI prefix, then attempts each APS download. APS cooldown and forced manual-open cases can bypass the extension and open APS pages for the user to finish manually. Each result is either a downloaded PDF record or a `manual_fallback_opened` APS page.
 
 Successful downloads now use formatted filenames when possible, for example `science-10.1126-science.adz8659.pdf`, instead of always overwriting `downloaded-paper.pdf`. The tool still falls back to the source filename or `downloaded-paper.pdf` when it cannot derive a better name.
 
@@ -128,7 +128,7 @@ Example APS batch prompt:
 Search and download the latest 3 APS papers about superconducting quantum computing with download_latest_aps_papers.
 ```
 
-For manual verification, keep your own publisher test URLs in a local scratch file such as `paper_url.txt` or in your notes. This repository does not ship a tracked `paper_url.txt`. Check that each URL belongs to one of the supported hosts above, then run the download and confirm the automatic path writes the PDF under `downloads/papers/` with a publisher/article-derived filename when available.
+For manual verification, keep your own publisher test URLs in a local scratch file such as `paper_url.txt` or in your notes. This repository does not ship a tracked `paper_url.txt`. Check that each URL belongs to one of the supported hosts above, then set up the extension bridge, run the download, and confirm the automatic path writes the PDF under `downloads/papers/` with a publisher/article-derived filename when available.
 
 ## Search And Fetch Configuration
 
@@ -217,7 +217,7 @@ In non-interactive mode:
 - `web_search`: searches the configured provider and returns JSON text for matching results
 - `fetch_url`: fetches an HTML page and returns JSON text for the extracted content
 - `search_papers`: searches arXiv first, then expands discovery with `web_search`, merges overlapping results, and classifies supported publishers versus external sources
-- `download_paper`: downloads arXiv papers into `downloads/papers/`, uses the managed browser flow for supported publishers, returns `already_downloaded` for existing indexed PDFs, and opens unsupported external URLs for manual continuation
+- `download_paper`: downloads arXiv papers into `downloads/papers/`, uses the extension bridge for supported publisher and external URLs when configured, returns `already_downloaded` for existing indexed PDFs, and returns `extension_unavailable` when the bridge is needed but unavailable
 - `download_latest_aps_papers`: searches APS/Physical Review metadata for the latest matching papers and attempts each APS download, returning downloaded PDFs or opened APS pages for manual download
 - `register_manual_paper_download`: registers a manually downloaded external PDF into `downloads/papers/` and updates the local index so repeated requests for the same URL are skipped
 - `open_paper_page_for_login`: opens the paper page in the managed browser session for manual login review without downloading anything

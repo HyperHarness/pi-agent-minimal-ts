@@ -70,7 +70,7 @@ If you intentionally use:
 npm install --ignore-scripts
 ```
 
-then normal build and test flows still work, but `download_paper_pdf` will need one of these before it can launch a browser:
+then normal build and test flows still work, but `open_paper_page_for_login` and explicit Playwright paper fallback paths will need one of these before they can launch a browser:
 
 - set `PI_PAPER_CHROME_EXECUTABLE` to an existing local Chrome or Chromium executable
 - run `npx playwright install chromium`
