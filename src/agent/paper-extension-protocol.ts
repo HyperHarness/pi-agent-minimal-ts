@@ -31,6 +31,7 @@ export type ExtensionHostMessage =
       articleUrl: string;
       source: PaperSource;
       downloadPath: string;
+      pdfUrl?: string;
       title?: string;
     }
   | {
@@ -214,7 +215,7 @@ export function parseExtensionHostMessage(value: unknown): ExtensionHostMessage 
       articleUrl: parseRequiredString(record, "articleUrl"),
       source: parsePaperSource(record, "source"),
       downloadPath: parseRequiredString(record, "downloadPath"),
-      ...parseOptionalFields(record, ["title"])
+      ...parseOptionalFields(record, ["title", "pdfUrl"])
     };
   }
 

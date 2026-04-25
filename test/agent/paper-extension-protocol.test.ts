@@ -12,6 +12,7 @@ test("parseExtensionHostMessage accepts register_download messages", () => {
     articleUrl: "https://www.science.org/doi/10.1126/science.adz8659",
     source: "science",
     downloadPath: "downloads/papers/science-paper.pdf",
+    pdfUrl: "https://www.science.org/doi/pdf/10.1126/science.adz8659",
     title: "Science Paper"
   });
 
@@ -21,6 +22,7 @@ test("parseExtensionHostMessage accepts register_download messages", () => {
     articleUrl: "https://www.science.org/doi/10.1126/science.adz8659",
     source: "science",
     downloadPath: "downloads/papers/science-paper.pdf",
+    pdfUrl: "https://www.science.org/doi/pdf/10.1126/science.adz8659",
     title: "Science Paper"
   });
 });

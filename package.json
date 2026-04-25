@@ -19,6 +19,7 @@
     "build": "tsc -p tsconfig.json",
     "test": "npm run build && node --test --test-isolation=none dist/test/**/*.test.js",
     "agent": "npm run build && node dist/src/pi-agent.js",
+    "paper-extension-host": "node dist/src/paper-extension-host.js",
     "doctor:approval": "tsc --ignoreConfig --target ES2022 --module NodeNext --moduleResolution NodeNext --strict --esModuleInterop --skipLibCheck --types node --rootDir . --outDir dist src/agent/codex-approval-doctor.ts src/codex-approval-doctor.ts && node dist/src/codex-approval-doctor.js"
   },
   "dependencies": {
