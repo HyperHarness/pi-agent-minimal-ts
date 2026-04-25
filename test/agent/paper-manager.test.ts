@@ -433,6 +433,7 @@ test("downloadPaper preserves supported-publisher manual fallback results when a
     const result = await downloadPaper({
       workspaceDir,
       url: articleUrl,
+      usePlaywrightFallback: true,
       downloadPublisherPaperImpl: async () => {
         throw new PaperDownloadError(
           "authorization_failed",
@@ -494,6 +495,7 @@ test("downloadPaper still opens supported hosts for manual fallback when canonic
     const result = await downloadPaper({
       workspaceDir,
       url: articleUrl,
+      usePlaywrightFallback: true,
       downloadPublisherPaperImpl: async () => {
         throw new PaperDownloadError(
           "manual_login_required",
@@ -525,6 +527,7 @@ test("downloadPaper keeps successful publisher downloads as downloaded when the 
     const result = await downloadPaper({
       workspaceDir,
       url: articleUrl,
+      usePlaywrightFallback: true,
       browserSessionFactory: async () => ({
         openArticlePage: async () => ({
           finalArticleUrl: articleUrl,
@@ -550,7 +553,7 @@ test("downloadPaper keeps successful publisher downloads as downloaded when the 
   }
 });
 
-test("downloadPaper opens unsupported external URLs instead of rejecting them", async () => {
+test("downloadPaper opens unsupported external URLs with explicit browser fallback", async () => {
   const workspaceDir = await mkdtemp(path.join(os.tmpdir(), "paper-manager-"));
   const articleUrl = "https://example.com/paper";
 
@@ -558,6 +561,7 @@ test("downloadPaper opens unsupported external URLs instead of rejecting them", 
     const result = await downloadPaper({
       workspaceDir,
       url: articleUrl,
+      usePlaywrightFallback: true,
       openPageInSystemChromeImpl: async () => ({
         url: articleUrl,
         openedUrl: articleUrl,
@@ -604,6 +608,7 @@ test("registerManualPaperDownload imports an external PDF and makes future downl
     await downloadPaper({
       workspaceDir,
       url: articleUrl,
+      usePlaywrightFallback: true,
       openPageInSystemChromeImpl: async () => {
         events.push("open");
         return {
@@ -729,6 +734,7 @@ test("downloadPaper uses openPageInSystemChromeImpl for supported-publisher manu
     const result = await downloadPaper({
       workspaceDir,
       url: articleUrl,
+      usePlaywrightFallback: true,
       downloadPublisherPaperImpl: async () => {
         throw new PaperDownloadError(
           "manual_login_required",

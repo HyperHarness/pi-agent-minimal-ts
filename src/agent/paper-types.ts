@@ -186,6 +186,25 @@ export interface ExternalOpenedPaperResult {
   executablePath?: string;
 }
 
+export interface ExtensionUnavailablePaperResult {
+  status: "extension_unavailable";
+  source: SupportedPaperSource | "external";
+  articleUrl: string;
+  failure: PaperFailure;
+}
+
+export interface ExtensionPaperJobResult {
+  status:
+    | "extension_job_queued"
+    | "opened_in_user_browser"
+    | "awaiting_user_verification"
+    | "awaiting_user_manual_download";
+  source: SupportedPaperSource | "external";
+  articleUrl: string;
+  jobId: string;
+  message: string;
+}
+
 export interface RegisteredManualPaperDownloadResult {
   status: "downloaded";
   source: "external";
@@ -200,4 +219,6 @@ export type PaperDownloadResult =
   | DownloadedPaperResult
   | AlreadyDownloadedPaperResult
   | ManualFallbackPaperResult
-  | ExternalOpenedPaperResult;
+  | ExternalOpenedPaperResult
+  | ExtensionUnavailablePaperResult
+  | ExtensionPaperJobResult;

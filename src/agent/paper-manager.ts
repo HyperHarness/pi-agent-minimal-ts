@@ -21,6 +21,10 @@ import {
   resolvePublisherCanonicalIdFromArticleUrl
 } from "./paper-download.js";
 import {
+  createPaperExtensionJob,
+  type PaperExtensionBridge
+} from "./paper-extension-bridge.js";
+import {
   findDownloadedPaperRecord,
   readPaperRecord,
   resolveExternalPaperPdfPath,
@@ -81,6 +85,8 @@ export interface DownloadPaperOptions {
   downloadPublisherPaperImpl?: DownloadPublisherPaperImplementation;
   openPublisherForLoginImpl?: OpenPublisherForLoginImplementation;
   openPageInSystemChromeImpl?: typeof openPageInSystemChrome;
+  extensionBridge?: PaperExtensionBridge;
+  usePlaywrightFallback?: boolean;
 }
 
 export interface DownloadLatestApsPapersOptions {
@@ -472,6 +478,57 @@ function toPaperFailure(error: PaperDownloadError): PaperFailure {
   };
 }
 
+function formatExtensionBridgeFailure(error: unknown): string {
+  if (error === undefined) {
+    return "Paper extension bridge is not configured. Set usePlaywrightFallback to true to use browser fallback.";
+  }
+  if (error instanceof Error) {
+    return error.message;
+  }
+  if (typeof error === "string") {
+    return error;
+  }
+  if (
+    typeof error === "object" &&
+    error !== null &&
+    "message" in error &&
+    typeof error.message === "string"
+  ) {
+    return error.message;
+  }
+
+  return `Paper extension bridge failed: ${String(error)}`;
+}
+
+function toExtensionUnavailablePaperResult(input: {
+  source: SupportedPaperSource | "external";
+  articleUrl: string;
+  error?: unknown;
+}): PaperDownloadResult {
+  return {
+    status: "extension_unavailable",
+    source: input.source,
+    articleUrl: input.articleUrl,
+    failure: {
+      code: "extension_unavailable",
+      message: formatExtensionBridgeFailure(input.error)
+    }
+  };
+}
+
+async function submitPaperExtensionJob(input: {
+  bridge: PaperExtensionBridge;
+  articleUrl: string;
+  source: SupportedPaperSource | "external";
+}): Promise<PaperDownloadResult> {
+  return input.bridge.submitJob(
+    createPaperExtensionJob({
+      articleUrl: input.articleUrl,
+      source: input.source
+    })
+  );
+}
+
 function resolveFallbackCanonicalId(input: {
   articleUrl: string;
   canonicalId?: string;
@@ -681,6 +738,29 @@ export async function downloadPaper(options: DownloadPaperOptions): Promise<Pape
       return toAlreadyDownloadedPaperResult(existingDownload);
     }
 
+    if (options.extensionBridge) {
+      try {
+        return await submitPaperExtensionJob({
+          bridge: options.extensionBridge,
+          articleUrl: classification.articleUrl,
+          source: "external"
+        });
+      } catch (error) {
+        if (options.usePlaywrightFallback !== true) {
+          return toExtensionUnavailablePaperResult({
+            source: "external",
+            articleUrl: classification.articleUrl,
+            error
+          });
+        }
+      }
+    } else if (options.usePlaywrightFallback !== true) {
+      return toExtensionUnavailablePaperResult({
+        source: "external",
+        articleUrl: classification.articleUrl
+      });
+    }
+
     const openPageInSystemChromeImpl = options.openPageInSystemChromeImpl ?? openPageInSystemChrome;
     const openResult = await openPageInSystemChromeImpl({
       workspaceDir: options.workspaceDir,
@@ -708,18 +788,6 @@ export async function downloadPaper(options: DownloadPaperOptions): Promise<Pape
     };
   }
 
-  const openPublisherForLoginImpl: OpenPublisherForLoginImplementation =
-    options.openPublisherForLoginImpl ??
-    ((openOptions) =>
-      (options.openPageInSystemChromeImpl ?? openPageInSystemChrome)({
-        workspaceDir: openOptions.workspaceDir,
-        url: openOptions.url
-      }).then(({ openedUrl, profileDir, executablePath }) => ({
-        openedUrl,
-        profileDir,
-        executablePath
-      })));
-
   if (classification.canonicalId) {
     const existingDownload = await findDownloadedPaperRecord({
       workspaceDir: options.workspaceDir,
@@ -731,6 +799,41 @@ export async function downloadPaper(options: DownloadPaperOptions): Promise<Pape
       return toAlreadyDownloadedPaperResult(existingDownload);
     }
   }
+
+  if (options.extensionBridge) {
+    try {
+      return await submitPaperExtensionJob({
+        bridge: options.extensionBridge,
+        articleUrl: classification.articleUrl,
+        source: classification.source
+      });
+    } catch (error) {
+      if (options.usePlaywrightFallback !== true) {
+        return toExtensionUnavailablePaperResult({
+          source: classification.source,
+          articleUrl: classification.articleUrl,
+          error
+        });
+      }
+    }
+  } else if (options.usePlaywrightFallback !== true) {
+    return toExtensionUnavailablePaperResult({
+      source: classification.source,
+      articleUrl: classification.articleUrl
+    });
+  }
+
+  const openPublisherForLoginImpl: OpenPublisherForLoginImplementation =
+    options.openPublisherForLoginImpl ??
+    ((openOptions) =>
+      (options.openPageInSystemChromeImpl ?? openPageInSystemChrome)({
+        workspaceDir: openOptions.workspaceDir,
+        url: openOptions.url
+      }).then(({ openedUrl, profileDir, executablePath }) => ({
+        openedUrl,
+        profileDir,
+        executablePath
+      })));
 
   if (options.forceManualOpen) {
     return openSupportedPublisherForManualFallback({
