@@ -767,6 +767,7 @@ test("download_paper uses the injected paper manager client for supported-publis
       browserSessionFactory: async () => {
         throw new Error("browserSessionFactory should not be called");
       },
+      usePlaywrightPaperFallback: true,
       paperBrowserManagerClient: {
         async openArticle(request: { url: string }) {
           events.push(`openArticle:${request.url}`);
@@ -845,6 +846,7 @@ test("download_paper opens manual fallback when the manager client download is n
     await writeFile(downloadedPath, "<html>not a pdf</html>", "utf8");
 
     const tool = getDownloadPaperTool(workspace, {
+      usePlaywrightPaperFallback: true,
       paperBrowserManagerClient: {
         async openArticle(request: { url: string }) {
           events.push(`openArticle:${request.url}`);
@@ -960,6 +962,7 @@ test("download_latest_aps_papers uses the managed paper browser client for defau
 
   try {
     const tool = getDownloadLatestApsPapersTool(workspace, {
+      usePlaywrightPaperFallback: true,
       browserSessionFactory: async () => {
         throw new Error("browserSessionFactory should not be called");
       },
@@ -1030,6 +1033,7 @@ test("download_latest_aps_papers opens one manual APS article tab per fallback r
 
   try {
     const tool = getDownloadLatestApsPapersTool(workspace, {
+      usePlaywrightPaperFallback: true,
       searchApsPapers: async () =>
         articleUrls.map((articleUrl, index) => ({
           title: `APS superconducting qubit paper ${index + 1}`,
@@ -1102,6 +1106,7 @@ test("download_latest_aps_papers stops automatic attempts after the first Cloudf
 
   try {
     const tool = getDownloadLatestApsPapersTool(workspace, {
+      usePlaywrightPaperFallback: true,
       searchApsPapers: async () =>
         articleUrls.map((articleUrl, index) => ({
           title: `APS superconducting qubit paper ${index + 1}`,
@@ -1168,6 +1173,7 @@ test("download_paper opens manual fallback when the manager client returns a cod
 
   try {
     const tool = getDownloadPaperTool(workspace, {
+      usePlaywrightPaperFallback: true,
       paperBrowserManagerClient: {
         async openArticle(request: { url: string }) {
           events.push(`openArticle:${request.url}`);
@@ -1231,6 +1237,7 @@ test("download_paper opens manual fallback when canonicalId cannot be derived fr
     await writeFile(downloadedPath, "%PDF-1.4\n1 0 obj\n<<>>\nendobj\n", "utf8");
 
     const tool = getDownloadPaperTool(workspace, {
+      usePlaywrightPaperFallback: true,
       paperBrowserManagerClient: {
         async openArticle(request: { url: string }) {
           events.push(`openArticle:${request.url}`);

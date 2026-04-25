@@ -19,6 +19,7 @@ import {
   registerManualPaperDownload,
   searchPapers
 } from "./paper-manager.js";
+import type { PaperExtensionBridge } from "./paper-extension-bridge.js";
 import { resolveCloudflareCooldownMs } from "./publisher-access-state.js";
 import {
   createPaperBrowserManagerClient,
@@ -220,6 +221,8 @@ export interface ToolDependencies {
   openPaperPageForLogin?: OpenPaperPageForLoginDependency;
   browserSessionFactory?: ReturnType<typeof resolveDefaultPaperBrowserSessionFactory>;
   paperBrowserManagerClient?: PaperBrowserManagerClient;
+  extensionBridge?: PaperExtensionBridge;
+  usePlaywrightPaperFallback?: boolean;
 }
 
 interface ToolSetMetadata {
@@ -395,6 +398,8 @@ export function createTools(workspaceDir: string, dependencies: ToolDependencies
     ((options: Parameters<typeof downloadPaper>[0]) =>
       downloadPaper({
         ...options,
+        extensionBridge: dependencies.extensionBridge,
+        usePlaywrightFallback: dependencies.usePlaywrightPaperFallback === true,
         downloadPublisherPaperImpl: async (downloadOptions) => {
           let result;
           try {

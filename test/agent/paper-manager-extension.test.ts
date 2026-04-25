@@ -207,6 +207,72 @@ test("downloadPaper runs legacy fallback when the bridge fails and fallback is e
   }
 });
 
+test("downloadPaper forceManualOpen bypasses the extension bridge for supported publisher URLs", async () => {
+  const workspaceDir = await mkdtemp(path.join(os.tmpdir(), "paper-manager-extension-"));
+  const articleUrl = "https://journals.aps.org/prl/abstract/10.1103/PhysRevLett.134.090601";
+  const bridgeCalls: unknown[] = [];
+  const fallbackCalls: string[] = [];
+
+  try {
+    const result = await downloadPaper({
+      workspaceDir,
+      url: articleUrl,
+      forceManualOpen: {
+        code: "recent_cloudflare_block",
+        message: "Skipping automatic APS download because Cloudflare recently blocked APS access."
+      },
+      extensionBridge: {
+        async submitJob(job) {
+          bridgeCalls.push(job);
+          return {
+            status: "extension_job_queued",
+            source: job.source,
+            articleUrl: job.articleUrl,
+            jobId: job.jobId,
+            message: "This should not be queued when manual fallback is forced."
+          };
+        }
+      },
+      downloadPublisherPaperImpl: async () => {
+        fallbackCalls.push("download");
+        throw new Error("automatic fallback should not run when manual fallback is forced");
+      },
+      openPublisherForLoginImpl: async (openOptions) => {
+        fallbackCalls.push(`open:${openOptions.url}`);
+        return {
+          openedUrl: `${openOptions.url}?manual=1`,
+          profileDir: path.join(workspaceDir, ".browser-profile", "paper-access")
+        };
+      }
+    });
+
+    assert.deepEqual(bridgeCalls, []);
+    assert.deepEqual(fallbackCalls, [`open:${articleUrl}`]);
+    assert.deepEqual(result, {
+      status: "manual_fallback_opened",
+      source: "aps",
+      canonicalId: "10.1103/PhysRevLett.134.090601",
+      articleUrl,
+      fallbackUrl: `${articleUrl}?manual=1`,
+      recordPath: path.join(
+        workspaceDir,
+        "downloads",
+        "papers",
+        "index",
+        "aps-10.1103-PhysRevLett.134.090601.json"
+      ),
+      failure: {
+        code: "recent_cloudflare_block",
+        message: "Skipping automatic APS download because Cloudflare recently blocked APS access."
+      },
+      profileDir: path.join(workspaceDir, ".browser-profile", "paper-access"),
+      executablePath: undefined
+    });
+  } finally {
+    await rm(workspaceDir, { recursive: true, force: true });
+  }
+});
+
 test("downloadPaper routes external URLs through the extension bridge by default", async () => {
   const workspaceDir = await mkdtemp(path.join(os.tmpdir(), "paper-manager-extension-"));
   const articleUrl = "https://example.com/paper";

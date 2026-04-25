@@ -800,6 +800,27 @@ export async function downloadPaper(options: DownloadPaperOptions): Promise<Pape
     }
   }
 
+  const openPublisherForLoginImpl: OpenPublisherForLoginImplementation =
+    options.openPublisherForLoginImpl ??
+    ((openOptions) =>
+      (options.openPageInSystemChromeImpl ?? openPageInSystemChrome)({
+        workspaceDir: openOptions.workspaceDir,
+        url: openOptions.url
+      }).then(({ openedUrl, profileDir, executablePath }) => ({
+        openedUrl,
+        profileDir,
+        executablePath
+      })));
+
+  if (options.forceManualOpen) {
+    return openSupportedPublisherForManualFallback({
+      workspaceDir: options.workspaceDir,
+      classification,
+      failure: options.forceManualOpen,
+      openPublisherForLoginImpl
+    });
+  }
+
   if (options.extensionBridge) {
     try {
       return await submitPaperExtensionJob({
@@ -820,27 +841,6 @@ export async function downloadPaper(options: DownloadPaperOptions): Promise<Pape
     return toExtensionUnavailablePaperResult({
       source: classification.source,
       articleUrl: classification.articleUrl
-    });
-  }
-
-  const openPublisherForLoginImpl: OpenPublisherForLoginImplementation =
-    options.openPublisherForLoginImpl ??
-    ((openOptions) =>
-      (options.openPageInSystemChromeImpl ?? openPageInSystemChrome)({
-        workspaceDir: openOptions.workspaceDir,
-        url: openOptions.url
-      }).then(({ openedUrl, profileDir, executablePath }) => ({
-        openedUrl,
-        profileDir,
-        executablePath
-      })));
-
-  if (options.forceManualOpen) {
-    return openSupportedPublisherForManualFallback({
-      workspaceDir: options.workspaceDir,
-      classification,
-      failure: options.forceManualOpen,
-      openPublisherForLoginImpl
     });
   }
 
