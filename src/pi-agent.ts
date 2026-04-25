@@ -15,6 +15,7 @@ import {
 } from "@mariozechner/pi-ai";
 import { agentLoop, type AgentContext, type AgentEvent, type AgentMessage } from "@mariozechner/pi-agent-core";
 import { resolveInitialModel } from "./agent/model-resolver.js";
+import { createQueuedPaperExtensionBridge } from "./agent/paper-extension-bridge.js";
 import { cleanupTools, createTools, getToolsWorkspaceDir } from "./agent/tools.js";
 
 type LlmMessage = UserMessage | AssistantMessage | ToolResultMessage;
@@ -203,6 +204,12 @@ function isFailedTurn(messages: AgentMessage[]): boolean {
   );
 }
 
+function createRuntimeTools(workspaceDir: string) {
+  return createTools(workspaceDir, {
+    extensionBridge: createQueuedPaperExtensionBridge({ workspaceDir })
+  });
+}
+
 export async function runSessionPrompt(
   options: RunAgentTurnOptions
 ): Promise<SessionPromptResult> {
@@ -270,10 +277,10 @@ export async function runAgentTurn(options: RunAgentTurnOptions): Promise<RunAge
   let tools = existingTools;
 
   if (existingTools.length === 0) {
-    tools = createTools(workspaceDir);
+    tools = createRuntimeTools(workspaceDir);
   } else if (previousWorkspaceDir !== undefined && previousWorkspaceDir !== workspaceDir) {
     await cleanupTools(existingTools);
-    tools = createTools(workspaceDir);
+    tools = createRuntimeTools(workspaceDir);
   }
 
   const stream = agentLoop(

@@ -106,6 +106,18 @@ async function openQueuedJob(job) {
   }
   await persistState();
   await reportJobStatus(trackedJob, "opened_in_browser", "Opened in browser tab.");
+
+  if (trackedJob.source === "external") {
+    if (urlPathEndsWithPdf(trackedJob.articleUrl)) {
+      await startAutomaticDownload(trackedJob, trackedJob.articleUrl);
+      return;
+    }
+
+    await enterManualDownloadMode(
+      trackedJob,
+      "External paper page opened. Download the PDF manually from this tab."
+    );
+  }
 }
 
 async function pollJobs() {

@@ -484,6 +484,65 @@ test("background automatic download registration payload includes pdfUrl and clo
   });
 });
 
+test("background starts automatic download for external direct PDF jobs", async () => {
+  const job = {
+    jobId: "job-external-pdf",
+    articleUrl: "https://example.com/downloads/paper.pdf",
+    source: "external",
+    title: "External PDF"
+  };
+  const fakeChrome = createFakeChrome({
+    jobs: [job],
+    downloadItems: {
+      501: {
+        id: 501,
+        filename: "C:\\Downloads\\external-paper.pdf",
+        url: "https://example.com/downloads/paper.pdf",
+        mime: "application/pdf"
+      }
+    }
+  });
+
+  await importBackground(fakeChrome);
+
+  assert.deepEqual(fakeChrome.createdTabs.map((tab) => tab.url), [job.articleUrl]);
+  assert.deepEqual(fakeChrome.downloadedRequests, [
+    {
+      url: job.articleUrl,
+      conflictAction: "uniquify",
+      saveAs: false
+    }
+  ]);
+  assert.equal(statusMessagesOf(fakeChrome, "pdf_candidate_found").length, 1);
+  assert.equal(statusMessagesOf(fakeChrome, "automatic_download_started").length, 1);
+  assert.deepEqual(fakeChrome.storage.piAgentPaperDownloaderState.downloads["501"], {
+    jobId: job.jobId,
+    articleUrl: job.articleUrl,
+    source: "external",
+    title: "External PDF",
+    tabId: 100,
+    autoClose: undefined,
+    pdfUrl: job.articleUrl
+  });
+});
+
+test("background puts external non-PDF jobs into manual mode", async () => {
+  const job = {
+    jobId: "job-external-page",
+    articleUrl: "https://example.com/research/paper",
+    source: "external"
+  };
+  const fakeChrome = createFakeChrome({ jobs: [job] });
+
+  await importBackground(fakeChrome);
+
+  assert.deepEqual(fakeChrome.createdTabs.map((tab) => tab.url), [job.articleUrl]);
+  assert.deepEqual(fakeChrome.downloadedRequests, []);
+  assert.equal(statusMessagesOf(fakeChrome, "awaiting_user_manual_download").length, 1);
+  assert.deepEqual(fakeChrome.removedTabs, []);
+  assert.ok(fakeChrome.storage.piAgentPaperDownloaderState.jobs[job.jobId]);
+});
+
 test("background keeps tab open when native host does not register completed download", async () => {
   const fakeChrome = createFakeChrome({
     jobs: [

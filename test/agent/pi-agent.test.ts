@@ -13,6 +13,7 @@ import {
 } from "@mariozechner/pi-ai";
 import type { AgentContext, AgentEvent } from "@mariozechner/pi-agent-core";
 import * as piAgent from "../../src/pi-agent.js";
+import { cleanupTools } from "../../src/agent/tools.js";
 import { runAgentTurn } from "../../src/pi-agent.js";
 
 type AgentMessage = AgentContext["messages"][number];
@@ -193,6 +194,54 @@ test("runAgentTurn executes a tool call and appends the resulting messages", asy
     );
   } finally {
     registration.unregister();
+  }
+});
+
+test("runAgentTurn default tools queue extension download jobs", async () => {
+  const registration = registerFauxProvider();
+  const workspace = await mkdtemp(path.join(tmpdir(), "pi-agent-extension-workspace-"));
+  const articleUrl = "https://example.com/research/paper.pdf";
+  registration.setResponses([
+    fauxAssistantMessage([fauxToolCall("download_paper", { url: articleUrl })], {
+      stopReason: "toolUse"
+    }),
+    fauxAssistantMessage([fauxText("Queued the paper download.")])
+  ]);
+
+  const context: AgentContext = {
+    systemPrompt: "You are a helpful assistant. Use tools when they are useful.",
+    messages: [],
+    tools: []
+  };
+
+  try {
+    const result = await runAgentTurn({
+      model: registration.getModel(),
+      workspaceDir: workspace,
+      context,
+      prompt: "Download this paper PDF."
+    });
+
+    const toolResult = result.newMessages.find(
+      (message): message is ToolResultMessage =>
+        isToolResultMessage(message) && message.toolName === "download_paper"
+    );
+    assert.ok(toolResult);
+    assert.equal(toolResult.isError, false);
+    const details = toolResult.details as { jobId?: string };
+    assert.equal(typeof details.jobId, "string");
+    assert.ok(details.jobId?.startsWith("paper-external-"));
+    assert.deepEqual(toolResult.details, {
+      status: "extension_job_queued",
+      source: "external",
+      articleUrl,
+      jobId: details.jobId,
+      message: "Paper download job queued for the browser extension."
+    });
+  } finally {
+    registration.unregister();
+    await cleanupTools(context.tools);
+    await rm(workspace, { recursive: true, force: true });
   }
 });
 

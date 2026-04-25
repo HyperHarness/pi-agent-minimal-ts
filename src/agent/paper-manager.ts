@@ -562,6 +562,21 @@ function isLikelyCloudflareFallback(result: PaperDownloadResult): boolean {
   );
 }
 
+function createRecentCloudflareBlockFailure(blockedAt: string): PaperFailure {
+  return {
+    code: "recent_cloudflare_block",
+    message: `Skipping automatic APS download because Cloudflare blocked APS access at ${blockedAt}. Complete the opened page manually, or retry automatic download after the cooldown window.`
+  };
+}
+
+function createPendingApsExtensionJobFailure(): PaperFailure {
+  return {
+    code: "aps_extension_job_pending",
+    message:
+      "Skipping automatic APS download because an APS browser extension job is already queued. Complete the opened APS page manually, or retry after the extension reports the first APS result."
+  };
+}
+
 function toAlreadyDownloadedPaperResult(match: DownloadedPaperRecordMatch): PaperDownloadResult {
   if (match.record.source === "external") {
     return {
@@ -984,6 +999,9 @@ export async function downloadLatestApsPapers(
     now: now(),
     cooldownMs: cloudflareCooldownMs
   });
+  let forceManualOpenFailure = recentCloudflareBlockAt
+    ? createRecentCloudflareBlockFailure(recentCloudflareBlockAt)
+    : undefined;
   const papers = await searchApsPapersImpl({
     query,
     maxResults
@@ -999,17 +1017,11 @@ export async function downloadLatestApsPapers(
     const download = await downloadPaperImpl({
       workspaceDir: options.workspaceDir,
       url: apsSource.articleUrl,
-      ...(recentCloudflareBlockAt
-        ? {
-            forceManualOpen: {
-              code: "recent_cloudflare_block",
-              message: `Skipping automatic APS download because Cloudflare blocked APS access at ${recentCloudflareBlockAt}. Complete the opened page manually, or retry automatic download after the cooldown window.`
-            }
-          }
-        : {})
+      ...(forceManualOpenFailure ? { forceManualOpen: forceManualOpenFailure } : {})
     });
-    if (!recentCloudflareBlockAt && isLikelyCloudflareFallback(download)) {
+    if (!forceManualOpenFailure && isLikelyCloudflareFallback(download)) {
       recentCloudflareBlockAt = now().toISOString();
+      forceManualOpenFailure = createRecentCloudflareBlockFailure(recentCloudflareBlockAt);
       publisherAccessState = setCloudflareBlock({
         state: publisherAccessState,
         publisher: "aps",
@@ -1019,6 +1031,13 @@ export async function downloadLatestApsPapers(
         workspaceDir: options.workspaceDir,
         state: publisherAccessState
       });
+    }
+    if (
+      !forceManualOpenFailure &&
+      download.status === "extension_job_queued" &&
+      download.source === "aps"
+    ) {
+      forceManualOpenFailure = createPendingApsExtensionJobFailure();
     }
     results.push({
       title: paper.title,

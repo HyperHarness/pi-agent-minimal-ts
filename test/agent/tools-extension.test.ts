@@ -333,3 +333,103 @@ test("download_latest_aps_papers preserves cooldown manual-open fallback with an
     await rm(workspace, { recursive: true, force: true });
   }
 });
+
+test("download_latest_aps_papers queues only the first APS extension job per batch", async () => {
+  const workspace = await mkdtemp(path.join(tmpdir(), "pi-agent-tools-extension-"));
+  const articleUrls = [
+    "https://journals.aps.org/prl/abstract/10.1103/PhysRevLett.134.090601",
+    "https://journals.aps.org/prl/abstract/10.1103/PhysRevLett.134.090602",
+    "https://journals.aps.org/prl/abstract/10.1103/PhysRevLett.134.090603",
+  ];
+  const bridgeCalls: string[] = [];
+  const downloadAttempts: string[] = [];
+  const opened: string[] = [];
+  const extensionBridge: PaperExtensionBridge = {
+    async submitJob(job) {
+      bridgeCalls.push(job.articleUrl);
+      return {
+        status: "extension_job_queued",
+        source: job.source,
+        articleUrl: job.articleUrl,
+        jobId: job.jobId,
+        message: "Queued by extension bridge.",
+      };
+    },
+  };
+
+  try {
+    const tool = getDownloadLatestApsPapersTool(workspace, {
+      usePlaywrightPaperFallback: true,
+      extensionBridge,
+      searchApsPapers: async () =>
+        articleUrls.map((articleUrl, index) => ({
+          title: `APS paper ${index + 1}`,
+          authors: [],
+          summary: "Published in Physical Review Letters.",
+          primarySource: "aps" as const,
+          primaryAction: "authorized_download" as const,
+          sources: [
+            {
+              source: "aps" as const,
+              action: "authorized_download" as const,
+              canonicalId: articleUrl.slice(articleUrl.lastIndexOf("/") + 1),
+              articleUrl,
+            },
+          ],
+        })),
+      paperBrowserManagerClient: {
+        async openArticle(request: { url: string }) {
+          opened.push(request.url);
+          return {
+            openedUrl: `${request.url}?manual=1`,
+            profileDir: path.join(workspace, ".browser-profile", "paper-access"),
+          };
+        },
+        async downloadPaperPdf(request: { url: string }): Promise<never> {
+          downloadAttempts.push(request.url);
+          throw new Error("Playwright fallback should not attempt APS batch downloads after queueing.");
+        },
+        async close() {},
+      },
+    } as unknown as CreateToolsDependencies);
+
+    const result = await tool.execute(
+      "tool-extension-latest-aps-single-queue",
+      { query: "superconducting quantum computing", maxResults: 3 },
+      undefined,
+    );
+
+    assert.deepEqual(bridgeCalls, [articleUrls[0]]);
+    assert.deepEqual(downloadAttempts, []);
+    assert.deepEqual(opened, articleUrls.slice(1));
+    const details = result.details as {
+      results: Array<{ articleUrl: string; download: { status: string; failure?: { code: string } } }>;
+    };
+    assert.deepEqual(
+      details.results.map((entry) => ({
+        articleUrl: entry.articleUrl,
+        status: entry.download.status,
+        failureCode: entry.download.failure?.code,
+      })),
+      [
+        {
+          articleUrl: articleUrls[0],
+          status: "extension_job_queued",
+          failureCode: undefined,
+        },
+        {
+          articleUrl: articleUrls[1],
+          status: "manual_fallback_opened",
+          failureCode: "aps_extension_job_pending",
+        },
+        {
+          articleUrl: articleUrls[2],
+          status: "manual_fallback_opened",
+          failureCode: "aps_extension_job_pending",
+        },
+      ],
+    );
+  } finally {
+    await rm(workspace, { recursive: true, force: true });
+  }
+});
