@@ -1,0 +1,52 @@
+{
+  "manifest_version": 3,
+  "name": "Pi Agent Paper Downloader",
+  "version": "0.1.0",
+  "description": "Downloads publisher PDFs through the user's browser session for Pi Agent.",
+  "permissions": [
+    "activeTab",
+    "alarms",
+    "downloads",
+    "nativeMessaging",
+    "storage",
+    "tabs"
+  ],
+  "host_permissions": [
+    "https://arxiv.org/*",
+    "https://www.nature.com/*",
+    "https://nature.com/*",
+    "https://www.science.org/*",
+    "https://science.org/*",
+    "https://journals.aps.org/*",
+    "https://aps.org/*"
+  ],
+  "background": {
+    "service_worker": "background.js",
+    "type": "module"
+  },
+  "content_scripts": [
+    {
+      "matches": [
+        "https://arxiv.org/*",
+        "https://www.nature.com/*",
+        "https://nature.com/*",
+        "https://www.science.org/*",
+        "https://science.org/*",
+        "https://journals.aps.org/*",
+        "https://aps.org/*"
+      ],
+      "js": [
+        "content/common.js",
+        "content/nature.js",
+        "content/science.js",
+        "content/aps.js",
+        "content/runner.js"
+      ],
+      "run_at": "document_idle"
+    }
+  ],
+  "action": {
+    "default_popup": "popup.html",
+    "default_title": "Pi Agent Paper Downloader"
+  }
+}
