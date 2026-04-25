@@ -105,9 +105,25 @@ type ExternalOpenedPaperRecord = {
   failure?: never;
 };
 
+type DownloadedExternalPaperRecord = {
+  source: "external";
+  articleUrl: string;
+  openedUrl?: string;
+  recordedAt: string;
+  handlingMethod: "manual_file_import";
+  status: "downloaded";
+  downloadPath: string;
+  fileSha256: string;
+  title?: string;
+  canonicalId?: never;
+  pdfUrl?: never;
+  failure?: never;
+};
+
 export type PaperRecord =
   | DownloadedArxivPaperRecord
   | DownloadedPublisherPaperRecord
+  | DownloadedExternalPaperRecord
   | ManualFallbackPaperRecord
   | ExternalOpenedPaperRecord;
 
@@ -120,6 +136,34 @@ export interface DownloadedPaperResult {
   path: string;
   recordPath: string;
 }
+
+type AlreadyDownloadedManagedPaperResult = {
+  status: "already_downloaded";
+  source: DownloadablePaperSource;
+  canonicalId: string;
+  articleUrl: string;
+  finalPdfUrl: string;
+  path: string;
+  recordPath: string;
+  recordedAt: string;
+};
+
+type AlreadyDownloadedExternalPaperResult = {
+  status: "already_downloaded";
+  source: "external";
+  articleUrl: string;
+  path: string;
+  recordPath: string;
+  recordedAt: string;
+  fileSha256: string;
+  title?: string;
+  canonicalId?: never;
+  finalPdfUrl?: never;
+};
+
+export type AlreadyDownloadedPaperResult =
+  | AlreadyDownloadedManagedPaperResult
+  | AlreadyDownloadedExternalPaperResult;
 
 export interface ManualFallbackPaperResult {
   status: "manual_fallback_opened";
@@ -142,7 +186,18 @@ export interface ExternalOpenedPaperResult {
   executablePath?: string;
 }
 
+export interface RegisteredManualPaperDownloadResult {
+  status: "downloaded";
+  source: "external";
+  articleUrl: string;
+  path: string;
+  recordPath: string;
+  fileSha256: string;
+  title?: string;
+}
+
 export type PaperDownloadResult =
   | DownloadedPaperResult
+  | AlreadyDownloadedPaperResult
   | ManualFallbackPaperResult
   | ExternalOpenedPaperResult;

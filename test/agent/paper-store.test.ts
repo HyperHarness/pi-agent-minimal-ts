@@ -2,7 +2,7 @@ import test from "node:test";
 import assert from "node:assert/strict";
 import os from "node:os";
 import path from "node:path";
-import { mkdtemp, readFile, rm } from "node:fs/promises";
+import { mkdir, mkdtemp, readFile, rm, writeFile } from "node:fs/promises";
 import type {
   ManualFallbackPaperResult,
   PaperRecord,
@@ -11,6 +11,8 @@ import type {
   PaperSource
 } from "../../src/agent/paper-types.js";
 import {
+  findDownloadedPaperRecord,
+  resolveExternalPaperPdfPath,
   resolvePaperPdfPath,
   resolvePaperRecordPath,
   writePaperRecord
@@ -75,6 +77,18 @@ const invalidExternalPaperRecord = {
   handlingMethod: "system_browser_open",
   status: "external_opened"
   // @ts-expect-error external-opened records must not carry download metadata
+} satisfies PaperRecord;
+
+const externalDownloadedPaperRecord = {
+  source: "external",
+  articleUrl: "https://example.com/paper",
+  openedUrl: "https://example.com/paper",
+  recordedAt: "2026-04-25T10:00:00.000Z",
+  handlingMethod: "manual_file_import",
+  status: "downloaded",
+  downloadPath: "downloads/papers/external-example.com-123456789abc.pdf",
+  fileSha256: "abc123",
+  title: "External Paper"
 } satisfies PaperRecord;
 
 const manualFallbackResult = {
@@ -269,10 +283,179 @@ test("writePaperRecord persists supported source records with pretty-printed fai
   }
 });
 
+test("resolveExternalPaperPdfPath uses the same URL key as external records", async () => {
+  const workspaceDir = await mkdtemp(path.join(os.tmpdir(), "paper-store-"));
+
+  try {
+    const articleUrl = "https://example.com/paper";
+    assert.equal(
+      path.basename(resolveExternalPaperPdfPath({ workspaceDir, articleUrl })).replace(/\.pdf$/, ".json"),
+      path.basename(resolvePaperRecordPath({ workspaceDir, source: "external", articleUrl }))
+    );
+  } finally {
+    await rm(workspaceDir, { recursive: true, force: true });
+  }
+});
+
+test("findDownloadedPaperRecord returns downloaded records only when the PDF still exists", async () => {
+  const workspaceDir = await mkdtemp(path.join(os.tmpdir(), "paper-store-"));
+  const pdfPath = resolvePaperPdfPath({
+    workspaceDir,
+    source: "arxiv",
+    canonicalId: "2401.01234"
+  });
+
+  try {
+    await mkdir(path.dirname(pdfPath), { recursive: true });
+    await writeFile(pdfPath, "%PDF-1.4\nmock pdf\n", "utf8");
+    const recordPath = await writePaperRecord({
+      workspaceDir,
+      record: {
+        source: "arxiv",
+        articleUrl: "https://arxiv.org/abs/2401.01234",
+        recordedAt: "2026-04-25T10:00:00.000Z",
+        handlingMethod: "direct_http",
+        status: "downloaded",
+        canonicalId: "2401.01234",
+        pdfUrl: "https://arxiv.org/pdf/2401.01234.pdf",
+        downloadPath: pdfPath
+      }
+    });
+
+    assert.deepEqual(
+      await findDownloadedPaperRecord({
+        workspaceDir,
+        source: "arxiv",
+        canonicalId: "2401.01234",
+        articleUrl: "https://arxiv.org/abs/2401.01234"
+      }),
+      {
+        record: {
+          source: "arxiv",
+          articleUrl: "https://arxiv.org/abs/2401.01234",
+          recordedAt: "2026-04-25T10:00:00.000Z",
+          handlingMethod: "direct_http",
+          status: "downloaded",
+          canonicalId: "2401.01234",
+          pdfUrl: "https://arxiv.org/pdf/2401.01234.pdf",
+          downloadPath: pdfPath
+        },
+        recordPath,
+        downloadPath: pdfPath
+      }
+    );
+  } finally {
+    await rm(workspaceDir, { recursive: true, force: true });
+  }
+});
+
+test("findDownloadedPaperRecord ignores manual fallback records and missing PDFs", async () => {
+  const workspaceDir = await mkdtemp(path.join(os.tmpdir(), "paper-store-"));
+  const missingPdfPath = resolvePaperPdfPath({
+    workspaceDir,
+    source: "science",
+    canonicalId: "10.1126/science.adz8659"
+  });
+
+  try {
+    await writePaperRecord({
+      workspaceDir,
+      record: manualFallbackPaperRecord
+    });
+
+    assert.equal(
+      await findDownloadedPaperRecord({
+        workspaceDir,
+        source: "science",
+        canonicalId: "10.1126/science.adz8659",
+        articleUrl: "https://www.science.org/doi/10.1126/science.adz8659"
+      }),
+      null
+    );
+
+    await writePaperRecord({
+      workspaceDir,
+      record: {
+        source: "science",
+        articleUrl: "https://www.science.org/doi/10.1126/science.adz8659",
+        recordedAt: "2026-04-25T10:00:00.000Z",
+        handlingMethod: "browser_session",
+        status: "downloaded",
+        canonicalId: "10.1126/science.adz8659",
+        pdfUrl: "https://www.science.org/doi/pdf/10.1126/science.adz8659",
+        downloadPath: missingPdfPath
+      }
+    });
+
+    assert.equal(
+      await findDownloadedPaperRecord({
+        workspaceDir,
+        source: "science",
+        canonicalId: "10.1126/science.adz8659",
+        articleUrl: "https://www.science.org/doi/10.1126/science.adz8659"
+      }),
+      null
+    );
+  } finally {
+    await rm(workspaceDir, { recursive: true, force: true });
+  }
+});
+
+test("findDownloadedPaperRecord returns imported external PDF records by article URL", async () => {
+  const workspaceDir = await mkdtemp(path.join(os.tmpdir(), "paper-store-"));
+  const articleUrl = "https://example.com/paper";
+  const pdfPath = resolveExternalPaperPdfPath({ workspaceDir, articleUrl });
+
+  try {
+    await mkdir(path.dirname(pdfPath), { recursive: true });
+    await writeFile(pdfPath, "%PDF-1.4\nexternal pdf\n", "utf8");
+    const recordPath = await writePaperRecord({
+      workspaceDir,
+      record: {
+        source: "external",
+        articleUrl,
+        openedUrl: articleUrl,
+        recordedAt: "2026-04-25T10:00:00.000Z",
+        handlingMethod: "manual_file_import",
+        status: "downloaded",
+        downloadPath: pdfPath,
+        fileSha256: "abc123",
+        title: "External Paper"
+      }
+    });
+
+    assert.deepEqual(
+      await findDownloadedPaperRecord({
+        workspaceDir,
+        source: "external",
+        articleUrl
+      }),
+      {
+        record: {
+          source: "external",
+          articleUrl,
+          openedUrl: articleUrl,
+          recordedAt: "2026-04-25T10:00:00.000Z",
+          handlingMethod: "manual_file_import",
+          status: "downloaded",
+          downloadPath: pdfPath,
+          fileSha256: "abc123",
+          title: "External Paper"
+        },
+        recordPath,
+        downloadPath: pdfPath
+      }
+    );
+  } finally {
+    await rm(workspaceDir, { recursive: true, force: true });
+  }
+});
+
 void supportedSearchSource;
 void externalSearchSource;
 void invalidExternalSearchSource;
 void invalidDownloadedPaperRecord;
 void invalidExternalPaperRecord;
+void externalDownloadedPaperRecord;
 void invalidPrimarySearchResult;
 void manualFallbackResult;

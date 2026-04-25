@@ -86,6 +86,14 @@ type DownloadLatestApsPapersTool = {
   ) => Promise<ToolResult>;
 };
 
+type RegisterManualPaperDownloadTool = {
+  execute: (
+    toolCallId: string,
+    args: { url: string; path: string; title?: string },
+    signal: undefined,
+  ) => Promise<ToolResult>;
+};
+
 type CreateToolsDependencies = NonNullable<Parameters<typeof createTools>[1]>;
 
 function getReadFileTool(workspace: string): ReadFileTool {
@@ -198,6 +206,20 @@ function getDownloadLatestApsPapersTool(
   return downloadLatestApsPapersTool as DownloadLatestApsPapersTool;
 }
 
+function getRegisterManualPaperDownloadTool(
+  workspace: string,
+  dependencies?: Parameters<typeof createTools>[1],
+): RegisterManualPaperDownloadTool {
+  const tools = createTools(workspace, dependencies) as ReadonlyArray<{
+    name: string;
+    execute?: RegisterManualPaperDownloadTool["execute"];
+  }>;
+  const tool = tools.find((candidate) => candidate.name === "register_manual_paper_download");
+  assert.ok(tool);
+  assert.equal(typeof tool.execute, "function");
+  return tool as RegisterManualPaperDownloadTool;
+}
+
 async function createDirectoryLink(targetDir: string, linkDir: string): Promise<void> {
   await symlink(targetDir, linkDir, process.platform === "win32" ? "junction" : "dir");
 }
@@ -301,6 +323,7 @@ test("createTools exposes the unified built-in tool set", async () => {
       "search_papers",
       "download_paper",
       "download_latest_aps_papers",
+      "register_manual_paper_download",
       "open_paper_page_for_login",
     ]);
 
@@ -526,6 +549,99 @@ test("download_paper delegates url inputs to the injected paper manager dependen
     ]);
     assert.deepEqual(result.content, [{ type: "text", text: JSON.stringify(managerResult) }]);
     assert.deepEqual(result.details, managerResult);
+  } finally {
+    await rm(workspace, { recursive: true, force: true });
+  }
+});
+
+test("register_manual_paper_download delegates resolved workspace PDF paths to the paper manager", async () => {
+  const workspace = await mkdtemp(path.join(tmpdir(), "pi-agent-tools-"));
+  const pdfPath = path.join(workspace, "downloads", "inbox", "manual.pdf");
+  const capturedCalls: Array<{
+    workspaceDir: string;
+    url: string;
+    pdfPath: string;
+    title?: string;
+  }> = [];
+  const managerResult = {
+    status: "downloaded" as const,
+    source: "external" as const,
+    articleUrl: "https://example.com/paper",
+    path: path.join(workspace, "downloads", "papers", "external-example.com-abc.pdf"),
+    recordPath: path.join(workspace, "downloads", "papers", "index", "external-example.com-abc.json"),
+    fileSha256: "abc123",
+    title: "Manual External Paper",
+  };
+
+  try {
+    await mkdir(path.dirname(pdfPath), { recursive: true });
+    await writeFile(pdfPath, "%PDF-1.7\nmanual pdf\n", "utf8");
+    const tool = getRegisterManualPaperDownloadTool(workspace, {
+      registerManualPaperDownload: async (options) => {
+        capturedCalls.push(options);
+        return managerResult;
+      },
+    });
+
+    const result = await tool.execute(
+      "tool-call-register-manual",
+      {
+        url: "https://example.com/paper",
+        path: "downloads/inbox/manual.pdf",
+        title: "Manual External Paper",
+      },
+      undefined,
+    );
+
+    assert.deepEqual(capturedCalls, [
+      {
+        workspaceDir: workspace,
+        url: "https://example.com/paper",
+        pdfPath,
+        title: "Manual External Paper",
+      },
+    ]);
+    assert.deepEqual(result.content, [{ type: "text", text: JSON.stringify(managerResult) }]);
+    assert.deepEqual(result.details, managerResult);
+  } finally {
+    await rm(workspace, { recursive: true, force: true });
+  }
+});
+
+test("register_manual_paper_download rejects absolute or escaping PDF paths", async () => {
+  const workspace = await mkdtemp(path.join(tmpdir(), "pi-agent-tools-"));
+
+  try {
+    const tool = getRegisterManualPaperDownloadTool(workspace, {
+      registerManualPaperDownload: async (): Promise<never> => {
+        throw new Error("manager should not receive unsafe paths");
+      },
+    });
+
+    await assert.rejects(
+      () =>
+        tool.execute(
+          "tool-call-register-absolute",
+          {
+            url: "https://example.com/paper",
+            path: path.join(workspace, "manual.pdf"),
+          },
+          undefined,
+        ),
+      /absolute paths are not allowed/i,
+    );
+    await assert.rejects(
+      () =>
+        tool.execute(
+          "tool-call-register-escape",
+          {
+            url: "https://example.com/paper",
+            path: "../manual.pdf",
+          },
+          undefined,
+        ),
+      /outside the workspace/i,
+    );
   } finally {
     await rm(workspace, { recursive: true, force: true });
   }

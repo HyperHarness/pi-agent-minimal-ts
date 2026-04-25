@@ -92,6 +92,10 @@ Use the normal install path if you want the manager-backed paper tools to start 
 - supported publisher URLs on `science.org`, `nature.com`, and `journals.aps.org` / `aps.org` reuse the managed browser session for download, with `manual_fallback_opened` if manual continuation is needed
 - unsupported external URLs are opened for manual continuation instead of attempting a managed download
 
+Before any arXiv, supported-publisher, or external URL action, the paper manager checks `downloads/papers/index/` for an existing `downloaded` record with a PDF file that still exists under `downloads/papers/`. When it finds one, it returns `already_downloaded` with the existing file path and skips the network or browser action. Manual fallback and plain `external_opened` records do not count as completed downloads.
+
+For unsupported external URLs, use `register_manual_paper_download` after downloading the PDF manually. Give it the original external URL and a relative workspace path to the PDF, for example `downloads/inbox/paper.pdf`. The tool verifies the file is a PDF, copies it into `downloads/papers/`, records a SHA-256 hash, and updates the external index record to `downloaded` so future attempts for that URL return `already_downloaded`.
+
 `download_latest_aps_papers` is the direct batch path for prompts such as "search and download the latest 3 APS papers about superconducting quantum computing." It searches APS/Physical Review metadata through Crossref's `10.1103` DOI prefix, then attempts each APS download through the same managed browser flow. Each result is either a downloaded PDF record or a `manual_fallback_opened` APS page for the user to finish manually.
 
 Successful downloads now use formatted filenames when possible, for example `science-10.1126-science.adz8659.pdf`, instead of always overwriting `downloaded-paper.pdf`. The tool still falls back to the source filename or `downloaded-paper.pdf` when it cannot derive a better name.
@@ -203,8 +207,9 @@ In non-interactive mode:
 - `web_search`: searches the configured provider and returns JSON text for matching results
 - `fetch_url`: fetches an HTML page and returns JSON text for the extracted content
 - `search_papers`: searches arXiv first, then expands discovery with `web_search`, merges overlapping results, and classifies supported publishers versus external sources
-- `download_paper`: downloads arXiv papers into `downloads/papers/`, uses the managed browser flow for supported publishers, and opens unsupported external URLs for manual continuation
+- `download_paper`: downloads arXiv papers into `downloads/papers/`, uses the managed browser flow for supported publishers, returns `already_downloaded` for existing indexed PDFs, and opens unsupported external URLs for manual continuation
 - `download_latest_aps_papers`: searches APS/Physical Review metadata for the latest matching papers and attempts each APS download, returning downloaded PDFs or opened APS pages for manual download
+- `register_manual_paper_download`: registers a manually downloaded external PDF into `downloads/papers/` and updates the local index so repeated requests for the same URL are skipped
 - `open_paper_page_for_login`: opens the paper page in the managed browser session for manual login review without downloading anything
 
 For `search_papers`, concise English keyword queries still work best because the first search stage uses arXiv before expanding through `web_search`.
@@ -221,6 +226,7 @@ Example prompts:
 - `Download arXiv paper 2401.01234 with download_paper.`
 - `Download this paper with download_paper: https://www.science.org/doi/10.1126/science.adz8659`
 - `Search and download the latest 3 APS papers about superconducting quantum computing with download_latest_aps_papers.`
+- `Register the manually downloaded PDF for https://example.com/paper with register_manual_paper_download using downloads/inbox/paper.pdf.`
 
 ## Scripts
 

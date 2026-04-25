@@ -13,7 +13,12 @@ import {
   resolvePublisherCanonicalId,
   resolvePublisherCanonicalIdFromArticleUrl
 } from "./paper-download.js";
-import { downloadLatestApsPapers, downloadPaper, searchPapers } from "./paper-manager.js";
+import {
+  downloadLatestApsPapers,
+  downloadPaper,
+  registerManualPaperDownload,
+  searchPapers
+} from "./paper-manager.js";
 import { resolveCloudflareCooldownMs } from "./publisher-access-state.js";
 import {
   createPaperBrowserManagerClient,
@@ -66,6 +71,14 @@ const downloadLatestApsPapersParameters = Type.Object({
   )
 });
 
+const registerManualPaperDownloadParameters = Type.Object({
+  url: Type.String({ description: "External article URL that was opened for manual download." }),
+  path: Type.String({
+    description: "Relative path inside the workspace to the manually downloaded PDF file."
+  }),
+  title: Type.Optional(Type.String({ description: "Optional paper title to save in the index." }))
+});
+
 const openPaperPageForLoginParameters = Type.Object({
   url: Type.String({ description: "Publisher article URL to open for manual login review." })
 });
@@ -77,6 +90,7 @@ type FetchUrlParameters = Static<typeof fetchUrlParameters>;
 type SearchPapersParameters = Static<typeof searchPapersParameters>;
 type DownloadPaperParameters = Static<typeof downloadPaperParameters>;
 type DownloadLatestApsPapersParameters = Static<typeof downloadLatestApsPapersParameters>;
+type RegisterManualPaperDownloadParameters = Static<typeof registerManualPaperDownloadParameters>;
 type OpenPaperPageForLoginParameters = Static<typeof openPaperPageForLoginParameters>;
 
 function assertPathInsideDirectory(rootDir: string, candidatePath: string): void {
@@ -130,6 +144,10 @@ type DownloadPaperTool = AgentTool<
 type DownloadLatestApsPapersTool = AgentTool<
   typeof downloadLatestApsPapersParameters,
   Awaited<ReturnType<typeof downloadLatestApsPapers>>
+>;
+type RegisterManualPaperDownloadTool = AgentTool<
+  typeof registerManualPaperDownloadParameters,
+  Awaited<ReturnType<typeof registerManualPaperDownload>>
 >;
 type OpenPaperPageForLoginResult = {
   url?: string;
@@ -198,6 +216,7 @@ export interface ToolDependencies {
   searchApsPapers?: typeof searchApsPapers;
   downloadPaper?: typeof downloadPaper;
   downloadLatestApsPapers?: typeof downloadLatestApsPapers;
+  registerManualPaperDownload?: typeof registerManualPaperDownload;
   openPaperPageForLogin?: OpenPaperPageForLoginDependency;
   browserSessionFactory?: ReturnType<typeof resolveDefaultPaperBrowserSessionFactory>;
   paperBrowserManagerClient?: PaperBrowserManagerClient;
@@ -216,6 +235,7 @@ export type AgentTools = [
   SearchPapersTool,
   DownloadPaperTool,
   DownloadLatestApsPapersTool,
+  RegisterManualPaperDownloadTool,
   OpenPaperPageForLoginTool
 ] & ToolSetMetadata;
 
@@ -422,6 +442,8 @@ export function createTools(workspaceDir: string, dependencies: ToolDependencies
         searchApsPapersImpl,
         downloadPaperImpl
       }));
+  const registerManualPaperDownloadImpl =
+    dependencies.registerManualPaperDownload ?? registerManualPaperDownload;
 
   const openPaperPageForLoginImpl =
     dependencies.openPaperPageForLogin ??
@@ -560,6 +582,29 @@ export function createTools(workspaceDir: string, dependencies: ToolDependencies
     }
   };
 
+  const registerManualPaperDownloadTool: RegisterManualPaperDownloadTool = {
+    name: "register_manual_paper_download",
+    label: "Register Manual Paper Download",
+    description:
+      "Registers a manually downloaded external PDF into the local paper index so future downloads for the same URL are skipped.",
+    parameters: registerManualPaperDownloadParameters,
+    executionMode: "sequential",
+    execute: async (_toolCallId: string, args: RegisterManualPaperDownloadParameters) => {
+      const resolvedPdfPath = await resolveWorkspacePath(resolvedWorkspaceDir, args.path);
+      const result = await registerManualPaperDownloadImpl({
+        workspaceDir: resolvedWorkspaceDir,
+        url: args.url,
+        pdfPath: resolvedPdfPath,
+        ...(args.title ? { title: args.title } : {})
+      });
+
+      return {
+        content: [{ type: "text", text: JSON.stringify(result) }],
+        details: result
+      };
+    }
+  };
+
   const openPaperPageForLoginTool: OpenPaperPageForLoginTool = {
     name: "open_paper_page_for_login",
     label: "Open Paper Page For Login",
@@ -589,6 +634,7 @@ export function createTools(workspaceDir: string, dependencies: ToolDependencies
     searchPapersTool,
     downloadPaperTool,
     downloadLatestApsPapersTool,
+    registerManualPaperDownloadTool,
     openPaperPageForLoginTool
   ] as unknown as AgentTools;
 

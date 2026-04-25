@@ -1,7 +1,12 @@
 import { createHash } from "node:crypto";
-import { mkdir, writeFile } from "node:fs/promises";
+import { mkdir, readFile, writeFile } from "node:fs/promises";
 import path from "node:path";
-import { downloadArxivPdf, searchArxiv, type ArxivSearchResult } from "./arxiv.js";
+import {
+  downloadArxivPdf,
+  parseArxivLocator,
+  searchArxiv,
+  type ArxivSearchResult
+} from "./arxiv.js";
 import { searchApsPapers, type SearchApsPapersOptions } from "./aps-search.js";
 import {
   openPageInSystemChrome,
@@ -15,7 +20,14 @@ import {
   resolvePublisherCanonicalId,
   resolvePublisherCanonicalIdFromArticleUrl
 } from "./paper-download.js";
-import { resolvePaperPdfPath, writePaperRecord } from "./paper-store.js";
+import {
+  findDownloadedPaperRecord,
+  readPaperRecord,
+  resolveExternalPaperPdfPath,
+  resolvePaperPdfPath,
+  writePaperRecord,
+  type DownloadedPaperRecordMatch
+} from "./paper-store.js";
 import {
   DEFAULT_CLOUDFLARE_COOLDOWN_MS,
   getRecentCloudflareBlock,
@@ -29,6 +41,7 @@ import type {
   PaperDownloadResult,
   PaperFailure,
   PaperAction,
+  RegisteredManualPaperDownloadResult,
   PaperSearchResult,
   PaperSearchSource,
   PaperSource,
@@ -90,6 +103,14 @@ export interface DownloadLatestApsPapersResult {
     articleUrl: string;
     download: PaperDownloadResult;
   }>;
+}
+
+export interface RegisterManualPaperDownloadOptions {
+  workspaceDir: string;
+  url: string;
+  pdfPath: string;
+  title?: string;
+  now?: () => Date;
 }
 
 type RankedSearchSource = PaperSearchSource & {
@@ -484,6 +505,38 @@ function isLikelyCloudflareFallback(result: PaperDownloadResult): boolean {
   );
 }
 
+function toAlreadyDownloadedPaperResult(match: DownloadedPaperRecordMatch): PaperDownloadResult {
+  if (match.record.source === "external") {
+    return {
+      status: "already_downloaded",
+      source: "external",
+      articleUrl: match.record.articleUrl,
+      path: match.downloadPath,
+      recordPath: match.recordPath,
+      recordedAt: match.record.recordedAt,
+      fileSha256: match.record.fileSha256,
+      ...(match.record.title ? { title: match.record.title } : {})
+    };
+  }
+
+  return {
+    status: "already_downloaded",
+    source: match.record.source,
+    canonicalId: match.record.canonicalId,
+    articleUrl: match.record.articleUrl,
+    finalPdfUrl: match.record.pdfUrl,
+    path: match.downloadPath,
+    recordPath: match.recordPath,
+    recordedAt: match.record.recordedAt
+  };
+}
+
+function assertPdfBytes(pdfBytes: Buffer): void {
+  if (!pdfBytes.subarray(0, 5).equals(Buffer.from("%PDF-"))) {
+    throw new Error("Manual paper download must be a valid PDF.");
+  }
+}
+
 async function openSupportedPublisherForManualFallback(input: {
   workspaceDir: string;
   classification: Extract<ClassifiedPaperUrl, { source: SupportedPaperSource }>;
@@ -534,8 +587,19 @@ async function downloadArxivPaper(options: {
   input: string;
   fetchImpl?: typeof fetch;
 }): Promise<PaperDownloadResult> {
+  const locator = parseArxivLocator(options.input);
+  const existingDownload = await findDownloadedPaperRecord({
+    workspaceDir: options.workspaceDir,
+    source: "arxiv",
+    canonicalId: locator.id,
+    articleUrl: locator.absUrl
+  });
+  if (existingDownload) {
+    return toAlreadyDownloadedPaperResult(existingDownload);
+  }
+
   const result = await downloadArxivPdf({
-    input: options.input,
+    input: locator.id,
     fetchImpl: options.fetchImpl
   });
   const pdfPath = resolvePaperPdfPath({
@@ -608,6 +672,15 @@ export async function downloadPaper(options: DownloadPaperOptions): Promise<Pape
   }
 
   if (classification.source === "external") {
+    const existingDownload = await findDownloadedPaperRecord({
+      workspaceDir: options.workspaceDir,
+      source: "external",
+      articleUrl: classification.articleUrl
+    });
+    if (existingDownload) {
+      return toAlreadyDownloadedPaperResult(existingDownload);
+    }
+
     const openPageInSystemChromeImpl = options.openPageInSystemChromeImpl ?? openPageInSystemChrome;
     const openResult = await openPageInSystemChromeImpl({
       workspaceDir: options.workspaceDir,
@@ -646,6 +719,18 @@ export async function downloadPaper(options: DownloadPaperOptions): Promise<Pape
         profileDir,
         executablePath
       })));
+
+  if (classification.canonicalId) {
+    const existingDownload = await findDownloadedPaperRecord({
+      workspaceDir: options.workspaceDir,
+      source: classification.source,
+      canonicalId: classification.canonicalId,
+      articleUrl: classification.articleUrl
+    });
+    if (existingDownload) {
+      return toAlreadyDownloadedPaperResult(existingDownload);
+    }
+  }
 
   if (options.forceManualOpen) {
     return openSupportedPublisherForManualFallback({
@@ -709,6 +794,60 @@ export async function downloadPaper(options: DownloadPaperOptions): Promise<Pape
       openPublisherForLoginImpl
     });
   }
+}
+
+export async function registerManualPaperDownload(
+  options: RegisterManualPaperDownloadOptions
+): Promise<RegisteredManualPaperDownloadResult> {
+  const classification = classifyPaperUrl(options.url);
+  if (classification.source !== "external") {
+    throw new Error("registerManualPaperDownload only accepts external URLs.");
+  }
+
+  const pdfBytes = await readFile(options.pdfPath);
+  assertPdfBytes(pdfBytes);
+
+  const pdfPath = resolveExternalPaperPdfPath({
+    workspaceDir: options.workspaceDir,
+    articleUrl: classification.articleUrl
+  });
+  await mkdir(path.dirname(pdfPath), { recursive: true });
+  await writeFile(pdfPath, pdfBytes);
+
+  const fileSha256 = createHash("sha256").update(pdfBytes).digest("hex");
+  const previousRecord = await readPaperRecord({
+    workspaceDir: options.workspaceDir,
+    source: "external",
+    articleUrl: classification.articleUrl
+  });
+  const previousOpenedUrl =
+    previousRecord?.record.source === "external" && "openedUrl" in previousRecord.record
+      ? previousRecord.record.openedUrl
+      : undefined;
+  const recordPath = await writePaperRecord({
+    workspaceDir: options.workspaceDir,
+    record: {
+      source: "external",
+      articleUrl: classification.articleUrl,
+      ...(previousOpenedUrl ? { openedUrl: previousOpenedUrl } : {}),
+      recordedAt: (options.now ?? (() => new Date()))().toISOString(),
+      handlingMethod: "manual_file_import",
+      status: "downloaded",
+      downloadPath: pdfPath,
+      fileSha256,
+      ...(options.title?.trim() ? { title: options.title.trim() } : {})
+    }
+  });
+
+  return {
+    status: "downloaded",
+    source: "external",
+    articleUrl: classification.articleUrl,
+    path: pdfPath,
+    recordPath,
+    fileSha256,
+    ...(options.title?.trim() ? { title: options.title.trim() } : {})
+  };
 }
 
 export async function downloadLatestApsPapers(

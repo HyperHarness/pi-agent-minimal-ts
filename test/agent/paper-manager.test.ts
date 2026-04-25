@@ -1,16 +1,22 @@
 import test from "node:test";
 import assert from "node:assert/strict";
-import { mkdtemp, readFile, rm, writeFile } from "node:fs/promises";
+import { createHash } from "node:crypto";
+import { mkdir, mkdtemp, readFile, rm, writeFile } from "node:fs/promises";
 import os from "node:os";
 import path from "node:path";
 import {
   downloadLatestApsPapers,
   downloadPaper,
+  registerManualPaperDownload,
   searchPapers
 } from "../../src/agent/paper-manager.js";
 import type { ArxivSearchResult } from "../../src/agent/arxiv.js";
 import { PaperDownloadError } from "../../src/agent/paper-download.js";
-import { resolvePaperPdfPath, resolvePaperRecordPath } from "../../src/agent/paper-store.js";
+import {
+  resolveExternalPaperPdfPath,
+  resolvePaperPdfPath,
+  resolvePaperRecordPath
+} from "../../src/agent/paper-store.js";
 import type { WebSearchResult } from "../../src/agent/web-search.js";
 import type { PaperSearchResult, PaperSearchSource } from "../../src/agent/paper-types.js";
 
@@ -288,6 +294,137 @@ test("downloadPaper downloads arXiv ids, writes the PDF file, and returns downlo
   }
 });
 
+test("downloadPaper returns an existing arXiv download without fetching it again", async () => {
+  const workspaceDir = await mkdtemp(path.join(os.tmpdir(), "paper-manager-"));
+  const pdfPath = resolvePaperPdfPath({
+    workspaceDir,
+    source: "arxiv",
+    canonicalId: "2401.01234"
+  });
+  const recordPath = resolvePaperRecordPath({
+    workspaceDir,
+    source: "arxiv",
+    canonicalId: "2401.01234",
+    articleUrl: "https://arxiv.org/abs/2401.01234"
+  });
+  let fetchCalls = 0;
+
+  try {
+    await mkdir(path.dirname(pdfPath), { recursive: true });
+    await mkdir(path.dirname(recordPath), { recursive: true });
+    await writeFile(pdfPath, "%PDF-1.4\nexisting pdf\n", "utf8");
+    await writeFile(
+      recordPath,
+      `${JSON.stringify(
+        {
+          source: "arxiv",
+          articleUrl: "https://arxiv.org/abs/2401.01234",
+          recordedAt: "2026-04-25T10:00:00.000Z",
+          handlingMethod: "direct_http",
+          status: "downloaded",
+          canonicalId: "2401.01234",
+          pdfUrl: "https://arxiv.org/pdf/2401.01234.pdf",
+          downloadPath: pdfPath
+        },
+        null,
+        2
+      )}\n`,
+      "utf8"
+    );
+
+    const result = await downloadPaper({
+      workspaceDir,
+      id: "2401.01234v2",
+      fetchImpl: async () => {
+        fetchCalls += 1;
+        throw new Error("fetch should not run for an existing local paper");
+      }
+    });
+
+    assert.equal(fetchCalls, 0);
+    assert.deepEqual(result, {
+      status: "already_downloaded",
+      source: "arxiv",
+      canonicalId: "2401.01234",
+      articleUrl: "https://arxiv.org/abs/2401.01234",
+      finalPdfUrl: "https://arxiv.org/pdf/2401.01234.pdf",
+      path: pdfPath,
+      recordPath,
+      recordedAt: "2026-04-25T10:00:00.000Z"
+    });
+  } finally {
+    await rm(workspaceDir, { recursive: true, force: true });
+  }
+});
+
+test("downloadPaper returns an existing publisher download without opening the browser", async () => {
+  const workspaceDir = await mkdtemp(path.join(os.tmpdir(), "paper-manager-"));
+  const articleUrl = "https://www.science.org/doi/10.1126/science.adz8659";
+  const pdfPath = resolvePaperPdfPath({
+    workspaceDir,
+    source: "science",
+    canonicalId: "10.1126/science.adz8659"
+  });
+  const recordPath = resolvePaperRecordPath({
+    workspaceDir,
+    source: "science",
+    canonicalId: "10.1126/science.adz8659",
+    articleUrl
+  });
+  const browserCalls: string[] = [];
+
+  try {
+    await mkdir(path.dirname(pdfPath), { recursive: true });
+    await mkdir(path.dirname(recordPath), { recursive: true });
+    await writeFile(pdfPath, "%PDF-1.4\nexisting science pdf\n", "utf8");
+    await writeFile(
+      recordPath,
+      `${JSON.stringify(
+        {
+          source: "science",
+          articleUrl,
+          recordedAt: "2026-04-25T10:00:00.000Z",
+          handlingMethod: "browser_session",
+          status: "downloaded",
+          canonicalId: "10.1126/science.adz8659",
+          pdfUrl: "https://www.science.org/doi/pdf/10.1126/science.adz8659",
+          downloadPath: pdfPath
+        },
+        null,
+        2
+      )}\n`,
+      "utf8"
+    );
+
+    const result = await downloadPaper({
+      workspaceDir,
+      url: articleUrl,
+      downloadPublisherPaperImpl: async () => {
+        browserCalls.push("download");
+        throw new Error("browser download should not run for an existing local paper");
+      },
+      openPublisherForLoginImpl: async () => {
+        browserCalls.push("open");
+        throw new Error("manual fallback should not open for an existing local paper");
+      }
+    });
+
+    assert.deepEqual(browserCalls, []);
+    assert.deepEqual(result, {
+      status: "already_downloaded",
+      source: "science",
+      canonicalId: "10.1126/science.adz8659",
+      articleUrl,
+      finalPdfUrl: "https://www.science.org/doi/pdf/10.1126/science.adz8659",
+      path: pdfPath,
+      recordPath,
+      recordedAt: "2026-04-25T10:00:00.000Z"
+    });
+  } finally {
+    await rm(workspaceDir, { recursive: true, force: true });
+  }
+});
+
 test("downloadPaper preserves supported-publisher manual fallback results when automatic download fails", async () => {
   const workspaceDir = await mkdtemp(path.join(os.tmpdir(), "paper-manager-"));
   const articleUrl = "https://www.science.org/doi/10.1126/science.adz8659";
@@ -452,6 +589,126 @@ test("downloadPaper opens unsupported external URLs instead of rejecting them", 
       handlingMethod: "system_browser_open",
       status: "external_opened"
     });
+  } finally {
+    await rm(workspaceDir, { recursive: true, force: true });
+  }
+});
+
+test("registerManualPaperDownload imports an external PDF and makes future downloads skip opening the browser", async () => {
+  const workspaceDir = await mkdtemp(path.join(os.tmpdir(), "paper-manager-"));
+  const articleUrl = "https://example.com/paper";
+  const manualPdfPath = path.join(workspaceDir, "downloads", "inbox", "manual.pdf");
+  const events: string[] = [];
+
+  try {
+    await downloadPaper({
+      workspaceDir,
+      url: articleUrl,
+      openPageInSystemChromeImpl: async () => {
+        events.push("open");
+        return {
+          url: articleUrl,
+          openedUrl: `${articleUrl}?opened=1`,
+          profileDir: path.join(workspaceDir, ".browser-profile", "paper-access"),
+          executablePath: "stubbed-chrome.exe"
+        };
+      }
+    });
+
+    await mkdir(path.dirname(manualPdfPath), { recursive: true });
+    await writeFile(manualPdfPath, "%PDF-1.7\nmanual external pdf\n", "utf8");
+
+    const expectedPdfPath = resolveExternalPaperPdfPath({ workspaceDir, articleUrl });
+    const expectedRecordPath = resolvePaperRecordPath({
+      workspaceDir,
+      source: "external",
+      articleUrl
+    });
+    const result = await registerManualPaperDownload({
+      workspaceDir,
+      url: articleUrl,
+      pdfPath: manualPdfPath,
+      title: "Manual External Paper",
+      now: () => new Date("2026-04-25T10:30:00.000Z")
+    });
+    const expectedSha256 = createHash("sha256")
+      .update(Buffer.from("%PDF-1.7\nmanual external pdf\n", "utf8"))
+      .digest("hex");
+
+    assert.deepEqual(result, {
+      status: "downloaded",
+      source: "external",
+      articleUrl,
+      path: expectedPdfPath,
+      recordPath: expectedRecordPath,
+      fileSha256: expectedSha256,
+      title: "Manual External Paper"
+    });
+    assert.equal(await readFile(expectedPdfPath, "utf8"), "%PDF-1.7\nmanual external pdf\n");
+    assert.deepEqual(JSON.parse(await readFile(expectedRecordPath, "utf8")), {
+      source: "external",
+      articleUrl,
+      openedUrl: `${articleUrl}?opened=1`,
+      recordedAt: "2026-04-25T10:30:00.000Z",
+      handlingMethod: "manual_file_import",
+      status: "downloaded",
+      downloadPath: expectedPdfPath,
+      fileSha256: expectedSha256,
+      title: "Manual External Paper"
+    });
+
+    const existing = await downloadPaper({
+      workspaceDir,
+      url: articleUrl,
+      openPageInSystemChromeImpl: async () => {
+        events.push("reopen");
+        throw new Error("external paper should be found in the local index");
+      }
+    });
+
+    assert.deepEqual(events, ["open"]);
+    assert.deepEqual(existing, {
+      status: "already_downloaded",
+      source: "external",
+      articleUrl,
+      path: expectedPdfPath,
+      recordPath: expectedRecordPath,
+      recordedAt: "2026-04-25T10:30:00.000Z",
+      fileSha256: expectedSha256,
+      title: "Manual External Paper"
+    });
+  } finally {
+    await rm(workspaceDir, { recursive: true, force: true });
+  }
+});
+
+test("registerManualPaperDownload rejects non-PDF files and supported publisher URLs", async () => {
+  const workspaceDir = await mkdtemp(path.join(os.tmpdir(), "paper-manager-"));
+  const textPath = path.join(workspaceDir, "downloads", "inbox", "not-pdf.txt");
+
+  try {
+    await mkdir(path.dirname(textPath), { recursive: true });
+    await writeFile(textPath, "not a pdf", "utf8");
+
+    await assert.rejects(
+      () =>
+        registerManualPaperDownload({
+          workspaceDir,
+          url: "https://example.com/paper",
+          pdfPath: textPath
+        }),
+      /valid PDF/i
+    );
+    await writeFile(textPath, "%PDF-1.7\nmanual publisher pdf\n", "utf8");
+    await assert.rejects(
+      () =>
+        registerManualPaperDownload({
+          workspaceDir,
+          url: "https://www.science.org/doi/10.1126/science.adz8659",
+          pdfPath: textPath
+        }),
+      /external URLs/i
+    );
   } finally {
     await rm(workspaceDir, { recursive: true, force: true });
   }
