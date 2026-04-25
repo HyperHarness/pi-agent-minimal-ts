@@ -76,6 +76,16 @@ Supported publishers:
 - `nature.com`
 - `journals.aps.org` / `aps.org`
 
+### Extension-first paper downloads
+
+1. Run `npm.cmd run build`.
+2. Open `chrome://extensions` or `edge://extensions`.
+3. Enable Developer Mode.
+4. Load unpacked extension from `extension/paper-downloader`.
+5. Copy the extension id.
+6. Run `powershell -ExecutionPolicy Bypass -File scripts/register-paper-extension-host.ps1 -ExtensionId <id>`.
+7. Restart the browser.
+
 Use the normal install path if you want the manager-backed paper tools to start their browser automatically:
 
 - keep Playwright's install scripts enabled during `npm install`

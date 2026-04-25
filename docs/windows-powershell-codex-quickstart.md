@@ -124,6 +124,16 @@ $env:PI_MODEL="gpt-5.4"
 npm run agent
 ```
 
+### Extension-first paper downloads
+
+1. Run `npm.cmd run build`.
+2. Open `chrome://extensions` or `edge://extensions`.
+3. Enable Developer Mode.
+4. Load unpacked extension from `extension/paper-downloader`.
+5. Copy the extension id.
+6. Run `powershell -ExecutionPolicy Bypass -File scripts/register-paper-extension-host.ps1 -ExtensionId <id>`.
+7. Restart the browser.
+
 ## 5. Reduce routine Git approval prompts in Codex Desktop
 
 This section is intentionally conservative.
