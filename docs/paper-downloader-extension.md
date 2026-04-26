@@ -1,6 +1,6 @@
 # Paper Downloader Browser Extension
 
-This guide installs the Pi Agent paper downloader extension for Chrome or Edge and connects it to the local native host.
+This guide explains the Pi Agent paper downloader extension for Chrome or Edge and points to the platform-specific native host setup.
 
 Use this path for `download_paper` on supported publisher and external URLs. arXiv direct downloads do not require the extension.
 
@@ -15,13 +15,15 @@ Use this path for `download_paper` on supported publisher and external URLs. arX
 ## Prerequisites
 
 - Chrome or Edge installed.
-- Node.js and npm available in PowerShell.
+- Node.js and npm available in the shell where you run the agent.
 - Dependencies installed in this repository.
 - The agent built at least once:
 
-```powershell
-npm.cmd run build
+```sh
+npm run build
 ```
+
+Native Messaging is registered in the browser's host operating system. If you run the agent in WSL but use Windows Chrome or Edge, the browser registration step still runs through Windows PowerShell and points back to the WSL workspace.
 
 ## Install Or Update The Extension
 
@@ -35,11 +37,10 @@ extension/paper-downloader
 ```
 
 5. Copy the extension ID from the extension card.
-6. Register the native host from the repository root:
+6. Register the native host for your environment:
 
-```powershell
-powershell -ExecutionPolicy Bypass -File scripts/register-paper-extension-host.ps1 -ExtensionId <extension-id>
-```
+- Windows PowerShell: follow [windows-powershell-codex-quickstart.md](windows-powershell-codex-quickstart.md#paper-downloader-extension)
+- WSL Ubuntu: follow [wsl-ubuntu-codex-quickstart.md](wsl-ubuntu-codex-quickstart.md#paper-downloader-extension)
 
 7. Fully restart Chrome or Edge.
 8. Restart the agent.
@@ -48,32 +49,19 @@ When updating this repository, reload the unpacked extension from `chrome://exte
 
 ## Verify Registration
 
-Chrome:
+Use the platform-specific quickstart for exact commands. At a high level:
 
-```powershell
-reg query HKCU\Software\Google\Chrome\NativeMessagingHosts\com.pi_agent.paper_downloader /ve
-```
-
-Edge:
-
-```powershell
-reg query HKCU\Software\Microsoft\Edge\NativeMessagingHosts\com.pi_agent.paper_downloader /ve
-```
-
-The default value should point to:
-
-```text
-.browser-profile\native-messaging\com.pi_agent.paper_downloader.json
-```
-
-The manifest should contain your extension ID in `allowed_origins`.
+- Windows PowerShell registration writes Chrome and/or Edge `HKCU` Native Messaging registry keys.
+- WSL registration for Windows Chrome or Edge also writes Windows `HKCU` registry keys, but the manifest path points to the WSL workspace through a `\\wsl.localhost\...` path.
+- The native host name is always `com.pi_agent.paper_downloader`.
+- The manifest must contain your extension ID in `allowed_origins`.
 
 ## Use It
 
 Start the agent from this repository after building:
 
-```powershell
-npm.cmd run agent
+```sh
+npm run agent
 ```
 
 Then ask for a publisher paper:
@@ -96,7 +84,7 @@ If the extension can download and register the PDF, the tab closes after native-
 
 If `download_paper` starts Playwright, you are probably running an old branch, old process, or explicit fallback path. Restart the agent from the repository that contains `createQueuedPaperExtensionBridge` in `src/pi-agent.ts`.
 
-If the tool returns `extension_unavailable`, confirm you are running the current `main`, rebuilt with `npm.cmd run build`, and restarted the agent.
+If the tool returns `extension_unavailable`, confirm you are running the current `main`, rebuilt with `npm run build`, registered the native host for the browser you are using, fully restarted the browser, and restarted the agent.
 
 If the browser opens a page but registration never completes:
 
@@ -105,8 +93,8 @@ If the browser opens a page but registration never completes:
 - Confirm the downloaded file is a PDF.
 - Keep the browser tab open and download the PDF manually from that tab.
 
-If the extension ID changes after reinstalling the unpacked extension, rerun:
+If the extension ID changes after reinstalling the unpacked extension, rerun the native host registration command from the appropriate platform quickstart with the new extension ID.
 
-```powershell
-powershell -ExecutionPolicy Bypass -File scripts/register-paper-extension-host.ps1 -ExtensionId <new-extension-id>
-```
+For Windows PowerShell-specific registry, `npm.cmd`, execution policy, and Codex Desktop approval details, use [windows-powershell-codex-quickstart.md](windows-powershell-codex-quickstart.md).
+
+For WSL Ubuntu-specific install, Windows browser bridge, `wslpath`, and Codex-in-WSL notes, use [wsl-ubuntu-codex-quickstart.md](wsl-ubuntu-codex-quickstart.md).

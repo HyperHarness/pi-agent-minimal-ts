@@ -17,13 +17,14 @@ It provides:
 
 ## Install
 
-If you are on Windows, especially Windows PowerShell or Codex Desktop on Windows, read [docs/windows-powershell-codex-quickstart.md](docs/windows-powershell-codex-quickstart.md) before installing dependencies.
+Choose the setup guide for the shell where you will run the agent:
 
-If you are not on Windows, continue with the normal install steps below.
+- Windows PowerShell or Codex Desktop on Windows: [docs/windows-powershell-codex-quickstart.md](docs/windows-powershell-codex-quickstart.md)
+- Windows WSL Ubuntu or Codex in WSL: [docs/wsl-ubuntu-codex-quickstart.md](docs/wsl-ubuntu-codex-quickstart.md)
 
 Use the normal install path if you want managed-browser paper tools to work without extra setup:
 
-```powershell
+```sh
 npm install
 ```
 
@@ -36,7 +37,7 @@ For supported publisher and other external `download_paper` URLs, set up the pap
 
 ## Run
 
-Use environment variables:
+Use environment variables in PowerShell:
 
 ```powershell
 $env:OPENAI_API_KEY="your-key"
@@ -49,9 +50,22 @@ $env:PI_FETCH_TIMEOUT_MS="10000"
 npm run agent
 ```
 
+Use environment variables in WSL/bash:
+
+```sh
+export OPENAI_API_KEY="your-key"
+export PI_PROVIDER="openai"
+export PI_MODEL="gpt-5.4"
+export PI_SEARCH_API_URL="https://search.example.com/query"
+export PI_SEARCH_API_KEY="your-search-key"
+export PI_FETCH_USER_AGENT="pi-agent-minimal-ts/1.0"
+export PI_FETCH_TIMEOUT_MS="10000"
+npm run agent
+```
+
 Use CLI arguments:
 
-```powershell
+```sh
 npm run agent -- --provider openai --model gpt-5.4
 ```
 
@@ -59,6 +73,11 @@ Use an OpenAI-compatible proxy or relay:
 
 ```powershell
 $env:OPENAI_API_KEY="your-proxy-key"
+npm run agent -- --provider openai --model gpt-5.4 --base-url https://your-proxy.example.com/v1
+```
+
+```sh
+export OPENAI_API_KEY="your-proxy-key"
 npm run agent -- --provider openai --model gpt-5.4 --base-url https://your-proxy.example.com/v1
 ```
 
@@ -80,12 +99,12 @@ Supported publishers:
 
 Detailed setup and troubleshooting live in [docs/paper-downloader-extension.md](docs/paper-downloader-extension.md).
 
-1. Run `npm.cmd run build`.
+1. Run `npm run build`.
 2. Open `chrome://extensions` or `edge://extensions`.
 3. Enable Developer Mode.
 4. Load unpacked extension from `extension/paper-downloader`.
 5. Copy the extension id.
-6. Run `powershell -ExecutionPolicy Bypass -File scripts/register-paper-extension-host.ps1 -ExtensionId <id>`.
+6. Register the native host using the PowerShell or WSL instructions in [docs/paper-downloader-extension.md](docs/paper-downloader-extension.md).
 7. Restart the browser.
 
 Use the normal install path if you want `open_paper_page_for_login` or explicit Playwright fallback paths to start their browser automatically:
@@ -206,6 +225,13 @@ The agent also accepts non-interactive stdin input. Each non-empty input line is
 ) | npm run agent -- --provider openai --model gpt-5.4
 ```
 
+```sh
+printf '%s\n' \
+  "hello" \
+  "read README.md and summarize it" \
+  "exit" | npm run agent -- --provider openai --model gpt-5.4
+```
+
 In non-interactive mode:
 
 - blank lines are ignored
@@ -250,7 +276,7 @@ Example prompts:
 
 ## Test
 
-```powershell
+```sh
 npm test
 ```
 

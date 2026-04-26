@@ -17,7 +17,7 @@ $ResolvedWorkspaceDir = if ($WorkspaceDir.Trim()) {
 } else {
   Join-Path $PSScriptRoot ".."
 }
-$WorkspacePath = (Resolve-Path -LiteralPath $ResolvedWorkspaceDir).Path
+$WorkspacePath = (Resolve-Path -LiteralPath $ResolvedWorkspaceDir).ProviderPath
 
 $ScriptsDir = Join-Path $WorkspacePath "scripts"
 $HostCmd = Join-Path $ScriptsDir "paper-extension-host.cmd"
@@ -136,7 +136,7 @@ internal static class PaperExtensionHostLauncher
 
     private static string QuoteArgument(string value)
     {
-        return "\"" + value.Replace("\\", "\\\\").Replace("\"", "\\\"") + "\"";
+        return "\"" + value.Replace("\"", "\\\"") + "\"";
     }
 }
 "@

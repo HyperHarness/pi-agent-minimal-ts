@@ -184,6 +184,14 @@ export function getPaperBrowserProfileDir(workspaceDir: string): string {
   return path.join(workspaceDir, ".browser-profile", "paper-access");
 }
 
+function getPaperBrowserProfileDirForPlatform(
+  workspaceDir: string,
+  platform: NodeJS.Platform | undefined
+): string {
+  const pathImpl = platform === "win32" ? path.win32 : path;
+  return pathImpl.join(workspaceDir, ".browser-profile", "paper-access");
+}
+
 function getPaperBrowserLockPaths(profileDir: string): string[] {
   return [
     path.join(profileDir, "lockfile"),
@@ -259,7 +267,12 @@ export async function openPageInSystemChromeForManualLogin(
     );
   }
 
-  const profileDir = getPaperBrowserProfileDir(path.resolve(options.workspaceDir));
+  const platform = options.platform ?? process.platform;
+  const pathImpl = platform === "win32" ? path.win32 : path;
+  const profileDir = getPaperBrowserProfileDirForPlatform(
+    pathImpl.resolve(options.workspaceDir),
+    platform
+  );
   const spawnImpl =
     options.spawnImpl ??
     ((command, args, spawnOptions) =>

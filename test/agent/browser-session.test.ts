@@ -141,7 +141,7 @@ test("openPageInSystemChromeForManualLogin launches Chrome with the shared profi
   assert.deepEqual(result, {
     url: "https://www.science.org/doi/10.1126/science.adz8659",
     openedUrl: "https://www.science.org/doi/10.1126/science.adz8659",
-    profileDir: path.join("D:\\Codex\\pi-agent-minimal-ts", ".browser-profile", "paper-access"),
+    profileDir: "D:\\Codex\\pi-agent-minimal-ts\\.browser-profile\\paper-access",
     executablePath: "C:\\Program Files\\Google\\Chrome\\Application\\chrome.exe"
   });
 });

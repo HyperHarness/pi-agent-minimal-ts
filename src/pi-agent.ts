@@ -15,6 +15,7 @@ import {
 } from "@mariozechner/pi-ai";
 import { agentLoop, type AgentContext, type AgentEvent, type AgentMessage } from "@mariozechner/pi-agent-core";
 import { resolveInitialModel } from "./agent/model-resolver.js";
+import { configureEnvProxy } from "./agent/env-proxy.js";
 import { createQueuedPaperExtensionBridge } from "./agent/paper-extension-bridge.js";
 import { cleanupTools, createTools, getToolsWorkspaceDir } from "./agent/tools.js";
 
@@ -310,6 +311,8 @@ export async function runAgentTurn(options: RunAgentTurnOptions): Promise<RunAge
 }
 
 export async function main(argv = process.argv.slice(2)): Promise<void> {
+  configureEnvProxy();
+
   const cli = parseCliArgs(argv);
   if (cli.help) {
     process.stdout.write(

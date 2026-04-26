@@ -40,7 +40,7 @@ test("registration script generates exe native host and registers HKCU browser k
   );
   assert.match(
     script,
-    /\$ResolvedWorkspaceDir\s*=\s*if\s*\(\$WorkspaceDir\.Trim\(\)\)\s*\{[\s\S]*Join-Path\s+\$PSScriptRoot\s+"\.{2}"[\s\S]*\$WorkspacePath\s*=\s*\(Resolve-Path\s+-LiteralPath\s+\$ResolvedWorkspaceDir\)\.Path/
+    /\$ResolvedWorkspaceDir\s*=\s*if\s*\(\$WorkspaceDir\.Trim\(\)\)\s*\{[\s\S]*Join-Path\s+\$PSScriptRoot\s+"\.{2}"[\s\S]*\$WorkspacePath\s*=\s*\(Resolve-Path\s+-LiteralPath\s+\$ResolvedWorkspaceDir\)\.ProviderPath/
   );
   assert.match(script, /\$HostExe\s*=\s*Join-Path\s+\$ScriptsDir\s+"paper-extension-host\.exe"/);
   assert.match(script, /set "PI_PAPER_WORKSPACE=%~dp0\.\."/);
@@ -92,5 +92,7 @@ test("registration script generates exe native host and registers HKCU browser k
     launcherSource,
     /CopyStream\(process\.StandardError\.BaseStream,\s*Console\.OpenStandardError\(\)\)/
   );
+  assert.match(launcherSource, /return\s+"\\""\s*\+\s*value\.Replace\("\\"",\s*"\\\\\\""\)\s*\+\s*"\\""/);
+  assert.doesNotMatch(launcherSource, /value\.Replace\("\\\\",\s*"\\\\\\\\"\)/);
   assert.doesNotMatch(launcherSource, /Console\.Write(?:Line)?\s*\(/);
 });

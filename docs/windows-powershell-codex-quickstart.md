@@ -6,6 +6,7 @@ It focuses on the setup that is easy to get wrong on Windows:
 
 - making `npm` resolve correctly in PowerShell
 - making Chinese and other non-ASCII input survive the console
+- registering the paper downloader extension native host in Windows
 - reducing repeated approval prompts for routine Git commands in Codex Desktop
 
 This version is intentionally written so Codex can execute it more reliably.
@@ -124,7 +125,9 @@ $env:PI_MODEL="gpt-5.4"
 npm run agent
 ```
 
-### Extension-first paper downloads
+<a id="paper-downloader-extension"></a>
+
+## 5. Paper Downloader Extension
 
 Detailed setup and troubleshooting live in [paper-downloader-extension.md](paper-downloader-extension.md).
 
@@ -136,7 +139,33 @@ Detailed setup and troubleshooting live in [paper-downloader-extension.md](paper
 6. Run `powershell -ExecutionPolicy Bypass -File scripts/register-paper-extension-host.ps1 -ExtensionId <id>`.
 7. Restart the browser.
 
-## 5. Reduce routine Git approval prompts in Codex Desktop
+### Verify native host registration
+
+Chrome:
+
+```powershell
+reg query HKCU\Software\Google\Chrome\NativeMessagingHosts\com.pi_agent.paper_downloader /ve
+```
+
+Edge:
+
+```powershell
+reg query HKCU\Software\Microsoft\Edge\NativeMessagingHosts\com.pi_agent.paper_downloader /ve
+```
+
+The default value should point to this repository's native messaging manifest:
+
+```text
+.browser-profile\native-messaging\com.pi_agent.paper_downloader.json
+```
+
+If the extension ID changes after reinstalling the unpacked extension, rerun:
+
+```powershell
+powershell -ExecutionPolicy Bypass -File scripts/register-paper-extension-host.ps1 -ExtensionId <new-extension-id>
+```
+
+## 6. Reduce routine Git approval prompts in Codex Desktop
 
 This section is intentionally conservative.
 
@@ -267,7 +296,7 @@ If approval prompts still appear after restart:
 - compare the exact command launcher prefix Codex is using with the prefix in the rule file instead of assuming they are equivalent
 - do not paste machine-specific usernames, session logs, or other local-only paths into shared documentation
 
-## 6. If you want Codex to apply these rules for you
+## 7. If you want Codex to apply these rules for you
 
 Use an instruction like this:
 
@@ -275,7 +304,7 @@ Use an instruction like this:
 Read docs/windows-powershell-codex-quickstart.md and apply the Codex Desktop approval-rule section exactly. Only append missing safe rules in %USERPROFILE%\.codex\rules\default.rules, keep approval_policy = "on-request" in %USERPROFILE%\.codex\config.toml, do not replace whole files, and re-read both files to verify the result.
 ```
 
-## 7. Recommended first-run checklist
+## 8. Recommended first-run checklist
 
 Use this order on a fresh Windows machine:
 
@@ -287,5 +316,7 @@ Use this order on a fresh Windows machine:
 6. Verify `npm` resolves to `npm.cmd`.
 7. Verify the console is running in UTF-8 if needed.
 8. Run `npm install`.
-9. Start the agent with your API key and model.
-10. Optionally update Codex approval rules for routine Git commands.
+9. Run `npm run build`.
+10. Start the agent with your API key and model.
+11. If you use publisher paper downloads, load the browser extension and register the native host.
+12. Optionally update Codex approval rules for routine Git commands.
