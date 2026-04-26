@@ -396,7 +396,7 @@ test("manifest declares required MV3 extension shell fields", async () => {
 
   assert.equal(manifest.manifest_version, 3);
   assert.equal(manifest.name, "Pi Agent Paper Downloader");
-  assert.equal(manifest.version, "0.1.0");
+  assert.equal(manifest.version, "0.1.1");
 
   for (const permission of [
     "activeTab",
