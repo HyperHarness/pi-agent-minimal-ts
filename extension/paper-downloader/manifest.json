@@ -1,7 +1,7 @@
 {
   "manifest_version": 3,
   "name": "Pi Agent Paper Downloader",
-  "version": "0.1.1",
+  "version": "0.1.2",
   "description": "Downloads publisher PDFs through the user's browser session for Pi Agent.",
   "permissions": [
     "activeTab",

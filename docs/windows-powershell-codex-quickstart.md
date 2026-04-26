@@ -126,6 +126,8 @@ npm run agent
 
 ### Extension-first paper downloads
 
+Detailed setup and troubleshooting live in [paper-downloader-extension.md](paper-downloader-extension.md).
+
 1. Run `npm.cmd run build`.
 2. Open `chrome://extensions` or `edge://extensions`.
 3. Enable Developer Mode.
