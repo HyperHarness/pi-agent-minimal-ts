@@ -127,7 +127,7 @@ Before any arXiv, supported-publisher, or external URL action, the paper manager
 
 For unsupported external URLs, use `register_manual_paper_download` after downloading the PDF manually. Give it the original external URL and a relative workspace path to the PDF, for example `downloads/inbox/paper.pdf`. The tool verifies the file is a PDF, copies it into `downloads/papers/`, records a SHA-256 hash, and updates the external index record to `downloaded` so future attempts for that URL return `already_downloaded`.
 
-`download_latest_aps_papers` is the direct batch path for prompts such as "search and download the latest 3 APS papers about superconducting quantum computing." It searches APS/Physical Review metadata through Crossref's `10.1103` DOI prefix, then attempts each APS download. APS cooldown and forced manual-open cases can bypass the extension and open APS pages for the user to finish manually. Each result is either a downloaded PDF record or a `manual_fallback_opened` APS page.
+`search_papers` includes APS/Physical Review metadata from Crossref's `10.1103` DOI prefix alongside arXiv and web results. Use `download_paper` on one selected result's arXiv ID or article URL. This keeps discovery and download as separate steps, so APS browser verification or extension handoff affects only the paper you choose to download.
 
 Successful downloads now use formatted filenames when possible, for example `science-10.1126-science.adz8659.pdf`, instead of always overwriting `downloaded-paper.pdf`. The tool still falls back to the source filename or `downloaded-paper.pdf` when it cannot derive a better name.
 
@@ -143,10 +143,10 @@ Example automatic download prompt:
 Download this paper with download_paper: https://www.science.org/doi/10.1126/science.adz8659
 ```
 
-Example APS batch prompt:
+Example latest-paper workflow:
 
 ```text
-Search and download the latest 3 APS papers about superconducting quantum computing with download_latest_aps_papers.
+Search papers about the latest superconducting quantum computing results with search_papers, then download the most relevant result with download_paper.
 ```
 
 For manual verification, keep your own publisher test URLs in a local scratch file such as `paper_url.txt` or in your notes. This repository does not ship a tracked `paper_url.txt`. Check that each URL belongs to one of the supported hosts above, then set up the extension bridge, run the download, and confirm the automatic path writes the PDF under `downloads/papers/` with a publisher/article-derived filename when available.
@@ -159,7 +159,7 @@ Optional environment variables for web search and page fetch tools:
 - `PI_SEARCH_API_KEY`: optional bearer token sent to the search provider
 - `PI_FETCH_USER_AGENT`: optional `User-Agent` header for `fetch_url`
 - `PI_FETCH_TIMEOUT_MS`: optional timeout in milliseconds for both search and fetch requests
-- `PI_PAPER_CLOUDFLARE_COOLDOWN_MS`: optional APS/Cloudflare cooldown window for batch paper downloads; defaults to 30 minutes
+- `PI_PAPER_CLOUDFLARE_COOLDOWN_MS`: optional APS/Cloudflare cooldown window for internal APS fallback handling; defaults to 30 minutes
 
 The search provider contract is JSON over HTTP `POST`:
 
@@ -244,15 +244,12 @@ In non-interactive mode:
 - `read_file`: reads a UTF-8 text file from inside the current workspace
 - `web_search`: searches the configured provider and returns JSON text for matching results
 - `fetch_url`: fetches an HTML page and returns JSON text for the extracted content
-- `search_papers`: searches arXiv first, then expands discovery with `web_search`, merges overlapping results, and classifies supported publishers versus external sources
+- `search_papers`: searches arXiv, APS/Physical Review metadata, and configured web results, merges overlapping results, and classifies supported publishers versus external sources
 - `download_paper`: downloads arXiv papers into `downloads/papers/`, uses the extension bridge for supported publisher and external URLs when configured, returns `already_downloaded` for existing indexed PDFs, and returns `extension_unavailable` when the bridge is needed but unavailable
-- `download_latest_aps_papers`: searches APS/Physical Review metadata for the latest matching papers and attempts each APS download, returning downloaded PDFs or opened APS pages for manual download
 - `register_manual_paper_download`: registers a manually downloaded external PDF into `downloads/papers/` and updates the local index so repeated requests for the same URL are skipped
 - `open_paper_page_for_login`: opens the paper page in the managed browser session for manual login review without downloading anything
 
-For `search_papers`, concise English keyword queries still work best because the first search stage uses arXiv before expanding through `web_search`.
-
-For APS batch downloads, the agent records recent Cloudflare blocks in `.browser-profile/paper-access-state.json`. If APS was blocked recently, `download_latest_aps_papers` skips automatic PDF attempts and opens the article pages directly. The default cooldown is 30 minutes, matching Cloudflare's default Challenge Passage lifetime; override it with `PI_PAPER_CLOUDFLARE_COOLDOWN_MS` when needed.
+For `search_papers`, concise English keyword queries still work best because the search stages include arXiv, APS/Crossref metadata, and the configured web provider.
 
 `read_file` rejects absolute paths and paths that resolve outside the workspace.
 
@@ -263,7 +260,7 @@ Example prompts:
 - `Search papers about retrieval-augmented generation from the last few years and highlight which results are arXiv, supported publisher papers, or external sources.`
 - `Download arXiv paper 2401.01234 with download_paper.`
 - `Download this paper with download_paper: https://www.science.org/doi/10.1126/science.adz8659`
-- `Search and download the latest 3 APS papers about superconducting quantum computing with download_latest_aps_papers.`
+- `Search papers about the latest superconducting quantum computing results, then download the best open result with download_paper.`
 - `Register the manually downloaded PDF for https://example.com/paper with register_manual_paper_download using downloads/inbox/paper.pdf.`
 
 ## Scripts

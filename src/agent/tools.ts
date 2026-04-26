@@ -14,13 +14,11 @@ import {
   resolvePublisherCanonicalIdFromArticleUrl
 } from "./paper-download.js";
 import {
-  downloadLatestApsPapers,
   downloadPaper,
   registerManualPaperDownload,
   searchPapers
 } from "./paper-manager.js";
 import type { PaperExtensionBridge } from "./paper-extension-bridge.js";
-import { resolveCloudflareCooldownMs } from "./publisher-access-state.js";
 import {
   createPaperBrowserManagerClient,
   type PaperBrowserManagerClient
@@ -62,16 +60,6 @@ const downloadPaperParameters = Type.Object({
   url: Type.Optional(Type.String({ description: "Paper URL to download." }))
 });
 
-const downloadLatestApsPapersParameters = Type.Object({
-  query: Type.String({
-    description:
-      "Research topic to search in APS/Physical Review papers, for example superconducting quantum computing."
-  }),
-  maxResults: Type.Optional(
-    Type.Integer({ description: "Number of latest APS papers to process.", minimum: 1 })
-  )
-});
-
 const registerManualPaperDownloadParameters = Type.Object({
   url: Type.String({ description: "External article URL that was opened for manual download." }),
   path: Type.String({
@@ -90,7 +78,6 @@ type WebSearchParameters = Static<typeof webSearchParameters>;
 type FetchUrlParameters = Static<typeof fetchUrlParameters>;
 type SearchPapersParameters = Static<typeof searchPapersParameters>;
 type DownloadPaperParameters = Static<typeof downloadPaperParameters>;
-type DownloadLatestApsPapersParameters = Static<typeof downloadLatestApsPapersParameters>;
 type RegisterManualPaperDownloadParameters = Static<typeof registerManualPaperDownloadParameters>;
 type OpenPaperPageForLoginParameters = Static<typeof openPaperPageForLoginParameters>;
 
@@ -141,10 +128,6 @@ type SearchPapersTool = AgentTool<
 type DownloadPaperTool = AgentTool<
   typeof downloadPaperParameters,
   Awaited<ReturnType<typeof downloadPaper>>
->;
-type DownloadLatestApsPapersTool = AgentTool<
-  typeof downloadLatestApsPapersParameters,
-  Awaited<ReturnType<typeof downloadLatestApsPapers>>
 >;
 type RegisterManualPaperDownloadTool = AgentTool<
   typeof registerManualPaperDownloadParameters,
@@ -216,7 +199,6 @@ export interface ToolDependencies {
   searchPapers?: typeof searchPapers;
   searchApsPapers?: typeof searchApsPapers;
   downloadPaper?: typeof downloadPaper;
-  downloadLatestApsPapers?: typeof downloadLatestApsPapers;
   registerManualPaperDownload?: typeof registerManualPaperDownload;
   openPaperPageForLogin?: OpenPaperPageForLoginDependency;
   browserSessionFactory?: ReturnType<typeof resolveDefaultPaperBrowserSessionFactory>;
@@ -237,7 +219,6 @@ export type AgentTools = [
   FetchUrlTool,
   SearchPapersTool,
   DownloadPaperTool,
-  DownloadLatestApsPapersTool,
   RegisterManualPaperDownloadTool,
   OpenPaperPageForLoginTool
 ] & ToolSetMetadata;
@@ -260,8 +241,14 @@ export function createTools(workspaceDir: string, dependencies: ToolDependencies
   const resolvedWorkspaceDir = path.resolve(workspaceDir);
   const searchWebImpl = dependencies.searchWeb ?? searchWeb;
   const fetchWebPageImpl = dependencies.fetchWebPage ?? fetchWebPage;
-  const searchPapersImpl = dependencies.searchPapers ?? searchPapers;
   const searchApsPapersImpl = dependencies.searchApsPapers ?? searchApsPapers;
+  const searchPapersImpl =
+    dependencies.searchPapers ??
+    ((options: Parameters<typeof searchPapers>[0]) =>
+      searchPapers({
+        ...options,
+        searchApsPapersImpl
+      }));
   const browserSessionFactoryImpl =
     dependencies.browserSessionFactory ??
     resolveDefaultPaperBrowserSessionFactory({ workspaceDir: resolvedWorkspaceDir });
@@ -438,15 +425,6 @@ export function createTools(workspaceDir: string, dependencies: ToolDependencies
         openPublisherForLoginImpl: async (openOptions) =>
           paperBrowserManagerClient.openArticle({ url: openOptions.url })
       }));
-  const downloadLatestApsPapersImpl =
-    dependencies.downloadLatestApsPapers ??
-    ((options: Parameters<typeof downloadLatestApsPapers>[0]) =>
-      downloadLatestApsPapers({
-        ...options,
-        cloudflareCooldownMs: resolveCloudflareCooldownMs(),
-        searchApsPapersImpl,
-        downloadPaperImpl
-      }));
   const registerManualPaperDownloadImpl =
     dependencies.registerManualPaperDownload ?? registerManualPaperDownload;
 
@@ -532,7 +510,8 @@ export function createTools(workspaceDir: string, dependencies: ToolDependencies
   const searchPapersTool: SearchPapersTool = {
     name: "search_papers",
     label: "Search Papers",
-    description: "Searches papers and returns unified result summaries.",
+    description:
+      "Searches papers across arXiv, APS/Physical Review metadata, and web results, then returns unified result summaries. Use download_paper with a returned id or URL to download one selected paper.",
     parameters: searchPapersParameters,
     execute: async (_toolCallId: string, args: SearchPapersParameters) => {
       const results = await searchPapersImpl({ query: args.query, maxResults: args.maxResults });
@@ -557,27 +536,6 @@ export function createTools(workspaceDir: string, dependencies: ToolDependencies
         workspaceDir: resolvedWorkspaceDir,
         ...(args.id ? { id: args.id } : {}),
         ...(args.url ? { url: args.url } : {})
-      });
-
-      return {
-        content: [{ type: "text", text: JSON.stringify(result) }],
-        details: result
-      };
-    }
-  };
-
-  const downloadLatestApsPapersTool: DownloadLatestApsPapersTool = {
-    name: "download_latest_aps_papers",
-    label: "Download Latest APS Papers",
-    description:
-      "Searches APS/Physical Review for the latest papers matching a topic, then attempts each download; returns downloaded PDFs or opened APS pages for manual download when publisher verification blocks automation.",
-    parameters: downloadLatestApsPapersParameters,
-    executionMode: "sequential",
-    execute: async (_toolCallId: string, args: DownloadLatestApsPapersParameters) => {
-      const result = await downloadLatestApsPapersImpl({
-        workspaceDir: resolvedWorkspaceDir,
-        query: args.query,
-        maxResults: args.maxResults
       });
 
       return {
@@ -638,7 +596,6 @@ export function createTools(workspaceDir: string, dependencies: ToolDependencies
     fetchUrlTool,
     searchPapersTool,
     downloadPaperTool,
-    downloadLatestApsPapersTool,
     registerManualPaperDownloadTool,
     openPaperPageForLoginTool
   ] as unknown as AgentTools;

@@ -67,6 +67,7 @@ test("searchPapers merges duplicate titles and prefers supported publisher sourc
         })
       ];
     },
+    searchApsPapersImpl: async () => [],
     searchWebImpl: async (options) => {
       webCalls.push({ query: options.query, maxResults: options.maxResults });
       return [
@@ -120,6 +121,7 @@ test("searchPapers maps unsupported hosts to external open_url_only results", as
   const results = await searchPapers({
     query: "unsupported host paper",
     searchArxivImpl: async () => [],
+    searchApsPapersImpl: async () => [],
     searchWebImpl: async () => [
       createWebResult({
         title: "Unsupported Host Paper",
@@ -147,10 +149,54 @@ test("searchPapers maps unsupported hosts to external open_url_only results", as
   ]);
 });
 
+test("searchPapers includes latest APS metadata results as downloadable paper sources", async () => {
+  const results = await searchPapers({
+    query: "superconducting quantum computing",
+    searchArxivImpl: async () => [],
+    searchApsPapersImpl: async () => [
+      {
+        title: "Latest Superconducting Qubit Paper",
+        authors: ["Grace Hopper"],
+        summary: "Published in Physical Review Letters.",
+        primarySource: "aps",
+        primaryAction: "authorized_download",
+        sources: [
+          {
+            source: "aps",
+            action: "authorized_download",
+            canonicalId: "10.1103/PhysRevLett.135.030801",
+            articleUrl: "https://journals.aps.org/prl/abstract/10.1103/PhysRevLett.135.030801"
+          }
+        ]
+      }
+    ],
+    searchWebImpl: async () => []
+  });
+
+  assert.deepEqual(results, [
+    {
+      title: "Latest Superconducting Qubit Paper",
+      authors: ["Grace Hopper"],
+      summary: "Published in Physical Review Letters.",
+      primarySource: "aps",
+      primaryAction: "authorized_download",
+      sources: [
+        {
+          source: "aps",
+          action: "authorized_download",
+          canonicalId: "10.1103/PhysRevLett.135.030801",
+          articleUrl: "https://journals.aps.org/prl/abstract/10.1103/PhysRevLett.135.030801"
+        }
+      ]
+    } satisfies PaperSearchResult
+  ]);
+});
+
 test("searchPapers keeps supported hosts classified by hostname even when the path shape is unknown", async () => {
   const results = await searchPapers({
     query: "hostname classified paper",
     searchArxivImpl: async () => [],
+    searchApsPapersImpl: async () => [],
     searchWebImpl: async () => [
       createWebResult({
         title: "Hostname Classified Paper",
@@ -182,6 +228,7 @@ test("searchPapers treats unsupported www.aps.org hosts as external results", as
   const results = await searchPapers({
     query: "aps host parity",
     searchArxivImpl: async () => [],
+    searchApsPapersImpl: async () => [],
     searchWebImpl: async () => [
       createWebResult({
         title: "APS Host Parity",
@@ -213,6 +260,7 @@ test("searchPapers reorders merged candidates when a higher-priority source appe
   const results = await searchPapers({
     query: "ordering",
     maxResults: 1,
+    searchApsPapersImpl: async () => [],
     searchArxivImpl: async () => [
       createArxivResult({
         id: "2401.00001",
@@ -940,6 +988,59 @@ test("downloadLatestApsPapers skips remaining automatic APS downloads after a Cl
     assert.equal(downloadCalls[0]?.forceManualOpen, undefined);
     assert.equal(downloadCalls[1]?.forceManualOpen?.code, "recent_cloudflare_block");
     assert.equal(downloadCalls[2]?.forceManualOpen?.code, "recent_cloudflare_block");
+  } finally {
+    await rm(workspaceDir, { recursive: true, force: true });
+  }
+});
+
+test("downloadLatestApsPapers defers remaining APS papers after queueing one extension job", async () => {
+  const workspaceDir = await mkdtemp(path.join(os.tmpdir(), "paper-manager-"));
+  const articleUrls = [
+    "https://journals.aps.org/prapplied/abstract/10.1103/PhysRevApplied.24.034057",
+    "https://journals.aps.org/prl/abstract/10.1103/PhysRevLett.135.030801"
+  ];
+  const downloadCalls: string[] = [];
+
+  try {
+    const result = await downloadLatestApsPapers({
+      workspaceDir,
+      query: "superconducting quantum computing",
+      maxResults: 2,
+      searchApsPapersImpl: async () =>
+        articleUrls.map((articleUrl, index) => ({
+          title: `APS superconducting qubit paper ${index + 1}`,
+          authors: [],
+          summary: "Published in Physical Review.",
+          primarySource: "aps",
+          primaryAction: "authorized_download",
+          sources: [
+            {
+              source: "aps",
+              action: "authorized_download",
+              canonicalId: articleUrl.slice(articleUrl.lastIndexOf("/") + 1),
+              articleUrl
+            }
+          ]
+        })),
+      downloadPaperImpl: async (options) => {
+        downloadCalls.push(options.url as string);
+        return {
+          status: "extension_job_queued",
+          source: "aps",
+          articleUrl: options.url as string,
+          jobId: "job-aps-1",
+          message: "Paper download job queued for the browser extension."
+        };
+      }
+    });
+
+    assert.deepEqual(downloadCalls, [articleUrls[0]]);
+    assert.equal(result.results[0]?.download.status, "extension_job_queued");
+    assert.equal(result.results[1]?.download.status, "extension_unavailable");
+    if (result.results[1]?.download.status !== "extension_unavailable") {
+      assert.fail("Expected the second APS result to be deferred.");
+    }
+    assert.equal(result.results[1].download.failure.code, "aps_extension_job_pending");
   } finally {
     await rm(workspaceDir, { recursive: true, force: true });
   }

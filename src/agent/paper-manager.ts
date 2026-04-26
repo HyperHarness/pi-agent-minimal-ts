@@ -56,6 +56,7 @@ export interface SearchPapersOptions {
   query: string;
   maxResults?: number;
   searchArxivImpl?: typeof searchArxiv;
+  searchApsPapersImpl?: typeof searchApsPapers;
   searchWebImpl?: typeof searchWeb;
 }
 
@@ -230,6 +231,30 @@ function classifyArxivSearchResult(result: ArxivSearchResult, order: number): Ra
     articleUrl: result.absUrl,
     pdfUrl: result.pdfUrl,
     rank: PAPER_SOURCE_PRIORITY.arxiv,
+    order
+  };
+}
+
+function rankPaperSearchSource(source: PaperSearchSource, order: number): RankedSearchSource {
+  if (source.source === "external") {
+    return {
+      ...source,
+      rank: PAPER_SOURCE_PRIORITY.external,
+      order
+    };
+  }
+
+  if (source.source === "arxiv") {
+    return {
+      ...source,
+      rank: PAPER_SOURCE_PRIORITY.arxiv,
+      order
+    };
+  }
+
+  return {
+    ...source,
+    rank: SUPPORTED_SOURCE_PRIORITY[source.source],
     order
   };
 }
@@ -574,6 +599,15 @@ function createPendingApsExtensionJobFailure(): PaperFailure {
     code: "aps_extension_job_pending",
     message:
       "Skipping automatic APS download because an APS browser extension job is already queued. Complete the opened APS page manually, or retry after the extension reports the first APS result."
+  };
+}
+
+function toPendingApsExtensionJobResult(articleUrl: string): PaperDownloadResult {
+  return {
+    status: "extension_unavailable",
+    source: "aps",
+    articleUrl,
+    failure: createPendingApsExtensionJobFailure()
   };
 }
 
@@ -1014,11 +1048,14 @@ export async function downloadLatestApsPapers(
       continue;
     }
 
-    const download = await downloadPaperImpl({
-      workspaceDir: options.workspaceDir,
-      url: apsSource.articleUrl,
-      ...(forceManualOpenFailure ? { forceManualOpen: forceManualOpenFailure } : {})
-    });
+    const download =
+      forceManualOpenFailure?.code === "aps_extension_job_pending"
+        ? toPendingApsExtensionJobResult(apsSource.articleUrl)
+        : await downloadPaperImpl({
+            workspaceDir: options.workspaceDir,
+            url: apsSource.articleUrl,
+            ...(forceManualOpenFailure ? { forceManualOpen: forceManualOpenFailure } : {})
+          });
     if (!forceManualOpenFailure && isLikelyCloudflareFallback(download)) {
       recentCloudflareBlockAt = now().toISOString();
       forceManualOpenFailure = createRecentCloudflareBlockFailure(recentCloudflareBlockAt);
@@ -1055,11 +1092,13 @@ export async function downloadLatestApsPapers(
 
 export async function searchPapers(options: SearchPapersOptions): Promise<PaperSearchResult[]> {
   const searchArxivImpl = options.searchArxivImpl ?? searchArxiv;
+  const searchApsPapersImpl = options.searchApsPapersImpl ?? searchApsPapers;
   const searchWebImpl = options.searchWebImpl ?? searchWeb;
   const maxResults = options.maxResults ?? 5;
 
-  const [arxivResults, webResults] = await Promise.all([
+  const [arxivResults, apsResults, webResults] = await Promise.all([
     searchArxivImpl({ query: options.query, maxResults }),
+    searchApsPapersImpl({ query: options.query, maxResults }).catch(() => []),
     searchWebImpl({ query: options.query, maxResults })
   ]);
 
@@ -1074,6 +1113,19 @@ export async function searchPapers(options: SearchPapersOptions): Promise<PaperS
       order,
       source: classifyArxivSearchResult(result, order)
     });
+    order += 1;
+  }
+
+  for (const result of apsResults) {
+    for (const source of result.sources) {
+      addCandidate(candidates, {
+        title: result.title,
+        authors: result.authors,
+        summary: result.summary,
+        order,
+        source: rankPaperSearchSource(source, order)
+      });
+    }
     order += 1;
   }
 
