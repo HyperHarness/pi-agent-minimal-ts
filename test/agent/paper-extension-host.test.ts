@@ -14,6 +14,7 @@ import {
   encodeNativeMessage,
   handleExtensionHostMessage,
   readNativeMessagesFromBuffer,
+  resolveDownloadPathCandidates,
   runPaperExtensionNativeHost,
   writeNativeHostManifest
 } from "../../src/agent/paper-extension-host.js";
@@ -75,6 +76,22 @@ test("native message framing roundtrips complete frames and ignores trailing par
   assert.deepEqual(readNativeMessagesFromBuffer(Buffer.concat([encoded, partialNextFrame])), [
     response
   ]);
+});
+
+test("resolveDownloadPathCandidates maps Windows browser paths for WSL native hosts", () => {
+  assert.deepEqual(resolveDownloadPathCandidates("C:\\Users\\alice\\Downloads\\paper.pdf"), [
+    "C:\\Users\\alice\\Downloads\\paper.pdf",
+    "/mnt/c/Users/alice/Downloads/paper.pdf"
+  ]);
+  assert.deepEqual(
+    resolveDownloadPathCandidates(
+      "\\\\wsl.localhost\\Ubuntu-24.04\\home\\alice\\repo\\downloads\\inbox\\paper.pdf"
+    ),
+    [
+      "\\\\wsl.localhost\\Ubuntu-24.04\\home\\alice\\repo\\downloads\\inbox\\paper.pdf",
+      "/home/alice/repo/downloads/inbox/paper.pdf"
+    ]
+  );
 });
 
 test("handleExtensionHostMessage registers external PDF downloads with manual import record shape", async () => {

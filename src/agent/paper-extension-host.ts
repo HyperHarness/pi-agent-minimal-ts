@@ -128,7 +128,7 @@ async function registerDownloadedPaper(options: {
 }): Promise<ExtensionHostResponse> {
   let pdfBytes: Buffer;
   try {
-    pdfBytes = await readFile(options.message.downloadPath);
+    pdfBytes = await readDownloadedFile(options.message.downloadPath);
   } catch (error) {
     return registrationError({
       jobId: options.message.jobId,
@@ -173,6 +173,43 @@ async function registerDownloadedPaper(options: {
       message: error instanceof Error ? error.message : "Paper registration failed."
     });
   }
+}
+
+async function readDownloadedFile(downloadPath: string): Promise<Buffer> {
+  let lastError: unknown;
+  for (const candidatePath of resolveDownloadPathCandidates(downloadPath)) {
+    try {
+      return await readFile(candidatePath);
+    } catch (error) {
+      lastError = error;
+    }
+  }
+
+  throw lastError instanceof Error
+    ? lastError
+    : new Error(`Unable to read downloaded file at ${downloadPath}.`);
+}
+
+export function resolveDownloadPathCandidates(downloadPath: string): string[] {
+  const candidates = [downloadPath];
+
+  const drivePathMatch = downloadPath.match(/^([A-Za-z]):[\\/](.*)$/);
+  if (drivePathMatch?.[1] && drivePathMatch[2]) {
+    candidates.push(
+      path.posix.join(
+        "/mnt",
+        drivePathMatch[1].toLowerCase(),
+        ...drivePathMatch[2].split(/[\\/]+/).filter(Boolean)
+      )
+    );
+  }
+
+  const uncWslMatch = downloadPath.match(/^\\\\(?:wsl\.localhost|wsl\$)\\[^\\]+\\(.+)$/i);
+  if (uncWslMatch?.[1]) {
+    candidates.push(path.posix.join("/", ...uncWslMatch[1].split(/[\\/]+/).filter(Boolean)));
+  }
+
+  return [...new Set(candidates)];
 }
 
 async function registerExternalDownload(options: {

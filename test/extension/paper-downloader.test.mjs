@@ -635,6 +635,43 @@ test("background manual association ignores non-PDF downloads from article refer
   assert.deepEqual(fakeChrome.removedTabs, []);
 });
 
+test("background registers manual PDF downloads from the tracked article tab", async () => {
+  const job = {
+    jobId: "job-manual-tab",
+    articleUrl: "https://www.nature.com/articles/s41586-019-1666-5",
+    source: "nature"
+  };
+  const fakeChrome = createFakeChrome({
+    jobs: [job],
+    downloadItems: {
+      778: {
+        id: 778,
+        tabId: 100,
+        filename: "C:\\Downloads\\manual-paper.pdf",
+        url: "https://media.springernature.com/full/s41586-019-1666-5.pdf",
+        mime: "application/pdf"
+      }
+    }
+  });
+
+  await importBackground(fakeChrome);
+  fakeChrome.events.onCreated.emit({
+    id: 778,
+    tabId: 100,
+    filename: "C:\\Downloads\\manual-paper.pdf",
+    url: "https://media.springernature.com/full/s41586-019-1666-5.pdf",
+    mime: "application/pdf"
+  });
+  await flushAsyncWork();
+  fakeChrome.events.onChanged.emit({ id: 778, state: { current: "complete" } });
+  await flushAsyncWork();
+
+  assert.equal(statusMessagesOf(fakeChrome, "manual_download_observed").length, 1);
+  assert.equal(messagesOf(fakeChrome, "register_download").length, 1);
+  assert.equal(messagesOf(fakeChrome, "register_download")[0].downloadPath, "C:\\Downloads\\manual-paper.pdf");
+  assert.deepEqual(fakeChrome.removedTabs, [100]);
+});
+
 test("background hydrates persisted jobs before polling and avoids duplicate tab opens", async () => {
   const persistedJob = {
     jobId: "job-persisted",

@@ -237,8 +237,10 @@ function downloadBelongsToJob(downloadItem, job) {
   const referrer = downloadItem.referrer || "";
   const url = downloadItem.url || "";
   const finalUrl = downloadItem.finalUrl || "";
+  const tabId = downloadItem.tabId;
 
   return (
+    (typeof tabId === "number" && typeof job.tabId === "number" && tabId === job.tabId) ||
     (!!job.pdfUrl && (url === job.pdfUrl || finalUrl === job.pdfUrl)) ||
     (referrer === job.articleUrl && downloadLooksPdfLike(downloadItem, job))
   );
