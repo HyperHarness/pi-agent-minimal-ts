@@ -36,7 +36,11 @@ test("registration script generates exe native host and registers HKCU browser k
 
   assert.match(
     script,
-    /\[string\]\$WorkspaceDir\s*=\s*\(Resolve-Path\s+-LiteralPath\s+\(Join-Path\s+\$PSScriptRoot\s+"\.{2}"\)\)\.Path/
+    /\[string\]\$WorkspaceDir\s*=\s*""/
+  );
+  assert.match(
+    script,
+    /\$ResolvedWorkspaceDir\s*=\s*if\s*\(\$WorkspaceDir\.Trim\(\)\)\s*\{[\s\S]*Join-Path\s+\$PSScriptRoot\s+"\.{2}"[\s\S]*\$WorkspacePath\s*=\s*\(Resolve-Path\s+-LiteralPath\s+\$ResolvedWorkspaceDir\)\.Path/
   );
   assert.match(script, /\$HostExe\s*=\s*Join-Path\s+\$ScriptsDir\s+"paper-extension-host\.exe"/);
   assert.match(script, /set "PI_PAPER_WORKSPACE=%~dp0\.\."/);
@@ -47,11 +51,15 @@ test("registration script generates exe native host and registers HKCU browser k
   assert.doesNotMatch(script, /path\s*=\s*\$HostCmd/);
   assert.match(
     script,
-    /Registry::HKEY_CURRENT_USER\\Software\\Google\\Chrome\\NativeMessagingHosts\\\$NativeHostName/
+    /Software\\Google\\Chrome\\NativeMessagingHosts\\\$NativeHostName/
   );
   assert.match(
     script,
-    /Registry::HKEY_CURRENT_USER\\Software\\Microsoft\\Edge\\NativeMessagingHosts\\\$NativeHostName/
+    /Software\\Microsoft\\Edge\\NativeMessagingHosts\\\$NativeHostName/
+  );
+  assert.match(
+    script,
+    /\[Microsoft\.Win32\.Registry\]::CurrentUser\.CreateSubKey\(\$RegistrySubKey\)/
   );
   assert.match(
     script,

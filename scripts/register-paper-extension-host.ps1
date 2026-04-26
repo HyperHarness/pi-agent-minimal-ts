@@ -2,7 +2,7 @@ param(
   [Parameter(Mandatory = $true)]
   [string]$ExtensionId,
 
-  [string]$WorkspaceDir = (Resolve-Path -LiteralPath (Join-Path $PSScriptRoot "..")).Path,
+  [string]$WorkspaceDir = "",
 
   [ValidateSet("Chrome", "Edge", "Both")]
   [string]$Browser = "Both"
@@ -12,7 +12,12 @@ $ErrorActionPreference = "Stop"
 
 $NativeHostName = "com.pi_agent.paper_downloader"
 $NativeHostDescription = "Pi Agent paper downloader native host"
-$WorkspacePath = (Resolve-Path -LiteralPath $WorkspaceDir).Path
+$ResolvedWorkspaceDir = if ($WorkspaceDir.Trim()) {
+  $WorkspaceDir
+} else {
+  Join-Path $PSScriptRoot ".."
+}
+$WorkspacePath = (Resolve-Path -LiteralPath $ResolvedWorkspaceDir).Path
 
 $ScriptsDir = Join-Path $WorkspacePath "scripts"
 $HostCmd = Join-Path $ScriptsDir "paper-extension-host.cmd"
@@ -155,14 +160,16 @@ $ManifestEncoding = [System.Text.UTF8Encoding]::new($false)
 function Set-NativeMessagingHostRegistryValue {
   param(
     [Parameter(Mandatory = $true)]
-    [string]$RegistryPath,
+    [string]$RegistrySubKey,
 
     [Parameter(Mandatory = $true)]
     [string]$ManifestPath
   )
 
-  New-Item -Path $RegistryPath -Force | Out-Null
-  $RegistryKey = Get-Item -LiteralPath $RegistryPath
+  $RegistryKey = [Microsoft.Win32.Registry]::CurrentUser.CreateSubKey($RegistrySubKey)
+  if ($null -eq $RegistryKey) {
+    throw "Unable to create or open HKCU:\$RegistrySubKey for writing."
+  }
   try {
     $RegistryKey.SetValue("", $ManifestPath, [Microsoft.Win32.RegistryValueKind]::String)
   } finally {
@@ -172,13 +179,13 @@ function Set-NativeMessagingHostRegistryValue {
 
 if ($Browser -eq "Chrome" -or $Browser -eq "Both") {
   Set-NativeMessagingHostRegistryValue `
-    -RegistryPath "Registry::HKEY_CURRENT_USER\Software\Google\Chrome\NativeMessagingHosts\$NativeHostName" `
+    -RegistrySubKey "Software\Google\Chrome\NativeMessagingHosts\$NativeHostName" `
     -ManifestPath $ManifestPath
 }
 
 if ($Browser -eq "Edge" -or $Browser -eq "Both") {
   Set-NativeMessagingHostRegistryValue `
-    -RegistryPath "Registry::HKEY_CURRENT_USER\Software\Microsoft\Edge\NativeMessagingHosts\$NativeHostName" `
+    -RegistrySubKey "Software\Microsoft\Edge\NativeMessagingHosts\$NativeHostName" `
     -ManifestPath $ManifestPath
 }
 
