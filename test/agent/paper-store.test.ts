@@ -26,7 +26,7 @@ const supportedSearchSource = {
   source: "science",
   canonicalId: "10.1126/science.adz8659",
   articleUrl: "https://www.science.org/doi/10.1126/science.adz8659",
-  pdfUrl: "https://www.science.org/doi/pdf/10.1126/science.adz8659",
+  pdfUrl: "https://www.science.org/doi/epdf/10.1126/science.adz8659",
   action: "authorized_download"
 } satisfies PaperSearchSource;
 
@@ -437,8 +437,48 @@ test("findDownloadedPaperRecord ignores manual fallback records and missing PDFs
         handlingMethod: "browser_session",
         status: "downloaded",
         canonicalId: "10.1126/science.adz8659",
-        pdfUrl: "https://www.science.org/doi/pdf/10.1126/science.adz8659",
+        pdfUrl: "https://www.science.org/doi/epdf/10.1126/science.adz8659",
         downloadPath: missingPdfPath
+      }
+    });
+
+    assert.equal(
+      await findDownloadedPaperRecord({
+        workspaceDir,
+        source: "science",
+        canonicalId: "10.1126/science.adz8659",
+        articleUrl: "https://www.science.org/doi/10.1126/science.adz8659"
+      }),
+      null
+    );
+  } finally {
+    await rm(workspaceDir, { recursive: true, force: true });
+  }
+});
+
+test("findDownloadedPaperRecord ignores Science supplement records for main article downloads", async () => {
+  const workspaceDir = await mkdtemp(path.join(os.tmpdir(), "paper-store-"));
+  const pdfPath = resolvePaperPdfPath({
+    workspaceDir,
+    source: "science",
+    canonicalId: "10.1126/science.adz8659"
+  });
+
+  try {
+    await mkdir(path.dirname(pdfPath), { recursive: true });
+    await writeFile(pdfPath, "%PDF-1.7\nsupplement pdf\n", "utf8");
+    await writePaperRecord({
+      workspaceDir,
+      record: {
+        source: "science",
+        articleUrl: "https://www.science.org/doi/10.1126/science.adz8659",
+        recordedAt: "2026-04-25T10:00:00.000Z",
+        handlingMethod: "browser_session",
+        status: "downloaded",
+        canonicalId: "10.1126/science.adz8659",
+        pdfUrl:
+          "https://www.science.org/doi/suppl/10.1126/science.adz8659/suppl_file/science.adz8659_sm.pdf",
+        downloadPath: pdfPath
       }
     });
 

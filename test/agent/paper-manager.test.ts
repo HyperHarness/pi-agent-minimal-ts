@@ -73,7 +73,7 @@ test("searchPapers merges duplicate titles and prefers supported publisher sourc
       return [
         createWebResult({
           title: " Unified  Paper Search ",
-          url: "https://www.science.org/doi/pdf/10.1126/science.adz8659",
+          url: "https://www.science.org/doi/epdf/10.1126/science.adz8659",
           snippet: "science summary"
         }),
         createWebResult({
@@ -98,7 +98,7 @@ test("searchPapers merges duplicate titles and prefers supported publisher sourc
         {
           source: "science",
           canonicalId: "10.1126/science.adz8659",
-          articleUrl: "https://www.science.org/doi/pdf/10.1126/science.adz8659",
+          articleUrl: "https://www.science.org/doi/epdf/10.1126/science.adz8659",
           action: "authorized_download"
         },
       {
@@ -468,7 +468,7 @@ test("downloadPaper returns an existing publisher download without opening the b
           handlingMethod: "browser_session",
           status: "downloaded",
           canonicalId: "10.1126/science.adz8659",
-          pdfUrl: "https://www.science.org/doi/pdf/10.1126/science.adz8659",
+          pdfUrl: "https://www.science.org/doi/epdf/10.1126/science.adz8659",
           downloadPath: pdfPath
         },
         null,
@@ -496,7 +496,7 @@ test("downloadPaper returns an existing publisher download without opening the b
       source: "science",
       canonicalId: "10.1126/science.adz8659",
       articleUrl,
-      finalPdfUrl: "https://www.science.org/doi/pdf/10.1126/science.adz8659",
+      finalPdfUrl: "https://www.science.org/doi/epdf/10.1126/science.adz8659",
       path: pdfPath,
       recordPath,
       recordedAt: "2026-04-25T10:00:00.000Z"

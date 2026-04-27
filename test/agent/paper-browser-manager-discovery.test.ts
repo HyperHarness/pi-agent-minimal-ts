@@ -56,7 +56,7 @@ test("paper browser manager protocol types accept representative values", () => 
     publisher: "science",
     articleUrl: downloadRequest.url,
     finalArticleUrl: openResponse.openedUrl,
-    finalPdfUrl: "https://www.science.org/doi/pdf/10.1126/science.adz8659"
+    finalPdfUrl: "https://www.science.org/doi/epdf/10.1126/science.adz8659"
   };
 
   assert.equal(metadata.pid, 1234);

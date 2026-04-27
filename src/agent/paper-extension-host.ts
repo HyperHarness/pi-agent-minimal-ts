@@ -126,6 +126,20 @@ async function registerDownloadedPaper(options: {
   message: Extract<ExtensionHostMessage, { type: "register_download" }>;
   recordedAt: string;
 }): Promise<ExtensionHostResponse> {
+  if (
+    options.message.source === "science" &&
+    isScienceSupplementDownload({
+      downloadPath: options.message.downloadPath,
+      pdfUrl: options.message.pdfUrl
+    })
+  ) {
+    return registrationError({
+      jobId: options.message.jobId,
+      code: "supplement_not_article",
+      message: "Science supplementary material downloads are not registered as article PDFs."
+    });
+  }
+
   let pdfBytes: Buffer;
   try {
     pdfBytes = await readDownloadedFile(options.message.downloadPath);
@@ -389,7 +403,32 @@ function getExistingDownloadedPdfUrl(options: {
     return undefined;
   }
 
-  return normalizeOptionalString(options.existingRecord.pdfUrl);
+  const pdfUrl = normalizeOptionalString(options.existingRecord.pdfUrl);
+  return pdfUrl && isCompatiblePublisherPdfUrl({
+    source: options.source,
+    canonicalId: options.canonicalId,
+    pdfUrl
+  })
+    ? pdfUrl
+    : undefined;
+}
+
+function isCompatiblePublisherPdfUrl(options: {
+  source: SupportedPaperSource;
+  canonicalId: string;
+  pdfUrl: string;
+}): boolean {
+  if (options.source !== "science") {
+    return true;
+  }
+
+  try {
+    const parsedUrl = new URL(options.pdfUrl);
+    const match = parsedUrl.pathname.match(/^\/doi\/epdf\/(.+)$/i);
+    return safeDecodeURIComponent(match?.[1] ?? "").replace(/\.pdf$/i, "") === options.canonicalId;
+  } catch {
+    return false;
+  }
 }
 
 function derivePublisherPdfUrl(options: {
@@ -416,19 +455,12 @@ function derivePublisherPdfUrl(options: {
   }
 
   if (options.source === "science") {
-    const existingPdfMatch = parsedUrl.pathname.match(/^\/doi\/pdf\/(.+)$/i);
-    if (existingPdfMatch?.[1]) {
-      parsedUrl.search = "";
-      parsedUrl.hash = "";
-      return parsedUrl.toString();
-    }
-
-    const match = parsedUrl.pathname.match(/^\/doi\/(?!pdf\/|full\/|abs\/|epdf\/)(.+)$/i);
+    const match = parsedUrl.pathname.match(/^\/doi\/(?!suppl\/)(?:(?:pdf|full|abs|epdf)\/)?(.+)$/i);
     if (!match?.[1]) {
       return undefined;
     }
 
-    parsedUrl.pathname = `/doi/pdf/${match[1]}`;
+    parsedUrl.pathname = `/doi/epdf/${match[1]}`;
     parsedUrl.search = "";
     parsedUrl.hash = "";
     return parsedUrl.toString();
@@ -486,6 +518,26 @@ function registrationError(input: {
 function normalizeOptionalString(value: string | undefined): string | undefined {
   const trimmed = value?.trim();
   return trimmed ? trimmed : undefined;
+}
+
+function isScienceSupplementDownload(input: {
+  downloadPath: string;
+  pdfUrl?: string;
+}): boolean {
+  const values = [input.downloadPath, input.pdfUrl ?? ""].filter(Boolean);
+  return values.some((value) => {
+    const basename = String(value).split(/[\\/]/).pop()?.split(/[?#]/, 1)[0] ?? "";
+    const decodedBasename = safeDecodeURIComponent(basename).toLowerCase();
+    return decodedBasename.endsWith("sm.pdf");
+  });
+}
+
+function safeDecodeURIComponent(value: string): string {
+  try {
+    return decodeURIComponent(value);
+  } catch {
+    return value;
+  }
 }
 
 function extractCompleteNativePayloads(buffer: Buffer): {

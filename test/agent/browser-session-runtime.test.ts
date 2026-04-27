@@ -477,7 +477,7 @@ test("downloadPdf leaves a failed publisher page open for manual download", asyn
     const session = await factory();
 
     await assert.rejects(
-      () => session.downloadPdf("https://www.science.org/doi/pdf/10.1126/science.adz8659", destinationPath),
+      () => session.downloadPdf("https://www.science.org/doi/epdf/10.1126/science.adz8659", destinationPath),
       /Timed out waiting for PDF download/i
     );
     assert.equal(closeCalls, 0);

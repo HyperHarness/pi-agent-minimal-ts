@@ -6,7 +6,7 @@ export const scienceAdapter: PublisherAdapter = {
     return url.hostname === "www.science.org" || url.hostname === "science.org";
   },
   resolvePdfPathFromHtml(html: string) {
-    const match = html.match(/href="([^"]*\/doi\/pdf\/[^"]+)"/i);
+    const match = html.match(/href="([^"]*\/doi\/epdf\/[^"]+)"/i);
     return match?.[1] ?? null;
   }
 } as const;

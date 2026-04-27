@@ -163,6 +163,20 @@ function isDownloadedPaperRecord(value: unknown): value is DownloadedPaperRecord
   return typeof record.canonicalId === "string" && typeof record.pdfUrl === "string";
 }
 
+function isCompatibleDownloadedPaperRecord(record: DownloadedPaperRecord): boolean {
+  if (record.source !== "science") {
+    return true;
+  }
+
+  try {
+    const pdfUrl = new URL(record.pdfUrl);
+    const pdfDoiMatch = pdfUrl.pathname.match(/^\/doi\/epdf\/(.+)$/i);
+    return decodeURIComponent(pdfDoiMatch?.[1] ?? "").replace(/\.pdf$/i, "") === record.canonicalId;
+  } catch {
+    return false;
+  }
+}
+
 export async function readPaperRecord(input: {
   workspaceDir: string;
   source: PaperSource;
@@ -197,6 +211,7 @@ export async function findDownloadedPaperRecord(
 
   if (
     !isDownloadedPaperRecord(record) ||
+    !isCompatibleDownloadedPaperRecord(record) ||
     record.source !== input.source ||
     (input.source === "external" && record.articleUrl !== input.articleUrl) ||
     (input.source !== "external" && record.canonicalId !== input.canonicalId)

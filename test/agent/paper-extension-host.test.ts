@@ -300,7 +300,7 @@ test("handleExtensionHostMessage reuses compatible downloaded publisher PDF URLs
         handlingMethod: "browser_session",
         status: "downloaded",
         canonicalId: "10.1126/science.adz8659",
-        pdfUrl: "https://cdn.example.org/science.adz8659.pdf",
+        pdfUrl: "https://www.science.org/doi/epdf/10.1126/science.adz8659",
         downloadPath: existingPdfPath
       }
     });
@@ -326,7 +326,45 @@ test("handleExtensionHostMessage reuses compatible downloaded publisher PDF URLs
     });
     assert.equal(
       JSON.parse(await readFile(recordPath, "utf8")).pdfUrl,
-      "https://cdn.example.org/science.adz8659.pdf"
+      "https://www.science.org/doi/epdf/10.1126/science.adz8659"
+    );
+  } finally {
+    await rm(workspaceDir, { recursive: true, force: true });
+  }
+});
+
+test("handleExtensionHostMessage rejects Science supplementary material PDFs", async () => {
+  const workspaceDir = await createWorkspaceDir();
+  const articleUrl = "https://www.science.org/doi/10.1126/science.adz8659";
+  const sourcePdfPath = path.join(workspaceDir, "inbox", "science.adz8659_sm.pdf");
+
+  try {
+    await writePdf(sourcePdfPath, "%PDF-1.7\nscience supplement pdf\n");
+
+    const response = await handleExtensionHostMessage({
+      workspaceDir,
+      now: () => new Date("2026-04-25T10:30:00.000Z"),
+      message: {
+        type: "register_download",
+        jobId: "job-science-sm",
+        articleUrl,
+        source: "science",
+        downloadPath: sourcePdfPath,
+        pdfUrl:
+          "https://www.science.org/doi/suppl/10.1126/science.adz8659/suppl_file/science.adz8659_sm.pdf"
+      }
+    });
+
+    assert.equal(response.type, "error");
+    assert.equal(response.code, "supplement_not_article");
+    assert.equal(
+      await findDownloadedPaperRecord({
+        workspaceDir,
+        source: "science",
+        canonicalId: "10.1126/science.adz8659",
+        articleUrl
+      }),
+      null
     );
   } finally {
     await rm(workspaceDir, { recursive: true, force: true });

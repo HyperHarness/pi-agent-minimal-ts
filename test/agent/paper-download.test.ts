@@ -1,6 +1,6 @@
 import test from "node:test";
 import assert from "node:assert/strict";
-import { mkdtemp } from "node:fs/promises";
+import { mkdtemp, rm } from "node:fs/promises";
 import os from "node:os";
 import path from "node:path";
 import { PaperBrowserSessionError } from "../../src/agent/browser-session.js";
@@ -42,10 +42,10 @@ test("downloadPaperPdf classifies a missing PDF path as pdf_not_found", async ()
   const error = await captureRejection(() =>
     downloadPaperPdf({
       workspaceDir: process.cwd(),
-      url: "https://www.science.org/doi/10.1126/science.adz8659",
+      url: "https://www.nature.com/content/preview",
       browserSession: {
         openArticlePage: async () => ({
-          finalArticleUrl: "https://www.science.org/doi/10.1126/science.adz8659",
+          finalArticleUrl: "https://www.nature.com/content/preview",
           html: "<html><body>No PDF here</body></html>",
           authorized: true
         })
@@ -123,7 +123,7 @@ test("downloadPaperPdf wraps output directory creation failures as download_fail
       browserSession: {
         openArticlePage: async () => ({
           finalArticleUrl: "https://www.science.org/doi/10.1126/science.adz8659",
-          html: '<html><body><a href="/doi/pdf/10.1126/science.adz8659">PDF</a></body></html>',
+          html: '<html><body><a href="/doi/epdf/10.1126/science.adz8659">PDF</a></body></html>',
           authorized: true
         }),
         downloadPdf: async () => {}
@@ -143,7 +143,7 @@ test("downloadPaperPdf wraps PDF download failures as download_failed", async ()
       browserSession: {
         openArticlePage: async () => ({
           finalArticleUrl: "https://www.science.org/doi/10.1126/science.adz8659",
-          html: '<html><body><a href="/doi/pdf/10.1126/science.adz8659">PDF</a></body></html>',
+          html: '<html><body><a href="/doi/epdf/10.1126/science.adz8659">PDF</a></body></html>',
           authorized: true
         }),
         downloadPdf: async () => {
@@ -197,7 +197,7 @@ test("downloadPaperPdf returns output metadata for a successful download", async
     browserSession: {
       openArticlePage: async () => ({
         finalArticleUrl: "https://www.science.org/doi/10.1126/science.adz8659",
-        html: '<html><body><a href="/doi/pdf/10.1126/science.adz8659">PDF</a></body></html>',
+        html: '<html><body><a href="/doi/epdf/10.1126/science.adz8659">PDF</a></body></html>',
         authorized: true
       }),
       openPageForManualLogin: async (url: string) => ({
@@ -220,9 +220,40 @@ test("downloadPaperPdf returns output metadata for a successful download", async
   assert.equal(result.publisher, "science");
   assert.equal(result.articleUrl, "https://www.science.org/doi/10.1126/science.adz8659");
   assert.equal(result.finalArticleUrl, "https://www.science.org/doi/10.1126/science.adz8659");
-  assert.equal(result.finalPdfUrl, "https://www.science.org/doi/pdf/10.1126/science.adz8659");
+  assert.equal(result.finalPdfUrl, "https://www.science.org/doi/epdf/10.1126/science.adz8659");
   assert.equal(downloadedUrl, result.finalPdfUrl);
   assert.equal(downloadedPath, expectedPath);
+});
+
+test("downloadPaperPdf derives the Science article PDF URL when only supplement links are present", async () => {
+  const workspaceDir = await mkdtemp(path.join(os.tmpdir(), "paper-download-"));
+  let downloadedUrl: string | undefined;
+
+  try {
+    const result = await downloadPaperPdf({
+      workspaceDir,
+      url: "https://www.science.org/doi/10.1126/science.adz8659",
+      browserSession: {
+        openArticlePage: async () => ({
+          finalArticleUrl: "https://www.science.org/doi/10.1126/science.adz8659",
+          html:
+            '<html><body><a href="/doi/suppl/10.1126/science.adz8659/suppl_file/science.adz8659_sm.pdf">Supplementary Materials</a></body></html>',
+          authorized: true
+        }),
+        openPageForManualLogin: async (url: string) => ({
+          openedUrl: url
+        }),
+        downloadPdf: async (url) => {
+          downloadedUrl = url;
+        }
+      }
+    });
+
+    assert.equal(result.finalPdfUrl, "https://www.science.org/doi/epdf/10.1126/science.adz8659");
+    assert.equal(downloadedUrl, "https://www.science.org/doi/epdf/10.1126/science.adz8659");
+  } finally {
+    await rm(workspaceDir, { recursive: true, force: true });
+  }
 });
 
 test("downloadPaperPdf derives the APS canonical PDF URL when the article page has no PDF link", async () => {

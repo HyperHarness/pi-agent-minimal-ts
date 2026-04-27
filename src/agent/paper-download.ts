@@ -118,6 +118,11 @@ function resolveFallbackPdfPath(input: {
   publisherId: "science" | "nature" | "aps";
   finalArticleUrl: string;
 }): string | null {
+  if (input.publisherId === "science") {
+    const doi = extractScienceDoi(input.finalArticleUrl);
+    return doi ? `/doi/epdf/${doi}` : null;
+  }
+
   if (input.publisherId !== "aps") {
     return null;
   }

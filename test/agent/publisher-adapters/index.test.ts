@@ -32,11 +32,11 @@ test("getPublisherAdapter selects the aps adapter for aps.org", () => {
 test("resolvePdfPathFromHtml returns a science PDF link from a landing page snippet", () => {
   const pdfPath = resolvePdfPathFromHtml("science", `
     <html><body>
-      <a href="/doi/pdf/10.1126/science.adz8659">PDF</a>
+      <a href="/doi/epdf/10.1126/science.adz8659">PDF</a>
     </body></html>
   `);
 
-  assert.equal(pdfPath, "/doi/pdf/10.1126/science.adz8659");
+  assert.equal(pdfPath, "/doi/epdf/10.1126/science.adz8659");
 });
 
 test("resolvePdfPathFromHtml returns a nature PDF link from a landing page snippet", () => {

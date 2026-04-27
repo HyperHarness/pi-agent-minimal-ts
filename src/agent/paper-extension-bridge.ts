@@ -18,6 +18,8 @@ export interface PaperExtensionBridge {
   submitJob(job: ExtensionPaperJob): Promise<ExtensionBridgeSubmitResult>;
 }
 
+let queuedJobSequence = 0;
+
 export function createPaperExtensionJob(options: {
   articleUrl: string;
   source: ExtensionPaperSource;
@@ -44,12 +46,16 @@ export function createQueuedPaperExtensionBridge(options: {
   const now = options.now ?? (() => new Date());
   return {
     async submitJob(job) {
+      const recordedAt = now();
+      const queuedJobId = `${job.jobId}-${recordedAt.getTime().toString(36)}-${(
+        queuedJobSequence++
+      ).toString(36)}`;
       const message = "Paper download job queued for the browser extension.";
       await appendPaperDownloadJobEvent({
         workspaceDir: options.workspaceDir,
         event: {
-          jobId: job.jobId,
-          recordedAt: now().toISOString(),
+          jobId: queuedJobId,
+          recordedAt: recordedAt.toISOString(),
           status: "queued",
           articleUrl: job.articleUrl,
           source: job.source,
@@ -63,7 +69,7 @@ export function createQueuedPaperExtensionBridge(options: {
         status: "extension_job_queued",
         source: job.source,
         articleUrl: job.articleUrl,
-        jobId: job.jobId,
+        jobId: queuedJobId,
         message
       };
     }

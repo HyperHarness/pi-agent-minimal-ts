@@ -497,7 +497,7 @@ test("download_paper delegates url inputs to the injected paper manager dependen
     source: "science",
     canonicalId: "10.1126/science.adz8659",
     articleUrl: "https://www.science.org/doi/10.1126/science.adz8659",
-    finalPdfUrl: "https://www.science.org/doi/pdf/10.1126/science.adz8659",
+    finalPdfUrl: "https://www.science.org/doi/epdf/10.1126/science.adz8659",
     path: pdfPath,
     recordPath,
   };
@@ -837,7 +837,7 @@ test("download_paper opens manual fallback when the manager client download is n
             publisher: "science" as const,
             articleUrl: request.url,
             finalArticleUrl: request.url,
-            finalPdfUrl: "https://www.science.org/doi/pdf/10.1126/science.adz8659",
+            finalPdfUrl: "https://www.science.org/doi/epdf/10.1126/science.adz8659",
             path: downloadedPath,
           };
         },

@@ -168,7 +168,7 @@ test("paper browser manager client forwards openArticle and downloadPaperPdf req
           publisher: "science",
           articleUrl: "https://www.science.org/doi/10.1126/science.adz8659",
           finalArticleUrl: "https://www.science.org/doi/10.1126/science.adz8659",
-          finalPdfUrl: "https://www.science.org/doi/pdf/10.1126/science.adz8659"
+          finalPdfUrl: "https://www.science.org/doi/epdf/10.1126/science.adz8659"
         };
       }
 

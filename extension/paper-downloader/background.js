@@ -2,12 +2,17 @@ const NATIVE_HOST_NAME = "com.pi_agent.paper_downloader";
 const POLL_ALARM_NAME = "pi-agent-paper-download-poll";
 const EXTENSION_INSTANCE_ID = "chrome-main";
 const STORAGE_KEY = "piAgentPaperDownloaderState";
+const QUICK_POLL_INTERVAL_MS = 2000;
+const QUICK_POLL_ACTIVE_MS = 5 * 60 * 1000;
 
 const jobsById = new Map();
 const jobsByTabId = new Map();
 const downloadsById = new Map();
+const openingJobIds = new Set();
 
 let stateReady = hydrateState();
+let quickPollTimer = null;
+let quickPollUntil = 0;
 
 function logAsyncError(label, error) {
   console.warn(`Pi Agent ${label} failed`, error);
@@ -89,34 +94,43 @@ async function reportJobStatus(job, status, message) {
 }
 
 async function openQueuedJob(job) {
-  if (!job || jobsById.has(job.jobId)) {
+  if (!job || jobsById.has(job.jobId) || openingJobIds.has(job.jobId)) {
     return;
   }
 
-  const tab = await chrome.tabs.create({ url: job.articleUrl, active: true });
-  const trackedJob = {
-    ...job,
-    tabId: tab.id,
-    automaticDownloadAttempted: false,
-    pdfUrl: undefined
-  };
-  jobsById.set(job.jobId, trackedJob);
-  if (typeof tab.id === "number") {
-    jobsByTabId.set(tab.id, trackedJob);
-  }
-  await persistState();
-  await reportJobStatus(trackedJob, "opened_in_browser", "Opened in browser tab.");
-
-  if (trackedJob.source === "external") {
-    if (urlPathEndsWithPdf(trackedJob.articleUrl)) {
-      await startAutomaticDownload(trackedJob, trackedJob.articleUrl);
+  openingJobIds.add(job.jobId);
+  try {
+    if (jobsById.has(job.jobId)) {
       return;
     }
 
-    await enterManualDownloadMode(
-      trackedJob,
-      "External paper page opened. Download the PDF manually from this tab."
-    );
+    const tab = await chrome.tabs.create({ url: job.articleUrl, active: true });
+    const trackedJob = {
+      ...job,
+      tabId: tab.id,
+      automaticDownloadAttempted: false,
+      pdfUrl: undefined
+    };
+    jobsById.set(job.jobId, trackedJob);
+    if (typeof tab.id === "number") {
+      jobsByTabId.set(tab.id, trackedJob);
+    }
+    await persistState();
+    await reportJobStatus(trackedJob, "opened_in_browser", "Opened in browser tab.");
+
+    if (trackedJob.source === "external") {
+      if (urlPathEndsWithPdf(trackedJob.articleUrl)) {
+        await startAutomaticDownload(trackedJob, trackedJob.articleUrl);
+        return;
+      }
+
+      await enterManualDownloadMode(
+        trackedJob,
+        "External paper page opened. Download the PDF manually from this tab."
+      );
+    }
+  } finally {
+    openingJobIds.delete(job.jobId);
   }
 }
 
@@ -135,6 +149,27 @@ async function pollJobs() {
       await openQueuedJob(job);
     }
   });
+}
+
+function scheduleQuickPoll(extendWindow = true) {
+  if (extendWindow) {
+    quickPollUntil = Math.max(quickPollUntil, Date.now() + QUICK_POLL_ACTIVE_MS);
+  }
+  if (quickPollTimer !== null) {
+    return;
+  }
+
+  quickPollTimer = setTimeout(async () => {
+    quickPollTimer = null;
+    await pollJobs().catch((error) => logAsyncError("quick poll", error));
+    if (Date.now() < quickPollUntil) {
+      scheduleQuickPoll(false);
+    }
+  }, QUICK_POLL_INTERVAL_MS);
+
+  if (quickPollTimer && typeof quickPollTimer.unref === "function") {
+    quickPollTimer.unref();
+  }
 }
 
 async function enterManualDownloadMode(job, message) {
@@ -208,6 +243,18 @@ async function startAutomaticDownload(job, pdfUrl) {
   }
 }
 
+async function enterPublisherManualDownloadMode(job, pdfUrl) {
+  job.automaticDownloadAttempted = true;
+  job.manualDownloadMode = true;
+  job.pdfUrl = pdfUrl;
+  await persistState();
+  await reportJobStatus(job, "pdf_candidate_found", "Found a direct PDF candidate.");
+  await enterManualDownloadMode(
+    job,
+    "Science article page opened. Download the article PDF manually from this tab."
+  );
+}
+
 async function handlePaperPageClassified(message, sender) {
   await withHydratedState(async () => {
     const tabId = sender && sender.tab ? sender.tab.id : undefined;
@@ -224,6 +271,11 @@ async function handlePaperPageClassified(message, sender) {
     await reportJobStatus(job, "page_classified", message.message);
 
     if (message.pdfUrl) {
+      if (job.source === "science") {
+        await enterPublisherManualDownloadMode(job, message.pdfUrl);
+        return;
+      }
+
       await startAutomaticDownload(job, message.pdfUrl);
       return;
     }
@@ -244,6 +296,34 @@ function urlPathEndsWithPdf(value) {
   }
 }
 
+function basenameFromPathOrUrl(value) {
+  if (!value) {
+    return "";
+  }
+
+  try {
+    return decodeURIComponent(new URL(value).pathname).split("/").pop() || "";
+  } catch (error) {
+    const withoutQuery = String(value).split(/[?#]/, 1)[0];
+    const parts = withoutQuery.split(/[\\/]/);
+    try {
+      return decodeURIComponent(parts[parts.length - 1] || "");
+    } catch (decodeError) {
+      return parts[parts.length - 1] || "";
+    }
+  }
+}
+
+function isScienceSupplementDownload(downloadItem, job) {
+  if (job.source !== "science") {
+    return false;
+  }
+
+  return [downloadItem.filename, downloadItem.url, downloadItem.finalUrl, job.pdfUrl].some((value) =>
+    basenameFromPathOrUrl(value).toLowerCase().endsWith("sm.pdf")
+  );
+}
+
 function downloadLooksPdfLike(downloadItem, job) {
   const filename = String(downloadItem.filename || "").toLowerCase();
   const mime = String(downloadItem.mime || "").toLowerCase();
@@ -259,6 +339,33 @@ function downloadLooksPdfLike(downloadItem, job) {
   );
 }
 
+function urlHostnameMatches(value, hostname) {
+  if (!value) {
+    return false;
+  }
+
+  try {
+    const parsed = new URL(value);
+    return parsed.hostname === hostname || parsed.hostname.endsWith(`.${hostname}`);
+  } catch (error) {
+    return false;
+  }
+}
+
+function downloadLooksLikeScienceManualArticleDownload(downloadItem, job) {
+  if (job.source !== "science" || !job.manualDownloadMode || !downloadLooksPdfLike(downloadItem, job)) {
+    return false;
+  }
+
+  if (isScienceSupplementDownload(downloadItem, job)) {
+    return false;
+  }
+
+  return [downloadItem.url, downloadItem.finalUrl, downloadItem.referrer].some((value) =>
+    urlHostnameMatches(value, "science.org")
+  );
+}
+
 function downloadBelongsToJob(downloadItem, job) {
   const referrer = downloadItem.referrer || "";
   const url = downloadItem.url || "";
@@ -268,7 +375,8 @@ function downloadBelongsToJob(downloadItem, job) {
   return (
     (typeof tabId === "number" && typeof job.tabId === "number" && tabId === job.tabId) ||
     (!!job.pdfUrl && (url === job.pdfUrl || finalUrl === job.pdfUrl)) ||
-    (referrer === job.articleUrl && downloadLooksPdfLike(downloadItem, job))
+    (referrer === job.articleUrl && downloadLooksPdfLike(downloadItem, job)) ||
+    downloadLooksLikeScienceManualArticleDownload(downloadItem, job)
   );
 }
 
@@ -278,6 +386,10 @@ async function associateDownloadItemWithJob(downloadItem) {
   }
 
   for (const job of jobsById.values()) {
+    if (isScienceSupplementDownload(downloadItem, job)) {
+      continue;
+    }
+
     if (!downloadBelongsToJob(downloadItem, job) || !downloadLooksPdfLike(downloadItem, job)) {
       continue;
     }
@@ -339,6 +451,20 @@ async function registerCompletedDownload(downloadId) {
       return;
     }
 
+    if (isScienceSupplementDownload(item, trackedDownload)) {
+      downloadsById.delete(downloadId);
+      await persistState();
+      const job = jobsById.get(trackedDownload.jobId);
+      if (job) {
+        await reportJobStatus(
+          job,
+          "awaiting_user_manual_download",
+          "Ignored a Science supplementary material download; waiting for the article PDF."
+        );
+      }
+      return;
+    }
+
     const response = await sendNativeMessage({
       type: "register_download",
       jobId: trackedDownload.jobId,
@@ -366,18 +492,21 @@ async function registerCompletedDownload(downloadId) {
 }
 
 chrome.runtime.onInstalled.addListener(() => {
-  chrome.alarms.create(POLL_ALARM_NAME, { periodInMinutes: 1 });
+  chrome.alarms.create(POLL_ALARM_NAME, { delayInMinutes: 0.1, periodInMinutes: 1 });
+  scheduleQuickPoll();
   void pollJobs().catch((error) => logAsyncError("install poll", error));
 });
 
 chrome.runtime.onStartup.addListener(() => {
   stateReady = hydrateState();
-  chrome.alarms.create(POLL_ALARM_NAME, { periodInMinutes: 1 });
+  chrome.alarms.create(POLL_ALARM_NAME, { delayInMinutes: 0.1, periodInMinutes: 1 });
+  scheduleQuickPoll();
   void pollJobs().catch((error) => logAsyncError("startup poll", error));
 });
 
 chrome.alarms.onAlarm.addListener((alarm) => {
   if (alarm.name === POLL_ALARM_NAME) {
+    scheduleQuickPoll();
     void pollJobs().catch((error) => logAsyncError("alarm poll", error));
   }
 });
@@ -407,4 +536,6 @@ chrome.downloads.onChanged.addListener((delta) => {
   }
 });
 
+chrome.alarms.create(POLL_ALARM_NAME, { delayInMinutes: 0.1, periodInMinutes: 1 });
+scheduleQuickPoll();
 void pollJobs().catch((error) => logAsyncError("initial poll", error));

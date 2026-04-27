@@ -381,7 +381,7 @@ test("downloadPaper skips a provided bridge for existing downloaded publisher re
         handlingMethod: "browser_session",
         status: "downloaded",
         canonicalId: "10.1126/science.adz8659",
-        pdfUrl: "https://www.science.org/doi/pdf/10.1126/science.adz8659",
+        pdfUrl: "https://www.science.org/doi/epdf/10.1126/science.adz8659",
         downloadPath: pdfPath
       })}\n`,
       "utf8"
@@ -404,7 +404,7 @@ test("downloadPaper skips a provided bridge for existing downloaded publisher re
       source: "science",
       canonicalId: "10.1126/science.adz8659",
       articleUrl,
-      finalPdfUrl: "https://www.science.org/doi/pdf/10.1126/science.adz8659",
+      finalPdfUrl: "https://www.science.org/doi/epdf/10.1126/science.adz8659",
       path: pdfPath,
       recordPath,
       recordedAt: "2026-04-25T10:00:00.000Z"
@@ -490,18 +490,19 @@ test("createQueuedPaperExtensionBridge appends queued job events", async () => {
 
     const result = await bridge.submitJob(job);
     const jobsPath = path.join(workspaceDir, ".browser-profile", "paper-download-jobs.jsonl");
+    assert.match(result.jobId, new RegExp(`^${expectedJobId("aps", articleUrl)}-[a-z0-9]+-[a-z0-9]+$`));
 
     assert.deepEqual(result, {
       status: "extension_job_queued",
       source: "aps",
       articleUrl,
-      jobId: expectedJobId("aps", articleUrl),
+      jobId: result.jobId,
       message: "Paper download job queued for the browser extension."
     });
     assert.equal(
       await readFile(jobsPath, "utf8"),
       `${JSON.stringify({
-        jobId: expectedJobId("aps", articleUrl),
+        jobId: result.jobId,
         recordedAt: "2026-04-25T04:00:00.000Z",
         status: "queued",
         articleUrl,
@@ -511,6 +512,31 @@ test("createQueuedPaperExtensionBridge appends queued job events", async () => {
         message: "Paper download job queued for the browser extension."
       })}\n`
     );
+  } finally {
+    await rm(workspaceDir, { recursive: true, force: true });
+  }
+});
+
+test("createQueuedPaperExtensionBridge gives repeated URL submissions distinct job ids", async () => {
+  const workspaceDir = await mkdtemp(path.join(os.tmpdir(), "paper-manager-extension-"));
+  const articleUrl = "https://www.science.org/doi/10.1126/science.adz8659";
+
+  try {
+    const job = createPaperExtensionJob({
+      articleUrl,
+      source: "science"
+    });
+    const bridge = createQueuedPaperExtensionBridge({
+      workspaceDir,
+      now: () => new Date("2026-04-25T04:00:00.000Z")
+    });
+
+    const first = await bridge.submitJob(job);
+    const second = await bridge.submitJob(job);
+
+    assert.notEqual(first.jobId, second.jobId);
+    assert.ok(first.jobId.startsWith(`${expectedJobId("science", articleUrl)}-`));
+    assert.ok(second.jobId.startsWith(`${expectedJobId("science", articleUrl)}-`));
   } finally {
     await rm(workspaceDir, { recursive: true, force: true });
   }

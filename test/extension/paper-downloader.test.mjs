@@ -47,6 +47,7 @@ function createFakeChrome(options = {}) {
   const sentTabMessages = [];
   const downloadedRequests = [];
   const nativeMessages = [];
+  const alarmCreates = [];
   const storage = structuredClone(options.storage ?? {});
   const events = {
     onInstalled: createEvent(),
@@ -81,10 +82,15 @@ function createFakeChrome(options = {}) {
     },
     alarms: {
       onAlarm: events.onAlarm,
-      create() {}
+      create(name, options) {
+        alarmCreates.push({ name, options });
+      }
     },
     tabs: {
       async create(input) {
+        if (options.beforeTabCreateResolve) {
+          await options.beforeTabCreateResolve();
+        }
         const tab = { id: nextTabId++, ...input };
         createdTabs.push(tab);
         return tab;
@@ -160,6 +166,7 @@ function createFakeChrome(options = {}) {
     sentTabMessages,
     downloadedRequests,
     nativeMessages,
+    alarmCreates,
     storage
   };
 }
@@ -385,10 +392,12 @@ test("publisher helpers extract Nature, Science, and APS PDF candidates", () => 
 
   assert.equal(
     findSciencePdfCandidate({
-      document: doc('<a href="/doi/pdf/10.1126/science.adz8659">PDF</a>'),
+      document: doc(
+        '<a href="/doi/suppl/10.1126/science.adz8659/suppl_file/science.adz8659_sm.pdf">Supplementary Materials</a>'
+      ),
       baseUrl: "https://www.science.org/doi/10.1126/science.adz8659"
     }),
-    "https://www.science.org/doi/pdf/10.1126/science.adz8659"
+    "https://www.science.org/doi/epdf/10.1126/science.adz8659"
   );
 
   assert.equal(
@@ -405,7 +414,7 @@ test("manifest declares required MV3 extension shell fields", async () => {
 
   assert.equal(manifest.manifest_version, 3);
   assert.equal(manifest.name, "Pi Agent Paper Downloader");
-  assert.equal(manifest.version, "0.1.2");
+  assert.equal(manifest.version, "0.1.5");
 
   for (const permission of [
     "activeTab",
@@ -551,6 +560,107 @@ test("background asks the article tab to start publisher PDF downloads before us
   assert.deepEqual(fakeChrome.removedTabs, [100]);
 });
 
+test("background opens Science pages for manual download and monitors the result", async () => {
+  const job = {
+    jobId: "job-science-manual",
+    articleUrl: "https://www.science.org/doi/10.1126/science.adz8659",
+    source: "science",
+    title: "Science paper"
+  };
+  const pdfUrl = "https://www.science.org/doi/epdf/10.1126/science.adz8659";
+  const fakeChrome = createFakeChrome({
+    jobs: [job],
+    downloadItems: {
+      602: {
+        id: 602,
+        tabId: 100,
+        filename: "C:\\Downloads\\science-paper.pdf",
+        url: pdfUrl,
+        mime: "application/pdf"
+      }
+    }
+  });
+
+  await importBackground(fakeChrome);
+  fakeChrome.events.onMessage.emit(
+    {
+      type: "paper_page_classified",
+      status: "page_classified",
+      pdfUrl
+    },
+    { tab: { id: 100 } }
+  );
+  await flushAsyncWork();
+
+  assert.deepEqual(fakeChrome.createdTabs.map((tab) => tab.url), [job.articleUrl]);
+  assert.deepEqual(fakeChrome.sentTabMessages, []);
+  assert.deepEqual(fakeChrome.downloadedRequests, []);
+  assert.equal(statusMessagesOf(fakeChrome, "pdf_candidate_found").length, 1);
+  assert.equal(statusMessagesOf(fakeChrome, "awaiting_user_manual_download").length, 1);
+  assert.equal(fakeChrome.storage.piAgentPaperDownloaderState.jobs[job.jobId].pdfUrl, pdfUrl);
+
+  fakeChrome.events.onCreated.emit({
+    id: 602,
+    tabId: 100,
+    filename: "C:\\Downloads\\science-paper.pdf",
+    url: pdfUrl,
+    mime: "application/pdf"
+  });
+  await flushAsyncWork();
+  fakeChrome.events.onChanged.emit({ id: 602, state: { current: "complete" } });
+  await flushAsyncWork();
+
+  assert.equal(statusMessagesOf(fakeChrome, "manual_download_observed").length, 1);
+  assert.equal(messagesOf(fakeChrome, "register_download")[0].pdfUrl, pdfUrl);
+  assert.deepEqual(fakeChrome.removedTabs, [100]);
+});
+
+test("background associates Science manual downloads by publisher URL when tab metadata is missing", async () => {
+  const job = {
+    jobId: "job-science-url-manual",
+    articleUrl: "https://www.science.org/doi/10.1126/science.adz8659",
+    source: "science"
+  };
+  const pdfUrl = "https://www.science.org/doi/epdf/10.1126/science.adz8659";
+  const fakeChrome = createFakeChrome({
+    jobs: [job],
+    downloadItems: {
+      603: {
+        id: 603,
+        filename: "C:\\Downloads\\science.adz8659.pdf",
+        url: pdfUrl,
+        finalUrl: pdfUrl,
+        mime: "application/pdf"
+      }
+    }
+  });
+
+  await importBackground(fakeChrome);
+  fakeChrome.events.onMessage.emit(
+    {
+      type: "paper_page_classified",
+      status: "page_classified",
+      pdfUrl
+    },
+    { tab: { id: 100 } }
+  );
+  await flushAsyncWork();
+  fakeChrome.events.onCreated.emit({
+    id: 603,
+    filename: "C:\\Downloads\\science.adz8659.pdf",
+    url: pdfUrl,
+    finalUrl: pdfUrl,
+    mime: "application/pdf"
+  });
+  await flushAsyncWork();
+  fakeChrome.events.onChanged.emit({ id: 603, state: { current: "complete" } });
+  await flushAsyncWork();
+
+  assert.equal(statusMessagesOf(fakeChrome, "manual_download_observed").length, 1);
+  assert.equal(messagesOf(fakeChrome, "register_download")[0].downloadPath, "C:\\Downloads\\science.adz8659.pdf");
+  assert.equal(messagesOf(fakeChrome, "register_download")[0].pdfUrl, pdfUrl);
+});
+
 test("background starts automatic download for external direct PDF jobs", async () => {
   const job = {
     jobId: "job-external-pdf",
@@ -623,7 +733,7 @@ test("background keeps tab open when native host does not register completed dow
       501: {
         id: 501,
         filename: "C:\\Downloads\\science.pdf",
-        url: "https://www.science.org/doi/pdf/10.1126/science.adz8659",
+        url: "https://www.science.org/doi/epdf/10.1126/science.adz8659",
         mime: "application/pdf"
       }
     },
@@ -652,7 +762,7 @@ test("background keeps tab open when native host does not register completed dow
     {
       type: "paper_page_classified",
       status: "page_classified",
-      pdfUrl: "https://www.science.org/doi/pdf/10.1126/science.adz8659"
+      pdfUrl: "https://www.science.org/doi/epdf/10.1126/science.adz8659"
     },
     { tab: { id: 100 } }
   );
@@ -739,6 +849,42 @@ test("background registers manual PDF downloads from the tracked article tab", a
   assert.deepEqual(fakeChrome.removedTabs, [100]);
 });
 
+test("background ignores Science supplementary material downloads", async () => {
+  const job = {
+    jobId: "job-science-sm",
+    articleUrl: "https://www.science.org/doi/10.1126/science.adz8659",
+    source: "science"
+  };
+  const fakeChrome = createFakeChrome({
+    jobs: [job],
+    downloadItems: {
+      780: {
+        id: 780,
+        tabId: 100,
+        filename: "C:\\Downloads\\science.adz8659_sm.pdf",
+        url: "https://www.science.org/doi/suppl/10.1126/science.adz8659/suppl_file/science.adz8659_sm.pdf",
+        mime: "application/pdf"
+      }
+    }
+  });
+
+  await importBackground(fakeChrome);
+  fakeChrome.events.onCreated.emit({
+    id: 780,
+    tabId: 100,
+    filename: "C:\\Downloads\\science.adz8659_sm.pdf",
+    url: "https://www.science.org/doi/suppl/10.1126/science.adz8659/suppl_file/science.adz8659_sm.pdf",
+    mime: "application/pdf"
+  });
+  await flushAsyncWork();
+  fakeChrome.events.onChanged.emit({ id: 780, state: { current: "complete" } });
+  await flushAsyncWork();
+
+  assert.equal(messagesOf(fakeChrome, "register_download").length, 0);
+  assert.equal(statusMessagesOf(fakeChrome, "manual_download_observed").length, 0);
+  assert.deepEqual(fakeChrome.removedTabs, []);
+});
+
 test("background registers completed downloads even when the created event was missed", async () => {
   const job = {
     jobId: "job-complete-first",
@@ -806,4 +952,31 @@ test("background hydrates persisted jobs before polling and avoids duplicate tab
   assert.deepEqual(fakeChrome.createdTabs, []);
   assert.equal(messagesOf(fakeChrome, "poll_jobs").length, 1);
   assert.deepEqual(fakeChrome.storage.piAgentPaperDownloaderState.jobs["job-persisted"], persistedJob);
+});
+
+test("background does not open duplicate tabs when polls overlap", async () => {
+  let releaseTabCreate;
+  const tabCreateGate = new Promise((resolve) => {
+    releaseTabCreate = resolve;
+  });
+  const job = {
+    jobId: "job-overlap",
+    articleUrl: "https://journals.aps.org/prapplied/abstract/10.1103/4ssz-6ctb",
+    source: "aps"
+  };
+  const fakeChrome = createFakeChrome({
+    jobs: [job],
+    beforeTabCreateResolve: () => tabCreateGate
+  });
+
+  await importBackground(fakeChrome);
+  fakeChrome.events.onAlarm.emit({ name: "pi-agent-paper-download-poll" });
+  await flushAsyncWork();
+
+  releaseTabCreate();
+  await flushAsyncWork();
+  await flushAsyncWork();
+
+  assert.equal(messagesOf(fakeChrome, "poll_jobs").length >= 2, true);
+  assert.deepEqual(fakeChrome.createdTabs.map((tab) => tab.url), [job.articleUrl]);
 });
