@@ -349,6 +349,61 @@ test("findDownloadedPaperRecord returns downloaded records only when the PDF sti
   }
 });
 
+test("findDownloadedPaperRecord resolves WSL UNC paths and reuses supported records by canonical id", async () => {
+  const workspaceDir = await mkdtemp(path.join(os.tmpdir(), "paper-store-"));
+  const articleUrl = "https://journals.aps.org/prapplied/abstract/10.1103/4ssz-6ctb";
+  const requestedPdfUrl = "https://journals.aps.org/prapplied/pdf/10.1103/4ssz-6ctb";
+  const pdfPath = resolvePaperPdfPath({
+    workspaceDir,
+    source: "aps",
+    canonicalId: "10.1103/4ssz-6ctb"
+  });
+  const uncDownloadPath = `\\\\wsl.localhost\\Ubuntu-24.04${pdfPath.replace(/\//g, "\\")}`;
+
+  try {
+    await mkdir(path.dirname(pdfPath), { recursive: true });
+    await writeFile(pdfPath, "%PDF-1.7\naps pdf\n", "utf8");
+    const recordPath = await writePaperRecord({
+      workspaceDir,
+      record: {
+        source: "aps",
+        articleUrl,
+        recordedAt: "2026-04-25T10:00:00.000Z",
+        handlingMethod: "browser_session",
+        status: "downloaded",
+        canonicalId: "10.1103/4ssz-6ctb",
+        pdfUrl: requestedPdfUrl,
+        downloadPath: uncDownloadPath
+      }
+    });
+
+    assert.deepEqual(
+      await findDownloadedPaperRecord({
+        workspaceDir,
+        source: "aps",
+        canonicalId: "10.1103/4ssz-6ctb",
+        articleUrl: requestedPdfUrl
+      }),
+      {
+        record: {
+          source: "aps",
+          articleUrl,
+          recordedAt: "2026-04-25T10:00:00.000Z",
+          handlingMethod: "browser_session",
+          status: "downloaded",
+          canonicalId: "10.1103/4ssz-6ctb",
+          pdfUrl: requestedPdfUrl,
+          downloadPath: uncDownloadPath
+        },
+        recordPath,
+        downloadPath: pdfPath
+      }
+    );
+  } finally {
+    await rm(workspaceDir, { recursive: true, force: true });
+  }
+});
+
 test("findDownloadedPaperRecord ignores manual fallback records and missing PDFs", async () => {
   const workspaceDir = await mkdtemp(path.join(os.tmpdir(), "paper-store-"));
   const missingPdfPath = resolvePaperPdfPath({

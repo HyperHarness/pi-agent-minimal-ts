@@ -1,4 +1,38 @@
 (function runPiAgentPaperDownloader(root) {
+  function triggerBrowserDownload(pdfUrl) {
+    var anchor = root.document.createElement("a");
+    anchor.href = pdfUrl;
+    anchor.download = "";
+    anchor.rel = "noopener";
+    anchor.style.display = "none";
+    root.document.documentElement.appendChild(anchor);
+    anchor.click();
+    anchor.remove();
+  }
+
+  if (root.chrome && root.chrome.runtime && root.chrome.runtime.onMessage) {
+    root.chrome.runtime.onMessage.addListener(function onPiAgentPaperMessage(
+      message,
+      _sender,
+      sendResponse
+    ) {
+      if (!message || message.type !== "paper_download_pdf" || !message.pdfUrl) {
+        return false;
+      }
+
+      try {
+        triggerBrowserDownload(message.pdfUrl);
+        sendResponse({ ok: true });
+      } catch (error) {
+        sendResponse({
+          ok: false,
+          message: error && error.message ? error.message : "Unable to trigger PDF download."
+        });
+      }
+      return false;
+    });
+  }
+
   function choosePublisherHelper(hostname) {
     var normalizedHostname = String(hostname || "").toLowerCase();
     if (normalizedHostname === "www.nature.com" || normalizedHostname === "nature.com") {

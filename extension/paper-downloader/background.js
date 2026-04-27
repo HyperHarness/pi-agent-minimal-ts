@@ -145,6 +145,23 @@ async function enterManualDownloadMode(job, message) {
   );
 }
 
+async function triggerDownloadFromArticleTab(job, pdfUrl) {
+  if (typeof job.tabId !== "number" || job.source === "external") {
+    return false;
+  }
+
+  try {
+    const response = await chrome.tabs.sendMessage(job.tabId, {
+      type: "paper_download_pdf",
+      pdfUrl
+    });
+    return !!(response && response.ok);
+  } catch (error) {
+    console.warn("Pi Agent tab download trigger failed", error);
+    return false;
+  }
+}
+
 async function startAutomaticDownload(job, pdfUrl) {
   if (job.automaticDownloadAttempted) {
     return;
@@ -156,6 +173,15 @@ async function startAutomaticDownload(job, pdfUrl) {
   await reportJobStatus(job, "pdf_candidate_found", "Found a direct PDF candidate.");
 
   try {
+    if (await triggerDownloadFromArticleTab(job, pdfUrl)) {
+      await reportJobStatus(
+        job,
+        "automatic_download_started",
+        "Started automatic PDF download from the article tab."
+      );
+      return;
+    }
+
     const downloadId = await chrome.downloads.download({
       url: pdfUrl,
       conflictAction: "uniquify",
@@ -246,31 +272,37 @@ function downloadBelongsToJob(downloadItem, job) {
   );
 }
 
+async function associateDownloadItemWithJob(downloadItem) {
+  if (!downloadItem || downloadsById.has(downloadItem.id)) {
+    return false;
+  }
+
+  for (const job of jobsById.values()) {
+    if (!downloadBelongsToJob(downloadItem, job) || !downloadLooksPdfLike(downloadItem, job)) {
+      continue;
+    }
+
+    const candidatePdfUrl = job.pdfUrl || downloadItem.finalUrl || downloadItem.url;
+    downloadsById.set(downloadItem.id, {
+      jobId: job.jobId,
+      articleUrl: job.articleUrl,
+      source: job.source,
+      title: job.title,
+      tabId: job.tabId,
+      autoClose: job.autoClose,
+      ...(candidatePdfUrl ? { pdfUrl: candidatePdfUrl } : {})
+    });
+    await persistState();
+    await reportJobStatus(job, "manual_download_observed", "Observed a browser PDF download.");
+    return true;
+  }
+
+  return false;
+}
+
 async function associateManualDownload(downloadItem) {
   await withHydratedState(async () => {
-    if (!downloadItem || downloadsById.has(downloadItem.id)) {
-      return;
-    }
-
-    for (const job of jobsById.values()) {
-      if (!downloadBelongsToJob(downloadItem, job) || !downloadLooksPdfLike(downloadItem, job)) {
-        continue;
-      }
-
-      const candidatePdfUrl = job.pdfUrl || downloadItem.finalUrl || downloadItem.url;
-      downloadsById.set(downloadItem.id, {
-        jobId: job.jobId,
-        articleUrl: job.articleUrl,
-        source: job.source,
-        title: job.title,
-        tabId: job.tabId,
-        autoClose: job.autoClose,
-        ...(candidatePdfUrl ? { pdfUrl: candidatePdfUrl } : {})
-      });
-      await persistState();
-      await reportJobStatus(job, "manual_download_observed", "Observed a browser PDF download.");
-      return;
-    }
+    await associateDownloadItemWithJob(downloadItem);
   });
 }
 
@@ -293,13 +325,17 @@ async function closeCompletedJobTab(trackedDownload) {
 
 async function registerCompletedDownload(downloadId) {
   await withHydratedState(async () => {
-    const trackedDownload = downloadsById.get(downloadId);
-    if (!trackedDownload) {
+    const item = await findDownloadItem(downloadId);
+    if (!item || !item.filename) {
       return;
     }
 
-    const item = await findDownloadItem(downloadId);
-    if (!item || !item.filename) {
+    let trackedDownload = downloadsById.get(downloadId);
+    if (!trackedDownload) {
+      await associateDownloadItemWithJob(item);
+      trackedDownload = downloadsById.get(downloadId);
+    }
+    if (!trackedDownload) {
       return;
     }
 

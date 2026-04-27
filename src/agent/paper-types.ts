@@ -70,7 +70,7 @@ type DownloadedPublisherPaperRecord = {
   source: SupportedPaperSource;
   articleUrl: string;
   recordedAt: string;
-  handlingMethod: "browser_session";
+  handlingMethod: "browser_session" | "direct_http";
   status: "downloaded";
   canonicalId: string;
   pdfUrl: string;

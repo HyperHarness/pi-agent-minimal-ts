@@ -44,6 +44,7 @@ function createFakeChrome(options = {}) {
   let nextTabId = 100;
   const createdTabs = [];
   const removedTabs = [];
+  const sentTabMessages = [];
   const downloadedRequests = [];
   const nativeMessages = [];
   const storage = structuredClone(options.storage ?? {});
@@ -90,6 +91,13 @@ function createFakeChrome(options = {}) {
       },
       async remove(tabId) {
         removedTabs.push(tabId);
+      },
+      async sendMessage(tabId, message) {
+        sentTabMessages.push({ tabId, message });
+        if (options.tabMessageHandler) {
+          return options.tabMessageHandler(tabId, message);
+        }
+        return { ok: false };
       }
     },
     downloads: {
@@ -149,6 +157,7 @@ function createFakeChrome(options = {}) {
     events,
     createdTabs,
     removedTabs,
+    sentTabMessages,
     downloadedRequests,
     nativeMessages,
     storage
@@ -484,6 +493,64 @@ test("background automatic download registration payload includes pdfUrl and clo
   });
 });
 
+test("background asks the article tab to start publisher PDF downloads before using downloads API", async () => {
+  const job = {
+    jobId: "job-aps-tab-download",
+    articleUrl: "https://journals.aps.org/prapplied/abstract/10.1103/4ssz-6ctb",
+    source: "aps",
+    title: "APS open paper"
+  };
+  const pdfUrl = "https://journals.aps.org/prapplied/pdf/10.1103/4ssz-6ctb";
+  const fakeChrome = createFakeChrome({
+    jobs: [job],
+    tabMessageHandler: () => ({ ok: true }),
+    downloadItems: {
+      601: {
+        id: 601,
+        tabId: 100,
+        filename: "C:\\Downloads\\aps-paper.pdf",
+        url: pdfUrl,
+        mime: "application/pdf"
+      }
+    }
+  });
+
+  await importBackground(fakeChrome);
+  fakeChrome.events.onMessage.emit(
+    {
+      type: "paper_page_classified",
+      status: "page_classified",
+      pdfUrl
+    },
+    { tab: { id: 100 } }
+  );
+  await flushAsyncWork();
+  fakeChrome.events.onCreated.emit({
+    id: 601,
+    tabId: 100,
+    filename: "C:\\Downloads\\aps-paper.pdf",
+    url: pdfUrl,
+    mime: "application/pdf"
+  });
+  await flushAsyncWork();
+  fakeChrome.events.onChanged.emit({ id: 601, state: { current: "complete" } });
+  await flushAsyncWork();
+
+  assert.deepEqual(fakeChrome.sentTabMessages, [
+    {
+      tabId: 100,
+      message: {
+        type: "paper_download_pdf",
+        pdfUrl
+      }
+    }
+  ]);
+  assert.deepEqual(fakeChrome.downloadedRequests, []);
+  assert.equal(statusMessagesOf(fakeChrome, "automatic_download_started").length, 1);
+  assert.equal(messagesOf(fakeChrome, "register_download")[0].pdfUrl, pdfUrl);
+  assert.deepEqual(fakeChrome.removedTabs, [100]);
+});
+
 test("background starts automatic download for external direct PDF jobs", async () => {
   const job = {
     jobId: "job-external-pdf",
@@ -669,6 +736,42 @@ test("background registers manual PDF downloads from the tracked article tab", a
   assert.equal(statusMessagesOf(fakeChrome, "manual_download_observed").length, 1);
   assert.equal(messagesOf(fakeChrome, "register_download").length, 1);
   assert.equal(messagesOf(fakeChrome, "register_download")[0].downloadPath, "C:\\Downloads\\manual-paper.pdf");
+  assert.deepEqual(fakeChrome.removedTabs, [100]);
+});
+
+test("background registers completed downloads even when the created event was missed", async () => {
+  const job = {
+    jobId: "job-complete-first",
+    articleUrl: "https://journals.aps.org/prapplied/abstract/10.1103/4ssz-6ctb",
+    source: "aps"
+  };
+  const fakeChrome = createFakeChrome({
+    jobs: [job],
+    downloadItems: {
+      779: {
+        id: 779,
+        tabId: 100,
+        filename: "C:\\Downloads\\aps-complete-first.pdf",
+        url: "https://journals.aps.org/prapplied/pdf/10.1103/4ssz-6ctb",
+        mime: "application/pdf"
+      }
+    }
+  });
+
+  await importBackground(fakeChrome);
+  fakeChrome.events.onChanged.emit({ id: 779, state: { current: "complete" } });
+  await flushAsyncWork();
+
+  assert.equal(statusMessagesOf(fakeChrome, "manual_download_observed").length, 1);
+  assert.equal(messagesOf(fakeChrome, "register_download").length, 1);
+  assert.equal(
+    messagesOf(fakeChrome, "register_download")[0].downloadPath,
+    "C:\\Downloads\\aps-complete-first.pdf"
+  );
+  assert.equal(
+    messagesOf(fakeChrome, "register_download")[0].pdfUrl,
+    "https://journals.aps.org/prapplied/pdf/10.1103/4ssz-6ctb"
+  );
   assert.deepEqual(fakeChrome.removedTabs, [100]);
 });
 

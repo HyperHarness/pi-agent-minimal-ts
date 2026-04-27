@@ -192,6 +192,39 @@ test("searchPapers includes latest APS metadata results as downloadable paper so
   ]);
 });
 
+test("searchPapers still returns available paper results when optional search providers fail", async () => {
+  const results = await searchPapers({
+    query: "superconducting quantum computing",
+    searchArxivImpl: async () => {
+      throw new Error("arXiv temporarily unavailable");
+    },
+    searchApsPapersImpl: async () => [
+      {
+        title: "Resilient APS Paper",
+        authors: [],
+        summary: "Published in Physical Review Applied.",
+        primarySource: "aps",
+        primaryAction: "authorized_download",
+        sources: [
+          {
+            source: "aps",
+            action: "authorized_download",
+            canonicalId: "10.1103/PhysRevApplied.24.034057",
+            articleUrl: "https://journals.aps.org/prapplied/abstract/10.1103/PhysRevApplied.24.034057"
+          }
+        ]
+      }
+    ],
+    searchWebImpl: async () => {
+      throw new Error("PI_SEARCH_API_URL is not configured.");
+    }
+  });
+
+  assert.equal(results.length, 1);
+  assert.equal(results[0]?.title, "Resilient APS Paper");
+  assert.equal(results[0]?.primarySource, "aps");
+});
+
 test("searchPapers keeps supported hosts classified by hostname even when the path shape is unknown", async () => {
   const results = await searchPapers({
     query: "hostname classified paper",
@@ -467,6 +500,208 @@ test("downloadPaper returns an existing publisher download without opening the b
       path: pdfPath,
       recordPath,
       recordedAt: "2026-04-25T10:00:00.000Z"
+    });
+  } finally {
+    await rm(workspaceDir, { recursive: true, force: true });
+  }
+});
+
+test("downloadPaper returns existing APS downloads for equivalent PDF URLs without re-downloading", async () => {
+  const workspaceDir = await mkdtemp(path.join(os.tmpdir(), "paper-manager-"));
+  const articleUrl = "https://journals.aps.org/prapplied/abstract/10.1103/4ssz-6ctb";
+  const requestedUrl = "https://journals.aps.org/prapplied/pdf/10.1103/4ssz-6ctb";
+  const pdfPath = resolvePaperPdfPath({
+    workspaceDir,
+    source: "aps",
+    canonicalId: "10.1103/4ssz-6ctb"
+  });
+  const recordPath = resolvePaperRecordPath({
+    workspaceDir,
+    source: "aps",
+    canonicalId: "10.1103/4ssz-6ctb",
+    articleUrl
+  });
+  const calls: string[] = [];
+
+  try {
+    await mkdir(path.dirname(pdfPath), { recursive: true });
+    await mkdir(path.dirname(recordPath), { recursive: true });
+    await writeFile(pdfPath, "%PDF-1.7\nexisting aps pdf\n", "utf8");
+    await writeFile(
+      recordPath,
+      `${JSON.stringify(
+        {
+          source: "aps",
+          articleUrl,
+          recordedAt: "2026-04-25T10:00:00.000Z",
+          handlingMethod: "browser_session",
+          status: "downloaded",
+          canonicalId: "10.1103/4ssz-6ctb",
+          pdfUrl: requestedUrl,
+          downloadPath: `\\\\wsl.localhost\\Ubuntu-24.04${pdfPath.replace(/\//g, "\\")}`
+        },
+        null,
+        2
+      )}\n`,
+      "utf8"
+    );
+
+    const result = await downloadPaper({
+      workspaceDir,
+      url: requestedUrl,
+      fetchImpl: async () => {
+        calls.push("fetch");
+        throw new Error("direct fetch should not run for an existing local paper");
+      },
+      extensionBridge: {
+        async submitJob() {
+          calls.push("extension");
+          throw new Error("extension should not run for an existing local paper");
+        }
+      },
+      downloadPublisherPaperImpl: async () => {
+        calls.push("browser");
+        throw new Error("browser fallback should not run for an existing local paper");
+      }
+    });
+
+    assert.deepEqual(calls, []);
+    assert.deepEqual(result, {
+      status: "already_downloaded",
+      source: "aps",
+      canonicalId: "10.1103/4ssz-6ctb",
+      articleUrl,
+      finalPdfUrl: requestedUrl,
+      path: pdfPath,
+      recordPath,
+      recordedAt: "2026-04-25T10:00:00.000Z"
+    });
+  } finally {
+    await rm(workspaceDir, { recursive: true, force: true });
+  }
+});
+
+test("downloadPaper downloads open APS abstract PDFs directly before using the extension bridge", async () => {
+  const workspaceDir = await mkdtemp(path.join(os.tmpdir(), "paper-manager-"));
+  const articleUrl = "https://journals.aps.org/prapplied/abstract/10.1103/4ssz-6ctb";
+  const pdfUrl = "https://journals.aps.org/prapplied/pdf/10.1103/4ssz-6ctb";
+  const pdfBytes = Buffer.from("%PDF-1.7\naps open access\n", "utf8");
+  const fetchCalls: string[] = [];
+
+  try {
+    const result = await downloadPaper({
+      workspaceDir,
+      url: articleUrl,
+      fetchImpl: async (input) => {
+        fetchCalls.push(String(input));
+        return new Response(pdfBytes, {
+          status: 200,
+          headers: {
+            "content-type": "application/pdf"
+          }
+        });
+      },
+      extensionBridge: {
+        async submitJob() {
+          throw new Error("extension bridge should not run for direct APS PDF downloads");
+        }
+      },
+      downloadPublisherPaperImpl: async () => {
+        throw new Error("browser fallback should not run for direct APS PDF downloads");
+      }
+    });
+
+    const expectedPdfPath = resolvePaperPdfPath({
+      workspaceDir,
+      source: "aps",
+      canonicalId: "10.1103/4ssz-6ctb"
+    });
+    const expectedRecordPath = resolvePaperRecordPath({
+      workspaceDir,
+      source: "aps",
+      canonicalId: "10.1103/4ssz-6ctb",
+      articleUrl
+    });
+    const savedRecord = JSON.parse(await readFile(expectedRecordPath, "utf8"));
+
+    assert.deepEqual(fetchCalls, [pdfUrl]);
+    assert.deepEqual(result, {
+      status: "downloaded",
+      source: "aps",
+      canonicalId: "10.1103/4ssz-6ctb",
+      articleUrl,
+      finalPdfUrl: pdfUrl,
+      path: expectedPdfPath,
+      recordPath: expectedRecordPath
+    });
+    assert.equal(await readFile(expectedPdfPath, "utf8"), pdfBytes.toString("utf8"));
+    assert.deepEqual(savedRecord, {
+      source: "aps",
+      articleUrl,
+      recordedAt: savedRecord.recordedAt,
+      handlingMethod: "direct_http",
+      status: "downloaded",
+      canonicalId: "10.1103/4ssz-6ctb",
+      pdfUrl,
+      downloadPath: expectedPdfPath
+    });
+  } finally {
+    await rm(workspaceDir, { recursive: true, force: true });
+  }
+});
+
+test("downloadPaper falls back to the extension bridge when direct APS PDF fetch is not a PDF", async () => {
+  const workspaceDir = await mkdtemp(path.join(os.tmpdir(), "paper-manager-"));
+  const articleUrl = "https://journals.aps.org/prapplied/abstract/10.1103/4ssz-6ctb";
+  const fetchCalls: string[] = [];
+  const submittedJobs: unknown[] = [];
+
+  try {
+    const result = await downloadPaper({
+      workspaceDir,
+      url: articleUrl,
+      fetchImpl: async (input) => {
+        fetchCalls.push(String(input));
+        return new Response("<html>not a pdf</html>", {
+          status: 200,
+          headers: {
+            "content-type": "text/html"
+          }
+        });
+      },
+      extensionBridge: {
+        async submitJob(job) {
+          submittedJobs.push(job);
+          return {
+            status: "extension_job_queued",
+            source: job.source,
+            articleUrl: job.articleUrl,
+            jobId: job.jobId,
+            message: "Paper download job queued for the browser extension."
+          };
+        }
+      },
+      downloadPublisherPaperImpl: async () => {
+        throw new Error("Playwright fallback should not run by default");
+      }
+    });
+
+    assert.deepEqual(fetchCalls, [
+      "https://journals.aps.org/prapplied/pdf/10.1103/4ssz-6ctb"
+    ]);
+    assert.deepEqual(submittedJobs, [
+      {
+        jobId: "paper-aps-6004bdc34f5d",
+        articleUrl,
+        source: "aps"
+      }
+    ]);
+    assert.deepEqual(result, {
+      status: "extension_job_queued",
+      source: "aps",
+      articleUrl,
+      jobId: "paper-aps-6004bdc34f5d",
+      message: "Paper download job queued for the browser extension."
     });
   } finally {
     await rm(workspaceDir, { recursive: true, force: true });

@@ -104,12 +104,35 @@ function resolveIndexedDownloadPath(input: {
   workspaceDir: string;
   downloadPath: string;
 }): string | null {
-  const resolvedPath = path.isAbsolute(input.downloadPath)
-    ? path.resolve(input.downloadPath)
-    : path.resolve(input.workspaceDir, input.downloadPath);
+  const candidates = [input.downloadPath];
+  const drivePathMatch = input.downloadPath.match(/^([A-Za-z]):[\\/](.*)$/);
+  if (drivePathMatch?.[1] && drivePathMatch[2]) {
+    candidates.push(
+      path.posix.join(
+        "/mnt",
+        drivePathMatch[1].toLowerCase(),
+        ...drivePathMatch[2].split(/[\\/]+/).filter(Boolean)
+      )
+    );
+  }
+
+  const uncWslMatch = input.downloadPath.match(/^\\\\(?:wsl\.localhost|wsl\$)\\[^\\]+\\(.+)$/i);
+  if (uncWslMatch?.[1]) {
+    candidates.push(path.posix.join("/", ...uncWslMatch[1].split(/[\\/]+/).filter(Boolean)));
+  }
+
   const papersDir = path.resolve(input.workspaceDir, "downloads", "papers");
 
-  return isPathInsideDirectory(papersDir, resolvedPath) ? resolvedPath : null;
+  for (const candidate of candidates) {
+    const resolvedPath = path.isAbsolute(candidate)
+      ? path.resolve(candidate)
+      : path.resolve(input.workspaceDir, candidate);
+    if (isPathInsideDirectory(papersDir, resolvedPath)) {
+      return resolvedPath;
+    }
+  }
+
+  return null;
 }
 
 function isDownloadedPaperRecord(value: unknown): value is DownloadedPaperRecord {
@@ -175,7 +198,7 @@ export async function findDownloadedPaperRecord(
   if (
     !isDownloadedPaperRecord(record) ||
     record.source !== input.source ||
-    record.articleUrl !== input.articleUrl ||
+    (input.source === "external" && record.articleUrl !== input.articleUrl) ||
     (input.source !== "external" && record.canonicalId !== input.canonicalId)
   ) {
     return null;

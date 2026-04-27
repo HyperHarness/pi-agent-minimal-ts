@@ -643,6 +643,97 @@ function assertPdfBytes(pdfBytes: Buffer): void {
   }
 }
 
+function resolveDirectPublisherPdfUrl(
+  classification: Extract<ClassifiedPaperUrl, { source: SupportedPaperSource }>
+): string | undefined {
+  if (classification.source !== "aps") {
+    return undefined;
+  }
+
+  const articleUrl = new URL(classification.articleUrl);
+  const pdfPathMatch = articleUrl.pathname.match(/^\/([^/]+)\/pdf\/(.+)$/i);
+  if (pdfPathMatch) {
+    articleUrl.search = "";
+    articleUrl.hash = "";
+    return articleUrl.toString();
+  }
+
+  const abstractPathMatch = articleUrl.pathname.match(/^\/([^/]+)\/abstract\/(.+)$/i);
+  if (!abstractPathMatch?.[1] || !abstractPathMatch[2]) {
+    return undefined;
+  }
+
+  articleUrl.pathname = `/${abstractPathMatch[1]}/pdf/${abstractPathMatch[2]}`;
+  articleUrl.search = "";
+  articleUrl.hash = "";
+  return articleUrl.toString();
+}
+
+async function tryDownloadDirectSupportedPublisherPaper(options: {
+  workspaceDir: string;
+  classification: Extract<ClassifiedPaperUrl, { source: SupportedPaperSource }>;
+  fetchImpl?: typeof fetch;
+}): Promise<PaperDownloadResult | null> {
+  const pdfUrl = resolveDirectPublisherPdfUrl(options.classification);
+  if (!pdfUrl) {
+    return null;
+  }
+
+  try {
+    const response = await (options.fetchImpl ?? fetch)(pdfUrl);
+    if (!response.ok) {
+      return null;
+    }
+
+    const pdfBytes = Buffer.from(await response.arrayBuffer());
+    assertPdfBytes(pdfBytes);
+
+    const canonicalId =
+      options.classification.canonicalId ??
+      resolvePublisherCanonicalId({
+        publisher: options.classification.source,
+        url: pdfUrl
+      });
+    if (!canonicalId) {
+      return null;
+    }
+
+    const pdfPath = resolvePaperPdfPath({
+      workspaceDir: options.workspaceDir,
+      source: options.classification.source,
+      canonicalId
+    });
+    await mkdir(path.dirname(pdfPath), { recursive: true });
+    await writeFile(pdfPath, pdfBytes);
+
+    const recordPath = await writePaperRecord({
+      workspaceDir: options.workspaceDir,
+      record: {
+        source: options.classification.source,
+        articleUrl: options.classification.articleUrl,
+        recordedAt: new Date().toISOString(),
+        handlingMethod: "direct_http",
+        status: "downloaded",
+        canonicalId,
+        pdfUrl,
+        downloadPath: pdfPath
+      }
+    });
+
+    return {
+      status: "downloaded",
+      source: options.classification.source,
+      canonicalId,
+      articleUrl: options.classification.articleUrl,
+      finalPdfUrl: pdfUrl,
+      path: pdfPath,
+      recordPath
+    };
+  } catch {
+    return null;
+  }
+}
+
 async function openSupportedPublisherForManualFallback(input: {
   workspaceDir: string;
   classification: Extract<ClassifiedPaperUrl, { source: SupportedPaperSource }>;
@@ -870,6 +961,15 @@ export async function downloadPaper(options: DownloadPaperOptions): Promise<Pape
     });
   }
 
+  const directPublisherDownload = await tryDownloadDirectSupportedPublisherPaper({
+    workspaceDir: options.workspaceDir,
+    classification,
+    fetchImpl: options.fetchImpl
+  });
+  if (directPublisherDownload) {
+    return directPublisherDownload;
+  }
+
   if (options.extensionBridge) {
     try {
       return await submitPaperExtensionJob({
@@ -1094,12 +1194,20 @@ export async function searchPapers(options: SearchPapersOptions): Promise<PaperS
   const searchArxivImpl = options.searchArxivImpl ?? searchArxiv;
   const searchApsPapersImpl = options.searchApsPapersImpl ?? searchApsPapers;
   const searchWebImpl = options.searchWebImpl ?? searchWeb;
+  const query = options.query.trim();
+  if (!query) {
+    throw new Error("Query is required.");
+  }
+
   const maxResults = options.maxResults ?? 5;
+  if (!Number.isInteger(maxResults) || maxResults <= 0) {
+    throw new Error("maxResults must be a positive integer.");
+  }
 
   const [arxivResults, apsResults, webResults] = await Promise.all([
-    searchArxivImpl({ query: options.query, maxResults }),
-    searchApsPapersImpl({ query: options.query, maxResults }).catch(() => []),
-    searchWebImpl({ query: options.query, maxResults })
+    searchArxivImpl({ query, maxResults }).catch(() => []),
+    searchApsPapersImpl({ query, maxResults }).catch(() => []),
+    searchWebImpl({ query, maxResults }).catch(() => [])
   ]);
 
   const candidates = new Map<string, SearchCandidate>();
