@@ -86,6 +86,81 @@ type RegisterManualPaperDownloadTool = {
   ) => Promise<ToolResult>;
 };
 
+type ParsePaperTool = {
+  execute: (
+    toolCallId: string,
+    args: {
+      path?: string;
+      recordPath?: string;
+      engine?: "auto" | "opendataloader-local" | "opendataloader-hybrid" | "plain-text-baseline";
+      force?: boolean;
+    },
+    signal: undefined,
+  ) => Promise<ToolResult>;
+};
+
+type InspectPaperTool = {
+  execute: (
+    toolCallId: string,
+    args: { path?: string; recordPath?: string; paperKey?: string },
+    signal: undefined,
+  ) => Promise<ToolResult>;
+};
+
+type ReadPaperSectionTool = {
+  execute: (
+    toolCallId: string,
+    args: {
+      paperKey: string;
+      engine?: "opendataloader-local" | "opendataloader-hybrid" | "plain-text-baseline";
+      sectionId?: string;
+      pageFrom?: number;
+      pageTo?: number;
+      maxChars?: number;
+    },
+    signal: undefined,
+  ) => Promise<ToolResult>;
+};
+
+type SearchPaperTextTool = {
+  execute: (
+    toolCallId: string,
+    args: {
+      paperKey: string;
+      engine?: "opendataloader-local" | "opendataloader-hybrid" | "plain-text-baseline";
+      query: string;
+      maxResults?: number;
+    },
+    signal: undefined,
+  ) => Promise<ToolResult>;
+};
+
+type WritePaperWikiSourceTool = {
+  execute: (
+    toolCallId: string,
+    args: {
+      paperKey: string;
+      engine?: "opendataloader-local" | "opendataloader-hybrid" | "plain-text-baseline";
+      title?: string;
+      summaryMarkdown: string;
+      tags?: string[];
+      keyFindings?: string[];
+      limitations?: string[];
+      openQuestions?: string[];
+      relatedPaperKeys?: string[];
+    },
+    signal: undefined,
+  ) => Promise<ToolResult>;
+};
+
+type SearchPaperWikiTool = {
+  execute: (
+    toolCallId: string,
+    args: { query: string; maxResults?: number },
+    signal: undefined,
+  ) => Promise<ToolResult>;
+};
+
 type CreateToolsDependencies = NonNullable<Parameters<typeof createTools>[1]>;
 
 function getReadFileTool(workspace: string): ReadFileTool {
@@ -196,6 +271,90 @@ function getRegisterManualPaperDownloadTool(
   return tool as RegisterManualPaperDownloadTool;
 }
 
+function getParsePaperTool(
+  workspace: string,
+  dependencies?: Parameters<typeof createTools>[1],
+): ParsePaperTool {
+  const tools = createTools(workspace, dependencies) as ReadonlyArray<{
+    name: string;
+    execute?: ParsePaperTool["execute"];
+  }>;
+  const tool = tools.find((candidate) => candidate.name === "parse_paper");
+  assert.ok(tool);
+  assert.equal(typeof tool.execute, "function");
+  return tool as ParsePaperTool;
+}
+
+function getInspectPaperTool(
+  workspace: string,
+  dependencies?: Parameters<typeof createTools>[1],
+): InspectPaperTool {
+  const tools = createTools(workspace, dependencies) as ReadonlyArray<{
+    name: string;
+    execute?: InspectPaperTool["execute"];
+  }>;
+  const tool = tools.find((candidate) => candidate.name === "inspect_paper");
+  assert.ok(tool);
+  assert.equal(typeof tool.execute, "function");
+  return tool as InspectPaperTool;
+}
+
+function getReadPaperSectionTool(
+  workspace: string,
+  dependencies?: Parameters<typeof createTools>[1],
+): ReadPaperSectionTool {
+  const tools = createTools(workspace, dependencies) as ReadonlyArray<{
+    name: string;
+    execute?: ReadPaperSectionTool["execute"];
+  }>;
+  const tool = tools.find((candidate) => candidate.name === "read_paper_section");
+  assert.ok(tool);
+  assert.equal(typeof tool.execute, "function");
+  return tool as ReadPaperSectionTool;
+}
+
+function getSearchPaperTextTool(
+  workspace: string,
+  dependencies?: Parameters<typeof createTools>[1],
+): SearchPaperTextTool {
+  const tools = createTools(workspace, dependencies) as ReadonlyArray<{
+    name: string;
+    execute?: SearchPaperTextTool["execute"];
+  }>;
+  const tool = tools.find((candidate) => candidate.name === "search_paper_text");
+  assert.ok(tool);
+  assert.equal(typeof tool.execute, "function");
+  return tool as SearchPaperTextTool;
+}
+
+function getWritePaperWikiSourceTool(
+  workspace: string,
+  dependencies?: Parameters<typeof createTools>[1],
+): WritePaperWikiSourceTool {
+  const tools = createTools(workspace, dependencies) as ReadonlyArray<{
+    name: string;
+    execute?: WritePaperWikiSourceTool["execute"];
+  }>;
+  const tool = tools.find((candidate) => candidate.name === "write_paper_wiki_source");
+  assert.ok(tool);
+  assert.equal(typeof tool.execute, "function");
+  return tool as WritePaperWikiSourceTool;
+}
+
+function getSearchPaperWikiTool(
+  workspace: string,
+  dependencies?: Parameters<typeof createTools>[1],
+): SearchPaperWikiTool {
+  const tools = createTools(workspace, dependencies) as ReadonlyArray<{
+    name: string;
+    execute?: SearchPaperWikiTool["execute"];
+  }>;
+  const tool = tools.find((candidate) => candidate.name === "search_paper_wiki");
+  assert.ok(tool);
+  assert.equal(typeof tool.execute, "function");
+  return tool as SearchPaperWikiTool;
+}
+
 async function createDirectoryLink(targetDir: string, linkDir: string): Promise<void> {
   await symlink(targetDir, linkDir, process.platform === "win32" ? "junction" : "dir");
 }
@@ -300,6 +459,12 @@ test("createTools exposes the unified built-in tool set", async () => {
       "download_paper",
       "register_manual_paper_download",
       "open_paper_page_for_login",
+      "parse_paper",
+      "inspect_paper",
+      "read_paper_section",
+      "search_paper_text",
+      "write_paper_wiki_source",
+      "search_paper_wiki",
     ]);
 
     const webSearchTool = tools.find((tool) => tool.name === "web_search");
@@ -1049,6 +1214,215 @@ test("createTools cleanup closes the injected paper manager client exactly once"
     await cleanupTools!(tools as ReturnType<typeof createTools>);
 
     assert.equal(closeCalls, 1);
+  } finally {
+    await rm(workspace, { recursive: true, force: true });
+  }
+});
+
+test("parse_paper delegates to the injected paper reader dependency and returns details", async () => {
+  const workspace = await mkdtemp(path.join(tmpdir(), "pi-agent-tools-"));
+  try {
+    const tool = getParsePaperTool(workspace, {
+      parsePaper: async (options) => ({
+        status: "parsed" as const,
+        paperKey: "arxiv-2406.06015",
+        engine: options.engine === "plain-text-baseline" ? "plain-text-baseline" as const : "opendataloader-local" as const,
+        pdfSha256: "abc123",
+        artifacts: {
+          sourcePath: path.join(options.workspaceDir, "downloads/papers/llm-wiki/intermediate/arxiv-2406.06015/source.json"),
+          parsePath: path.join(options.workspaceDir, "downloads/papers/llm-wiki/intermediate/arxiv-2406.06015/parses/plain-text-baseline/parse.json"),
+          markdownPath: path.join(options.workspaceDir, "downloads/papers/llm-wiki/intermediate/arxiv-2406.06015/parses/plain-text-baseline/document.md"),
+          qualityPath: path.join(options.workspaceDir, "downloads/papers/llm-wiki/intermediate/arxiv-2406.06015/parses/plain-text-baseline/quality.json"),
+          chunksPath: path.join(options.workspaceDir, "downloads/papers/llm-wiki/intermediate/arxiv-2406.06015/chunks/plain-text-baseline.jsonl"),
+        },
+        quality: {
+          status: "good" as const,
+          score: 1,
+          pages: 1,
+          totalTextLength: 100,
+          emptyPageCount: 0,
+          headingCount: 1,
+          tableCount: 0,
+          figureOrCaptionCount: 0,
+          warnings: [],
+        },
+        sections: [
+          {
+            id: "section-0001",
+            title: "Abstract",
+            level: 1,
+            pageFrom: 1,
+            pageTo: 1,
+          },
+        ],
+      }),
+    });
+
+    const result = await tool.execute("parse-call", {
+      path: "downloads/papers/arxiv-2406.06015.pdf",
+      engine: "plain-text-baseline",
+      force: true,
+    }, undefined);
+
+    assert.deepEqual(result.details, JSON.parse(result.content?.[0]?.text ?? ""));
+    assert.equal((result.details as { paperKey?: string }).paperKey, "arxiv-2406.06015");
+  } finally {
+    await rm(workspace, { recursive: true, force: true });
+  }
+});
+
+test("inspect_paper delegates to the injected paper reader dependency and returns details", async () => {
+  const workspace = await mkdtemp(path.join(tmpdir(), "pi-agent-tools-"));
+  try {
+    const tool = getInspectPaperTool(workspace, {
+      inspectPaper: async (options) => ({
+        paperKey: options.paperKey ?? "arxiv-2406.06015",
+        parses: [],
+      }),
+    });
+
+    const result = await tool.execute("inspect-call", {
+      paperKey: "arxiv-2406.06015",
+    }, undefined);
+
+    assert.deepEqual(result.details, {
+      paperKey: "arxiv-2406.06015",
+      parses: [],
+    });
+  } finally {
+    await rm(workspace, { recursive: true, force: true });
+  }
+});
+
+test("read_paper_section delegates to the injected paper reader dependency and returns details", async () => {
+  const workspace = await mkdtemp(path.join(tmpdir(), "pi-agent-tools-"));
+  try {
+    const tool = getReadPaperSectionTool(workspace, {
+      readPaperSection: async (options) => ({
+        paperKey: options.paperKey,
+        engine: options.engine ?? "plain-text-baseline",
+        sectionId: options.sectionId,
+        pageFrom: options.pageFrom,
+        pageTo: options.pageTo,
+        maxChars: options.maxChars ?? 6000,
+        text: "[p.1] methods text",
+        truncated: false,
+        elements: [],
+      }),
+    });
+
+    const result = await tool.execute("read-section-call", {
+      paperKey: "arxiv-2406.06015",
+      engine: "plain-text-baseline",
+      sectionId: "section-0001",
+      maxChars: 1000,
+    }, undefined);
+
+    assert.equal((result.details as { text?: string }).text, "[p.1] methods text");
+  } finally {
+    await rm(workspace, { recursive: true, force: true });
+  }
+});
+
+test("search_paper_text delegates to the injected paper reader dependency and returns details", async () => {
+  const workspace = await mkdtemp(path.join(tmpdir(), "pi-agent-tools-"));
+  try {
+    const tool = getSearchPaperTextTool(workspace, {
+      searchPaperText: async (options) => ({
+        paperKey: options.paperKey,
+        engine: options.engine ?? "plain-text-baseline",
+        query: options.query,
+        results: [
+          {
+            elementId: "el-0002",
+            type: "paragraph" as const,
+            page: 1,
+            sectionId: "section-0001",
+            snippet: "matched query",
+          },
+        ],
+      }),
+    });
+
+    const result = await tool.execute("search-paper-call", {
+      paperKey: "arxiv-2406.06015",
+      query: "query",
+      maxResults: 3,
+    }, undefined);
+
+    assert.equal((result.details as { results?: unknown[] }).results?.length, 1);
+  } finally {
+    await rm(workspace, { recursive: true, force: true });
+  }
+});
+
+test("write_paper_wiki_source delegates to the injected wiki dependency and returns details", async () => {
+  const workspace = await mkdtemp(path.join(tmpdir(), "pi-agent-tools-"));
+  const capturedCalls: Array<{
+    workspaceDir: string;
+    paperKey: string;
+    summaryMarkdown: string;
+    tags?: string[];
+  }> = [];
+
+  try {
+    const tool = getWritePaperWikiSourceTool(workspace, {
+      writePaperWikiSource: async (options) => {
+        capturedCalls.push(options);
+        return {
+          paperKey: options.paperKey,
+          title: options.title ?? "Paper title",
+          sourcePath: "downloads/papers/llm-wiki/sources/arxiv-2406.06015.md",
+          indexPath: "downloads/papers/llm-wiki/index.md",
+          logPath: "downloads/papers/llm-wiki/log.md",
+          schemaPath: "downloads/papers/llm-wiki/schema.md",
+        };
+      },
+    });
+
+    const result = await tool.execute("write-wiki-call", {
+      paperKey: "arxiv-2406.06015",
+      summaryMarkdown: "Grounded retrieval summary.",
+      tags: ["quantum"],
+    }, undefined);
+
+    assert.deepEqual(capturedCalls, [
+      {
+        workspaceDir: workspace,
+        paperKey: "arxiv-2406.06015",
+        summaryMarkdown: "Grounded retrieval summary.",
+        tags: ["quantum"],
+      },
+    ]);
+    assert.equal((result.details as { sourcePath?: string }).sourcePath, "downloads/papers/llm-wiki/sources/arxiv-2406.06015.md");
+  } finally {
+    await rm(workspace, { recursive: true, force: true });
+  }
+});
+
+test("search_paper_wiki delegates to the injected wiki search dependency and returns details", async () => {
+  const workspace = await mkdtemp(path.join(tmpdir(), "pi-agent-tools-"));
+  try {
+    const tool = getSearchPaperWikiTool(workspace, {
+      searchPaperWiki: async (options) => ({
+        query: options.query,
+        results: [
+          {
+            paperKey: "arxiv-2406.06015",
+            title: "Paper title",
+            path: "downloads/papers/llm-wiki/sources/arxiv-2406.06015.md",
+            snippet: "query match",
+          },
+        ],
+      }),
+    });
+
+    const result = await tool.execute("search-wiki-call", {
+      query: "query",
+      maxResults: 2,
+    }, undefined);
+
+    assert.equal((result.details as { results?: unknown[] }).results?.length, 1);
   } finally {
     await rm(workspace, { recursive: true, force: true });
   }

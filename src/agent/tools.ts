@@ -18,6 +18,16 @@ import {
   registerManualPaperDownload,
   searchPapers
 } from "./paper-manager.js";
+import {
+  inspectPaper,
+  parsePaper,
+  readPaperSection,
+  searchPaperText
+} from "./paper-reader/paper-reader.js";
+import {
+  searchPaperWiki,
+  writePaperWikiSource
+} from "./paper-wiki/paper-wiki.js";
 import type { PaperExtensionBridge } from "./paper-extension-bridge.js";
 import {
   createPaperBrowserManagerClient,
@@ -79,6 +89,78 @@ const openPaperPageForLoginParameters = Type.Object({
   url: Type.String({ description: "Publisher article URL to open for manual login review." })
 });
 
+const parsePaperParameters = Type.Object({
+  path: Type.Optional(
+    Type.String({ description: "Workspace-relative or workspace-absolute PDF path under downloads/papers/." })
+  ),
+  recordPath: Type.Optional(
+    Type.String({ description: "Workspace-relative or workspace-absolute paper record JSON path." })
+  ),
+  engine: Type.Optional(
+    Type.Union([
+      Type.Literal("auto"),
+      Type.Literal("opendataloader-local"),
+      Type.Literal("opendataloader-hybrid"),
+      Type.Literal("plain-text-baseline")
+    ], { description: "Parser engine to use. Defaults to auto." })
+  ),
+  force: Type.Optional(Type.Boolean({ description: "Re-parse even when a matching cached parse exists." }))
+});
+
+const inspectPaperParameters = Type.Object({
+  path: Type.Optional(
+    Type.String({ description: "Workspace-relative or workspace-absolute PDF path under downloads/papers/." })
+  ),
+  recordPath: Type.Optional(
+    Type.String({ description: "Workspace-relative or workspace-absolute paper record JSON path." })
+  ),
+  paperKey: Type.Optional(Type.String({ description: "Parsed paper key, for example arxiv-2406.06015." }))
+});
+
+const paperReaderEngineParameter = Type.Optional(
+  Type.Union([
+    Type.Literal("opendataloader-local"),
+    Type.Literal("opendataloader-hybrid"),
+    Type.Literal("plain-text-baseline")
+  ], { description: "Parsed engine to read from. Defaults to the best available parse." })
+);
+
+const readPaperSectionParameters = Type.Object({
+  paperKey: Type.String({ description: "Parsed paper key, for example arxiv-2406.06015." }),
+  engine: paperReaderEngineParameter,
+  sectionId: Type.Optional(Type.String({ description: "Optional section id from inspect_paper." })),
+  pageFrom: Type.Optional(Type.Integer({ description: "Optional first page number.", minimum: 1 })),
+  pageTo: Type.Optional(Type.Integer({ description: "Optional last page number.", minimum: 1 })),
+  maxChars: Type.Optional(Type.Integer({ description: "Maximum characters to return.", minimum: 1 }))
+});
+
+const searchPaperTextParameters = Type.Object({
+  paperKey: Type.String({ description: "Parsed paper key, for example arxiv-2406.06015." }),
+  engine: paperReaderEngineParameter,
+  query: Type.String({ description: "Text query to search inside the parsed paper." }),
+  maxResults: Type.Optional(Type.Integer({ description: "Maximum matching elements to return.", minimum: 1 }))
+});
+
+const writePaperWikiSourceParameters = Type.Object({
+  paperKey: Type.String({ description: "Parsed paper key, for example arxiv-2406.06015." }),
+  engine: paperReaderEngineParameter,
+  title: Type.Optional(Type.String({ description: "Optional display title for the source summary." })),
+  summaryMarkdown: Type.String({
+    description:
+      "LLM-authored grounded markdown summary to save as the retrieval source for this paper."
+  }),
+  tags: Type.Optional(Type.Array(Type.String({ description: "Short searchable tag." }))),
+  keyFindings: Type.Optional(Type.Array(Type.String({ description: "One key grounded finding." }))),
+  limitations: Type.Optional(Type.Array(Type.String({ description: "One limitation or caveat." }))),
+  openQuestions: Type.Optional(Type.Array(Type.String({ description: "One follow-up question." }))),
+  relatedPaperKeys: Type.Optional(Type.Array(Type.String({ description: "Related parsed paper key." })))
+});
+
+const searchPaperWikiParameters = Type.Object({
+  query: Type.String({ description: "Text query to search inside LLM-authored paper source summaries." }),
+  maxResults: Type.Optional(Type.Integer({ description: "Maximum matching source summaries to return.", minimum: 1 }))
+});
+
 type GetTimeParameters = Static<typeof getTimeParameters>;
 type ReadFileParameters = Static<typeof readFileParameters>;
 type WebSearchParameters = Static<typeof webSearchParameters>;
@@ -87,6 +169,12 @@ type SearchPapersParameters = Static<typeof searchPapersParameters>;
 type DownloadPaperParameters = Static<typeof downloadPaperParameters>;
 type RegisterManualPaperDownloadParameters = Static<typeof registerManualPaperDownloadParameters>;
 type OpenPaperPageForLoginParameters = Static<typeof openPaperPageForLoginParameters>;
+type ParsePaperParameters = Static<typeof parsePaperParameters>;
+type InspectPaperParameters = Static<typeof inspectPaperParameters>;
+type ReadPaperSectionParameters = Static<typeof readPaperSectionParameters>;
+type SearchPaperTextParameters = Static<typeof searchPaperTextParameters>;
+type WritePaperWikiSourceParameters = Static<typeof writePaperWikiSourceParameters>;
+type SearchPaperWikiParameters = Static<typeof searchPaperWikiParameters>;
 
 function assertPathInsideDirectory(rootDir: string, candidatePath: string): void {
   const relativePath = path.relative(rootDir, candidatePath);
@@ -164,6 +252,14 @@ type OpenPaperPageForLoginDependency = (options: {
   workspaceDir: string;
   url: string;
 }) => Promise<OpenPaperPageForLoginResult>;
+type WritePaperWikiSourceTool = AgentTool<
+  typeof writePaperWikiSourceParameters,
+  Awaited<ReturnType<typeof writePaperWikiSource>>
+>;
+type SearchPaperWikiTool = AgentTool<
+  typeof searchPaperWikiParameters,
+  Awaited<ReturnType<typeof searchPaperWiki>>
+>;
 
 const MAX_SEARCH_RESULT_PREVIEWS = 5;
 const MAX_SEARCH_PREVIEW_TEXT_LENGTH = 220;
@@ -203,6 +299,22 @@ function summarizePaperSearchResults(results: PaperSearchResult[]): SearchResult
 type OpenPaperPageForLoginTool = AgentTool<
   typeof openPaperPageForLoginParameters,
   OpenPaperPageForLoginResult
+>;
+type ParsePaperTool = AgentTool<
+  typeof parsePaperParameters,
+  Awaited<ReturnType<typeof parsePaper>>
+>;
+type InspectPaperTool = AgentTool<
+  typeof inspectPaperParameters,
+  Awaited<ReturnType<typeof inspectPaper>>
+>;
+type ReadPaperSectionTool = AgentTool<
+  typeof readPaperSectionParameters,
+  Awaited<ReturnType<typeof readPaperSection>>
+>;
+type SearchPaperTextTool = AgentTool<
+  typeof searchPaperTextParameters,
+  Awaited<ReturnType<typeof searchPaperText>>
 >;
 
 function assertSupportedPaperPublisherUrl(input: string): void {
@@ -257,6 +369,12 @@ export interface ToolDependencies {
   searchApsPapers?: typeof searchApsPapers;
   downloadPaper?: typeof downloadPaper;
   registerManualPaperDownload?: typeof registerManualPaperDownload;
+  parsePaper?: typeof parsePaper;
+  inspectPaper?: typeof inspectPaper;
+  readPaperSection?: typeof readPaperSection;
+  searchPaperText?: typeof searchPaperText;
+  writePaperWikiSource?: typeof writePaperWikiSource;
+  searchPaperWiki?: typeof searchPaperWiki;
   openPaperPageForLogin?: OpenPaperPageForLoginDependency;
   browserSessionFactory?: ReturnType<typeof resolveDefaultPaperBrowserSessionFactory>;
   paperBrowserManagerClient?: PaperBrowserManagerClient;
@@ -277,7 +395,13 @@ export type AgentTools = [
   SearchPapersTool,
   DownloadPaperTool,
   RegisterManualPaperDownloadTool,
-  OpenPaperPageForLoginTool
+  OpenPaperPageForLoginTool,
+  ParsePaperTool,
+  InspectPaperTool,
+  ReadPaperSectionTool,
+  SearchPaperTextTool,
+  WritePaperWikiSourceTool,
+  SearchPaperWikiTool
 ] & ToolSetMetadata;
 
 export async function cleanupTools(tools: ReadonlyArray<AgentTool<any>> | undefined): Promise<void> {
@@ -306,6 +430,8 @@ export function createTools(workspaceDir: string, dependencies: ToolDependencies
         ...options,
         searchApsPapersImpl
       }));
+  const writePaperWikiSourceImpl = dependencies.writePaperWikiSource ?? writePaperWikiSource;
+  const searchPaperWikiImpl = dependencies.searchPaperWiki ?? searchPaperWiki;
   const browserSessionFactoryImpl =
     dependencies.browserSessionFactory ??
     resolveDefaultPaperBrowserSessionFactory({ workspaceDir: resolvedWorkspaceDir });
@@ -484,6 +610,10 @@ export function createTools(workspaceDir: string, dependencies: ToolDependencies
       }));
   const registerManualPaperDownloadImpl =
     dependencies.registerManualPaperDownload ?? registerManualPaperDownload;
+  const parsePaperImpl = dependencies.parsePaper ?? parsePaper;
+  const inspectPaperImpl = dependencies.inspectPaper ?? inspectPaper;
+  const readPaperSectionImpl = dependencies.readPaperSection ?? readPaperSection;
+  const searchPaperTextImpl = dependencies.searchPaperText ?? searchPaperText;
 
   const openPaperPageForLoginImpl =
     dependencies.openPaperPageForLogin ??
@@ -657,6 +787,147 @@ export function createTools(workspaceDir: string, dependencies: ToolDependencies
     }
   };
 
+  const parsePaperTool: ParsePaperTool = {
+    name: "parse_paper",
+    label: "Parse Paper",
+    description:
+      "Parses a downloaded PDF from downloads/papers/ into structured reading artifacts. Use a path or recordPath returned by download_paper. The default engine uses OpenDataLoader; use plain-text-baseline only for debugging.",
+    parameters: parsePaperParameters,
+    executionMode: "sequential",
+    execute: async (_toolCallId: string, args: ParsePaperParameters) => {
+      const result = await parsePaperImpl({
+        workspaceDir: resolvedWorkspaceDir,
+        ...(args.path ? { path: args.path } : {}),
+        ...(args.recordPath ? { recordPath: args.recordPath } : {}),
+        ...(args.engine ? { engine: args.engine } : {}),
+        ...(args.force !== undefined ? { force: args.force } : {})
+      });
+
+      return {
+        content: [{ type: "text", text: JSON.stringify(result) }],
+        details: result
+      };
+    }
+  };
+
+  const inspectPaperTool: InspectPaperTool = {
+    name: "inspect_paper",
+    label: "Inspect Paper",
+    description:
+      "Inspects parsed paper artifacts, including available parser engines, parse quality, and section previews. It does not return the full paper body.",
+    parameters: inspectPaperParameters,
+    executionMode: "sequential",
+    execute: async (_toolCallId: string, args: InspectPaperParameters) => {
+      const result = await inspectPaperImpl({
+        workspaceDir: resolvedWorkspaceDir,
+        ...(args.path ? { path: args.path } : {}),
+        ...(args.recordPath ? { recordPath: args.recordPath } : {}),
+        ...(args.paperKey ? { paperKey: args.paperKey } : {})
+      });
+
+      return {
+        content: [{ type: "text", text: JSON.stringify(result) }],
+        details: result
+      };
+    }
+  };
+
+  const readPaperSectionTool: ReadPaperSectionTool = {
+    name: "read_paper_section",
+    label: "Read Paper Section",
+    description:
+      "Reads bounded text from a parsed paper by section id and/or page range, with source element metadata.",
+    parameters: readPaperSectionParameters,
+    executionMode: "sequential",
+    execute: async (_toolCallId: string, args: ReadPaperSectionParameters) => {
+      const result = await readPaperSectionImpl({
+        workspaceDir: resolvedWorkspaceDir,
+        paperKey: args.paperKey,
+        ...(args.engine ? { engine: args.engine } : {}),
+        ...(args.sectionId ? { sectionId: args.sectionId } : {}),
+        ...(args.pageFrom !== undefined ? { pageFrom: args.pageFrom } : {}),
+        ...(args.pageTo !== undefined ? { pageTo: args.pageTo } : {}),
+        ...(args.maxChars !== undefined ? { maxChars: args.maxChars } : {})
+      });
+
+      return {
+        content: [{ type: "text", text: JSON.stringify(result) }],
+        details: result
+      };
+    }
+  };
+
+  const searchPaperTextTool: SearchPaperTextTool = {
+    name: "search_paper_text",
+    label: "Search Paper Text",
+    description:
+      "Searches inside a parsed paper and returns snippets with page, section, and element metadata.",
+    parameters: searchPaperTextParameters,
+    executionMode: "sequential",
+    execute: async (_toolCallId: string, args: SearchPaperTextParameters) => {
+      const result = await searchPaperTextImpl({
+        workspaceDir: resolvedWorkspaceDir,
+        paperKey: args.paperKey,
+        ...(args.engine ? { engine: args.engine } : {}),
+        query: args.query,
+        ...(args.maxResults !== undefined ? { maxResults: args.maxResults } : {})
+      });
+
+      return {
+        content: [{ type: "text", text: JSON.stringify(result) }],
+        details: result
+      };
+    }
+  };
+
+  const writePaperWikiSourceTool: WritePaperWikiSourceTool = {
+    name: "write_paper_wiki_source",
+    label: "Write Paper Wiki Source",
+    description:
+      "Saves an LLM-authored, provenance-tracked paper summary into downloads/papers/llm-wiki/sources/ for later knowledge retrieval. Use after parse_paper and grounded reading.",
+    parameters: writePaperWikiSourceParameters,
+    executionMode: "sequential",
+    execute: async (_toolCallId: string, args: WritePaperWikiSourceParameters) => {
+      const result = await writePaperWikiSourceImpl({
+        workspaceDir: resolvedWorkspaceDir,
+        paperKey: args.paperKey,
+        summaryMarkdown: args.summaryMarkdown,
+        ...(args.engine ? { engine: args.engine } : {}),
+        ...(args.title ? { title: args.title } : {}),
+        ...(args.tags ? { tags: args.tags } : {}),
+        ...(args.keyFindings ? { keyFindings: args.keyFindings } : {}),
+        ...(args.limitations ? { limitations: args.limitations } : {}),
+        ...(args.openQuestions ? { openQuestions: args.openQuestions } : {}),
+        ...(args.relatedPaperKeys ? { relatedPaperKeys: args.relatedPaperKeys } : {})
+      });
+
+      return {
+        content: [{ type: "text", text: JSON.stringify(result) }],
+        details: result
+      };
+    }
+  };
+
+  const searchPaperWikiTool: SearchPaperWikiTool = {
+    name: "search_paper_wiki",
+    label: "Search Paper Wiki",
+    description:
+      "Searches LLM-authored paper source summaries under downloads/papers/llm-wiki/sources/. Use this for knowledge retrieval after paper summaries have been written.",
+    parameters: searchPaperWikiParameters,
+    execute: async (_toolCallId: string, args: SearchPaperWikiParameters) => {
+      const result = await searchPaperWikiImpl({
+        workspaceDir: resolvedWorkspaceDir,
+        query: args.query,
+        ...(args.maxResults !== undefined ? { maxResults: args.maxResults } : {})
+      });
+
+      return {
+        content: [{ type: "text", text: JSON.stringify(result) }],
+        details: result
+      };
+    }
+  };
+
   const tools = [
     getTimeTool,
     readFileTool,
@@ -665,7 +936,13 @@ export function createTools(workspaceDir: string, dependencies: ToolDependencies
     searchPapersTool,
     downloadPaperTool,
     registerManualPaperDownloadTool,
-    openPaperPageForLoginTool
+    openPaperPageForLoginTool,
+    parsePaperTool,
+    inspectPaperTool,
+    readPaperSectionTool,
+    searchPaperTextTool,
+    writePaperWikiSourceTool,
+    searchPaperWikiTool
   ] as unknown as AgentTools;
 
   Object.defineProperties(tools, {

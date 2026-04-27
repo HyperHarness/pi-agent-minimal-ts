@@ -57,7 +57,7 @@ export function resolveExternalPaperPdfPath(input: {
   articleUrl: string;
 }): string {
   const filename = getExternalRecordFilename(input.articleUrl).replace(/\.json$/, ".pdf");
-  return path.join(input.workspaceDir, "downloads", "papers", filename);
+  return path.join(input.workspaceDir, "downloads", "papers", "raw", filename);
 }
 
 export function resolvePaperPdfPath(input: {
@@ -66,7 +66,7 @@ export function resolvePaperPdfPath(input: {
   canonicalId: string;
 }): string {
   const filename = `${sanitizeFilenameComponent(input.source)}-${sanitizeCanonicalId(input.canonicalId)}.pdf`;
-  return path.join(input.workspaceDir, "downloads", "papers", filename);
+  return path.join(input.workspaceDir, "downloads", "papers", "raw", filename);
 }
 
 export function resolvePaperRecordPath(input: {

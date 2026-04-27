@@ -1022,6 +1022,7 @@ test("downloadPaper uses arXiv fallback when a prior publisher artifact is HTML"
     workspaceDir,
     "downloads",
     "papers",
+    "raw",
     "aps-10.1103-k3d5-v43c.htm"
   );
   const submittedJobs: unknown[] = [];

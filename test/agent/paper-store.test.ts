@@ -128,7 +128,7 @@ test("resolvePaperPdfPath uses source-specific filenames", async () => {
         source: "arxiv",
         canonicalId: "2401.01234"
       }),
-      path.join(workspaceDir, "downloads", "papers", "arxiv-2401.01234.pdf")
+      path.join(workspaceDir, "downloads", "papers", "raw", "arxiv-2401.01234.pdf")
     );
 
     assert.equal(
@@ -137,7 +137,7 @@ test("resolvePaperPdfPath uses source-specific filenames", async () => {
         source: "science",
         canonicalId: "10.1126/science.adz8659"
       }),
-      path.join(workspaceDir, "downloads", "papers", "science-10.1126-science.adz8659.pdf")
+      path.join(workspaceDir, "downloads", "papers", "raw", "science-10.1126-science.adz8659.pdf")
     );
 
     assert.equal(
@@ -146,7 +146,7 @@ test("resolvePaperPdfPath uses source-specific filenames", async () => {
         source: "nature",
         canonicalId: "s41586-019-1666-5"
       }),
-      path.join(workspaceDir, "downloads", "papers", "nature-s41586-019-1666-5.pdf")
+      path.join(workspaceDir, "downloads", "papers", "raw", "nature-s41586-019-1666-5.pdf")
     );
 
     assert.equal(
@@ -159,6 +159,7 @@ test("resolvePaperPdfPath uses source-specific filenames", async () => {
         workspaceDir,
         "downloads",
         "papers",
+        "raw",
         "aps-10.1103-PhysRevLett.133.123456.pdf"
       )
     );
