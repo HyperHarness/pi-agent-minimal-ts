@@ -58,7 +58,13 @@ const searchPapersParameters = Type.Object({
 
 const downloadPaperParameters = Type.Object({
   id: Type.Optional(Type.String({ description: "Paper identifier to download." })),
-  url: Type.Optional(Type.String({ description: "Paper URL to download." }))
+  url: Type.Optional(Type.String({ description: "Paper URL to download." })),
+  title: Type.Optional(
+    Type.String({
+      description:
+        "Paper title for arXiv preprint fallback when a publisher URL cannot be downloaded."
+    })
+  )
 });
 
 const registerManualPaperDownloadParameters = Type.Object({
@@ -589,14 +595,15 @@ export function createTools(workspaceDir: string, dependencies: ToolDependencies
     name: "download_paper",
     label: "Download Paper",
     description:
-      "Downloads a paper by id or URL through the unified paper manager, reusing the managed browser flow for supported publishers.",
+      "Downloads a paper by id or URL through the unified paper manager, reusing the managed browser flow for supported publishers. When downloading a publisher URL from search_papers, pass the returned title so the manager can try an exact-title arXiv preprint fallback if the publisher download fails.",
     parameters: downloadPaperParameters,
     executionMode: "sequential",
     execute: async (_toolCallId: string, args: DownloadPaperParameters) => {
       const result = await downloadPaperImpl({
         workspaceDir: resolvedWorkspaceDir,
         ...(args.id ? { id: args.id } : {}),
-        ...(args.url ? { url: args.url } : {})
+        ...(args.url ? { url: args.url } : {}),
+        ...(args.title ? { title: args.title } : {})
       });
 
       return {

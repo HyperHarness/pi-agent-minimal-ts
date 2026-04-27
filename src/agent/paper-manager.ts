@@ -1,5 +1,5 @@
 import { createHash } from "node:crypto";
-import { mkdir, readFile, writeFile } from "node:fs/promises";
+import { access, mkdir, readFile, writeFile } from "node:fs/promises";
 import path from "node:path";
 import {
   downloadArxivPdf,
@@ -24,6 +24,10 @@ import {
   createPaperExtensionJob,
   type PaperExtensionBridge
 } from "./paper-extension-bridge.js";
+import {
+  readPaperDownloadJobEvents,
+  summarizePaperDownloadJobs
+} from "./paper-download-jobs.js";
 import {
   findDownloadedPaperRecord,
   readPaperRecord,
@@ -80,8 +84,10 @@ export interface DownloadPaperOptions {
   workspaceDir: string;
   id?: string;
   url?: string;
+  title?: string;
   forceManualOpen?: PaperFailure;
   fetchImpl?: typeof fetch;
+  searchArxivImpl?: typeof searchArxiv;
   browserSessionFactory?: () => Promise<PaperBrowserSession>;
   downloadPublisherPaperImpl?: DownloadPublisherPaperImplementation;
   openPublisherForLoginImpl?: OpenPublisherForLoginImplementation;
@@ -545,13 +551,76 @@ async function submitPaperExtensionJob(input: {
   bridge: PaperExtensionBridge;
   articleUrl: string;
   source: SupportedPaperSource | "external";
+  title?: string;
 }): Promise<PaperDownloadResult> {
   return input.bridge.submitJob(
     createPaperExtensionJob({
       articleUrl: input.articleUrl,
-      source: input.source
+      source: input.source,
+      ...(input.title ? { title: input.title } : {})
     })
   );
+}
+
+async function findPriorExtensionDownloadFailure(options: {
+  workspaceDir: string;
+  articleUrl: string;
+  source: SupportedPaperSource | "external";
+}): Promise<PaperFailure | null> {
+  try {
+    const matchingJob = summarizePaperDownloadJobs(
+      await readPaperDownloadJobEvents({ workspaceDir: options.workspaceDir })
+    ).find((job) =>
+      job.articleUrl === options.articleUrl &&
+      job.source === options.source &&
+      job.status === "automatic_download_failed"
+    );
+    if (!matchingJob) {
+      return null;
+    }
+
+    return {
+      code: "extension_download_failed",
+      message: matchingJob.message ?? "The browser extension downloaded a file that was not a valid PDF."
+    };
+  } catch {
+    return null;
+  }
+}
+
+async function findPriorNonPdfPublisherArtifact(options: {
+  workspaceDir: string;
+  source: SupportedPaperSource;
+  canonicalId?: string;
+}): Promise<PaperFailure | null> {
+  if (!options.canonicalId) {
+    return null;
+  }
+
+  const pdfPath = resolvePaperPdfPath({
+    workspaceDir: options.workspaceDir,
+    source: options.source,
+    canonicalId: options.canonicalId
+  });
+  const parsedPath = path.parse(pdfPath);
+  const candidates = [
+    path.join(parsedPath.dir, `${parsedPath.name}.htm`),
+    path.join(parsedPath.dir, `${parsedPath.name}.html`)
+  ];
+
+  for (const candidate of candidates) {
+    try {
+      await access(candidate);
+      return {
+        code: "non_pdf_download_artifact",
+        message: `A previous publisher download produced a non-PDF file at ${candidate}.`
+      };
+    } catch {
+      // Try the next candidate.
+    }
+  }
+
+  return null;
 }
 
 function resolveFallbackCanonicalId(input: {
@@ -848,6 +917,42 @@ async function downloadArxivPaper(options: {
   };
 }
 
+async function tryDownloadArxivPreprintByTitle(options: {
+  workspaceDir: string;
+  title?: string;
+  fetchImpl?: typeof fetch;
+  searchArxivImpl?: typeof searchArxiv;
+}): Promise<PaperDownloadResult | null> {
+  const title = options.title?.trim();
+  if (!title) {
+    return null;
+  }
+
+  const searchArxivImpl = options.searchArxivImpl ?? searchArxiv;
+  let results: ArxivSearchResult[];
+  try {
+    results = await searchArxivImpl({ query: title, maxResults: 5 });
+  } catch {
+    return null;
+  }
+
+  const titleKey = normalizeTitle(title);
+  const match = results.find((result) => normalizeTitle(result.title) === titleKey);
+  if (!match) {
+    return null;
+  }
+
+  try {
+    return await downloadArxivPaper({
+      workspaceDir: options.workspaceDir,
+      input: match.id,
+      fetchImpl: options.fetchImpl
+    });
+  } catch {
+    return null;
+  }
+}
+
 async function withBrowserSession<T>(
   browserSessionFactory: () => Promise<PaperBrowserSession>,
   action: (browserSession: PaperBrowserSession) => Promise<T>
@@ -898,7 +1003,8 @@ export async function downloadPaper(options: DownloadPaperOptions): Promise<Pape
         return await submitPaperExtensionJob({
           bridge: options.extensionBridge,
           articleUrl: classification.articleUrl,
-          source: "external"
+          source: "external",
+          title: options.title
         });
       } catch (error) {
         if (options.usePlaywrightFallback !== true) {
@@ -985,15 +1091,72 @@ export async function downloadPaper(options: DownloadPaperOptions): Promise<Pape
     return directPublisherDownload;
   }
 
+  const priorNonPdfArtifact = await findPriorNonPdfPublisherArtifact({
+    workspaceDir: options.workspaceDir,
+    source: classification.source,
+    canonicalId: classification.canonicalId
+  });
+  if (priorNonPdfArtifact) {
+    const arxivFallback = await tryDownloadArxivPreprintByTitle({
+      workspaceDir: options.workspaceDir,
+      title: options.title,
+      fetchImpl: options.fetchImpl,
+      searchArxivImpl: options.searchArxivImpl
+    });
+    if (arxivFallback) {
+      return arxivFallback;
+    }
+
+    return toExtensionUnavailablePaperResult({
+      source: classification.source,
+      articleUrl: classification.articleUrl,
+      error: priorNonPdfArtifact.message
+    });
+  }
+
+  const priorExtensionFailure = await findPriorExtensionDownloadFailure({
+    workspaceDir: options.workspaceDir,
+    articleUrl: classification.articleUrl,
+    source: classification.source
+  });
+  if (priorExtensionFailure) {
+    const arxivFallback = await tryDownloadArxivPreprintByTitle({
+      workspaceDir: options.workspaceDir,
+      title: options.title,
+      fetchImpl: options.fetchImpl,
+      searchArxivImpl: options.searchArxivImpl
+    });
+    if (arxivFallback) {
+      return arxivFallback;
+    }
+
+    return toExtensionUnavailablePaperResult({
+      source: classification.source,
+      articleUrl: classification.articleUrl,
+      error: priorExtensionFailure.message
+    });
+  }
+
   if (options.extensionBridge) {
     try {
       return await submitPaperExtensionJob({
-        bridge: options.extensionBridge,
-        articleUrl: classification.articleUrl,
-        source: classification.source
-      });
+          bridge: options.extensionBridge,
+          articleUrl: classification.articleUrl,
+          source: classification.source,
+          title: options.title
+        });
     } catch (error) {
       if (options.usePlaywrightFallback !== true) {
+        const arxivFallback = await tryDownloadArxivPreprintByTitle({
+          workspaceDir: options.workspaceDir,
+          title: options.title,
+          fetchImpl: options.fetchImpl,
+          searchArxivImpl: options.searchArxivImpl
+        });
+        if (arxivFallback) {
+          return arxivFallback;
+        }
+
         return toExtensionUnavailablePaperResult({
           source: classification.source,
           articleUrl: classification.articleUrl,
@@ -1002,6 +1165,16 @@ export async function downloadPaper(options: DownloadPaperOptions): Promise<Pape
       }
     }
   } else if (options.usePlaywrightFallback !== true) {
+    const arxivFallback = await tryDownloadArxivPreprintByTitle({
+      workspaceDir: options.workspaceDir,
+      title: options.title,
+      fetchImpl: options.fetchImpl,
+      searchArxivImpl: options.searchArxivImpl
+    });
+    if (arxivFallback) {
+      return arxivFallback;
+    }
+
     return toExtensionUnavailablePaperResult({
       source: classification.source,
       articleUrl: classification.articleUrl
@@ -1052,6 +1225,16 @@ export async function downloadPaper(options: DownloadPaperOptions): Promise<Pape
   } catch (error) {
     if (!isFallbackEligibleDownloadError(error)) {
       throw error;
+    }
+
+    const arxivFallback = await tryDownloadArxivPreprintByTitle({
+      workspaceDir: options.workspaceDir,
+      title: options.title,
+      fetchImpl: options.fetchImpl,
+      searchArxivImpl: options.searchArxivImpl
+    });
+    if (arxivFallback) {
+      return arxivFallback;
     }
 
     return openSupportedPublisherForManualFallback({
@@ -1169,6 +1352,7 @@ export async function downloadLatestApsPapers(
         : await downloadPaperImpl({
             workspaceDir: options.workspaceDir,
             url: apsSource.articleUrl,
+            title: paper.title,
             ...(forceManualOpenFailure ? { forceManualOpen: forceManualOpenFailure } : {})
           });
     if (!forceManualOpenFailure && isLikelyCloudflareFallback(download)) {

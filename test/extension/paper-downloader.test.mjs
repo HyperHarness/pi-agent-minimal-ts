@@ -422,7 +422,7 @@ test("manifest declares required MV3 extension shell fields", async () => {
 
   assert.equal(manifest.manifest_version, 3);
   assert.equal(manifest.name, "Pi Agent Paper Downloader");
-  assert.equal(manifest.version, "0.1.5");
+  assert.equal(manifest.version, "0.1.8");
 
   for (const permission of [
     "activeTab",
@@ -502,6 +502,8 @@ test("background automatic download registration payload includes pdfUrl and clo
   await flushAsyncWork();
 
   assert.equal(fakeChrome.downloadedRequests[0].url, "https://www.nature.com/articles/s41586-019-1666-5.pdf");
+  assert.equal(fakeChrome.downloadedRequests[0].filename, "pi-agent-papers/nature-s41586-019-1666-5.pdf");
+  assert.equal(fakeChrome.downloadedRequests[0].saveAs, false);
   assert.equal(messagesOf(fakeChrome, "register_download")[0].pdfUrl, "https://www.nature.com/articles/s41586-019-1666-5.pdf");
   assert.deepEqual(fakeChrome.removedTabs, [100]);
   assert.deepEqual(fakeChrome.storage.piAgentPaperDownloaderState, {
@@ -510,7 +512,7 @@ test("background automatic download registration payload includes pdfUrl and clo
   });
 });
 
-test("background asks the article tab to start publisher PDF downloads before using downloads API", async () => {
+test("background uses downloads API with a default filename for publisher PDF downloads", async () => {
   const job = {
     jobId: "job-aps-tab-download",
     articleUrl: "https://journals.aps.org/prapplied/abstract/10.1103/4ssz-6ctb",
@@ -521,6 +523,7 @@ test("background asks the article tab to start publisher PDF downloads before us
   const fakeChrome = createFakeChrome({
     jobs: [job],
     tabMessageHandler: () => ({ ok: true }),
+    downloadId: 601,
     downloadItems: {
       601: {
         id: 601,
@@ -553,16 +556,15 @@ test("background asks the article tab to start publisher PDF downloads before us
   fakeChrome.events.onChanged.emit({ id: 601, state: { current: "complete" } });
   await flushAsyncWork();
 
-  assert.deepEqual(fakeChrome.sentTabMessages, [
+  assert.deepEqual(fakeChrome.sentTabMessages, []);
+  assert.deepEqual(fakeChrome.downloadedRequests, [
     {
-      tabId: 100,
-      message: {
-        type: "paper_download_pdf",
-        pdfUrl
-      }
+      url: pdfUrl,
+      filename: "pi-agent-papers/aps-10.1103-4ssz-6ctb.pdf",
+      conflictAction: "uniquify",
+      saveAs: false
     }
   ]);
-  assert.deepEqual(fakeChrome.downloadedRequests, []);
   assert.equal(statusMessagesOf(fakeChrome, "automatic_download_started").length, 1);
   assert.equal(messagesOf(fakeChrome, "register_download")[0].pdfUrl, pdfUrl);
   assert.deepEqual(fakeChrome.removedTabs, [100]);
@@ -694,6 +696,7 @@ test("background starts automatic download for external direct PDF jobs", async 
   assert.deepEqual(fakeChrome.downloadedRequests, [
     {
       url: job.articleUrl,
+      filename: "pi-agent-papers/external-paper.pdf",
       conflictAction: "uniquify",
       saveAs: false
     }
@@ -707,7 +710,8 @@ test("background starts automatic download for external direct PDF jobs", async 
     title: "External PDF",
     tabId: 100,
     autoClose: undefined,
-    pdfUrl: job.articleUrl
+    pdfUrl: job.articleUrl,
+    filename: "pi-agent-papers/external-paper.pdf"
   });
 });
 
@@ -780,7 +784,17 @@ test("background keeps tab open when native host does not register completed dow
 
   assert.deepEqual(fakeChrome.removedTabs, []);
   assert.ok(fakeChrome.storage.piAgentPaperDownloaderState.jobs["job-unregistered"]);
-  assert.ok(fakeChrome.storage.piAgentPaperDownloaderState.downloads["501"]);
+  assert.equal(fakeChrome.storage.piAgentPaperDownloaderState.downloads["501"], undefined);
+  assert.deepEqual(statusMessagesOf(fakeChrome, "automatic_download_failed"), [
+    {
+      type: "job_status",
+      jobId: "job-unregistered",
+      articleUrl: "https://www.science.org/doi/10.1126/science.adz8659",
+      source: "science",
+      status: "automatic_download_failed",
+      message: "Not a PDF."
+    }
+  ]);
 });
 
 test("background manual association ignores non-PDF downloads from article referrer", async () => {

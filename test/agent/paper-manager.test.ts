@@ -17,6 +17,7 @@ import {
   resolvePaperPdfPath,
   resolvePaperRecordPath
 } from "../../src/agent/paper-store.js";
+import { appendPaperDownloadJobEvent } from "../../src/agent/paper-download-jobs.js";
 import type { WebSearchResult } from "../../src/agent/web-search.js";
 import type { PaperSearchResult, PaperSearchSource } from "../../src/agent/paper-types.js";
 
@@ -51,7 +52,7 @@ function createWebResult(overrides: Partial<WebSearchResult> = {}): WebSearchRes
   };
 }
 
-test("searchPapers merges duplicate titles and prefers supported publisher sources", async () => {
+test("searchPapers merges duplicate titles and keeps publisher sources primary", async () => {
   const arxivCalls: SearchArxivCall[] = [];
   const webCalls: SearchWebCall[] = [];
 
@@ -95,12 +96,12 @@ test("searchPapers merges duplicate titles and prefers supported publisher sourc
     primarySource: "science",
     primaryAction: "authorized_download",
     sources: [
-        {
-          source: "science",
-          canonicalId: "10.1126/science.adz8659",
-          articleUrl: "https://www.science.org/doi/epdf/10.1126/science.adz8659",
-          action: "authorized_download"
-        },
+      {
+        source: "science",
+        canonicalId: "10.1126/science.adz8659",
+        articleUrl: "https://www.science.org/doi/epdf/10.1126/science.adz8659",
+        action: "authorized_download"
+      },
       {
         source: "arxiv",
         canonicalId: "2401.01234",
@@ -114,6 +115,64 @@ test("searchPapers merges duplicate titles and prefers supported publisher sourc
         action: "open_url_only"
       }
     ] satisfies PaperSearchSource[]
+  } satisfies PaperSearchResult);
+});
+
+test("searchPapers keeps APS article URLs and matching arXiv preprints as alternate sources", async () => {
+  const results = await searchPapers({
+    query: "Superconducting qubits in the millions",
+    maxResults: 2,
+    searchArxivImpl: async () => [
+      createArxivResult({
+        id: "2406.06015",
+        title: "Superconducting qubits in the millions: The potential and limitations of modularity",
+        summary: "arXiv preprint summary.",
+        absUrl: "https://arxiv.org/abs/2406.06015",
+        pdfUrl: "https://arxiv.org/pdf/2406.06015.pdf"
+      })
+    ],
+    searchApsPapersImpl: async () => [
+      {
+        title: "Superconducting qubits in the millions: The potential and limitations of modularity",
+        authors: ["S. N. Saadatmand"],
+        summary: "APS metadata summary.",
+        primarySource: "aps",
+        primaryAction: "authorized_download",
+        sources: [
+          {
+            source: "aps",
+            action: "authorized_download",
+            canonicalId: "10.1103/example",
+            articleUrl: "https://journals.aps.org/prxquantum/abstract/10.1103/example"
+          }
+        ]
+      }
+    ],
+    searchWebImpl: async () => []
+  });
+
+  assert.equal(results.length, 1);
+  assert.deepEqual(results[0], {
+    title: "Superconducting qubits in the millions: The potential and limitations of modularity",
+    authors: ["S. N. Saadatmand"],
+    summary: "APS metadata summary.",
+    primarySource: "aps",
+    primaryAction: "authorized_download",
+    sources: [
+      {
+        source: "aps",
+        action: "authorized_download",
+        canonicalId: "10.1103/example",
+        articleUrl: "https://journals.aps.org/prxquantum/abstract/10.1103/example"
+      },
+      {
+        source: "arxiv",
+        action: "direct_download",
+        canonicalId: "2406.06015",
+        articleUrl: "https://arxiv.org/abs/2406.06015",
+        pdfUrl: "https://arxiv.org/pdf/2406.06015.pdf"
+      }
+    ]
   } satisfies PaperSearchResult);
 });
 
@@ -751,6 +810,279 @@ test("downloadPaper falls back to the extension bridge when direct APS PDF fetch
   }
 });
 
+test("downloadPaper tries an exact-title arXiv preprint when a publisher URL cannot be downloaded", async () => {
+  const workspaceDir = await mkdtemp(path.join(os.tmpdir(), "paper-manager-"));
+  const articleUrl = "https://journals.aps.org/prxquantum/abstract/10.1103/example";
+  const title = "Superconducting qubits in the millions: The potential and limitations of modularity";
+  const apsPdfUrl = "https://journals.aps.org/prxquantum/pdf/10.1103/example";
+  const arxivPdfUrl = "https://arxiv.org/pdf/2406.06015.pdf";
+  const pdfBytes = Buffer.from("%PDF-1.7\narxiv preprint\n", "utf8");
+  const fetchCalls: string[] = [];
+  const searchCalls: Array<{ query: string; maxResults?: number }> = [];
+
+  try {
+    const result = await downloadPaper({
+      workspaceDir,
+      url: articleUrl,
+      title,
+      fetchImpl: async (input) => {
+        fetchCalls.push(String(input));
+        if (String(input) === arxivPdfUrl) {
+          return new Response(pdfBytes, {
+            status: 200,
+            headers: {
+              "content-type": "application/pdf"
+            }
+          });
+        }
+
+        return new Response("<html>publisher unavailable</html>", {
+          status: 503,
+          headers: {
+            "content-type": "text/html"
+          }
+        });
+      },
+      searchArxivImpl: async (options) => {
+        searchCalls.push({ query: options.query, maxResults: options.maxResults });
+        return [
+          createArxivResult({
+            id: "2406.06015",
+            title,
+            summary: "arXiv preprint summary.",
+            absUrl: "https://arxiv.org/abs/2406.06015",
+            pdfUrl: arxivPdfUrl
+          })
+        ];
+      }
+    });
+
+    const expectedPdfPath = resolvePaperPdfPath({
+      workspaceDir,
+      source: "arxiv",
+      canonicalId: "2406.06015"
+    });
+    const expectedRecordPath = resolvePaperRecordPath({
+      workspaceDir,
+      source: "arxiv",
+      canonicalId: "2406.06015",
+      articleUrl: "https://arxiv.org/abs/2406.06015"
+    });
+
+    assert.deepEqual(fetchCalls, [apsPdfUrl, arxivPdfUrl]);
+    assert.deepEqual(searchCalls, [{ query: title, maxResults: 5 }]);
+    assert.deepEqual(result, {
+      status: "downloaded",
+      source: "arxiv",
+      canonicalId: "2406.06015",
+      articleUrl: "https://arxiv.org/abs/2406.06015",
+      finalPdfUrl: arxivPdfUrl,
+      path: expectedPdfPath,
+      recordPath: expectedRecordPath
+    });
+    assert.equal(await readFile(expectedPdfPath, "utf8"), pdfBytes.toString("utf8"));
+  } finally {
+    await rm(workspaceDir, { recursive: true, force: true });
+  }
+});
+
+test("downloadPaper keeps publisher failure results when title does not match an arXiv preprint", async () => {
+  const workspaceDir = await mkdtemp(path.join(os.tmpdir(), "paper-manager-"));
+  const articleUrl = "https://journals.aps.org/prxquantum/abstract/10.1103/example";
+  const title = "Superconducting qubits in the millions: The potential and limitations of modularity";
+
+  try {
+    const result = await downloadPaper({
+      workspaceDir,
+      url: articleUrl,
+      title,
+      fetchImpl: async () =>
+        new Response("<html>publisher unavailable</html>", {
+          status: 503,
+          headers: {
+            "content-type": "text/html"
+          }
+        }),
+      searchArxivImpl: async () => [
+        createArxivResult({
+          id: "2406.06015",
+          title: "A different superconducting qubit paper",
+          absUrl: "https://arxiv.org/abs/2406.06015",
+          pdfUrl: "https://arxiv.org/pdf/2406.06015.pdf"
+        })
+      ]
+    });
+
+    assert.deepEqual(result, {
+      status: "extension_unavailable",
+      source: "aps",
+      articleUrl,
+      failure: {
+        code: "extension_unavailable",
+        message: "Paper extension bridge is not configured. Set usePlaywrightFallback to true to use browser fallback."
+      }
+    });
+  } finally {
+    await rm(workspaceDir, { recursive: true, force: true });
+  }
+});
+
+test("downloadPaper uses arXiv fallback after a prior extension non-PDF failure", async () => {
+  const workspaceDir = await mkdtemp(path.join(os.tmpdir(), "paper-manager-"));
+  const articleUrl = "https://journals.aps.org/prxquantum/abstract/10.1103/k3d5-v43c";
+  const title = "Superconducting qubits in the millions: The potential and limitations of modularity";
+  const apsPdfUrl = "https://journals.aps.org/prxquantum/pdf/10.1103/k3d5-v43c";
+  const arxivPdfUrl = "https://arxiv.org/pdf/2406.06015.pdf";
+  const pdfBytes = Buffer.from("%PDF-1.7\narxiv preprint\n", "utf8");
+  const submittedJobs: unknown[] = [];
+  const fetchCalls: string[] = [];
+
+  try {
+    await appendPaperDownloadJobEvent({
+      workspaceDir,
+      event: {
+        jobId: "paper-aps-failed",
+        recordedAt: "2026-04-27T10:00:00.000Z",
+        status: "automatic_download_failed",
+        articleUrl,
+        source: "aps",
+        title,
+        message: "Downloaded file is not a valid PDF."
+      }
+    });
+
+    const result = await downloadPaper({
+      workspaceDir,
+      url: articleUrl,
+      title,
+      fetchImpl: async (input) => {
+        fetchCalls.push(String(input));
+        if (String(input) === arxivPdfUrl) {
+          return new Response(pdfBytes, {
+            status: 200,
+            headers: {
+              "content-type": "application/pdf"
+            }
+          });
+        }
+
+        return new Response("<html>publisher unavailable</html>", {
+          status: 200,
+          headers: {
+            "content-type": "text/html"
+          }
+        });
+      },
+      searchArxivImpl: async () => [
+        createArxivResult({
+          id: "2406.06015",
+          title,
+          absUrl: "https://arxiv.org/abs/2406.06015",
+          pdfUrl: arxivPdfUrl
+        })
+      ],
+      extensionBridge: {
+        async submitJob(job) {
+          submittedJobs.push(job);
+          return {
+            status: "extension_job_queued",
+            source: job.source,
+            articleUrl: job.articleUrl,
+            jobId: job.jobId,
+            message: "Paper download job queued for the browser extension."
+          };
+        }
+      }
+    });
+
+    const expectedPdfPath = resolvePaperPdfPath({
+      workspaceDir,
+      source: "arxiv",
+      canonicalId: "2406.06015"
+    });
+
+    assert.deepEqual(submittedJobs, []);
+    assert.deepEqual(fetchCalls, [apsPdfUrl, arxivPdfUrl]);
+    assert.equal(result.status, "downloaded");
+    assert.equal(result.source, "arxiv");
+    assert.equal(result.path, expectedPdfPath);
+  } finally {
+    await rm(workspaceDir, { recursive: true, force: true });
+  }
+});
+
+test("downloadPaper uses arXiv fallback when a prior publisher artifact is HTML", async () => {
+  const workspaceDir = await mkdtemp(path.join(os.tmpdir(), "paper-manager-"));
+  const articleUrl = "https://journals.aps.org/prxquantum/abstract/10.1103/k3d5-v43c";
+  const title = "Superconducting qubits in the millions: The potential and limitations of modularity";
+  const apsPdfUrl = "https://journals.aps.org/prxquantum/pdf/10.1103/k3d5-v43c";
+  const arxivPdfUrl = "https://arxiv.org/pdf/2406.06015.pdf";
+  const pdfBytes = Buffer.from("%PDF-1.7\narxiv preprint\n", "utf8");
+  const htmlArtifactPath = path.join(
+    workspaceDir,
+    "downloads",
+    "papers",
+    "aps-10.1103-k3d5-v43c.htm"
+  );
+  const submittedJobs: unknown[] = [];
+
+  try {
+    await mkdir(path.dirname(htmlArtifactPath), { recursive: true });
+    await writeFile(htmlArtifactPath, "<html>not a PDF</html>", "utf8");
+
+    const result = await downloadPaper({
+      workspaceDir,
+      url: articleUrl,
+      title,
+      fetchImpl: async (input) => {
+        if (String(input) === arxivPdfUrl) {
+          return new Response(pdfBytes, {
+            status: 200,
+            headers: {
+              "content-type": "application/pdf"
+            }
+          });
+        }
+
+        assert.equal(String(input), apsPdfUrl);
+        return new Response("<html>publisher unavailable</html>", {
+          status: 200,
+          headers: {
+            "content-type": "text/html"
+          }
+        });
+      },
+      searchArxivImpl: async () => [
+        createArxivResult({
+          id: "2406.06015",
+          title,
+          absUrl: "https://arxiv.org/abs/2406.06015",
+          pdfUrl: arxivPdfUrl
+        })
+      ],
+      extensionBridge: {
+        async submitJob(job) {
+          submittedJobs.push(job);
+          return {
+            status: "extension_job_queued",
+            source: job.source,
+            articleUrl: job.articleUrl,
+            jobId: job.jobId,
+            message: "Paper download job queued for the browser extension."
+          };
+        }
+      }
+    });
+
+    assert.deepEqual(submittedJobs, []);
+    assert.equal(result.status, "downloaded");
+    assert.equal(result.source, "arxiv");
+    assert.equal(result.canonicalId, "2406.06015");
+  } finally {
+    await rm(workspaceDir, { recursive: true, force: true });
+  }
+});
+
 test("downloadPaper preserves supported-publisher manual fallback results when automatic download fails", async () => {
   const workspaceDir = await mkdtemp(path.join(os.tmpdir(), "paper-manager-"));
   const articleUrl = "https://www.science.org/doi/10.1126/science.adz8659";
@@ -1117,7 +1449,7 @@ test("downloadLatestApsPapers searches APS and attempts each requested download"
   const firstUrl = "https://journals.aps.org/doi/10.1103/PhysRevApplied.24.034057";
   const secondUrl = "https://journals.aps.org/doi/10.1103/PhysRevLett.135.030801";
   const searchCalls: Array<{ query: string; maxResults?: number }> = [];
-  const downloadCalls: Array<{ workspaceDir: string; url?: string }> = [];
+  const downloadCalls: Array<{ workspaceDir: string; url?: string; title?: string }> = [];
 
   try {
     const result = await downloadLatestApsPapers({
@@ -1192,8 +1524,16 @@ test("downloadLatestApsPapers searches APS and attempts each requested download"
       { query: "superconducting quantum computing", maxResults: 2 }
     ]);
     assert.deepEqual(downloadCalls, [
-      { workspaceDir, url: firstUrl },
-      { workspaceDir, url: secondUrl }
+      {
+        workspaceDir,
+        url: firstUrl,
+        title: "On-chip direct-current source for scalable superconducting quantum computing"
+      },
+      {
+        workspaceDir,
+        url: secondUrl,
+        title: "Complete Self-Testing of a System of Remote Superconducting Qubits"
+      }
     ]);
     assert.equal(result.query, "superconducting quantum computing");
     assert.equal(result.requested, 2);
@@ -1216,6 +1556,7 @@ test("downloadLatestApsPapers skips remaining automatic APS downloads after a Cl
   const downloadCalls: Array<{
     workspaceDir: string;
     url?: string;
+    title?: string;
     forceManualOpen?: { code: string; message: string };
   }> = [];
 
@@ -1333,6 +1674,7 @@ test("downloadLatestApsPapers skips all automatic APS downloads when a recent Cl
   ];
   const downloadCalls: Array<{
     url?: string;
+    title?: string;
     forceManualOpen?: { code: string; message: string };
   }> = [];
 

@@ -180,21 +180,65 @@ async function enterManualDownloadMode(job, message) {
   );
 }
 
-async function triggerDownloadFromArticleTab(job, pdfUrl) {
-  if (typeof job.tabId !== "number" || job.source === "external") {
-    return false;
+function sanitizeFilenamePart(value) {
+  var sanitized = String(value || "")
+    .replace(/[\u0000-\u001f<>:"/\\|?*]+/g, "-")
+    .replace(/\s+/g, " ")
+    .trim()
+    .replace(/[ .]+$/g, "");
+
+  return sanitized || "paper";
+}
+
+function filenamePartFromPathOrUrl(value) {
+  var basename = basenameFromPathOrUrl(value);
+  return basename.replace(/\.pdf$/i, "");
+}
+
+function canonicalPartFromPublisherUrl(source, articleUrl, pdfUrl) {
+  var candidates = [articleUrl, pdfUrl].filter(Boolean);
+
+  for (var index = 0; index < candidates.length; index += 1) {
+    try {
+      var parsed = new URL(candidates[index]);
+      if (source === "nature") {
+        var natureMatch = parsed.pathname.match(/^\/articles\/([^/?#]+?)(?:\.pdf)?$/i);
+        if (natureMatch && natureMatch[1]) {
+          return decodeURIComponent(natureMatch[1]);
+        }
+      }
+
+      if (source === "science") {
+        var scienceMatch = parsed.pathname.match(/^\/doi\/(?:(?:pdf|full|abs|epdf)\/)?(.+)$/i);
+        if (scienceMatch && scienceMatch[1]) {
+          return decodeURIComponent(scienceMatch[1]).replace(/\.pdf$/i, "");
+        }
+      }
+
+      if (source === "aps") {
+        var apsDirectMatch = parsed.pathname.match(/^\/doi\/(?:pdf\/)?(.+)$/i);
+        if (apsDirectMatch && apsDirectMatch[1]) {
+          return decodeURIComponent(apsDirectMatch[1]).replace(/\.pdf$/i, "");
+        }
+
+        var apsJournalMatch = parsed.pathname.match(/^\/[^/]+\/(?:abstract|pdf)\/(.+)$/i);
+        if (apsJournalMatch && apsJournalMatch[1]) {
+          return decodeURIComponent(apsJournalMatch[1]).replace(/\.pdf$/i, "");
+        }
+      }
+    } catch (error) {
+      // Fall back to URL basename below.
+    }
   }
 
-  try {
-    const response = await chrome.tabs.sendMessage(job.tabId, {
-      type: "paper_download_pdf",
-      pdfUrl
-    });
-    return !!(response && response.ok);
-  } catch (error) {
-    console.warn("Pi Agent tab download trigger failed", error);
-    return false;
-  }
+  return filenamePartFromPathOrUrl(pdfUrl) || filenamePartFromPathOrUrl(articleUrl);
+}
+
+function buildDefaultDownloadFilename(job, pdfUrl) {
+  var source = sanitizeFilenamePart(job && job.source ? job.source : "paper").toLowerCase();
+  var canonical = canonicalPartFromPublisherUrl(source, job && job.articleUrl, pdfUrl);
+  var stem = sanitizeFilenamePart(source + "-" + (canonical || "paper"));
+  return "pi-agent-papers/" + stem + ".pdf";
 }
 
 async function startAutomaticDownload(job, pdfUrl) {
@@ -208,17 +252,10 @@ async function startAutomaticDownload(job, pdfUrl) {
   await reportJobStatus(job, "pdf_candidate_found", "Found a direct PDF candidate.");
 
   try {
-    if (await triggerDownloadFromArticleTab(job, pdfUrl)) {
-      await reportJobStatus(
-        job,
-        "automatic_download_started",
-        "Started automatic PDF download from the article tab."
-      );
-      return;
-    }
-
+    var filename = buildDefaultDownloadFilename(job, pdfUrl);
     const downloadId = await chrome.downloads.download({
       url: pdfUrl,
+      filename,
       conflictAction: "uniquify",
       saveAs: false
     });
@@ -229,10 +266,15 @@ async function startAutomaticDownload(job, pdfUrl) {
       title: job.title,
       tabId: job.tabId,
       autoClose: job.autoClose,
-      pdfUrl
+      pdfUrl,
+      filename
     });
     await persistState();
-    await reportJobStatus(job, "automatic_download_started", "Started automatic PDF download.");
+    await reportJobStatus(
+      job,
+      "automatic_download_started",
+      "Started automatic PDF download with a default filename."
+    );
   } catch (error) {
     await reportJobStatus(
       job,
@@ -487,6 +529,17 @@ async function registerCompletedDownload(downloadId) {
       downloadsById.delete(downloadId);
       await persistState();
       await closeCompletedJobTab(trackedDownload);
+    } else if (response && response.type === "error") {
+      const job = jobsById.get(trackedDownload.jobId);
+      downloadsById.delete(downloadId);
+      if (job) {
+        await reportJobStatus(
+          job,
+          "automatic_download_failed",
+          response.message || "Downloaded file could not be registered as a PDF."
+        );
+      }
+      await persistState();
     }
   });
 }
