@@ -27,7 +27,8 @@ import { createPaperBrowserManagerServer, startPaperBrowserManagerHttpServer } f
 import { searchApsPapers } from "./aps-search.js";
 import { getPublisherAdapter } from "./publisher-adapters/index.js";
 import { fetchWebPage } from "./web-fetch.js";
-import { searchWeb } from "./web-search.js";
+import { searchWeb, type WebSearchResult } from "./web-search.js";
+import type { PaperSearchResult } from "./paper-types.js";
 
 const getTimeParameters = Type.Object({
   timezone: Type.Optional(Type.String({ description: "Optional IANA timezone name." }))
@@ -116,14 +117,28 @@ async function resolveWorkspacePath(workspaceDir: string, requestedPath: string)
 
 type GetTimeTool = AgentTool<typeof getTimeParameters, { timezone: string }>;
 type ReadFileTool = AgentTool<typeof readFileParameters, { path: string }>;
+type SearchResultPreview = {
+  title: string;
+  url?: string;
+  summary?: string;
+  source?: string;
+  action?: string;
+  canonicalId?: string;
+};
+type SearchToolDetails = {
+  query: string;
+  maxResults: number;
+  count: number;
+  results: SearchResultPreview[];
+};
 type WebSearchTool = AgentTool<
   typeof webSearchParameters,
-  { query: string; maxResults: number; count: number }
+  SearchToolDetails
 >;
 type FetchUrlTool = AgentTool<typeof fetchUrlParameters, { url: string }>;
 type SearchPapersTool = AgentTool<
   typeof searchPapersParameters,
-  { query: string; maxResults: number; count: number }
+  SearchToolDetails
 >;
 type DownloadPaperTool = AgentTool<
   typeof downloadPaperParameters,
@@ -143,6 +158,42 @@ type OpenPaperPageForLoginDependency = (options: {
   workspaceDir: string;
   url: string;
 }) => Promise<OpenPaperPageForLoginResult>;
+
+const MAX_SEARCH_RESULT_PREVIEWS = 5;
+const MAX_SEARCH_PREVIEW_TEXT_LENGTH = 220;
+
+function compactPreviewText(value: string | undefined, maxLength = MAX_SEARCH_PREVIEW_TEXT_LENGTH): string | undefined {
+  const compacted = value?.replace(/\s+/g, " ").trim();
+  if (!compacted) {
+    return undefined;
+  }
+
+  return compacted.length > maxLength
+    ? `${compacted.slice(0, Math.max(0, maxLength - 1)).trimEnd()}...`
+    : compacted;
+}
+
+function summarizeWebSearchResults(results: WebSearchResult[]): SearchResultPreview[] {
+  return results.slice(0, MAX_SEARCH_RESULT_PREVIEWS).map((result) => ({
+    title: compactPreviewText(result.title, 120) ?? "(untitled)",
+    url: result.url,
+    summary: compactPreviewText(result.snippet)
+  }));
+}
+
+function summarizePaperSearchResults(results: PaperSearchResult[]): SearchResultPreview[] {
+  return results.slice(0, MAX_SEARCH_RESULT_PREVIEWS).map((result) => {
+    const primarySource = result.sources[0];
+    return {
+      title: compactPreviewText(result.title, 120) ?? "(untitled)",
+      ...(primarySource?.articleUrl ? { url: primarySource.articleUrl } : {}),
+      summary: compactPreviewText(result.summary),
+      source: result.primarySource,
+      action: result.primaryAction,
+      ...(primarySource?.canonicalId ? { canonicalId: primarySource.canonicalId } : {})
+    };
+  });
+}
 type OpenPaperPageForLoginTool = AgentTool<
   typeof openPaperPageForLoginParameters,
   OpenPaperPageForLoginResult
@@ -487,7 +538,12 @@ export function createTools(workspaceDir: string, dependencies: ToolDependencies
 
       return {
         content: [{ type: "text", text: JSON.stringify(results) }],
-        details: { query: args.query, maxResults, count: results.length }
+        details: {
+          query: args.query,
+          maxResults,
+          count: results.length,
+          results: summarizeWebSearchResults(results)
+        }
       };
     }
   };
@@ -519,7 +575,12 @@ export function createTools(workspaceDir: string, dependencies: ToolDependencies
 
       return {
         content: [{ type: "text", text: JSON.stringify(results) }],
-        details: { query: args.query, maxResults, count: results.length }
+        details: {
+          query: args.query,
+          maxResults,
+          count: results.length,
+          results: summarizePaperSearchResults(results)
+        }
       };
     }
   };

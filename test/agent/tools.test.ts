@@ -364,6 +364,13 @@ test("web_search delegates to the injected search client and returns JSON text w
       query: "latest pi agent docs",
       maxResults: 2,
       count: 1,
+      results: [
+        {
+          title: "Result title",
+          url: "https://example.com/result",
+          summary: "Result snippet",
+        },
+      ],
     });
   } finally {
     await rm(workspace, { recursive: true, force: true });
@@ -444,6 +451,16 @@ test("search_papers delegates to the injected paper manager dependency and retur
       query: "tool adapters",
       maxResults: 3,
       count: 1,
+      results: [
+        {
+          title: "Unified Paper Search",
+          url: "https://www.science.org/doi/10.1126/science.adz8659",
+          summary: "Merged paper result.",
+          source: "science",
+          action: "authorized_download",
+          canonicalId: "10.1126/science.adz8659",
+        },
+      ],
     });
   } finally {
     await rm(workspace, { recursive: true, force: true });

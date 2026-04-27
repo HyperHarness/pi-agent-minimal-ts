@@ -82,6 +82,75 @@ function getAssistantText(message: AssistantMessage): string {
     .join("");
 }
 
+function isRecord(value: unknown): value is Record<string, unknown> {
+  return typeof value === "object" && value !== null;
+}
+
+function compactOutputText(value: unknown, maxLength = 180): string | null {
+  if (typeof value !== "string") {
+    return null;
+  }
+
+  const compacted = value.replace(/\s+/g, " ").trim();
+  if (!compacted) {
+    return null;
+  }
+
+  return compacted.length > maxLength
+    ? `${compacted.slice(0, Math.max(0, maxLength - 1)).trimEnd()}...`
+    : compacted;
+}
+
+function formatSearchToolDetails(details: unknown): string | null {
+  if (!isRecord(details)) {
+    return null;
+  }
+
+  const query = compactOutputText(details.query, 240);
+  const count = typeof details.count === "number" ? details.count : undefined;
+  const results = Array.isArray(details.results) ? details.results.filter(isRecord) : [];
+  if (!query && count === undefined && results.length === 0) {
+    return null;
+  }
+
+  const lines: string[] = [];
+  if (query) {
+    lines.push(`[tool:search] query: ${query}`);
+  }
+  if (count !== undefined) {
+    const shown = results.length;
+    lines.push(`[tool:search] results: ${count}${shown > 0 && shown < count ? `, showing ${shown}` : ""}`);
+  }
+
+  results.forEach((result, index) => {
+    const title = compactOutputText(result.title, 140) ?? "(untitled)";
+    const url = compactOutputText(result.url, 240);
+    const summary = compactOutputText(result.summary, 220);
+    const source = compactOutputText(result.source, 40);
+    const action = compactOutputText(result.action, 60);
+    const canonicalId = compactOutputText(result.canonicalId, 120);
+    const metadata = [source, action, canonicalId].filter(Boolean).join(" | ");
+
+    lines.push(`  ${index + 1}. ${title}${metadata ? ` [${metadata}]` : ""}`);
+    if (url) {
+      lines.push(`     url: ${url}`);
+    }
+    if (summary) {
+      lines.push(`     summary: ${summary}`);
+    }
+  });
+
+  return lines.length > 0 ? `${lines.join("\n")}\n` : null;
+}
+
+function formatToolExecutionDetails(event: Extract<AgentEvent, { type: "tool_execution_end" }>): string | null {
+  if (event.isError || (event.toolName !== "web_search" && event.toolName !== "search_papers")) {
+    return null;
+  }
+
+  return formatSearchToolDetails(event.result.details);
+}
+
 function normalizeBaseUrl(baseUrl: string | undefined): string | undefined {
   const trimmedBaseUrl = baseUrl?.trim();
   return trimmedBaseUrl ? trimmedBaseUrl : undefined;
@@ -170,6 +239,10 @@ export function createReplEventHandler(output: NodeJS.WriteStream): AgentMessage
 
     if (event.type === "tool_execution_end") {
       output.write(`[tool:end] ${event.toolName} ${event.isError ? "error" : "ok"}\n`);
+      const detailsOutput = formatToolExecutionDetails(event);
+      if (detailsOutput) {
+        output.write(detailsOutput);
+      }
       return;
     }
 

@@ -685,6 +685,56 @@ test("createReplEventHandler prints assistant error messages", () => {
   assert.match(writes.join(""), /Authentication failed/);
 });
 
+test("createReplEventHandler prints compact search tool details", () => {
+  const handlerFactory = (
+    piAgent as {
+      createReplEventHandler?: (output: NodeJS.WriteStream) => (event: AgentEvent) => void;
+    }
+  ).createReplEventHandler;
+  assert.equal(typeof handlerFactory, "function");
+
+  const writes: string[] = [];
+  const output: { write: (chunk: string | Uint8Array) => boolean } = {
+    write: (chunk) => {
+      writes.push(typeof chunk === "string" ? chunk : Buffer.from(chunk).toString("utf8"));
+      return true;
+    }
+  };
+  const handleEvent = handlerFactory!(output as NodeJS.WriteStream);
+
+  handleEvent({
+    type: "tool_execution_end",
+    toolName: "search_papers",
+    toolCallId: "call-search",
+    isError: false,
+    result: {
+      content: [],
+      details: {
+        query: "latest superconducting quantum computing papers",
+        maxResults: 3,
+        count: 2,
+        results: [
+          {
+            title: "A superconducting qubit paper",
+            url: "https://journals.aps.org/prapplied/abstract/10.1103/example",
+            summary: "A compact summary of the search result.",
+            source: "aps",
+            action: "authorized_download",
+            canonicalId: "10.1103/example"
+          }
+        ]
+      }
+    }
+  } as AgentEvent);
+
+  const outputText = writes.join("");
+  assert.match(outputText, /\[tool:end\] search_papers ok/);
+  assert.match(outputText, /\[tool:search\] query: latest superconducting quantum computing papers/);
+  assert.match(outputText, /\[tool:search\] results: 2, showing 1/);
+  assert.match(outputText, /A superconducting qubit paper/);
+  assert.match(outputText, /https:\/\/journals\.aps\.org\/prapplied\/abstract\/10\.1103\/example/);
+});
+
 test("parseCliArgs accepts --base-url", () => {
   const parseCliArgs = (
     piAgent as {
