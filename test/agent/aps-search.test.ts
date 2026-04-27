@@ -16,7 +16,7 @@ test("searchApsPapers queries Crossref for APS DOI-prefix papers and returns new
 
   const results = await searchApsPapers({
     query: "superconducting quantum computing",
-    maxResults: 2,
+    maxResults: 3,
     fetchImpl: async (input) => {
       calls.push({ url: String(input) });
       return jsonResponse({
@@ -40,6 +40,16 @@ test("searchApsPapers queries Crossref for APS DOI-prefix papers and returns new
                 "date-parts": [[2025, 9, 22]]
               },
               author: [{ given: "Grace", family: "Hopper" }],
+              "container-title": ["Physical Review Applied"]
+            },
+            {
+              DOI: "10.1103/k3d5-v43c",
+              title: ["A routed superconducting quantum processor paper"],
+              abstract: "Superconducting quantum computing with routed DOI.",
+              published: {
+                "date-parts": [[2025, 10, 1]]
+              },
+              author: [{ given: "Katherine", family: "Johnson" }],
               "container-title": ["Physical Review Applied"]
             },
             {
@@ -73,6 +83,12 @@ test("searchApsPapers queries Crossref for APS DOI-prefix papers and returns new
       canonicalId: result.sources[0]?.canonicalId
     })),
     [
+      {
+        title: "A routed superconducting quantum processor paper",
+        primarySource: "aps",
+        articleUrl: "https://journals.aps.org/prapplied/abstract/10.1103/k3d5-v43c",
+        canonicalId: "10.1103/k3d5-v43c"
+      },
       {
         title: "On-chip direct-current source for scalable superconducting quantum computing",
         primarySource: "aps",

@@ -466,6 +466,21 @@ function derivePublisherPdfUrl(options: {
     return parsedUrl.toString();
   }
 
+  const doiPdfPathMatch = parsedUrl.pathname.match(/^\/doi\/pdf\/(.+)$/i);
+  if (doiPdfPathMatch?.[1]) {
+    parsedUrl.search = "";
+    parsedUrl.hash = "";
+    return parsedUrl.toString();
+  }
+
+  const doiPathMatch = parsedUrl.pathname.match(/^\/doi\/(.+)$/i);
+  if (doiPathMatch?.[1]) {
+    parsedUrl.pathname = `/doi/pdf/${doiPathMatch[1]}`;
+    parsedUrl.search = "";
+    parsedUrl.hash = "";
+    return parsedUrl.toString();
+  }
+
   const match = parsedUrl.pathname.match(/^\/([^/]+)\/(?:abstract|pdf)\/(.+)$/i);
   if (!match?.[1] || !match[2]) {
     return undefined;

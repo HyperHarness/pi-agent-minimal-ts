@@ -407,6 +407,14 @@ test("publisher helpers extract Nature, Science, and APS PDF candidates", () => 
     }),
     "https://journals.aps.org/prl/pdf/10.1103/PhysRevLett.134.090601"
   );
+
+  assert.equal(
+    findApsPdfCandidate({
+      document: doc("<main>No PDF link</main>"),
+      baseUrl: "https://journals.aps.org/doi/10.1103/k3d5-v43c"
+    }),
+    "https://journals.aps.org/doi/pdf/10.1103/k3d5-v43c"
+  );
 });
 
 test("manifest declares required MV3 extension shell fields", async () => {

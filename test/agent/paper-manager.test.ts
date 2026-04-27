@@ -192,6 +192,49 @@ test("searchPapers includes latest APS metadata results as downloadable paper so
   ]);
 });
 
+test("searchPapers prefers original supported web URLs over generated APS metadata URLs", async () => {
+  const generatedUrl = "https://journals.aps.org/prapplied/abstract/10.1103/k3d5-v43c";
+  const originalUrl = "https://journals.aps.org/prapplied/abstract/10.1103/PhysRevApplied.24.034057";
+
+  const results = await searchPapers({
+    query: "superconducting quantum computing",
+    searchArxivImpl: async () => [],
+    searchApsPapersImpl: async () => [
+      {
+        title: "Latest Superconducting Qubit Paper",
+        authors: ["Grace Hopper"],
+        summary: "APS metadata summary.",
+        primarySource: "aps",
+        primaryAction: "authorized_download",
+        sources: [
+          {
+            source: "aps",
+            action: "authorized_download",
+            canonicalId: "10.1103/k3d5-v43c",
+            articleUrl: generatedUrl
+          }
+        ]
+      }
+    ],
+    searchWebImpl: async () => [
+      createWebResult({
+        title: "Latest Superconducting Qubit Paper",
+        url: originalUrl,
+        snippet: "Web search original URL summary."
+      })
+    ]
+  });
+
+  assert.equal(results.length, 1);
+  assert.equal(results[0]?.summary, "Web search original URL summary.");
+  assert.deepEqual(results[0]?.sources[0], {
+    source: "aps",
+    action: "authorized_download",
+    articleUrl: originalUrl,
+    canonicalId: "10.1103/PhysRevApplied.24.034057"
+  });
+});
+
 test("searchPapers still returns available paper results when optional search providers fail", async () => {
   const results = await searchPapers({
     query: "superconducting quantum computing",

@@ -385,7 +385,7 @@ function classifyWebSearchResult(
     source: classification.source,
     action: classification.action,
     articleUrl: classification.articleUrl,
-    rank: SUPPORTED_SOURCE_PRIORITY[classification.source],
+    rank: SUPPORTED_SOURCE_PRIORITY[classification.source] - 0.5,
     order,
     ...(classification.canonicalId ? { canonicalId: classification.canonicalId } : {})
   };
@@ -651,6 +651,21 @@ function resolveDirectPublisherPdfUrl(
   }
 
   const articleUrl = new URL(classification.articleUrl);
+  const doiPdfPathMatch = articleUrl.pathname.match(/^\/doi\/pdf\/(.+)$/i);
+  if (doiPdfPathMatch?.[1]) {
+    articleUrl.search = "";
+    articleUrl.hash = "";
+    return articleUrl.toString();
+  }
+
+  const doiPathMatch = articleUrl.pathname.match(/^\/doi\/(.+)$/i);
+  if (doiPathMatch?.[1]) {
+    articleUrl.pathname = `/doi/pdf/${doiPathMatch[1]}`;
+    articleUrl.search = "";
+    articleUrl.hash = "";
+    return articleUrl.toString();
+  }
+
   const pdfPathMatch = articleUrl.pathname.match(/^\/([^/]+)\/pdf\/(.+)$/i);
   if (pdfPathMatch) {
     articleUrl.search = "";

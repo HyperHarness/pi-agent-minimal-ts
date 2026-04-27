@@ -50,7 +50,7 @@ function extractScienceDoi(urlString: string): string | null {
 
 function extractApsDoi(urlString: string): string | null {
   const path = new URL(urlString).pathname;
-  const directDoiMatch = path.match(/^\/doi\/(.+)$/i);
+  const directDoiMatch = path.match(/^\/doi\/(?:pdf\/)?(.+)$/i);
   if (directDoiMatch?.[1]) {
     return decodePublisherPathSegment(directDoiMatch[1]).replace(/\.pdf$/i, "");
   }
@@ -127,7 +127,13 @@ function resolveFallbackPdfPath(input: {
     return null;
   }
 
-  const match = new URL(input.finalArticleUrl).pathname.match(/^\/([^/]+)\/abstract\/(.+)$/i);
+  const finalArticleUrl = new URL(input.finalArticleUrl);
+  const doiMatch = finalArticleUrl.pathname.match(/^\/doi\/(?:pdf\/)?(.+)$/i);
+  if (doiMatch?.[1]) {
+    return `/doi/pdf/${doiMatch[1]}`;
+  }
+
+  const match = finalArticleUrl.pathname.match(/^\/([^/]+)\/abstract\/(.+)$/i);
   if (!match) {
     return null;
   }

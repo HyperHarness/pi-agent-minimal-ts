@@ -466,7 +466,7 @@ test("handleExtensionHostMessage stores message-provided publisher PDF URLs inst
   }
 });
 
-test("handleExtensionHostMessage returns pdf_url_not_found when publisher PDF URL cannot be determined", async () => {
+test("handleExtensionHostMessage derives APS DOI resolver PDF URLs", async () => {
   const workspaceDir = await createWorkspaceDir();
   const articleUrl = "https://journals.aps.org/doi/10.1103/PhysRevApplied.24.034057";
   const sourcePdfPath = path.join(workspaceDir, "inbox", "aps.pdf");
@@ -474,24 +474,26 @@ test("handleExtensionHostMessage returns pdf_url_not_found when publisher PDF UR
   try {
     await writePdf(sourcePdfPath, "%PDF-1.7\naps pdf\n");
 
-    assert.deepEqual(
-      await handleExtensionHostMessage({
-        workspaceDir,
-        message: {
-          type: "register_download",
-          jobId: "job-no-pdf-url",
-          articleUrl,
-          source: "aps",
-          downloadPath: sourcePdfPath
-        }
-      }),
-      {
-        type: "error",
-        jobId: "job-no-pdf-url",
-        code: "pdf_url_not_found",
-        message: "Unable to determine a PDF URL for this publisher article."
+    const response = await handleExtensionHostMessage({
+      workspaceDir,
+      message: {
+        type: "register_download",
+        jobId: "job-aps-doi-url",
+        articleUrl,
+        source: "aps",
+        downloadPath: sourcePdfPath
       }
-    );
+    });
+
+    assert.equal(response.type, "registered");
+    const recordPath = resolvePaperRecordPath({
+      workspaceDir,
+      source: "aps",
+      canonicalId: "10.1103/PhysRevApplied.24.034057",
+      articleUrl
+    });
+    const record = JSON.parse(await readFile(recordPath, "utf8"));
+    assert.equal(record.pdfUrl, "https://journals.aps.org/doi/pdf/10.1103/PhysRevApplied.24.034057");
   } finally {
     await rm(workspaceDir, { recursive: true, force: true });
   }

@@ -294,6 +294,33 @@ test("downloadPaperPdf derives the APS canonical PDF URL when the article page h
   assert.equal(downloadedUrl, result.finalPdfUrl);
 });
 
+test("downloadPaperPdf derives APS DOI resolver PDF URLs for routed DOI pages", async () => {
+  const workspaceDir = await mkdtemp(path.join(os.tmpdir(), "paper-download-"));
+  let downloadedUrl: string | undefined;
+
+  const result = await downloadPaperPdf({
+    workspaceDir,
+    url: "https://journals.aps.org/doi/10.1103/k3d5-v43c",
+    browserSession: {
+      openArticlePage: async () => ({
+        finalArticleUrl: "https://journals.aps.org/doi/10.1103/k3d5-v43c",
+        html: "<html><body>No direct PDF link in the article HTML.</body></html>",
+        authorized: true
+      }),
+      openPageForManualLogin: async (url: string) => ({
+        openedUrl: url
+      }),
+      downloadPdf: async (url) => {
+        downloadedUrl = url;
+      }
+    }
+  });
+
+  assert.equal(result.finalPdfUrl, "https://journals.aps.org/doi/pdf/10.1103/k3d5-v43c");
+  assert.equal(result.publisher, "aps");
+  assert.equal(downloadedUrl, result.finalPdfUrl);
+});
+
 test("downloadPaperPdf formats Nature output filenames from the article identifier", async () => {
   const workspaceDir = await mkdtemp(path.join(os.tmpdir(), "paper-download-"));
   let downloadedPath: string | undefined;
