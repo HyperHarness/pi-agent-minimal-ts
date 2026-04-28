@@ -11,6 +11,7 @@ import {
   readCachedParse,
   readParsedPaperDocument,
   readPaperSourceByKey,
+  resolveExistingPaperKey,
   resolvePaperSource,
   writeParseArtifacts
 } from "./paper-reader-store.js";
@@ -83,7 +84,7 @@ function resolveConcreteEngine(engine: PaperParseEngine | undefined): ConcretePa
   return engine;
 }
 
-function sortEnginesByPreference(engines: ConcretePaperParseEngine[]): ConcretePaperParseEngine[] {
+function enginePreference(engine: ConcretePaperParseEngine): number {
   const priority: Record<ConcretePaperParseEngine, number> = {
     "webpage": 0,
     "opendataloader-hybrid": 1,
@@ -91,28 +92,85 @@ function sortEnginesByPreference(engines: ConcretePaperParseEngine[]): ConcreteP
     "docling": 3,
     "plain-text-baseline": 4
   };
-  return engines.slice().sort((left, right) => priority[left] - priority[right]);
+  return priority[engine];
+}
+
+function sortEnginesByPreference(engines: ConcretePaperParseEngine[]): ConcretePaperParseEngine[] {
+  return engines.slice().sort((left, right) => enginePreference(left) - enginePreference(right));
+}
+
+function qualityStatusRank(status: PaperParseQualityReport["status"]): number {
+  const rank: Record<PaperParseQualityReport["status"], number> = {
+    good: 3,
+    needs_hybrid: 2,
+    poor: 1
+  };
+  return rank[status];
+}
+
+function statusFromScore(score: number): PaperParseQualityReport["status"] {
+  return score >= 0.7 ? "good" : score >= 0.4 ? "needs_hybrid" : "poor";
+}
+
+function refreshStoredQuality(
+  document: ParsedPaperDocument,
+  storedQuality: PaperParseQualityReport
+): PaperParseQualityReport {
+  if (document.engine !== "webpage") {
+    return storedQuality;
+  }
+
+  const currentQuality = evaluateParseQuality(document);
+  const score = Math.min(storedQuality.score, currentQuality.score);
+  return {
+    ...currentQuality,
+    status: statusFromScore(score),
+    score,
+    warnings: [...new Set([...storedQuality.warnings, ...currentQuality.warnings])]
+  };
 }
 
 async function resolveAvailableEngine(input: {
   workspaceDir: string;
   paperKey: string;
   engine?: ConcretePaperParseEngine;
-}): Promise<ConcretePaperParseEngine> {
+}): Promise<{ paperKey: string; engine: ConcretePaperParseEngine }> {
+  const paperKey = await resolveExistingPaperKey({
+    workspaceDir: input.workspaceDir,
+    paperKey: input.paperKey
+  });
   if (input.engine) {
-    return input.engine;
+    return { paperKey, engine: input.engine };
   }
   const engines = sortEnginesByPreference(
     await listPaperParseEngines({
       workspaceDir: input.workspaceDir,
-      paperKey: input.paperKey
+      paperKey
     })
   );
-  const engine = engines[0];
+  const parseSummaries = (await Promise.all(
+    engines.map((engine) => readParseSummary({
+      workspaceDir: input.workspaceDir,
+      paperKey,
+      engine
+    }))
+  )).filter((parse): parse is NonNullable<typeof parse> => parse !== undefined);
+  const engine = parseSummaries
+    .sort((left, right) => {
+      const statusDelta = qualityStatusRank(right.quality.status) - qualityStatusRank(left.quality.status);
+      if (statusDelta !== 0) {
+        return statusDelta;
+      }
+      const scoreDelta = right.quality.score - left.quality.score;
+      if (scoreDelta !== 0) {
+        return scoreDelta;
+      }
+      return enginePreference(left.engine) - enginePreference(right.engine);
+    })[0]?.engine ?? engines[0];
   if (!engine) {
     throw new PaperReaderError("paper_not_found", `No parsed paper found for ${input.paperKey}.`);
   }
-  return engine;
+  return { paperKey, engine };
 }
 
 async function runParser(input: {
@@ -314,7 +372,8 @@ async function readParseSummary(input: {
       readFile(artifacts.qualityPath, "utf8")
     ]);
     const document = JSON.parse(documentText) as ParsedPaperDocument;
-    const quality = JSON.parse(qualityText) as PaperParseQualityReport;
+    const storedQuality = JSON.parse(qualityText) as PaperParseQualityReport;
+    const quality = refreshStoredQuality(document, storedQuality);
     return {
       engine: input.engine,
       pdfSha256: document.pdfSha256,
@@ -344,6 +403,7 @@ export async function inspectPaper(options: InspectPaperOptions): Promise<PaperI
   if (!paperKey) {
     throw new PaperReaderError("paper_not_found", "paperKey is required.");
   }
+  paperKey = await resolveExistingPaperKey({ workspaceDir: options.workspaceDir, paperKey });
 
   await assertPaperReadingExists({ workspaceDir: options.workspaceDir, paperKey });
   const [source, engines] = await Promise.all([
@@ -368,10 +428,10 @@ export async function inspectPaper(options: InspectPaperOptions): Promise<PaperI
 export async function readPaperSection(
   options: ReadPaperSectionOptions
 ): Promise<PaperSectionReadResult> {
-  const engine = await resolveAvailableEngine(options);
+  const { paperKey, engine } = await resolveAvailableEngine(options);
   const document = await readParsedPaperDocument({
     workspaceDir: options.workspaceDir,
-    paperKey: options.paperKey,
+    paperKey,
     engine
   });
   const pageFrom = options.pageFrom;
@@ -404,7 +464,7 @@ export async function readPaperSection(
   const text = truncated ? fullText.slice(0, maxChars).trimEnd() : fullText;
 
   return {
-    paperKey: options.paperKey,
+    paperKey,
     engine,
     ...(options.sectionId ? { sectionId: options.sectionId } : {}),
     ...(pageFrom !== undefined ? { pageFrom } : {}),
@@ -446,10 +506,10 @@ export async function searchPaperText(
   }
 
   const maxResults = Math.max(1, Math.trunc(options.maxResults ?? DEFAULT_SEARCH_RESULTS));
-  const engine = await resolveAvailableEngine(options);
+  const { paperKey, engine } = await resolveAvailableEngine(options);
   const document = await readParsedPaperDocument({
     workspaceDir: options.workspaceDir,
-    paperKey: options.paperKey,
+    paperKey,
     engine
   });
   const lowerQuery = query.toLowerCase();
@@ -466,7 +526,7 @@ export async function searchPaperText(
     }));
 
   return {
-    paperKey: options.paperKey,
+    paperKey,
     engine,
     query,
     results

@@ -150,7 +150,7 @@ test("Science webpage parsing removes access chrome and flags abstract-only page
       extraction
     });
 
-    assert.equal(result.quality.status, "needs_hybrid");
+    assert.ok(["poor", "needs_hybrid"].includes(result.quality.status));
     assert.ok(
       result.quality.warnings.some((warning) =>
         warning.includes("Ask the user to log in")
@@ -329,6 +329,63 @@ test("Nature webpage parsing flags subscription previews as access-limited", asy
     assert.ok(
       result.quality.warnings.some((warning) =>
         warning.includes("Ask the user to log in")
+      )
+    );
+  } finally {
+    await rm(workspace, { recursive: true, force: true });
+  }
+});
+
+test("Nature unedited manuscript webpage without body is not treated as full-quality text", async () => {
+  const workspace = await mkdtemp(path.join(tmpdir(), "pi-paper-nature-unedited-"));
+  try {
+    const extraction = parsePaperWebPageHtml({
+      url: "https://www.nature.com/articles/s41534-026-01233-y",
+      html: `
+        <html>
+          <head>
+            <meta name="citation_title" content="Fusion-based implementation of qLDPC codes with quantum emitters">
+            <meta name="citation_doi" content="10.1038/s41534-026-01233-y">
+            <meta name="citation_journal_title" content="npj Quantum Information">
+          </head>
+          <body>
+            <article>
+              <h1>Fusion-based implementation of qLDPC codes with quantum emitters</h1>
+              <p>We are providing an unedited version of this manuscript to give early access to its findings. Before final publication, the manuscript will undergo further editing. Please note there may be errors present which affect the content, and all legal disclaimers apply.</p>
+              <h2>Abstract</h2>
+              <p>Quantum low-density parity check codes offer higher encoding rate than topological codes.</p>
+              <h2>Data availability</h2>
+              <p>The code and data generated for this article are openly available.</p>
+              <h2>Code availability</h2>
+              <p>The code written for this article is openly available.</p>
+              <h2>References</h2>
+              <p>${"Reference metadata ".repeat(220)}</p>
+              <h2>Acknowledgements</h2>
+              <p>We thank collaborators.</p>
+              <h2>Author information</h2>
+              <p>Authors and affiliations.</p>
+            </article>
+          </body>
+        </html>
+      `
+    });
+
+    const result = await savePaperWebPageParse({
+      workspaceDir: workspace,
+      extraction
+    });
+
+    assert.equal(result.paperKey, "nature-s41534-026-01233-y");
+    assert.ok(["poor", "needs_hybrid"].includes(result.quality.status));
+    assert.ok(result.quality.score < 0.7);
+    assert.ok(
+      result.quality.warnings.some((warning) =>
+        warning.includes("No main body sections were detected")
+      )
+    );
+    assert.ok(
+      result.quality.warnings.some((warning) =>
+        warning.includes("Prefer PDF parsing")
       )
     );
   } finally {

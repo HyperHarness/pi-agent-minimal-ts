@@ -15,6 +15,8 @@ import {
   writePaperWikiSource
 } from "../../src/agent/paper-wiki/paper-wiki.js";
 import { PaperReaderError } from "../../src/agent/paper-reader/types.js";
+import { parsePaperWebPageHtml } from "../../src/agent/paper-webpage-fetch.js";
+import { savePaperWebPageParse } from "../../src/agent/paper-reader/engines/webpage.js";
 
 async function createWorkspace(): Promise<string> {
   const workspace = await mkdtemp(path.join(os.tmpdir(), "pi-paper-reader-"));
@@ -268,6 +270,130 @@ test("parsePaper resolves downloaded paper records", async () => {
     const inspection = await inspectPaper({ workspaceDir: workspace, paperKey: result.paperKey });
     assert.equal(inspection.source?.canonicalId, "2401.01234");
     assert.equal(inspection.parses.length, 1);
+  } finally {
+    await rm(workspace, { recursive: true, force: true });
+  }
+});
+
+test("paper reading tools resolve bare publisher canonical ids to parsed paper keys", async () => {
+  const workspace = await createWorkspace();
+  try {
+    const pdfPath = await writePdf(
+      workspace,
+      "nature-s41467-025-63214-7.pdf",
+      "Abstract localized statistics decoding for quantum low-density parity-check codes"
+    );
+    const recordPath = path.join(workspace, "knowledge-base", "records", "nature-s41467-025-63214-7.json");
+    await writeFile(recordPath, `${JSON.stringify({
+      source: "nature",
+      articleUrl: "https://www.nature.com/articles/s41467-025-63214-7",
+      recordedAt: "2026-04-28T00:00:00.000Z",
+      handlingMethod: "browser_extension",
+      status: "downloaded",
+      canonicalId: "s41467-025-63214-7",
+      pdfUrl: "https://www.nature.com/articles/s41467-025-63214-7.pdf",
+      downloadPath: pdfPath
+    }, null, 2)}\n`, "utf8");
+
+    const parsed = await parsePaper({
+      workspaceDir: workspace,
+      recordPath,
+      engine: "plain-text-baseline"
+    });
+    assert.equal(parsed.paperKey, "nature-s41467-025-63214-7");
+
+    const inspection = await inspectPaper({
+      workspaceDir: workspace,
+      paperKey: "s41467-025-63214-7"
+    });
+    assert.equal(inspection.paperKey, "nature-s41467-025-63214-7");
+    assert.equal(inspection.parses.length, 1);
+
+    const section = await readPaperSection({
+      workspaceDir: workspace,
+      paperKey: "s41467-025-63214-7",
+      maxChars: 120
+    });
+    assert.equal(section.paperKey, "nature-s41467-025-63214-7");
+    assert.match(section.text, /localized statistics decoding/i);
+
+    const search = await searchPaperText({
+      workspaceDir: workspace,
+      paperKey: "s41467-025-63214-7",
+      query: "quantum"
+    });
+    assert.equal(search.paperKey, "nature-s41467-025-63214-7");
+    assert.equal(search.results.length, 1);
+  } finally {
+    await rm(workspace, { recursive: true, force: true });
+  }
+});
+
+test("readPaperSection prefers a good PDF parse over an incomplete publisher webpage parse", async () => {
+  const workspace = await createWorkspace();
+  try {
+    const pdfPath = await writePdf(
+      workspace,
+      "nature-s41534-026-01233-y.pdf",
+      "Introduction PDF full text Methods Results Discussion Conclusion ".repeat(80)
+    );
+    const recordPath = path.join(workspace, "knowledge-base", "records", "nature-s41534-026-01233-y.json");
+    await writeFile(recordPath, `${JSON.stringify({
+      source: "nature",
+      articleUrl: "https://www.nature.com/articles/s41534-026-01233-y",
+      recordedAt: "2026-04-28T00:00:00.000Z",
+      handlingMethod: "browser_extension",
+      status: "downloaded",
+      canonicalId: "s41534-026-01233-y",
+      pdfUrl: "https://www.nature.com/articles/s41534-026-01233-y.pdf",
+      downloadPath: pdfPath
+    }, null, 2)}\n`, "utf8");
+    const pdfParse = await parsePaper({
+      workspaceDir: workspace,
+      recordPath,
+      engine: "plain-text-baseline"
+    });
+
+    const webpageExtraction = parsePaperWebPageHtml({
+      url: "https://www.nature.com/articles/s41534-026-01233-y",
+      html: `
+        <html>
+          <head>
+            <meta name="citation_title" content="Fusion-based implementation of qLDPC codes with quantum emitters">
+            <meta name="citation_doi" content="10.1038/s41534-026-01233-y">
+          </head>
+          <body>
+            <article>
+              <h1>Fusion-based implementation of qLDPC codes with quantum emitters</h1>
+              <h2>Abstract</h2>
+              <p>Publisher webpage abstract only.</p>
+              <h2>Data availability</h2>
+              <p>Data are available.</p>
+              <h2>Code availability</h2>
+              <p>Code is available.</p>
+              <h2>References</h2>
+              <p>${"Reference metadata ".repeat(180)}</p>
+            </article>
+          </body>
+        </html>
+      `
+    });
+    const webpageParse = await savePaperWebPageParse({
+      workspaceDir: workspace,
+      extraction: webpageExtraction
+    });
+    assert.ok(["poor", "needs_hybrid"].includes(webpageParse.quality.status));
+
+    const section = await readPaperSection({
+      workspaceDir: workspace,
+      paperKey: "s41534-026-01233-y",
+      maxChars: 200
+    });
+
+    assert.equal(pdfParse.quality.status, "good");
+    assert.equal(section.paperKey, "nature-s41534-026-01233-y");
+    assert.equal(section.engine, "plain-text-baseline");
+    assert.match(section.text, /PDF full text Methods Results/);
   } finally {
     await rm(workspace, { recursive: true, force: true });
   }

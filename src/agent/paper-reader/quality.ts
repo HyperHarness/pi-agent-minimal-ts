@@ -11,6 +11,23 @@ function countByPage(document: ParsedPaperDocument): Map<number, number> {
   return counts;
 }
 
+function isArxivWebpage(document: ParsedPaperDocument): boolean {
+  return document.engine === "webpage" && document.paperKey.startsWith("arxiv-");
+}
+
+function isMainBodySectionTitle(title: string): boolean {
+  const normalizedTitle = title.trim().toLowerCase();
+  if (
+    /^(?:abstract|references?|references and notes|bibliography|acknowledgements?|author information|authors and affiliations|contributions|corresponding authors|ethics declarations|competing interests|additional information|supplementary information|supplementary materials?|rights and permissions|about this article|cite this article|subjects|data availability|code availability)$/i
+      .test(normalizedTitle)
+  ) {
+    return false;
+  }
+
+  return /(?:introduction|background|results?|discussion|methods?|materials|conclusion|article text|full text)/i
+    .test(normalizedTitle);
+}
+
 export function evaluateParseQuality(document: ParsedPaperDocument): PaperParseQualityReport {
   const totalTextLength = document.elements.reduce(
     (sum, element) => sum + element.text.trim().length,
@@ -41,14 +58,11 @@ export function evaluateParseQuality(document: ParsedPaperDocument): PaperParseQ
   const referenceTextLength = document.elements
     .filter((element) => element.type === "reference")
     .reduce((sum, element) => sum + element.text.trim().length, 0);
-  const hasMainBodySection = document.sections.some((section) => {
-    if (/^supplementary materials?$/i.test(section.title.trim())) {
-      return false;
-    }
-
-    return /(?:introduction|background|results?|discussion|methods?|materials|conclusion|data availability)/i
-      .test(section.title);
-  });
+  const hasMainBodySection = document.sections.some((section) =>
+    isMainBodySectionTitle(section.title)
+  );
+  const publisherWebpageWithoutMainBody =
+    document.engine === "webpage" && !isArxivWebpage(document) && !hasMainBodySection;
 
   const warnings: string[] = [];
   if (totalTextLength < 1500) {
@@ -66,8 +80,8 @@ export function evaluateParseQuality(document: ParsedPaperDocument): PaperParseQ
   if (pdfObjectDumpCount > 5) {
     warnings.push("Extracted text looks like raw PDF object syntax rather than paper body text.");
   }
-  if (document.engine === "webpage" && !hasMainBodySection && totalTextLength < 8000) {
-    warnings.push("No main body sections were detected; the webpage may expose only abstract, references, or access-limited text.");
+  if (publisherWebpageWithoutMainBody) {
+    warnings.push("No main body sections were detected; the publisher webpage may expose only abstract, metadata, references, or early-access placeholder text. Prefer PDF parsing.");
   }
   if (
     document.engine === "webpage" &&
@@ -93,8 +107,8 @@ export function evaluateParseQuality(document: ParsedPaperDocument): PaperParseQ
   if (pdfObjectDumpCount > 5) {
     score -= 0.8;
   }
-  if (document.engine === "webpage" && !hasMainBodySection && totalTextLength < 8000) {
-    score -= 0.35;
+  if (publisherWebpageWithoutMainBody) {
+    score -= 0.45;
   }
   if (
     document.engine === "webpage" &&

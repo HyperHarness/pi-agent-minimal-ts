@@ -314,6 +314,94 @@ export async function readPaperSourceByKey(input: {
   }
 }
 
+async function paperReadingDirExists(input: {
+  workspaceDir: string;
+  paperKey: string;
+}): Promise<boolean> {
+  try {
+    await access(getPaperReadingDir(input.workspaceDir, input.paperKey));
+    return true;
+  } catch {
+    return false;
+  }
+}
+
+function paperKeyLookupCandidates(paperKey: string): string[] {
+  const candidate = sanitizePaperKey(paperKey);
+  const publisherPrefixes = ["arxiv", "nature", "science", "aps", "external"];
+  const candidates = [
+    candidate,
+    ...publisherPrefixes
+      .filter((prefix) => !candidate.startsWith(`${prefix}-`))
+      .map((prefix) => `${prefix}-${candidate}`)
+  ];
+  return [...new Set(candidates)];
+}
+
+function sourceMatchesPaperKeyAlias(source: PaperReaderSource | undefined, requested: string): boolean {
+  if (!source) {
+    return false;
+  }
+  const candidates = [
+    source.paperKey,
+    source.canonicalId,
+    source.source && source.canonicalId ? `${source.source}-${source.canonicalId}` : undefined,
+    source.articleUrl
+  ].filter((value): value is string => typeof value === "string" && value.length > 0);
+
+  return candidates.some((candidate) => {
+    try {
+      return sanitizePaperKey(candidate) === requested;
+    } catch {
+      return false;
+    }
+  });
+}
+
+export async function resolveExistingPaperKey(input: {
+  workspaceDir: string;
+  paperKey: string;
+}): Promise<string> {
+  const requested = sanitizePaperKey(input.paperKey);
+  for (const candidate of paperKeyLookupCandidates(requested)) {
+    if (await paperReadingDirExists({ workspaceDir: input.workspaceDir, paperKey: candidate })) {
+      return candidate;
+    }
+  }
+
+  let entries;
+  try {
+    entries = await readdir(getReadingDir(input.workspaceDir), { withFileTypes: true });
+  } catch {
+    throw new PaperReaderError("paper_not_found", `No parsed paper found for ${input.paperKey}.`);
+  }
+
+  const matchingKeys: string[] = [];
+  for (const entry of entries) {
+    if (!entry.isDirectory()) {
+      continue;
+    }
+    const candidateKey = sanitizePaperKey(entry.name);
+    if (candidateKey.endsWith(`-${requested}`)) {
+      matchingKeys.push(candidateKey);
+      continue;
+    }
+    const source = await readPaperSourceByKey({
+      workspaceDir: input.workspaceDir,
+      paperKey: candidateKey
+    });
+    if (sourceMatchesPaperKeyAlias(source, requested)) {
+      matchingKeys.push(candidateKey);
+    }
+  }
+
+  const match = matchingKeys[0];
+  if (!match) {
+    throw new PaperReaderError("paper_not_found", `No parsed paper found for ${input.paperKey}.`);
+  }
+  return match;
+}
+
 export async function listPaperParseEngines(input: {
   workspaceDir: string;
   paperKey: string;
