@@ -418,6 +418,7 @@ export async function listPaperParseEngines(input: {
           name === "opendataloader-local" ||
           name === "opendataloader-hybrid" ||
           name === "docling" ||
+          name === "tex-source" ||
           name === "plain-text-baseline" ||
           name === "webpage"
         )

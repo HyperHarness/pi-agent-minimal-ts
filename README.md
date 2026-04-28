@@ -270,7 +270,7 @@ In non-interactive mode:
 - `download_paper`: downloads arXiv papers into `knowledge-base/raw/pdfs/`, uses the extension bridge for supported publisher and external URLs when configured, returns `already_downloaded` for existing indexed PDFs, and returns `extension_unavailable` when the bridge is needed but unavailable
 - `register_manual_paper_download`: registers a manually downloaded external PDF into `knowledge-base/raw/pdfs/` and updates the local index so repeated requests for the same URL are skipped
 - `open_paper_page_for_login`: opens the paper page in the managed browser session for manual login review without downloading anything
-- `parse_paper`: parses a downloaded PDF from `knowledge-base/raw/pdfs/` into structured reading artifacts under `knowledge-base/wiki/sources/<paper-key>/`; `auto` starts with OpenDataLoader PDF, falls back to Docling when advanced parsing fails, then uses `plain-text-baseline` as the final fallback
+- `parse_paper`: parses downloaded papers into structured reading artifacts under `knowledge-base/wiki/sources/<paper-key>/`; arXiv can use TeX source through `latexmlc -> pandoc`, publisher webpages use filtered HTML through Pandoc when available, and PDF `auto` starts with OpenDataLoader PDF, falls back to Docling, then uses `plain-text-baseline`
 - `inspect_paper`: inspects parsed paper artifacts, parse quality, and section previews without returning the full paper body
 - `read_paper_section`: reads bounded text from a parsed paper by section id or page range, with source element metadata
 - `search_paper_text`: searches inside a parsed paper and returns snippets with page, section, and element metadata
@@ -279,7 +279,7 @@ In non-interactive mode:
 
 For `search_papers`, concise English keyword queries still work best because the search stages include arXiv, APS/Crossref metadata, and the configured web provider.
 
-OpenDataLoader PDF installation and verification notes are in [docs/opendataloader-pdf-install.md](docs/opendataloader-pdf-install.md). Docling fallback installation notes are in [docs/docling-pdf-install.md](docs/docling-pdf-install.md).
+OpenDataLoader PDF installation and verification notes are in [docs/opendataloader-pdf-install.md](docs/opendataloader-pdf-install.md). Docling fallback installation notes are in [docs/docling-pdf-install.md](docs/docling-pdf-install.md). Pandoc and LaTeXML installation notes are in [docs/pandoc-latexml-install.md](docs/pandoc-latexml-install.md).
 
 `read_file` rejects absolute paths and paths that resolve outside the workspace.
 

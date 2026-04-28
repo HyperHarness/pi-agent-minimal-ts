@@ -1,12 +1,13 @@
 import test from "node:test";
 import assert from "node:assert/strict";
-import { mkdtemp, readFile, rm } from "node:fs/promises";
+import { chmod, mkdtemp, readFile, rm, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import path from "node:path";
 import {
   diagnosePaperWebPageHtml,
   fetchPaperWebPage,
-  parsePaperWebPageHtml
+  parsePaperWebPageHtml,
+  parsePaperWebPageHtmlWithPandoc
 } from "../../src/agent/paper-webpage-fetch.js";
 import { savePaperWebPageParse } from "../../src/agent/paper-reader/engines/webpage.js";
 import {
@@ -20,6 +21,13 @@ function createHtmlResponse(status: number, body: string, contentType = "text/ht
     status,
     headers: { "content-type": contentType }
   });
+}
+
+async function writeExecutableScript(workspace: string, filename: string, source: string): Promise<string> {
+  const scriptPath = path.join(workspace, filename);
+  await writeFile(scriptPath, source, "utf8");
+  await chmod(scriptPath, 0o755);
+  return scriptPath;
 }
 
 test("parsePaperWebPageHtml extracts article text and filters navigation noise", () => {
@@ -84,6 +92,58 @@ test("parsePaperWebPageHtml extracts article text and filters navigation noise",
   assert.doesNotMatch(result.markdown, /Subscribe/i);
   assert.doesNotMatch(result.markdown, /Related articles/i);
   assert.doesNotMatch(result.markdown, /Springer Nature/i);
+});
+
+test("parsePaperWebPageHtmlWithPandoc converts filtered article HTML through pandoc", async () => {
+  const workspace = await mkdtemp(path.join(tmpdir(), "pi-paper-webpage-pandoc-"));
+  const pandocInputPath = path.join(workspace, "pandoc-input.html");
+  try {
+    const pandocBin = await writeExecutableScript(workspace, "fake-pandoc", `#!/usr/bin/env node
+const fs = require("node:fs");
+const args = process.argv.slice(2);
+const output = args[args.indexOf("--output") + 1];
+const input = args[args.length - 1];
+const html = fs.readFileSync(input, "utf8");
+fs.writeFileSync(${JSON.stringify(pandocInputPath)}, html);
+fs.writeFileSync(output, [
+  "# Pandoc Article",
+  "",
+  "Pandoc preserved [citation link](https://doi.org/10.1234/example).",
+  "",
+  "| Col A | Col B |",
+  "| --- | --- |",
+  "| alpha | beta |"
+].join("\\n"));
+`);
+    const extraction = await parsePaperWebPageHtmlWithPandoc({
+      url: "https://journals.aps.org/prl/abstract/10.1103/example",
+      html: `
+        <html>
+          <head>
+            <meta name="citation_title" content="Pandoc Article">
+            <meta name="citation_doi" content="10.1103/example">
+          </head>
+          <body>
+            <header>Skip to main content</header>
+            <article>
+              <h1>Pandoc Article</h1>
+              <aside class="related">Related articles</aside>
+              <table><tr><th>Col A</th><th>Col B</th></tr><tr><td>alpha</td><td>beta</td></tr></table>
+            </article>
+          </body>
+        </html>
+      `,
+      pandocBin
+    });
+
+    assert.match(extraction.markdown, /# Pandoc Article/);
+    assert.match(extraction.markdown, /\| Col A \| Col B \|/);
+    assert.match(extraction.markdown, /citation link/);
+    assert.doesNotMatch(extraction.markdown, /Related articles/);
+    assert.doesNotMatch(await readFile(pandocInputPath, "utf8"), /Related articles|Skip to main content/);
+  } finally {
+    await rm(workspace, { recursive: true, force: true });
+  }
 });
 
 test("fetchPaperWebPage rejects non-html responses", async () => {

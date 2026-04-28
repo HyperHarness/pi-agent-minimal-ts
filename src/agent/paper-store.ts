@@ -5,7 +5,13 @@ import {
   isPathInsideDirectory,
   resolvePaperLibraryPaths
 } from "./knowledge-base.js";
-import type { DownloadablePaperSource, PaperRecord, PaperSource } from "./paper-types.js";
+import type {
+  DownloadablePaperSource,
+  PaperRecord,
+  PaperRecordArtifactManifest,
+  PaperRecordReadingManifest,
+  PaperSource
+} from "./paper-types.js";
 
 type DownloadedPaperRecord = Extract<PaperRecord, { status: "downloaded" }>;
 type FindDownloadedPaperRecordInput =
@@ -28,6 +34,47 @@ export interface DownloadedPaperRecordMatch {
   downloadPath: string;
 }
 
+export interface PaperRecordParseManifestInput {
+  workspaceDir: string;
+  recordPath: string;
+  strategy: "pdf_parse" | "webpage";
+  status: "parsed" | "already_parsed";
+  paperKey: string;
+  engine: string;
+  sourceSha256: string;
+  artifacts: {
+    markdownPath: string;
+    parsePath: string;
+    qualityPath: string;
+    chunksPath: string;
+  };
+  quality: {
+    status: string;
+    score: number;
+    pages: number;
+    totalTextLength: number;
+    warnings: string[];
+  };
+  updatedAt?: string;
+}
+
+export interface PaperRecordReadingFailureInput {
+  workspaceDir: string;
+  recordPath: string;
+  strategy: "pdf_parse" | "webpage";
+  message: string;
+  updatedAt?: string;
+}
+
+export interface PaperRecordQueuedReadingInput {
+  workspaceDir: string;
+  recordPath: string;
+  strategy: "webpage" | "pdf_parse";
+  jobId?: string;
+  message: string;
+  updatedAt?: string;
+}
+
 function sanitizeFilenameComponent(value: string): string {
   return value
     .trim()
@@ -48,6 +95,24 @@ function sanitizeCanonicalId(value: string): string {
 
 function getRecordIndexDir(workspaceDir: string): string {
   return resolvePaperLibraryPaths(workspaceDir).recordsRoot;
+}
+
+function toWorkspacePath(input: { workspaceDir: string; filePath: string }): string {
+  const resolvedFilePath = path.resolve(input.filePath);
+  const resolvedWorkspaceDir = path.resolve(input.workspaceDir);
+  return isPathInsideDirectory(resolvedWorkspaceDir, resolvedFilePath)
+    ? path.relative(resolvedWorkspaceDir, resolvedFilePath)
+    : input.filePath;
+}
+
+function toQualitySummary(input: PaperRecordParseManifestInput["quality"]) {
+  return {
+    status: input.status,
+    score: input.score,
+    pages: input.pages,
+    totalTextLength: input.totalTextLength,
+    warnings: input.warnings
+  };
 }
 
 function getExternalRecordFilename(articleUrl: string): string {
@@ -171,6 +236,98 @@ function isCompatibleDownloadedPaperRecord(record: DownloadedPaperRecord): boole
   }
 }
 
+function buildInitialDownloadManifest(input: {
+  workspaceDir: string;
+  record: PaperRecord;
+}): Pick<PaperRecord, "download" | "reading" | "updatedAt"> {
+  const updatedAt = input.record.recordedAt;
+  if (input.record.status === "downloaded") {
+    const pdfSha256 = input.record.source === "external" ? input.record.fileSha256 : undefined;
+    return {
+      updatedAt,
+      download: {
+        status: "downloaded",
+        updatedAt,
+        method: input.record.handlingMethod,
+        pdfPath: toWorkspacePath({ workspaceDir: input.workspaceDir, filePath: input.record.downloadPath }),
+        ...("pdfUrl" in input.record && input.record.pdfUrl ? { pdfUrl: input.record.pdfUrl } : {}),
+        ...(pdfSha256 ? { pdfSha256 } : {})
+      },
+      reading: {
+        status: "not_ready",
+        updatedAt,
+        reason: "PDF is downloaded, but markdown reading artifacts are not registered yet."
+      }
+    };
+  }
+
+  if (input.record.status === "manual_fallback_opened") {
+    return {
+      updatedAt,
+      download: {
+        status: "manual_fallback_opened",
+        updatedAt,
+        method: input.record.handlingMethod,
+        failure: input.record.failure
+      },
+      reading: {
+        status: "not_ready",
+        updatedAt,
+        reason: input.record.failure.message
+      }
+    };
+  }
+
+  return {
+    updatedAt,
+    download: {
+      status: "external_opened",
+      updatedAt,
+      method: input.record.handlingMethod,
+      message: "External article page was opened, but no PDF is registered yet."
+    },
+    reading: {
+      status: "not_ready",
+      updatedAt,
+      reason: "External article page was opened, but no markdown reading artifact is registered yet."
+    }
+  };
+}
+
+function withInitialRecordManifest(input: {
+  workspaceDir: string;
+  record: PaperRecord;
+}): PaperRecord {
+  const initial = buildInitialDownloadManifest(input);
+  return {
+    ...input.record,
+    updatedAt: input.record.updatedAt ?? initial.updatedAt,
+    download: input.record.download ?? initial.download,
+    reading: input.record.reading ?? initial.reading
+  };
+}
+
+function assertRecordPathInsideRecords(input: { workspaceDir: string; recordPath: string }): string {
+  const recordsRoot = path.resolve(getRecordIndexDir(input.workspaceDir));
+  const recordPath = path.resolve(input.recordPath);
+  if (!isPathInsideDirectory(recordsRoot, recordPath)) {
+    throw new Error("recordPath must be inside knowledge-base/records.");
+  }
+  return recordPath;
+}
+
+function stripRecordManifest<T extends PaperRecord>(record: T): T {
+  const {
+    updatedAt: _updatedAt,
+    download: _download,
+    parse: _parse,
+    webpage: _webpage,
+    reading: _reading,
+    ...legacyRecord
+  } = record;
+  return legacyRecord as T;
+}
+
 export async function readPaperRecord(input: {
   workspaceDir: string;
   source: PaperSource;
@@ -184,6 +341,21 @@ export async function readPaperRecord(input: {
     articleUrl: input.articleUrl
   });
 
+  try {
+    return {
+      record: JSON.parse(await readFile(recordPath, "utf8")) as PaperRecord,
+      recordPath
+    };
+  } catch {
+    return null;
+  }
+}
+
+export async function readPaperRecordByPath(input: {
+  workspaceDir: string;
+  recordPath: string;
+}): Promise<{ record: PaperRecord; recordPath: string } | null> {
+  const recordPath = assertRecordPathInsideRecords(input);
   try {
     return {
       record: JSON.parse(await readFile(recordPath, "utf8")) as PaperRecord,
@@ -228,7 +400,7 @@ export async function findDownloadedPaperRecord(
   }
 
   return {
-    record,
+    record: stripRecordManifest(record),
     recordPath,
     downloadPath
   };
@@ -238,13 +410,122 @@ export async function writePaperRecord(input: {
   workspaceDir: string;
   record: PaperRecord;
 }): Promise<string> {
+  const record = withInitialRecordManifest(input);
   const recordPath = resolvePaperRecordPath({
     workspaceDir: input.workspaceDir,
-    source: input.record.source,
-    canonicalId: input.record.canonicalId,
-    articleUrl: input.record.articleUrl
+    source: record.source,
+    canonicalId: record.canonicalId,
+    articleUrl: record.articleUrl
   });
   await mkdir(path.dirname(recordPath), { recursive: true });
-  await writeFile(recordPath, `${JSON.stringify(input.record, null, 2)}\n`, "utf8");
+  await writeFile(recordPath, `${JSON.stringify(record, null, 2)}\n`, "utf8");
   return recordPath;
+}
+
+export async function updatePaperRecordParseManifest(input: PaperRecordParseManifestInput): Promise<void> {
+  const saved = await readPaperRecordByPath({
+    workspaceDir: input.workspaceDir,
+    recordPath: input.recordPath
+  });
+  if (!saved) {
+    return;
+  }
+
+  const updatedAt = input.updatedAt ?? new Date().toISOString();
+  const artifact: PaperRecordArtifactManifest = {
+    status: input.status,
+    updatedAt,
+    paperKey: input.paperKey,
+    engine: input.engine,
+    sourceSha256: input.sourceSha256,
+    markdownPath: toWorkspacePath({ workspaceDir: input.workspaceDir, filePath: input.artifacts.markdownPath }),
+    parsePath: toWorkspacePath({ workspaceDir: input.workspaceDir, filePath: input.artifacts.parsePath }),
+    qualityPath: toWorkspacePath({ workspaceDir: input.workspaceDir, filePath: input.artifacts.qualityPath }),
+    chunksPath: toWorkspacePath({ workspaceDir: input.workspaceDir, filePath: input.artifacts.chunksPath }),
+    quality: toQualitySummary(input.quality)
+  };
+  const reading: PaperRecordReadingManifest = {
+    status: "ready",
+    updatedAt,
+    preferredSource: input.strategy,
+    paperKey: input.paperKey,
+    markdownPath: artifact.markdownPath,
+    parsePath: artifact.parsePath,
+    qualityPath: artifact.qualityPath,
+    chunksPath: artifact.chunksPath,
+    quality: artifact.quality,
+    reason:
+      input.strategy === "webpage"
+        ? "Publisher or arXiv webpage markdown is ready for reading."
+        : "PDF markdown parse is ready for reading."
+  };
+  const record: PaperRecord = {
+    ...saved.record,
+    updatedAt,
+    ...(input.strategy === "webpage" ? { webpage: artifact } : { parse: artifact }),
+    reading
+  };
+
+  await writeFile(saved.recordPath, `${JSON.stringify(record, null, 2)}\n`, "utf8");
+}
+
+export async function updatePaperRecordReadingFailure(input: PaperRecordReadingFailureInput): Promise<void> {
+  const saved = await readPaperRecordByPath({
+    workspaceDir: input.workspaceDir,
+    recordPath: input.recordPath
+  });
+  if (!saved) {
+    return;
+  }
+
+  const updatedAt = input.updatedAt ?? new Date().toISOString();
+  const artifact: PaperRecordArtifactManifest = {
+    status: "failed",
+    updatedAt,
+    message: input.message
+  };
+  const record: PaperRecord = {
+    ...saved.record,
+    updatedAt,
+    ...(input.strategy === "webpage" ? { webpage: artifact } : { parse: artifact }),
+    reading: {
+      status: "failed",
+      updatedAt,
+      preferredSource: input.strategy,
+      reason: input.message
+    }
+  };
+
+  await writeFile(saved.recordPath, `${JSON.stringify(record, null, 2)}\n`, "utf8");
+}
+
+export async function updatePaperRecordQueuedReading(input: PaperRecordQueuedReadingInput): Promise<void> {
+  const saved = await readPaperRecordByPath({
+    workspaceDir: input.workspaceDir,
+    recordPath: input.recordPath
+  });
+  if (!saved) {
+    return;
+  }
+
+  const updatedAt = input.updatedAt ?? new Date().toISOString();
+  const artifact: PaperRecordArtifactManifest = {
+    status: "queued",
+    updatedAt,
+    ...(input.jobId ? { jobId: input.jobId } : {}),
+    message: input.message
+  };
+  const record: PaperRecord = {
+    ...saved.record,
+    updatedAt,
+    ...(input.strategy === "webpage" ? { webpage: artifact } : { parse: artifact }),
+    reading: {
+      status: "queued",
+      updatedAt,
+      preferredSource: input.strategy,
+      ...(input.jobId ? { reason: `${input.message} Job ID: ${input.jobId}` } : { reason: input.message })
+    }
+  };
+
+  await writeFile(saved.recordPath, `${JSON.stringify(record, null, 2)}\n`, "utf8");
 }

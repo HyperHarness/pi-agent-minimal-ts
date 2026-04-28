@@ -9,6 +9,69 @@ export interface PaperFailure {
   message: string;
 }
 
+export type PaperRecordArtifactStatus =
+  | "not_started"
+  | "downloaded"
+  | "parsed"
+  | "already_parsed"
+  | "queued"
+  | "failed"
+  | "manual_login_required"
+  | "manual_fallback_opened"
+  | "external_opened";
+
+export type PaperRecordReadingStatus = "not_ready" | "ready" | "queued" | "failed";
+export type PaperRecordReadingPreferredSource = "webpage" | "pdf_parse";
+
+export interface PaperRecordQualitySummary {
+  status: string;
+  score: number;
+  pages: number;
+  totalTextLength: number;
+  warnings: string[];
+}
+
+export interface PaperRecordArtifactManifest {
+  status: PaperRecordArtifactStatus;
+  updatedAt: string;
+  method?: string;
+  paperKey?: string;
+  engine?: string;
+  pdfPath?: string;
+  pdfUrl?: string;
+  pdfSha256?: string;
+  sourceSha256?: string;
+  markdownPath?: string;
+  parsePath?: string;
+  qualityPath?: string;
+  chunksPath?: string;
+  jobId?: string;
+  message?: string;
+  quality?: PaperRecordQualitySummary;
+  failure?: PaperFailure;
+}
+
+export interface PaperRecordReadingManifest {
+  status: PaperRecordReadingStatus;
+  updatedAt: string;
+  preferredSource?: PaperRecordReadingPreferredSource;
+  paperKey?: string;
+  markdownPath?: string;
+  parsePath?: string;
+  qualityPath?: string;
+  chunksPath?: string;
+  quality?: PaperRecordQualitySummary;
+  reason?: string;
+}
+
+export interface PaperRecordManifest {
+  updatedAt?: string;
+  download?: PaperRecordArtifactManifest;
+  parse?: PaperRecordArtifactManifest;
+  webpage?: PaperRecordArtifactManifest;
+  reading?: PaperRecordReadingManifest;
+}
+
 export type PaperSearchSource =
   | {
       source: "arxiv";
@@ -120,12 +183,13 @@ type DownloadedExternalPaperRecord = {
   failure?: never;
 };
 
-export type PaperRecord =
+export type PaperRecord = PaperRecordManifest & (
   | DownloadedArxivPaperRecord
   | DownloadedPublisherPaperRecord
   | DownloadedExternalPaperRecord
   | ManualFallbackPaperRecord
-  | ExternalOpenedPaperRecord;
+  | ExternalOpenedPaperRecord
+);
 
 export interface DownloadedPaperResult {
   status: "downloaded";

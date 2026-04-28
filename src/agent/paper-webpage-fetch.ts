@@ -1,3 +1,8 @@
+import { execFile } from "node:child_process";
+import { mkdtemp, readFile, rm, writeFile } from "node:fs/promises";
+import os from "node:os";
+import path from "node:path";
+import { promisify } from "node:util";
 import {
   getResponseStatusError,
   resolveFetchTimeoutMs,
@@ -11,6 +16,13 @@ export interface FetchPaperWebPageOptions {
 }
 
 export interface FetchPaperWebPageEnvironment extends NodeJS.ProcessEnv {}
+
+export interface ParsePaperWebPageHtmlOptions {
+  url: string;
+  html: string;
+  env?: FetchPaperWebPageEnvironment;
+  pandocBin?: string;
+}
 
 export interface PaperWebPageMetadata {
   title?: string;
@@ -69,6 +81,8 @@ export interface PaperWebPageHtmlDiagnostic {
 }
 
 const DEFAULT_USER_AGENT = "pi-agent-minimal-ts/1.0";
+const DEFAULT_PANDOC_TIMEOUT_MS = 60_000;
+const execFileAsync = promisify(execFile);
 
 const BLOCK_TAGS_TO_REMOVE = [
   "script",
@@ -577,6 +591,71 @@ function htmlToMarkdown(html: string): string {
     .replace(/<[^>]+>/g, " ");
 }
 
+function resolvePandocBin(options: {
+  env: FetchPaperWebPageEnvironment;
+  pandocBin?: string;
+}): string | undefined {
+  const configured = options.pandocBin?.trim() ||
+    options.env.PI_PAPER_WEBPAGE_PANDOC_BIN?.trim() ||
+    options.env.PI_PAPER_READER_PANDOC_BIN?.trim();
+  if (configured) {
+    return configured;
+  }
+  if (/^(0|false|off|no)$/i.test(options.env.PI_PAPER_WEBPAGE_PANDOC ?? "")) {
+    return undefined;
+  }
+  return "pandoc";
+}
+
+function resolvePandocTimeoutMs(env: FetchPaperWebPageEnvironment): number {
+  const value = Number(env.PI_PAPER_WEBPAGE_PANDOC_TIMEOUT_MS || "") ||
+    Number(env.PI_PAPER_READER_TIMEOUT_MS || "") ||
+    DEFAULT_PANDOC_TIMEOUT_MS;
+  return Number.isFinite(value) && value > 0 ? value : DEFAULT_PANDOC_TIMEOUT_MS;
+}
+
+async function htmlToMarkdownWithPandoc(input: {
+  html: string;
+  env: FetchPaperWebPageEnvironment;
+  pandocBin?: string;
+}): Promise<string | undefined> {
+  const pandocBin = resolvePandocBin(input);
+  if (!pandocBin) {
+    return undefined;
+  }
+
+  const outputDir = await mkdtemp(path.join(os.tmpdir(), "pi-paper-webpage-pandoc-"));
+  try {
+    const htmlPath = path.join(outputDir, "article.html");
+    const markdownPath = path.join(outputDir, "article.md");
+    await writeFile(htmlPath, input.html, "utf8");
+    await execFileAsync(
+      pandocBin,
+      [
+        "--from",
+        "html",
+        "--to",
+        "gfm",
+        "--wrap=none",
+        "--output",
+        markdownPath,
+        htmlPath
+      ],
+      {
+        timeout: resolvePandocTimeoutMs(input.env),
+        maxBuffer: 64 * 1024 * 1024,
+        encoding: "utf8"
+      }
+    );
+    const markdown = (await readFile(markdownPath, "utf8")).trim();
+    return markdown || undefined;
+  } catch {
+    return undefined;
+  } finally {
+    await rm(outputDir, { recursive: true, force: true });
+  }
+}
+
 function compactLine(line: string): string {
   return line
     .replace(/\s+/g, " ")
@@ -695,21 +774,22 @@ function detectAccessStatus(html: string): PaperWebPageAccessStatus {
   };
 }
 
-export function parsePaperWebPageHtml(options: {
+function buildPaperWebPageExtraction(input: {
   url: string;
   html: string;
+  markdown: string;
 }): PaperWebPageExtraction {
-  const selected = selectArticleHtml(stripComments(options.html));
-  const metadata = extractMetadata(options.html, {
+  const cleanedMarkdown = cleanMarkdown(input.markdown);
+  const selected = selectArticleHtml(stripComments(input.html));
+  const cleanedBlocks = removeKnownNoiseBlocks(selected.html);
+  const metadata = extractMetadata(input.html, {
     html: selected.html,
-    baseUrl: options.url
+    baseUrl: input.url
   });
   const access = detectAccessStatus(selected.html);
-  const cleanedBlocks = removeKnownNoiseBlocks(selected.html);
-  const cleanedMarkdown = cleanMarkdown(htmlToMarkdown(cleanedBlocks.html));
 
   return {
-    url: options.url,
+    url: input.url,
     ...(metadata.title ? { title: metadata.title } : {}),
     markdown: cleanedMarkdown.markdown,
     metadata,
@@ -721,6 +801,33 @@ export function parsePaperWebPageHtml(options: {
       extractedFrom: selected.extractedFrom
     }
   };
+}
+
+export function parsePaperWebPageHtml(options: ParsePaperWebPageHtmlOptions): PaperWebPageExtraction {
+  const selected = selectArticleHtml(stripComments(options.html));
+  const cleanedBlocks = removeKnownNoiseBlocks(selected.html);
+  return buildPaperWebPageExtraction({
+    url: options.url,
+    html: options.html,
+    markdown: htmlToMarkdown(cleanedBlocks.html)
+  });
+}
+
+export async function parsePaperWebPageHtmlWithPandoc(
+  options: ParsePaperWebPageHtmlOptions
+): Promise<PaperWebPageExtraction> {
+  const selected = selectArticleHtml(stripComments(options.html));
+  const cleanedBlocks = removeKnownNoiseBlocks(selected.html);
+  const markdown = await htmlToMarkdownWithPandoc({
+    html: cleanedBlocks.html,
+    env: options.env ?? process.env,
+    ...(options.pandocBin ? { pandocBin: options.pandocBin } : {})
+  }) ?? htmlToMarkdown(cleanedBlocks.html);
+  return buildPaperWebPageExtraction({
+    url: options.url,
+    html: options.html,
+    markdown
+  });
 }
 
 export function diagnosePaperWebPageHtml(options: {
@@ -771,9 +878,10 @@ export async function fetchPaperWebPage(
       throw new Error("Expected text/html content-type.");
     }
 
-    return parsePaperWebPageHtml({
+    return parsePaperWebPageHtmlWithPandoc({
       url: endpoint.toString(),
-      html: await response.text()
+      html: await response.text(),
+      env
     });
   } finally {
     timeout.dispose();

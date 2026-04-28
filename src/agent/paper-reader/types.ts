@@ -1,5 +1,6 @@
 export type PaperParseEngine =
   | "auto"
+  | "tex-source"
   | "opendataloader-local"
   | "opendataloader-hybrid"
   | "docling"
@@ -159,6 +160,7 @@ export interface PaperReaderErrorDetails {
     | "pdf_outside_papers_dir"
     | "invalid_pdf"
     | "parser_not_installed"
+    | "tex_source_not_found"
     | "java_missing"
     | "hybrid_server_unavailable"
     | "parse_failed"

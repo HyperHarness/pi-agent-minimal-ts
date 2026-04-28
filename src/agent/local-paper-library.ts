@@ -81,6 +81,7 @@ const CONCRETE_ENGINES = new Set<ConcretePaperParseEngine>([
   "opendataloader-local",
   "opendataloader-hybrid",
   "docling",
+  "tex-source",
   "plain-text-baseline",
   "webpage"
 ]);
@@ -118,7 +119,7 @@ function readOptionalString(value: unknown): string | undefined {
 }
 
 function applyRecord(entry: LocalPaperEntry, record: PaperRecord, recordPath: string, workspaceDir: string): void {
-  const rawRecord = record as Record<string, unknown>;
+  const rawRecord = record as unknown as Record<string, unknown>;
   entry.source = record.source;
   entry.articleUrl = record.articleUrl;
   entry.status = record.status;

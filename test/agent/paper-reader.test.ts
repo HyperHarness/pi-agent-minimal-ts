@@ -275,6 +275,68 @@ test("parsePaper resolves downloaded paper records", async () => {
   }
 });
 
+test("parsePaper tex-source uses LaTeXML HTML followed by pandoc markdown", async () => {
+  const workspace = await createWorkspace();
+  try {
+    const pdfPath = await writePdf(workspace, "arxiv-2507.09690.pdf", "tex source companion pdf");
+    const recordPath = path.join(workspace, "knowledge-base", "records", "arxiv-2507.09690.json");
+    await writeFile(recordPath, `${JSON.stringify({
+      source: "arxiv",
+      articleUrl: "https://arxiv.org/abs/2507.09690",
+      recordedAt: "2026-04-28T00:00:00.000Z",
+      handlingMethod: "direct_http",
+      status: "downloaded",
+      canonicalId: "2507.09690",
+      pdfUrl: "https://arxiv.org/pdf/2507.09690.pdf",
+      downloadPath: pdfPath
+    }, null, 2)}\n`, "utf8");
+    const sourceDir = path.join(workspace, "knowledge-base", "raw", "arxiv-sources", "2507.09690");
+    await mkdir(sourceDir, { recursive: true });
+    await writeFile(path.join(sourceDir, "00README.json"), `${JSON.stringify({
+      sources: [{ usage: "toplevel", filename: "main.tex" }]
+    })}\n`, "utf8");
+    await writeFile(path.join(sourceDir, "main.tex"), "\\title{TeX Source Paper}\\begin{document}Body\\end{document}\n", "utf8");
+    const callsPath = path.join(workspace, "calls.log");
+    const latexmlBin = await writeExecutableScript(workspace, "fake-latexmlc", `#!/usr/bin/env node
+const fs = require("node:fs");
+const path = require("node:path");
+fs.appendFileSync(${JSON.stringify(callsPath)}, "latexmlc " + process.argv.slice(2).join(" ") + "\\n");
+const dest = process.argv[process.argv.indexOf("--dest") + 1];
+fs.writeFileSync(dest, "<html><body><h1>TeX Source Paper</h1><h2>Introduction</h2><p>Converted from LaTeXML HTML.</p></body></html>");
+`);
+    const pandocBin = await writeExecutableScript(workspace, "fake-pandoc", `#!/usr/bin/env node
+const fs = require("node:fs");
+fs.appendFileSync(${JSON.stringify(callsPath)}, "pandoc " + process.argv.slice(2).join(" ") + "\\n");
+const output = process.argv[process.argv.indexOf("--output") + 1];
+fs.writeFileSync(output, "# TeX Source Paper\\n\\n## Introduction\\n\\nConverted from LaTeXML HTML.\\n");
+`);
+
+    const result = await parsePaper({
+      workspaceDir: workspace,
+      recordPath,
+      engine: "tex-source",
+      force: true,
+      latexmlBin,
+      pandocBin
+    });
+
+    assert.equal(result.engine, "tex-source");
+    assert.equal(result.paperKey, "arxiv-2507.09690");
+    assert.match(result.artifacts.markdownPath, /parses\/tex-source\/document\.md$/);
+    assert.notEqual(result.quality.status, "poor");
+    assert.deepEqual(result.sections.map((section) => section.title).slice(0, 2), [
+      "TeX Source Paper",
+      "Introduction"
+    ]);
+    assert.match(await readFile(result.artifacts.markdownPath, "utf8"), /Converted from LaTeXML HTML/);
+    const calls = await readFile(callsPath, "utf8");
+    assert.match(calls, /latexmlc --dest .*document\.html .*main\.tex/);
+    assert.match(calls, /pandoc --from html --to gfm --wrap=none --output .*document\.md .*document\.html/);
+  } finally {
+    await rm(workspace, { recursive: true, force: true });
+  }
+});
+
 test("paper reading tools resolve bare publisher canonical ids to parsed paper keys", async () => {
   const workspace = await createWorkspace();
   try {

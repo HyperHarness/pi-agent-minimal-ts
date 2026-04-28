@@ -29,10 +29,11 @@ const DEFAULT_WIKI_SEARCH_RESULTS = 8;
 function sortEnginesByPreference(engines: ConcretePaperParseEngine[]): ConcretePaperParseEngine[] {
   const priority: Record<ConcretePaperParseEngine, number> = {
     "webpage": 0,
-    "opendataloader-hybrid": 1,
-    "opendataloader-local": 2,
-    "docling": 3,
-    "plain-text-baseline": 4
+    "tex-source": 1,
+    "opendataloader-hybrid": 2,
+    "opendataloader-local": 3,
+    "docling": 4,
+    "plain-text-baseline": 5
   };
   return engines.slice().sort((left, right) => priority[left] - priority[right]);
 }

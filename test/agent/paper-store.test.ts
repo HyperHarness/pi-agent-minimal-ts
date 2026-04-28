@@ -12,9 +12,11 @@ import type {
 } from "../../src/agent/paper-types.js";
 import {
   findDownloadedPaperRecord,
+  readPaperRecordByPath,
   resolveExternalPaperPdfPath,
   resolvePaperPdfPath,
   resolvePaperRecordPath,
+  updatePaperRecordParseManifest,
   writePaperRecord
 } from "../../src/agent/paper-store.js";
 import { resolvePaperLibraryPaths } from "../../src/agent/knowledge-base.js";
@@ -22,6 +24,18 @@ import { resolvePaperLibraryPaths } from "../../src/agent/knowledge-base.js";
 type Assert<T extends true> = T;
 type IsEqual<A, B> =
   (<T>() => T extends A ? 1 : 2) extends (<T>() => T extends B ? 1 : 2) ? true : false;
+
+function stripRecordManifest(record: Record<string, unknown>): Record<string, unknown> {
+  const {
+    updatedAt: _updatedAt,
+    download: _download,
+    parse: _parse,
+    webpage: _webpage,
+    reading: _reading,
+    ...legacyRecord
+  } = record;
+  return legacyRecord;
+}
 
 const supportedSearchSource = {
   source: "science",
@@ -314,8 +328,71 @@ test("writePaperRecord persists supported source records with pretty-printed fai
         "science-10.1126-science.adz8659.json"
       )
     );
-    assert.match(saved, /\n  "failure": \{\n    "code": "PAYWALL",\n    "message": "Browser session required\."\n  \}\n/);
-    assert.deepEqual(JSON.parse(saved), manualFallbackPaperRecord);
+    assert.match(saved, /\n  "failure": \{\n    "code": "PAYWALL",\n    "message": "Browser session required\."\n  \},\n/);
+    const savedRecord = JSON.parse(saved);
+    assert.deepEqual(stripRecordManifest(savedRecord), manualFallbackPaperRecord);
+    assert.equal(savedRecord.download.status, "manual_fallback_opened");
+    assert.equal(savedRecord.reading.status, "not_ready");
+  } finally {
+    await rm(workspaceDir, { recursive: true, force: true });
+  }
+});
+
+test("updatePaperRecordParseManifest records ready markdown artifacts in the paper record", async () => {
+  const workspaceDir = await mkdtemp(path.join(os.tmpdir(), "paper-store-"));
+  const pdfPath = resolvePaperPdfPath({
+    workspaceDir,
+    source: "arxiv",
+    canonicalId: "2401.01234"
+  });
+
+  try {
+    await mkdir(path.dirname(pdfPath), { recursive: true });
+    await writeFile(pdfPath, "%PDF-1.7\npaper\n", "utf8");
+    const recordPath = await writePaperRecord({
+      workspaceDir,
+      record: {
+        source: "arxiv",
+        articleUrl: "https://arxiv.org/abs/2401.01234",
+        recordedAt: "2026-04-25T10:00:00.000Z",
+        handlingMethod: "direct_http",
+        status: "downloaded",
+        canonicalId: "2401.01234",
+        pdfUrl: "https://arxiv.org/pdf/2401.01234.pdf",
+        downloadPath: pdfPath
+      }
+    });
+
+    await updatePaperRecordParseManifest({
+      workspaceDir,
+      recordPath,
+      strategy: "webpage",
+      status: "parsed",
+      paperKey: "arxiv-2401.01234",
+      engine: "webpage",
+      sourceSha256: "webpage-hash",
+      artifacts: {
+        markdownPath: path.join(workspaceDir, "knowledge-base/wiki/sources/arxiv-2401.01234/parses/webpage/document.md"),
+        parsePath: path.join(workspaceDir, "knowledge-base/wiki/sources/arxiv-2401.01234/parses/webpage/parse.json"),
+        qualityPath: path.join(workspaceDir, "knowledge-base/wiki/sources/arxiv-2401.01234/parses/webpage/quality.json"),
+        chunksPath: path.join(workspaceDir, "knowledge-base/wiki/sources/arxiv-2401.01234/chunks/webpage.jsonl")
+      },
+      quality: {
+        status: "good",
+        score: 1,
+        pages: 1,
+        totalTextLength: 1200,
+        warnings: []
+      },
+      updatedAt: "2026-04-25T10:01:00.000Z"
+    });
+
+    const saved = await readPaperRecordByPath({ workspaceDir, recordPath });
+    assert.equal(saved?.record.webpage?.status, "parsed");
+    assert.equal(saved?.record.webpage?.markdownPath, "knowledge-base/wiki/sources/arxiv-2401.01234/parses/webpage/document.md");
+    assert.equal(saved?.record.reading?.status, "ready");
+    assert.equal(saved?.record.reading?.preferredSource, "webpage");
+    assert.equal(saved?.record.reading?.markdownPath, "knowledge-base/wiki/sources/arxiv-2401.01234/parses/webpage/document.md");
   } finally {
     await rm(workspaceDir, { recursive: true, force: true });
   }

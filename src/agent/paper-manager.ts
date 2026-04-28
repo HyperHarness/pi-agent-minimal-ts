@@ -1,6 +1,8 @@
 import { createHash } from "node:crypto";
+import { execFile } from "node:child_process";
 import { access, mkdir, readFile, writeFile } from "node:fs/promises";
 import path from "node:path";
+import { promisify } from "node:util";
 import {
   downloadArxivPdf,
   parseArxivLocator,
@@ -36,6 +38,7 @@ import {
   writePaperRecord,
   type DownloadedPaperRecordMatch
 } from "./paper-store.js";
+import { resolvePaperLibraryPaths } from "./knowledge-base.js";
 import {
   DEFAULT_CLOUDFLARE_COOLDOWN_MS,
   getRecentCloudflareBlock,
@@ -55,6 +58,8 @@ import type {
   PaperSource,
   SupportedPaperSource
 } from "./paper-types.js";
+
+const execFileAsync = promisify(execFile);
 
 export interface SearchPapersOptions {
   query: string;
@@ -1005,6 +1010,12 @@ async function downloadArxivPaper(options: {
 
   await mkdir(path.dirname(pdfPath), { recursive: true });
   await writeFile(pdfPath, result.pdfBytes);
+  if (options.fetchImpl === undefined) {
+    await tryDownloadArxivTexSource({
+      workspaceDir: options.workspaceDir,
+      canonicalId: result.canonicalId
+    });
+  }
 
   const recordPath = await writePaperRecord({
     workspaceDir: options.workspaceDir,
@@ -1029,6 +1040,42 @@ async function downloadArxivPaper(options: {
     path: pdfPath,
     recordPath
   };
+}
+
+async function tryDownloadArxivTexSource(options: {
+  workspaceDir: string;
+  canonicalId: string;
+}): Promise<void> {
+  const sourceUrl = `https://arxiv.org/e-print/${options.canonicalId}`;
+  try {
+    const response = await fetch(sourceUrl, {
+      headers: {
+        "user-agent": "pi-agent-minimal-ts/arxiv-source"
+      }
+    });
+    if (!response.ok) {
+      return;
+    }
+    const bytes = Buffer.from(await response.arrayBuffer());
+    if (bytes.byteLength === 0) {
+      return;
+    }
+
+    const sourceDir = path.join(
+      resolvePaperLibraryPaths(options.workspaceDir).rawRoot,
+      "arxiv-sources",
+      options.canonicalId
+    );
+    await mkdir(sourceDir, { recursive: true });
+    const archivePath = path.join(sourceDir, "source.tar");
+    await writeFile(archivePath, bytes);
+    await execFileAsync("tar", ["-xzf", archivePath, "-C", sourceDir], {
+      timeout: 60_000,
+      maxBuffer: 8 * 1024 * 1024
+    }).catch(() => undefined);
+  } catch {
+    // TeX source is an enhancement path; PDF download remains the durable baseline.
+  }
 }
 
 async function tryDownloadArxivPreprintByTitle(options: {

@@ -12,7 +12,7 @@ import {
   type ExtensionHostMessage,
   type ExtensionHostResponse
 } from "./paper-extension-protocol.js";
-import { parsePaperWebPageHtml } from "./paper-webpage-fetch.js";
+import { parsePaperWebPageHtmlWithPandoc } from "./paper-webpage-fetch.js";
 import { savePaperWebPageParse } from "./paper-reader/engines/webpage.js";
 import { parsePaper } from "./paper-reader/paper-reader.js";
 import type { PaperParseResult } from "./paper-reader/types.js";
@@ -20,6 +20,8 @@ import {
   readPaperRecord,
   resolveExternalPaperPdfPath,
   resolvePaperPdfPath,
+  updatePaperRecordParseManifest,
+  updatePaperRecordReadingFailure,
   writePaperRecord
 } from "./paper-store.js";
 import { resolvePublisherCanonicalIdFromArticleUrl } from "./paper-download.js";
@@ -141,7 +143,7 @@ async function registerWebpageSnapshot(options: {
 }): Promise<ExtensionHostResponse> {
   try {
     const pageUrl = options.message.finalUrl ?? options.message.articleUrl;
-    const extraction = parsePaperWebPageHtml({
+    const extraction = await parsePaperWebPageHtmlWithPandoc({
       url: pageUrl,
       html: options.message.html
     });
@@ -150,6 +152,24 @@ async function registerWebpageSnapshot(options: {
       extraction,
       force: true
     });
+    const webpageRecord = await resolveRecordForExtensionMessage({
+      workspaceDir: options.workspaceDir,
+      message: options.message
+    });
+    if (webpageRecord) {
+      await updatePaperRecordParseManifest({
+        workspaceDir: options.workspaceDir,
+        recordPath: webpageRecord.recordPath,
+        strategy: "webpage",
+        status: saved.status,
+        paperKey: saved.paperKey,
+        engine: saved.engine,
+        sourceSha256: saved.pdfSha256,
+        artifacts: saved.artifacts,
+        quality: saved.quality,
+        updatedAt: options.recordedAt
+      });
+    }
 
     await appendPaperDownloadJobEvent({
       workspaceDir: options.workspaceDir,
@@ -191,6 +211,39 @@ async function registerWebpageSnapshot(options: {
       message: error instanceof Error ? error.message : "Unable to register webpage snapshot."
     });
   }
+}
+
+async function resolveRecordForExtensionMessage(input: {
+  workspaceDir: string;
+  message: Extract<ExtensionHostMessage, { type: "register_webpage_snapshot" }>;
+}): Promise<{ record: PaperRecord; recordPath: string } | null> {
+  if (input.message.source === "external") {
+    return readPaperRecord({
+      workspaceDir: input.workspaceDir,
+      source: "external",
+      articleUrl: input.message.articleUrl
+    });
+  }
+
+  if (!SUPPORTED_PUBLISHER_SOURCES.has(input.message.source as SupportedPaperSource)) {
+    return null;
+  }
+
+  const source = input.message.source as SupportedPaperSource;
+  const canonicalId = resolvePublisherCanonicalIdFromArticleUrl({
+    publisher: source,
+    articleUrl: input.message.articleUrl
+  });
+  if (!canonicalId) {
+    return null;
+  }
+
+  return readPaperRecord({
+    workspaceDir: input.workspaceDir,
+    source,
+    canonicalId,
+    articleUrl: input.message.articleUrl
+  });
 }
 
 async function registerDownloadedPaper(options: {
@@ -633,11 +686,29 @@ async function tryParseRegisteredPdf(input: {
   }
 
   try {
-    return await parsePaper({
+    const result = await parsePaper({
       workspaceDir: input.workspaceDir,
       recordPath: input.recordPath
     });
-  } catch {
+    await updatePaperRecordParseManifest({
+      workspaceDir: input.workspaceDir,
+      recordPath: input.recordPath,
+      strategy: "pdf_parse",
+      status: result.status,
+      paperKey: result.paperKey,
+      engine: result.engine,
+      sourceSha256: result.pdfSha256,
+      artifacts: result.artifacts,
+      quality: result.quality
+    });
+    return result;
+  } catch (error) {
+    await updatePaperRecordReadingFailure({
+      workspaceDir: input.workspaceDir,
+      recordPath: input.recordPath,
+      strategy: "pdf_parse",
+      message: error instanceof Error ? error.message : "Registered PDF could not be parsed into markdown."
+    }).catch(() => {});
     return undefined;
   }
 }

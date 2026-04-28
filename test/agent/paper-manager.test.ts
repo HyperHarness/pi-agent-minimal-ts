@@ -31,6 +31,18 @@ type SearchWebCall = {
   maxResults?: number;
 };
 
+function stripRecordManifest(record: Record<string, unknown>): Record<string, unknown> {
+  const {
+    updatedAt: _updatedAt,
+    download: _download,
+    parse: _parse,
+    webpage: _webpage,
+    reading: _reading,
+    ...legacyRecord
+  } = record;
+  return legacyRecord;
+}
+
 function createArxivResult(overrides: Partial<ArxivSearchResult> = {}): ArxivSearchResult {
   return {
     id: "2401.01234",
@@ -495,16 +507,19 @@ test("downloadPaper downloads arXiv ids, writes the PDF file, and returns downlo
     assert.equal(result.recordPath, expectedRecordPath);
     assert.equal(await readFile(expectedPdfPath, "utf8"), pdfBytes.toString("utf8"));
 
-    assert.deepEqual(JSON.parse(await readFile(expectedRecordPath, "utf8")), {
+    const savedRecord = JSON.parse(await readFile(expectedRecordPath, "utf8"));
+    assert.deepEqual(stripRecordManifest(savedRecord), {
       source: "arxiv",
       articleUrl: "https://arxiv.org/abs/2401.01234",
-      recordedAt: JSON.parse(await readFile(expectedRecordPath, "utf8")).recordedAt,
+      recordedAt: savedRecord.recordedAt,
       handlingMethod: "direct_http",
       status: "downloaded",
       canonicalId: "2401.01234",
       pdfUrl: "https://arxiv.org/pdf/2401.01234.pdf",
       downloadPath: expectedPdfPath
     });
+    assert.equal(savedRecord.download.status, "downloaded");
+    assert.equal(savedRecord.reading.status, "not_ready");
   } finally {
     await rm(workspaceDir, { recursive: true, force: true });
   }
@@ -800,7 +815,7 @@ test("downloadPaper downloads open APS abstract PDFs directly before using the e
       recordPath: expectedRecordPath
     });
     assert.equal(await readFile(expectedPdfPath, "utf8"), pdfBytes.toString("utf8"));
-    assert.deepEqual(savedRecord, {
+    assert.deepEqual(stripRecordManifest(savedRecord), {
       source: "aps",
       articleUrl,
       recordedAt: savedRecord.recordedAt,
@@ -810,6 +825,8 @@ test("downloadPaper downloads open APS abstract PDFs directly before using the e
       pdfUrl,
       downloadPath: expectedPdfPath
     });
+    assert.equal(savedRecord.download.status, "downloaded");
+    assert.equal(savedRecord.reading.status, "not_ready");
   } finally {
     await rm(workspaceDir, { recursive: true, force: true });
   }
@@ -1190,7 +1207,7 @@ test("downloadPaper preserves supported-publisher manual fallback results when a
       profileDir: path.join(workspaceDir, ".browser-profile", "paper-access"),
       executablePath: "C:\\Program Files\\Google\\Chrome\\Application\\chrome.exe"
     });
-    assert.deepEqual(savedRecord, {
+    assert.deepEqual(stripRecordManifest(savedRecord), {
       source: "science",
       canonicalId: "10.1126/science.adz8659",
       articleUrl,
@@ -1203,6 +1220,8 @@ test("downloadPaper preserves supported-publisher manual fallback results when a
         message: "Publisher requires institutional login."
       }
     });
+    assert.equal(savedRecord.download.status, "manual_fallback_opened");
+    assert.equal(savedRecord.reading.status, "not_ready");
   } finally {
     await rm(workspaceDir, { recursive: true, force: true });
   }
@@ -1306,7 +1325,7 @@ test("downloadPaper opens unsupported external URLs with explicit browser fallba
       recordPath: expectedRecordPath,
       executablePath: "C:\\Program Files\\Google\\Chrome\\Application\\chrome.exe"
     });
-    assert.deepEqual(savedRecord, {
+    assert.deepEqual(stripRecordManifest(savedRecord), {
       source: "external",
       articleUrl,
       openedUrl: articleUrl,
@@ -1314,6 +1333,8 @@ test("downloadPaper opens unsupported external URLs with explicit browser fallba
       handlingMethod: "system_browser_open",
       status: "external_opened"
     });
+    assert.equal(savedRecord.download.status, "external_opened");
+    assert.equal(savedRecord.reading.status, "not_ready");
   } finally {
     await rm(workspaceDir, { recursive: true, force: true });
   }
@@ -1364,7 +1385,7 @@ test("downloadPaper directly downloads Quantum Journal external PDFs", async () 
     });
     assert.equal(await readFile(expectedPdfPath, "utf8"), pdfBytes.toString("utf8"));
     const savedRecord = JSON.parse(await readFile(expectedRecordPath, "utf8"));
-    assert.deepEqual(savedRecord, {
+    assert.deepEqual(stripRecordManifest(savedRecord), {
       source: "external",
       articleUrl,
       recordedAt: savedRecord.recordedAt,
@@ -1375,6 +1396,8 @@ test("downloadPaper directly downloads Quantum Journal external PDFs", async () 
       fileSha256: expectedSha256,
       title: "Hierarchical memories"
     });
+    assert.equal(savedRecord.download.status, "downloaded");
+    assert.equal(savedRecord.reading.status, "not_ready");
 
     const existing = await downloadPaper({
       workspaceDir,
@@ -1444,7 +1467,8 @@ test("registerManualPaperDownload imports an external PDF and makes future downl
       title: "Manual External Paper"
     });
     assert.equal(await readFile(expectedPdfPath, "utf8"), "%PDF-1.7\nmanual external pdf\n");
-    assert.deepEqual(JSON.parse(await readFile(expectedRecordPath, "utf8")), {
+    const savedManualRecord = JSON.parse(await readFile(expectedRecordPath, "utf8"));
+    assert.deepEqual(stripRecordManifest(savedManualRecord), {
       source: "external",
       articleUrl,
       openedUrl: `${articleUrl}?opened=1`,
@@ -1455,6 +1479,8 @@ test("registerManualPaperDownload imports an external PDF and makes future downl
       fileSha256: expectedSha256,
       title: "Manual External Paper"
     });
+    assert.equal(savedManualRecord.download.status, "downloaded");
+    assert.equal(savedManualRecord.reading.status, "not_ready");
 
     const existing = await downloadPaper({
       workspaceDir,

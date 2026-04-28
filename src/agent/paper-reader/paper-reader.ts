@@ -4,6 +4,7 @@ import { createPaperChunks } from "./chunks.js";
 import { parseWithDocling } from "./engines/docling.js";
 import { parseWithOpenDataLoader } from "./engines/opendataloader.js";
 import { parseWithPlainTextBaseline } from "./engines/plain-text-baseline.js";
+import { parseWithTexSource } from "./engines/tex-source.js";
 import {
   assertPaperReadingExists,
   getPaperParseArtifactPaths,
@@ -36,6 +37,8 @@ export interface ParsePaperOptions {
   engine?: PaperParseEngine;
   force?: boolean;
   opendataloaderBin?: string;
+  latexmlBin?: string;
+  pandocBin?: string;
 }
 
 export interface InspectPaperOptions {
@@ -87,10 +90,11 @@ function resolveConcreteEngine(engine: PaperParseEngine | undefined): ConcretePa
 function enginePreference(engine: ConcretePaperParseEngine): number {
   const priority: Record<ConcretePaperParseEngine, number> = {
     "webpage": 0,
-    "opendataloader-hybrid": 1,
-    "opendataloader-local": 2,
-    "docling": 3,
-    "plain-text-baseline": 4
+    "tex-source": 1,
+    "opendataloader-hybrid": 2,
+    "opendataloader-local": 3,
+    "docling": 4,
+    "plain-text-baseline": 5
   };
   return priority[engine];
 }
@@ -175,17 +179,30 @@ async function resolveAvailableEngine(input: {
 
 async function runParser(input: {
   engine: ConcretePaperParseEngine;
+  workspaceDir: string;
   pdfPath: string;
   paperKey: string;
   pdfSha256: string;
   title?: string;
   opendataloaderBin?: string;
+  latexmlBin?: string;
+  pandocBin?: string;
 }): Promise<{ document: ParsedPaperDocument; markdown: string }> {
   if (input.engine === "plain-text-baseline") {
     return parseWithPlainTextBaseline(input);
   }
   if (input.engine === "docling") {
     return parseWithDocling(input);
+  }
+  if (input.engine === "tex-source") {
+    return parseWithTexSource({
+      workspaceDir: input.workspaceDir,
+      paperKey: input.paperKey,
+      pdfSha256: input.pdfSha256,
+      ...(input.title ? { title: input.title } : {}),
+      ...(input.latexmlBin ? { latexmlBin: input.latexmlBin } : {}),
+      ...(input.pandocBin ? { pandocBin: input.pandocBin } : {})
+    });
   }
   if (input.engine === "webpage") {
     throw new PaperReaderError(
@@ -211,6 +228,8 @@ async function parseWithConcreteEngine(input: {
   engine: ConcretePaperParseEngine;
   force?: boolean;
   opendataloaderBin?: string;
+  latexmlBin?: string;
+  pandocBin?: string;
 }): Promise<PaperParseResult> {
   const resolved = await resolvePaperSource(input);
   if (!resolved.source.pdfPath || !resolved.source.pdfSha256) {
@@ -240,11 +259,14 @@ async function parseWithConcreteEngine(input: {
 
   const parsed = await runParser({
     engine: input.engine,
+    workspaceDir: input.workspaceDir,
     pdfPath,
     paperKey: resolved.source.paperKey,
     pdfSha256,
     ...(resolved.source.title ? { title: resolved.source.title } : {}),
-    ...(input.opendataloaderBin ? { opendataloaderBin: input.opendataloaderBin } : {})
+    ...(input.opendataloaderBin ? { opendataloaderBin: input.opendataloaderBin } : {}),
+    ...(input.latexmlBin ? { latexmlBin: input.latexmlBin } : {}),
+    ...(input.pandocBin ? { pandocBin: input.pandocBin } : {})
   });
   const quality = evaluateParseQuality(parsed.document);
   const chunks = createPaperChunks(parsed.document);
@@ -277,7 +299,9 @@ export async function parsePaper(options: ParsePaperOptions): Promise<PaperParse
       ...(options.recordPath ? { recordPath: options.recordPath } : {}),
       engine: resolveConcreteEngine(requestedEngine),
       ...(options.force !== undefined ? { force: options.force } : {}),
-      ...(options.opendataloaderBin ? { opendataloaderBin: options.opendataloaderBin } : {})
+      ...(options.opendataloaderBin ? { opendataloaderBin: options.opendataloaderBin } : {}),
+      ...(options.latexmlBin ? { latexmlBin: options.latexmlBin } : {}),
+      ...(options.pandocBin ? { pandocBin: options.pandocBin } : {})
     });
   }
 
@@ -289,7 +313,9 @@ export async function parsePaper(options: ParsePaperOptions): Promise<PaperParse
       ...(options.recordPath ? { recordPath: options.recordPath } : {}),
       engine: "opendataloader-local",
       ...(options.force !== undefined ? { force: options.force } : {}),
-      ...(options.opendataloaderBin ? { opendataloaderBin: options.opendataloaderBin } : {})
+      ...(options.opendataloaderBin ? { opendataloaderBin: options.opendataloaderBin } : {}),
+      ...(options.latexmlBin ? { latexmlBin: options.latexmlBin } : {}),
+      ...(options.pandocBin ? { pandocBin: options.pandocBin } : {})
     });
   } catch (error) {
     if (error instanceof PaperReaderError && error.code === "parse_failed") {
@@ -299,7 +325,9 @@ export async function parsePaper(options: ParsePaperOptions): Promise<PaperParse
           ...(options.path ? { path: options.path } : {}),
           ...(options.recordPath ? { recordPath: options.recordPath } : {}),
           engine: "docling",
-          ...(options.force !== undefined ? { force: options.force } : {})
+          ...(options.force !== undefined ? { force: options.force } : {}),
+          ...(options.latexmlBin ? { latexmlBin: options.latexmlBin } : {}),
+          ...(options.pandocBin ? { pandocBin: options.pandocBin } : {})
         });
       } catch (doclingError) {
         if (!(doclingError instanceof PaperReaderError) || doclingError.code !== "parse_failed") {
@@ -311,7 +339,9 @@ export async function parsePaper(options: ParsePaperOptions): Promise<PaperParse
         ...(options.path ? { path: options.path } : {}),
         ...(options.recordPath ? { recordPath: options.recordPath } : {}),
         engine: "plain-text-baseline",
-        ...(options.force !== undefined ? { force: options.force } : {})
+        ...(options.force !== undefined ? { force: options.force } : {}),
+        ...(options.latexmlBin ? { latexmlBin: options.latexmlBin } : {}),
+        ...(options.pandocBin ? { pandocBin: options.pandocBin } : {})
       });
     }
     throw error;
@@ -328,7 +358,9 @@ export async function parsePaper(options: ParsePaperOptions): Promise<PaperParse
       ...(options.recordPath ? { recordPath: options.recordPath } : {}),
       engine: "opendataloader-hybrid",
       ...(options.force !== undefined ? { force: options.force } : {}),
-      ...(options.opendataloaderBin ? { opendataloaderBin: options.opendataloaderBin } : {})
+      ...(options.opendataloaderBin ? { opendataloaderBin: options.opendataloaderBin } : {}),
+      ...(options.latexmlBin ? { latexmlBin: options.latexmlBin } : {}),
+      ...(options.pandocBin ? { pandocBin: options.pandocBin } : {})
     });
   } catch (error) {
     if (error instanceof PaperReaderError && error.code === "hybrid_server_unavailable") {
@@ -341,7 +373,9 @@ export async function parsePaper(options: ParsePaperOptions): Promise<PaperParse
           ...(options.path ? { path: options.path } : {}),
           ...(options.recordPath ? { recordPath: options.recordPath } : {}),
           engine: "docling",
-          ...(options.force !== undefined ? { force: options.force } : {})
+          ...(options.force !== undefined ? { force: options.force } : {}),
+          ...(options.latexmlBin ? { latexmlBin: options.latexmlBin } : {}),
+          ...(options.pandocBin ? { pandocBin: options.pandocBin } : {})
         });
       } catch (doclingError) {
         if (doclingError instanceof PaperReaderError && doclingError.code === "parse_failed") {
@@ -350,7 +384,9 @@ export async function parsePaper(options: ParsePaperOptions): Promise<PaperParse
             ...(options.path ? { path: options.path } : {}),
             ...(options.recordPath ? { recordPath: options.recordPath } : {}),
             engine: "plain-text-baseline",
-            ...(options.force !== undefined ? { force: options.force } : {})
+            ...(options.force !== undefined ? { force: options.force } : {}),
+            ...(options.latexmlBin ? { latexmlBin: options.latexmlBin } : {}),
+            ...(options.pandocBin ? { pandocBin: options.pandocBin } : {})
           });
         }
         throw doclingError;

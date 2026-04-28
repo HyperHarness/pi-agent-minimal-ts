@@ -36,6 +36,18 @@ async function writePdf(filePath: string, contents = "%PDF-1.7\nmock pdf\n%%EOF\
   await writeFile(filePath, contents, "utf8");
 }
 
+function stripRecordManifest(record: Record<string, unknown>): Record<string, unknown> {
+  const {
+    updatedAt: _updatedAt,
+    download: _download,
+    parse: _parse,
+    webpage: _webpage,
+    reading: _reading,
+    ...legacyRecord
+  } = record;
+  return legacyRecord;
+}
+
 function decodeFirstFrame(buffer: Buffer): unknown {
   const messages = readNativeMessagesFromBuffer(buffer);
   assert.equal(messages.length, 1);
@@ -146,7 +158,8 @@ test("handleExtensionHostMessage registers external PDF downloads with manual im
       title: "External Paper"
     });
     assert.equal(await readFile(expectedDownloadPath, "utf8"), "%PDF-1.7\nexternal pdf\n");
-    assert.deepEqual(JSON.parse(await readFile(expectedRecordPath, "utf8")), {
+    const savedRecord = JSON.parse(await readFile(expectedRecordPath, "utf8"));
+    assert.deepEqual(stripRecordManifest(savedRecord), {
       source: "external",
       articleUrl,
       openedUrl: `${articleUrl}?opened=1`,
@@ -157,6 +170,8 @@ test("handleExtensionHostMessage registers external PDF downloads with manual im
       fileSha256: expectedSha256,
       title: "External Paper"
     });
+    assert.equal(savedRecord.download.status, "downloaded");
+    assert.equal(savedRecord.reading.status, "not_ready");
   } finally {
     await rm(workspaceDir, { recursive: true, force: true });
   }
@@ -207,7 +222,8 @@ test("handleExtensionHostMessage registers supported publisher PDFs using canoni
       fileSha256: expectedSha256,
       title: "Nature Paper"
     });
-    assert.deepEqual(JSON.parse(await readFile(expectedRecordPath, "utf8")), {
+    const savedRecord = JSON.parse(await readFile(expectedRecordPath, "utf8"));
+    assert.deepEqual(stripRecordManifest(savedRecord), {
       source: "nature",
       articleUrl,
       recordedAt: "2026-04-25T10:30:00.000Z",
@@ -217,6 +233,8 @@ test("handleExtensionHostMessage registers supported publisher PDFs using canoni
       pdfUrl: "https://www.nature.com/articles/s41586-019-1666-5.pdf",
       downloadPath: expectedDownloadPath
     });
+    assert.equal(savedRecord.download.status, "downloaded");
+    assert.equal(savedRecord.reading.status, "not_ready");
     const events = await readPaperDownloadJobEvents({ workspaceDir });
     assert.equal(events.at(-1)?.status, "downloaded");
     assert.equal(events.at(-1)?.recordPath, expectedRecordPath);

@@ -2,7 +2,7 @@ export interface PaperWikiSourceInput {
   workspaceDir: string;
   paperKey: string;
   summaryMarkdown: string;
-  engine?: "opendataloader-local" | "opendataloader-hybrid" | "docling" | "plain-text-baseline" | "webpage";
+  engine?: "opendataloader-local" | "opendataloader-hybrid" | "docling" | "tex-source" | "plain-text-baseline" | "webpage";
   title?: string;
   tags?: string[];
   keyFindings?: string[];

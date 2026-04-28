@@ -11,6 +11,11 @@ import type {
 } from "../../src/agent/paper-types.js";
 import * as agentTools from "../../src/agent/tools.js";
 import { createTools } from "../../src/agent/tools.js";
+import {
+  resolvePaperPdfPath,
+  updatePaperRecordParseManifest,
+  writePaperRecord
+} from "../../src/agent/paper-store.js";
 
 type ToolContentItem = {
   type?: string;
@@ -100,7 +105,7 @@ type ParsePaperTool = {
     args: {
       path?: string;
       recordPath?: string;
-      engine?: "auto" | "opendataloader-local" | "opendataloader-hybrid" | "docling" | "plain-text-baseline";
+      engine?: "auto" | "opendataloader-local" | "opendataloader-hybrid" | "docling" | "tex-source" | "plain-text-baseline";
       force?: boolean;
     },
     signal: undefined,
@@ -120,7 +125,7 @@ type ReadPaperSectionTool = {
     toolCallId: string,
     args: {
       paperKey: string;
-      engine?: "opendataloader-local" | "opendataloader-hybrid" | "docling" | "plain-text-baseline" | "webpage";
+      engine?: "opendataloader-local" | "opendataloader-hybrid" | "docling" | "tex-source" | "plain-text-baseline" | "webpage";
       sectionId?: string;
       pageFrom?: number;
       pageTo?: number;
@@ -135,7 +140,7 @@ type SearchPaperTextTool = {
     toolCallId: string,
     args: {
       paperKey: string;
-      engine?: "opendataloader-local" | "opendataloader-hybrid" | "docling" | "plain-text-baseline" | "webpage";
+      engine?: "opendataloader-local" | "opendataloader-hybrid" | "docling" | "tex-source" | "plain-text-baseline" | "webpage";
       query: string;
       maxResults?: number;
     },
@@ -148,7 +153,7 @@ type WritePaperWikiSourceTool = {
     toolCallId: string,
     args: {
       paperKey: string;
-      engine?: "opendataloader-local" | "opendataloader-hybrid" | "docling" | "plain-text-baseline" | "webpage";
+      engine?: "opendataloader-local" | "opendataloader-hybrid" | "docling" | "tex-source" | "plain-text-baseline" | "webpage";
       title?: string;
       summaryMarkdown: string;
       tags?: string[];
@@ -875,6 +880,73 @@ test("download_paper delegates id inputs to the injected paper manager dependenc
   }
 });
 
+test("download_paper prefers arXiv TeX source markdown before arXiv HTML and PDF parsing", async () => {
+  const workspace = await mkdtemp(path.join(tmpdir(), "pi-agent-tools-"));
+  const recordPath = path.join(workspace, "papers", "arxiv-2601.00425.json");
+  const pdfPath = path.join(workspace, "papers", "arxiv-2601.00425.pdf");
+  const managerResult: PaperDownloadResult = {
+    status: "downloaded",
+    source: "arxiv",
+    canonicalId: "2601.00425",
+    articleUrl: "https://arxiv.org/abs/2601.00425",
+    finalPdfUrl: "https://arxiv.org/pdf/2601.00425.pdf",
+    path: pdfPath,
+    recordPath,
+  };
+  const calls: string[] = [];
+
+  try {
+    const downloadPaperTool = getDownloadPaperTool(workspace, {
+      downloadPaper: async () => managerResult,
+      parsePaper: async (options) => {
+        calls.push(`parse:${options.engine ?? "auto"}`);
+        assert.equal(options.engine, "tex-source");
+        assert.equal(options.recordPath, recordPath);
+        return {
+          status: "parsed",
+          paperKey: "arxiv-2601.00425",
+          engine: "tex-source",
+          pdfSha256: "pdf-hash",
+          artifacts: {
+            sourcePath: path.join(workspace, "knowledge-base/wiki/sources/arxiv-2601.00425/source.json"),
+            parsePath: path.join(workspace, "knowledge-base/wiki/sources/arxiv-2601.00425/parses/tex-source/parse.json"),
+            markdownPath: path.join(workspace, "knowledge-base/wiki/sources/arxiv-2601.00425/parses/tex-source/document.md"),
+            qualityPath: path.join(workspace, "knowledge-base/wiki/sources/arxiv-2601.00425/parses/tex-source/quality.json"),
+            chunksPath: path.join(workspace, "knowledge-base/wiki/sources/arxiv-2601.00425/chunks/tex-source.jsonl"),
+          },
+          quality: {
+            status: "good",
+            score: 1,
+            pages: 1,
+            totalTextLength: 128,
+            emptyPageCount: 0,
+            headingCount: 2,
+            tableCount: 0,
+            figureOrCaptionCount: 0,
+            warnings: [],
+          },
+          sections: [],
+        };
+      },
+      fetchPaperWebPage: async () => {
+        throw new Error("arXiv HTML should not be fetched when TeX source parsing succeeds");
+      },
+    });
+
+    const result = await downloadPaperTool.execute(
+      "call-arxiv-tex-source",
+      { id: "2601.00425" },
+      undefined,
+    );
+
+    assert.deepEqual(calls, ["parse:tex-source"]);
+    assert.equal((result.details as { reading?: { strategy?: string } }).reading?.strategy, "pdf");
+    assert.equal((result.details as { reading?: { engine?: string } }).reading?.engine, "tex-source");
+  } finally {
+    await rm(workspace, { recursive: true, force: true });
+  }
+});
+
 test("download_paper prefers arXiv HTML webpage markdown before PDF parsing", async () => {
   const workspace = await mkdtemp(path.join(tmpdir(), "pi-agent-tools-"));
   const recordPath = path.join(workspace, "papers", "arxiv-2601.00425.json");
@@ -957,6 +1029,92 @@ test("download_paper prefers arXiv HTML webpage markdown before PDF parsing", as
     ]);
     assert.equal((result.details as { reading?: { strategy?: string } }).reading?.strategy, "webpage");
     assert.equal((result.details as { reading?: { engine?: string } }).reading?.engine, "webpage");
+  } finally {
+    await rm(workspace, { recursive: true, force: true });
+  }
+});
+
+test("download_paper reuses ready record manifests without re-fetching publisher webpages", async () => {
+  const workspace = await mkdtemp(path.join(tmpdir(), "pi-agent-tools-"));
+  const articleUrl = "https://www.nature.com/articles/s41586-019-1666-5";
+  const pdfPath = resolvePaperPdfPath({
+    workspaceDir: workspace,
+    source: "nature",
+    canonicalId: "s41586-019-1666-5"
+  });
+
+  try {
+    await mkdir(path.dirname(pdfPath), { recursive: true });
+    await writeFile(pdfPath, "%PDF-1.7\nnature pdf\n", "utf8");
+    const recordPath = await writePaperRecord({
+      workspaceDir: workspace,
+      record: {
+        source: "nature",
+        articleUrl,
+        recordedAt: "2026-04-25T10:00:00.000Z",
+        handlingMethod: "browser_session",
+        status: "downloaded",
+        canonicalId: "s41586-019-1666-5",
+        pdfUrl: "https://www.nature.com/articles/s41586-019-1666-5.pdf",
+        downloadPath: pdfPath
+      }
+    });
+    await updatePaperRecordParseManifest({
+      workspaceDir: workspace,
+      recordPath,
+      strategy: "webpage",
+      status: "parsed",
+      paperKey: "nature-s41586-019-1666-5",
+      engine: "webpage",
+      sourceSha256: "webpage-hash",
+      artifacts: {
+        markdownPath: path.join(workspace, "knowledge-base/wiki/sources/nature-s41586-019-1666-5/parses/webpage/document.md"),
+        parsePath: path.join(workspace, "knowledge-base/wiki/sources/nature-s41586-019-1666-5/parses/webpage/parse.json"),
+        qualityPath: path.join(workspace, "knowledge-base/wiki/sources/nature-s41586-019-1666-5/parses/webpage/quality.json"),
+        chunksPath: path.join(workspace, "knowledge-base/wiki/sources/nature-s41586-019-1666-5/chunks/webpage.jsonl")
+      },
+      quality: {
+        status: "good",
+        score: 1,
+        pages: 1,
+        totalTextLength: 2000,
+        warnings: []
+      }
+    });
+
+    const downloadPaperTool = getDownloadPaperTool(workspace, {
+      downloadPaper: async () => ({
+        status: "already_downloaded",
+        source: "nature",
+        canonicalId: "s41586-019-1666-5",
+        articleUrl,
+        finalPdfUrl: "https://www.nature.com/articles/s41586-019-1666-5.pdf",
+        path: pdfPath,
+        recordPath,
+        recordedAt: "2026-04-25T10:00:00.000Z"
+      }),
+      extensionBridge: {
+        async submitJob() {
+          throw new Error("ready records should not queue webpage capture again");
+        }
+      },
+      parsePaper: async () => {
+        throw new Error("ready records should not be parsed again");
+      }
+    });
+
+    const result = await downloadPaperTool.execute(
+      "call-ready-record",
+      { url: articleUrl },
+      undefined
+    );
+
+    assert.equal((result.details as { reading?: { status?: string } }).reading?.status, "already_parsed");
+    assert.equal((result.details as { reading?: { strategy?: string } }).reading?.strategy, "webpage");
+    assert.equal(
+      (result.details as { reading?: { markdownPath?: string } }).reading?.markdownPath,
+      "knowledge-base/wiki/sources/nature-s41586-019-1666-5/parses/webpage/document.md"
+    );
   } finally {
     await rm(workspace, { recursive: true, force: true });
   }

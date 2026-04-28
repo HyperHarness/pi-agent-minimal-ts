@@ -49,6 +49,14 @@ import {
   listLocalPapers,
   searchLocalPapers
 } from "./local-paper-library.js";
+import {
+  readPaperRecord,
+  readPaperRecordByPath,
+  updatePaperRecordParseManifest,
+  updatePaperRecordQueuedReading,
+  updatePaperRecordReadingFailure
+} from "./paper-store.js";
+import type { PaperRecord } from "./paper-types.js";
 
 const getTimeParameters = Type.Object({
   timezone: Type.Optional(Type.String({ description: "Optional IANA timezone name." }))
@@ -135,6 +143,7 @@ const parsePaperParameters = Type.Object({
       Type.Literal("opendataloader-local"),
       Type.Literal("opendataloader-hybrid"),
       Type.Literal("docling"),
+      Type.Literal("tex-source"),
       Type.Literal("plain-text-baseline")
     ], { description: "Parser engine to use. Defaults to auto." })
   ),
@@ -156,6 +165,7 @@ const paperReaderEngineParameter = Type.Optional(
     Type.Literal("opendataloader-local"),
     Type.Literal("opendataloader-hybrid"),
     Type.Literal("docling"),
+    Type.Literal("tex-source"),
     Type.Literal("plain-text-baseline"),
     Type.Literal("webpage")
   ], { description: "Parsed engine to read from. Defaults to the best available parse." })
@@ -422,6 +432,68 @@ function summarizeParseResult(
   };
 }
 
+function summarizeReadyRecordReading(record: PaperRecord): DownloadPaperReadingClosure | undefined {
+  if (record.reading?.status !== "ready") {
+    return undefined;
+  }
+
+  const artifact = record.reading.preferredSource === "webpage" ? record.webpage : record.parse;
+  if (
+    !artifact?.paperKey ||
+    !artifact.engine ||
+    !artifact.markdownPath ||
+    !artifact.parsePath ||
+    !artifact.qualityPath ||
+    !artifact.chunksPath ||
+    !artifact.quality
+  ) {
+    return undefined;
+  }
+
+  return {
+    status: "already_parsed",
+    strategy: record.reading.preferredSource === "webpage" ? "webpage" : "pdf",
+    paperKey: artifact.paperKey,
+    engine: artifact.engine as Awaited<ReturnType<typeof parsePaper>>["engine"],
+    markdownPath: artifact.markdownPath,
+    parsePath: artifact.parsePath,
+    qualityPath: artifact.qualityPath,
+    chunksPath: artifact.chunksPath,
+    quality: artifact.quality as Awaited<ReturnType<typeof parsePaper>>["quality"]
+  };
+}
+
+async function readReadyRecordReading(input: {
+  workspaceDir: string;
+  recordPath: string;
+}): Promise<DownloadPaperReadingClosure | undefined> {
+  try {
+    const saved = await readPaperRecordByPath(input);
+    return saved ? summarizeReadyRecordReading(saved.record) : undefined;
+  } catch {
+    return undefined;
+  }
+}
+
+async function updateRecordWithParseResult(input: {
+  workspaceDir: string;
+  recordPath: string;
+  strategy: "pdf" | "webpage";
+  result: Awaited<ReturnType<typeof parsePaper>>;
+}): Promise<void> {
+  await updatePaperRecordParseManifest({
+    workspaceDir: input.workspaceDir,
+    recordPath: input.recordPath,
+    strategy: input.strategy === "webpage" ? "webpage" : "pdf_parse",
+    status: input.result.status,
+    paperKey: input.result.paperKey,
+    engine: input.result.engine,
+    sourceSha256: input.result.pdfSha256,
+    artifacts: input.result.artifacts,
+    quality: input.result.quality
+  }).catch(() => {});
+}
+
 function isWebpageFirstPublisher(source: string): source is SupportedPaperSource {
   return source === "aps" || source === "nature" || source === "science";
 }
@@ -465,6 +537,35 @@ function resolveExtensionPaperSource(input: string): SupportedPaperSource | "ext
   } catch {
     return "external";
   }
+}
+
+async function resolveRecordPathForArticleUrl(input: {
+  workspaceDir: string;
+  url: string;
+}): Promise<string | undefined> {
+  const source = resolveExtensionPaperSource(input.url);
+  if (source === "external") {
+    return (await readPaperRecord({
+      workspaceDir: input.workspaceDir,
+      source,
+      articleUrl: input.url
+    }))?.recordPath;
+  }
+
+  const canonicalId = resolvePublisherCanonicalIdFromArticleUrl({
+    publisher: source,
+    articleUrl: input.url
+  });
+  if (!canonicalId) {
+    return undefined;
+  }
+
+  return (await readPaperRecord({
+    workspaceDir: input.workspaceDir,
+    source,
+    canonicalId,
+    articleUrl: input.url
+  }))?.recordPath;
 }
 
 const PAPER_DOWNLOAD_ERROR_CODES = new Set<PaperDownloadError["code"]>([
@@ -776,14 +877,24 @@ export function createTools(workspaceDir: string, dependencies: ToolDependencies
     recordPath: string
   ): Promise<DownloadPaperReadingClosure> => {
     try {
-      return summarizeParseResult(
-        await parsePaperImpl({
-          workspaceDir: resolvedWorkspaceDir,
-          recordPath
-        }),
-        "pdf"
-      );
+      const result = await parsePaperImpl({
+        workspaceDir: resolvedWorkspaceDir,
+        recordPath
+      });
+      await updateRecordWithParseResult({
+        workspaceDir: resolvedWorkspaceDir,
+        recordPath,
+        strategy: "pdf",
+        result
+      });
+      return summarizeParseResult(result, "pdf");
     } catch (error) {
+      await updatePaperRecordReadingFailure({
+        workspaceDir: resolvedWorkspaceDir,
+        recordPath,
+        strategy: "pdf_parse",
+        message: formatReadingError(error, "Downloaded PDF could not be parsed into markdown.")
+      }).catch(() => {});
       return {
         status: "failed",
         strategy: "pdf",
@@ -792,21 +903,47 @@ export function createTools(workspaceDir: string, dependencies: ToolDependencies
     }
   };
 
+  const parseDownloadedTexSourceForReading = async (
+    recordPath: string
+  ): Promise<DownloadPaperReadingClosure | undefined> => {
+    try {
+      const result = await parsePaperImpl({
+        workspaceDir: resolvedWorkspaceDir,
+        recordPath,
+        engine: "tex-source"
+      });
+      await updateRecordWithParseResult({
+        workspaceDir: resolvedWorkspaceDir,
+        recordPath,
+        strategy: "pdf",
+        result
+      });
+      return summarizeParseResult(result, "pdf");
+    } catch {
+      return undefined;
+    }
+  };
+
   const parseArxivWebpageForReading = async (
-    canonicalId: string
+    canonicalId: string,
+    recordPath: string
   ): Promise<DownloadPaperReadingClosure | undefined> => {
     try {
       const extraction = await fetchPaperWebPageImpl({
         url: buildArxivHtmlUrl(canonicalId)
       });
-      return summarizeParseResult(
-        await savePaperWebPageParseImpl({
-          workspaceDir: resolvedWorkspaceDir,
-          extraction,
-          paperKey: `arxiv-${canonicalId}`
-        }),
-        "webpage"
-      );
+      const result = await savePaperWebPageParseImpl({
+        workspaceDir: resolvedWorkspaceDir,
+        extraction,
+        paperKey: `arxiv-${canonicalId}`
+      });
+      await updateRecordWithParseResult({
+        workspaceDir: resolvedWorkspaceDir,
+        recordPath,
+        strategy: "webpage",
+        result
+      });
+      return summarizeParseResult(result, "webpage");
     } catch {
       return undefined;
     }
@@ -816,9 +953,19 @@ export function createTools(workspaceDir: string, dependencies: ToolDependencies
     result: PaperDownloadResult
   ): Promise<DownloadPaperReadingClosure | undefined> => {
     if (result.status === "downloaded" || result.status === "already_downloaded") {
+      const ready = await readReadyRecordReading({
+        workspaceDir: resolvedWorkspaceDir,
+        recordPath: result.recordPath
+      });
+      if (ready) {
+        return ready;
+      }
+
       if (result.source === "arxiv") {
         return (
-          await parseArxivWebpageForReading(result.canonicalId)
+          await parseDownloadedTexSourceForReading(result.recordPath)
+        ) ?? (
+          await parseArxivWebpageForReading(result.canonicalId, result.recordPath)
         ) ?? parseDownloadedPdfForReading(result.recordPath);
       }
 
@@ -845,6 +992,14 @@ export function createTools(workspaceDir: string, dependencies: ToolDependencies
               autoClose: true
             })
           );
+          await updatePaperRecordQueuedReading({
+            workspaceDir: resolvedWorkspaceDir,
+            recordPath: result.recordPath,
+            strategy: "webpage",
+            jobId: queued.jobId,
+            message:
+              "Publisher PDF is downloaded. Browser extension webpage capture was queued so the reading source markdown can be generated."
+          }).catch(() => {});
           return {
             status: "queued",
             strategy: "webpage",
@@ -853,6 +1008,12 @@ export function createTools(workspaceDir: string, dependencies: ToolDependencies
               "Publisher PDF is downloaded. Browser extension webpage capture was queued so the reading source markdown can be generated."
           };
         } catch (error) {
+          await updatePaperRecordReadingFailure({
+            workspaceDir: resolvedWorkspaceDir,
+            recordPath: result.recordPath,
+            strategy: "webpage",
+            message: formatReadingError(error, "Publisher webpage markdown capture could not be queued.")
+          }).catch(() => {});
           return {
             status: "failed",
             strategy: "webpage",
@@ -977,6 +1138,20 @@ export function createTools(workspaceDir: string, dependencies: ToolDependencies
             ...(args.paperKey ? { paperKey: args.paperKey } : {}),
             ...(args.force !== undefined ? { force: args.force } : {})
           });
+        if (savedParse) {
+          const recordPath = await resolveRecordPathForArticleUrl({
+            workspaceDir: resolvedWorkspaceDir,
+            url: result.url
+          });
+          if (recordPath) {
+            await updateRecordWithParseResult({
+              workspaceDir: resolvedWorkspaceDir,
+              recordPath,
+              strategy: "webpage",
+              result: savedParse
+            });
+          }
+        }
         const output = {
           ...result,
           ...(savedParse ? { savedParse } : {})
