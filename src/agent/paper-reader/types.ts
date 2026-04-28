@@ -2,7 +2,9 @@ export type PaperParseEngine =
   | "auto"
   | "opendataloader-local"
   | "opendataloader-hybrid"
-  | "plain-text-baseline";
+  | "docling"
+  | "plain-text-baseline"
+  | "webpage";
 
 export type ConcretePaperParseEngine = Exclude<PaperParseEngine, "auto">;
 
@@ -63,8 +65,8 @@ export interface PaperParseQualityReport {
 
 export interface PaperReaderSource {
   paperKey: string;
-  pdfPath: string;
-  pdfSha256: string;
+  pdfPath?: string;
+  pdfSha256?: string;
   createdAt: string;
   recordPath?: string;
   source?: string;

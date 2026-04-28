@@ -1,6 +1,11 @@
 import { createHash } from "node:crypto";
 import { access, mkdir, readFile, readdir, realpath, writeFile } from "node:fs/promises";
 import path from "node:path";
+import {
+  isPathInsideDirectory,
+  resolvePaperLibraryPaths,
+  uniquePaths
+} from "../knowledge-base.js";
 import type { PaperRecord } from "../paper-types.js";
 import type {
   ConcretePaperParseEngine,
@@ -21,18 +26,6 @@ export interface ResolvePaperInput {
 export interface ResolvedPaperSource {
   source: PaperReaderSource;
   record?: PaperRecord;
-}
-
-function isPathInsideDirectory(rootDir: string, candidatePath: string): boolean {
-  const relativePath = path.relative(rootDir, candidatePath);
-  return (
-    relativePath === "" ||
-    (
-      relativePath !== ".." &&
-      !relativePath.startsWith(`..${path.sep}`) &&
-      !path.isAbsolute(relativePath)
-    )
-  );
 }
 
 function sanitizePaperKey(value: string): string {
@@ -70,39 +63,61 @@ async function resolvePathInsideWorkspace(
     throw new PaperReaderError("paper_not_found", "Path is required.");
   }
 
-  const resolvedWorkspaceDir = path.resolve(workspaceDir);
-  const candidatePath = path.isAbsolute(requestedPath)
-    ? path.resolve(requestedPath)
-    : path.resolve(resolvedWorkspaceDir, requestedPath);
+  const paths = resolvePaperLibraryPaths(workspaceDir);
+  const resolvedWorkspaceDir = paths.workspaceDir;
+  const allowedRoots = uniquePaths([resolvedWorkspaceDir, paths.libraryRoot]);
+  const normalizedRequestedPath = normalizeRequestedPath(requestedPath);
+  const candidatePath = path.isAbsolute(normalizedRequestedPath)
+    ? path.resolve(normalizedRequestedPath)
+    : path.resolve(resolvedWorkspaceDir, normalizedRequestedPath);
 
-  if (!isPathInsideDirectory(resolvedWorkspaceDir, candidatePath)) {
-    throw new PaperReaderError("paper_not_found", "Requested path is outside the workspace.");
+  if (!allowedRoots.some((root) => isPathInsideDirectory(path.resolve(root), candidatePath))) {
+    throw new PaperReaderError("paper_not_found", "Requested path is outside the workspace or knowledge base.");
   }
 
-  let realWorkspaceDir: string;
+  let realAllowedRoots: string[];
   let realCandidatePath: string;
   try {
-    [realWorkspaceDir, realCandidatePath] = await Promise.all([
-      realpath(resolvedWorkspaceDir),
+    [realAllowedRoots, realCandidatePath] = await Promise.all([
+      Promise.all(allowedRoots.map(async (root) => realpath(root).catch(() => path.resolve(root)))),
       realpath(candidatePath)
     ]);
   } catch {
     throw new PaperReaderError("paper_not_found", `Paper file was not found: ${requestedPath}`);
   }
 
-  if (!isPathInsideDirectory(realWorkspaceDir, realCandidatePath)) {
-    throw new PaperReaderError("paper_not_found", "Requested path is outside the workspace.");
+  if (!realAllowedRoots.some((root) => isPathInsideDirectory(root, realCandidatePath))) {
+    throw new PaperReaderError("paper_not_found", "Requested path is outside the workspace or knowledge base.");
   }
 
   return realCandidatePath;
 }
 
+function normalizeRequestedPath(requestedPath: string): string {
+  const drivePathMatch = requestedPath.match(/^([A-Za-z]):[\\/](.*)$/);
+  if (drivePathMatch?.[1] && drivePathMatch[2]) {
+    return path.posix.join(
+      "/mnt",
+      drivePathMatch[1].toLowerCase(),
+      ...drivePathMatch[2].split(/[\\/]+/).filter(Boolean)
+    );
+  }
+
+  const uncWslMatch = requestedPath.match(/^\\\\(?:wsl\.localhost|wsl\$)\\[^\\]+\\(.+)$/i);
+  if (uncWslMatch?.[1]) {
+    return path.posix.join("/", ...uncWslMatch[1].split(/[\\/]+/).filter(Boolean));
+  }
+
+  return requestedPath;
+}
+
 function assertInsidePapersDir(workspaceDir: string, pdfPath: string): void {
-  const papersDir = path.resolve(workspaceDir, "downloads", "papers");
-  if (!isPathInsideDirectory(papersDir, path.resolve(pdfPath))) {
+  const paths = resolvePaperLibraryPaths(workspaceDir);
+  const allowedRoots = [paths.rawPdfRoot].map((candidate) => path.resolve(candidate));
+  if (!allowedRoots.some((root) => isPathInsideDirectory(root, path.resolve(pdfPath)))) {
     throw new PaperReaderError(
       "pdf_outside_papers_dir",
-      "Paper reading only accepts PDFs stored under downloads/papers/."
+      "Paper reading only accepts PDFs stored under knowledge-base/raw/pdfs/."
     );
   }
 }
@@ -179,7 +194,7 @@ export async function resolvePaperSource(input: ResolvePaperInput): Promise<Reso
 }
 
 export function getReadingDir(workspaceDir: string): string {
-  return path.join(workspaceDir, "downloads", "papers", "llm-wiki", "intermediate");
+  return resolvePaperLibraryPaths(workspaceDir).sourceArtifactsRoot;
 }
 
 export function getPaperReadingDir(workspaceDir: string, paperKey: string): string {
@@ -210,6 +225,14 @@ export function getPaperParseArtifactPaths(input: {
   };
 }
 
+export async function resolvePaperParseArtifactPaths(input: {
+  workspaceDir: string;
+  paperKey: string;
+  engine: ConcretePaperParseEngine;
+}): Promise<PaperParseArtifactPaths> {
+  return getPaperParseArtifactPaths(input);
+}
+
 export async function readCachedParse(input: {
   workspaceDir: string;
   paperKey: string;
@@ -229,6 +252,16 @@ export async function readCachedParse(input: {
     const document = JSON.parse(documentText) as ParsedPaperDocument;
     const quality = JSON.parse(qualityText) as PaperParseQualityReport;
     if (document.pdfSha256 !== input.pdfSha256 || document.engine !== input.engine) {
+      return null;
+    }
+    if (
+      document.engine === "plain-text-baseline" &&
+      document.elements.some((element) =>
+        element.text.includes("%PDF-") &&
+        element.text.includes(" endobj ") &&
+        element.text.includes(" endstream ")
+      )
+    ) {
       return null;
     }
     return { document, quality, artifacts };
@@ -285,20 +318,26 @@ export async function listPaperParseEngines(input: {
   workspaceDir: string;
   paperKey: string;
 }): Promise<ConcretePaperParseEngine[]> {
+  const engines: ConcretePaperParseEngine[] = [];
   const parsesDir = path.join(getPaperReadingDir(input.workspaceDir, input.paperKey), "parses");
   try {
     const entries = await readdir(parsesDir, { withFileTypes: true });
-    return entries
-      .filter((entry) => entry.isDirectory())
-      .map((entry) => entry.name)
-      .filter((name): name is ConcretePaperParseEngine =>
-        name === "opendataloader-local" ||
-        name === "opendataloader-hybrid" ||
-        name === "plain-text-baseline"
-      );
+    engines.push(
+      ...entries
+        .filter((entry) => entry.isDirectory())
+        .map((entry) => entry.name)
+        .filter((name): name is ConcretePaperParseEngine =>
+          name === "opendataloader-local" ||
+          name === "opendataloader-hybrid" ||
+          name === "docling" ||
+          name === "plain-text-baseline" ||
+          name === "webpage"
+        )
+    );
   } catch {
     return [];
   }
+  return [...new Set(engines)];
 }
 
 export async function readParsedPaperDocument(input: {
@@ -306,7 +345,7 @@ export async function readParsedPaperDocument(input: {
   paperKey: string;
   engine: ConcretePaperParseEngine;
 }): Promise<ParsedPaperDocument> {
-  const artifacts = getPaperParseArtifactPaths(input);
+  const artifacts = await resolvePaperParseArtifactPaths(input);
   try {
     return JSON.parse(await readFile(artifacts.parsePath, "utf8")) as ParsedPaperDocument;
   } catch {
@@ -323,6 +362,7 @@ export async function assertPaperReadingExists(input: {
 }): Promise<void> {
   try {
     await access(getPaperReadingDir(input.workspaceDir, input.paperKey));
+    return;
   } catch {
     throw new PaperReaderError("paper_not_found", `No parsed paper found for ${input.paperKey}.`);
   }

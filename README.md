@@ -119,13 +119,13 @@ Use the normal install path if you want `open_paper_page_for_login` or explicit 
 
 `download_paper` handles three cases:
 
-- arXiv IDs or arXiv URLs download directly into `downloads/papers/`
+- arXiv IDs or arXiv URLs download directly into `knowledge-base/raw/pdfs/`
 - supported publisher URLs on `science.org`, `nature.com`, and `journals.aps.org` / `aps.org` use the extension bridge when configured; without the bridge they return `extension_unavailable` unless an internal Playwright fallback is explicitly enabled
 - unsupported external URLs also use the extension bridge when configured; without the bridge they return `extension_unavailable`
 
-Before any arXiv, supported-publisher, or external URL action, the paper manager checks `downloads/papers/index/` for an existing `downloaded` record with a PDF file that still exists under `downloads/papers/`. When it finds one, it returns `already_downloaded` with the existing file path and skips the network or browser action. Manual fallback and plain `external_opened` records do not count as completed downloads.
+Before any arXiv, supported-publisher, or external URL action, the paper manager checks `knowledge-base/records/` for an existing `downloaded` record with a PDF file that still exists under `knowledge-base/raw/pdfs/`. When it finds one, it returns `already_downloaded` with the existing file path and skips the network or browser action. Manual fallback and plain `external_opened` records do not count as completed downloads.
 
-For unsupported external URLs, use `register_manual_paper_download` after downloading the PDF manually. Give it the original external URL and a relative workspace path to the PDF, for example `downloads/inbox/paper.pdf`. The tool verifies the file is a PDF, copies it into `downloads/papers/`, records a SHA-256 hash, and updates the external index record to `downloaded` so future attempts for that URL return `already_downloaded`.
+For unsupported external URLs, use `register_manual_paper_download` after downloading the PDF manually. Give it the original external URL and a relative workspace path to the PDF, for example `downloads/inbox/paper.pdf`. The tool verifies the file is a PDF, copies it into `knowledge-base/raw/pdfs/`, records a SHA-256 hash, and updates the external index record to `downloaded` so future attempts for that URL return `already_downloaded`.
 
 `search_papers` includes APS/Physical Review metadata from Crossref's `10.1103` DOI prefix alongside arXiv and web results. Use `download_paper` on one selected result's arXiv ID or article URL. This keeps discovery and download as separate steps, so APS browser verification or extension handoff affects only the paper you choose to download.
 
@@ -149,29 +149,29 @@ Example latest-paper workflow:
 Search papers about the latest superconducting quantum computing results with search_papers, then download the most relevant result with download_paper.
 ```
 
-For manual verification, keep your own publisher test URLs in a local scratch file such as `paper_url.txt` or in your notes. This repository does not ship a tracked `paper_url.txt`. Check that each URL belongs to one of the supported hosts above, then set up the extension bridge, run the download, and confirm the automatic path writes the PDF under `downloads/papers/` with a publisher/article-derived filename when available.
+For manual verification, keep your own publisher test URLs in a local scratch file such as `paper_url.txt` or in your notes. This repository does not ship a tracked `paper_url.txt`. Check that each URL belongs to one of the supported hosts above, then set up the extension bridge, run the download, and confirm the automatic path writes the PDF under `knowledge-base/raw/pdfs/` with a publisher/article-derived filename when available.
 
 ### Paper LLM wiki
 
-The reader now uses a compact three-layer literature wiki:
+The reader now uses a compact three-layer literature wiki. By default it lives in local `knowledge-base/`, which is gitignored so the open-source code repository stays light. Set `PI_KNOWLEDGE_BASE_DIR=/absolute/path/to/knowledge-base` to move the library outside the code checkout, for example into a separate private knowledge repository or a large data volume.
 
 ```text
-downloads/papers/
-  raw/                         # original PDFs for new downloads
-  index/                       # download records
-  llm-wiki/
+knowledge-base/
+  raw/pdfs/                    # original PDFs for new downloads
+  records/                     # download records
+  wiki/
     schema.md                  # conventions for future agent sessions
     index.md                   # content-oriented catalog
     log.md                     # chronological audit log
-    intermediate/<paper-key>/  # parsed PDF markdown, JSON, quality, chunks
     sources/<paper-key>.md     # LLM-authored retrieval source summary
-    wiki/                      # future cross-paper synthesis pages
+    sources/<paper-key>/       # parsed PDF markdown, JSON, quality, chunks
+    pages/                     # future cross-paper synthesis pages
+    manifests/                 # future machine-readable source manifests
     assets/
+    state/
 ```
 
-Older PDFs directly under `downloads/papers/*.pdf` are still accepted. New downloads use `downloads/papers/raw/`.
-
-Use `parse_paper` first to convert a downloaded PDF into `llm-wiki/intermediate/<paper-key>/parses/<engine>/document.md`. After reading and grounding the summary against the parsed text, use `write_paper_wiki_source` to save the final LLM-authored source page under `llm-wiki/sources/`. Use `search_paper_wiki` for knowledge retrieval over those source summaries.
+Use `parse_paper` first to convert a downloaded PDF into `wiki/sources/<paper-key>/parses/<engine>/document.md`. After reading and grounding the summary against the parsed text, use `write_paper_wiki_source` to save the final LLM-authored source page as `wiki/sources/<paper-key>.md`. Use `search_paper_wiki` for knowledge retrieval over those source summaries.
 
 ## Search And Fetch Configuration
 
@@ -267,19 +267,19 @@ In non-interactive mode:
 - `web_search`: searches the configured provider and returns JSON text for matching results
 - `fetch_url`: fetches an HTML page and returns JSON text for the extracted content
 - `search_papers`: searches arXiv, APS/Physical Review metadata, and configured web results, merges overlapping results, and classifies supported publishers versus external sources
-- `download_paper`: downloads arXiv papers into `downloads/papers/raw/`, uses the extension bridge for supported publisher and external URLs when configured, returns `already_downloaded` for existing indexed PDFs, and returns `extension_unavailable` when the bridge is needed but unavailable
-- `register_manual_paper_download`: registers a manually downloaded external PDF into `downloads/papers/` and updates the local index so repeated requests for the same URL are skipped
+- `download_paper`: downloads arXiv papers into `knowledge-base/raw/pdfs/`, uses the extension bridge for supported publisher and external URLs when configured, returns `already_downloaded` for existing indexed PDFs, and returns `extension_unavailable` when the bridge is needed but unavailable
+- `register_manual_paper_download`: registers a manually downloaded external PDF into `knowledge-base/raw/pdfs/` and updates the local index so repeated requests for the same URL are skipped
 - `open_paper_page_for_login`: opens the paper page in the managed browser session for manual login review without downloading anything
-- `parse_paper`: parses a downloaded PDF from `downloads/papers/` into structured reading artifacts under `downloads/papers/llm-wiki/intermediate/`; defaults to OpenDataLoader PDF and supports `plain-text-baseline` for debugging
+- `parse_paper`: parses a downloaded PDF from `knowledge-base/raw/pdfs/` into structured reading artifacts under `knowledge-base/wiki/sources/<paper-key>/`; `auto` starts with OpenDataLoader PDF, falls back to Docling when advanced parsing fails, then uses `plain-text-baseline` as the final fallback
 - `inspect_paper`: inspects parsed paper artifacts, parse quality, and section previews without returning the full paper body
 - `read_paper_section`: reads bounded text from a parsed paper by section id or page range, with source element metadata
 - `search_paper_text`: searches inside a parsed paper and returns snippets with page, section, and element metadata
-- `write_paper_wiki_source`: saves an LLM-authored, provenance-tracked paper summary under `downloads/papers/llm-wiki/sources/`
+- `write_paper_wiki_source`: saves an LLM-authored, provenance-tracked paper summary under `knowledge-base/wiki/sources/`
 - `search_paper_wiki`: searches the LLM-authored source summaries for knowledge retrieval
 
 For `search_papers`, concise English keyword queries still work best because the search stages include arXiv, APS/Crossref metadata, and the configured web provider.
 
-OpenDataLoader PDF installation and verification notes are in [docs/opendataloader-pdf-install.md](docs/opendataloader-pdf-install.md).
+OpenDataLoader PDF installation and verification notes are in [docs/opendataloader-pdf-install.md](docs/opendataloader-pdf-install.md). Docling fallback installation notes are in [docs/docling-pdf-install.md](docs/docling-pdf-install.md).
 
 `read_file` rejects absolute paths and paths that resolve outside the workspace.
 

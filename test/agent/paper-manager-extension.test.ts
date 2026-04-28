@@ -256,9 +256,8 @@ test("downloadPaper forceManualOpen bypasses the extension bridge for supported 
       fallbackUrl: `${articleUrl}?manual=1`,
       recordPath: path.join(
         workspaceDir,
-        "downloads",
-        "papers",
-        "index",
+        "knowledge-base",
+        "records",
         "aps-10.1103-PhysRevLett.134.090601.json"
       ),
       failure: {

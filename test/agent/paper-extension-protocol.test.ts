@@ -11,7 +11,7 @@ test("parseExtensionHostMessage accepts register_download messages", () => {
     jobId: "job-123",
     articleUrl: "https://www.science.org/doi/10.1126/science.adz8659",
     source: "science",
-    downloadPath: "downloads/papers/science-paper.pdf",
+    downloadPath: "knowledge-base/raw/pdfs/science-paper.pdf",
     pdfUrl: "https://www.science.org/doi/epdf/10.1126/science.adz8659",
     title: "Science Paper"
   });
@@ -21,9 +21,31 @@ test("parseExtensionHostMessage accepts register_download messages", () => {
     jobId: "job-123",
     articleUrl: "https://www.science.org/doi/10.1126/science.adz8659",
     source: "science",
-    downloadPath: "downloads/papers/science-paper.pdf",
+    downloadPath: "knowledge-base/raw/pdfs/science-paper.pdf",
     pdfUrl: "https://www.science.org/doi/epdf/10.1126/science.adz8659",
     title: "Science Paper"
+  });
+});
+
+test("parseExtensionHostMessage accepts register_webpage_snapshot messages", () => {
+  const message = parseExtensionHostMessage({
+    type: "register_webpage_snapshot",
+    jobId: "job-webpage",
+    articleUrl: "https://www.science.org/doi/10.1126/science.adz8659",
+    finalUrl: "https://www.science.org/doi/10.1126/science.adz8659?loaded=1",
+    source: "science",
+    title: "Science Paper",
+    html: "<html><head><title>Science Paper</title></head><body><main><h1>Science Paper</h1><p>Abstract text.</p></main></body></html>"
+  });
+
+  assert.deepEqual(message, {
+    type: "register_webpage_snapshot",
+    jobId: "job-webpage",
+    articleUrl: "https://www.science.org/doi/10.1126/science.adz8659",
+    finalUrl: "https://www.science.org/doi/10.1126/science.adz8659?loaded=1",
+    source: "science",
+    title: "Science Paper",
+    html: "<html><head><title>Science Paper</title></head><body><main><h1>Science Paper</h1><p>Abstract text.</p></main></body></html>"
   });
 });
 
@@ -95,7 +117,7 @@ test("parseExtensionHostMessage rejects invalid PaperSource values", () => {
         jobId: "job-123",
         articleUrl: "https://example.com/paper",
         source: "publisher",
-        downloadPath: "downloads/papers/paper.pdf"
+        downloadPath: "knowledge-base/raw/pdfs/paper.pdf"
       }),
     /source/i
   );
@@ -123,7 +145,8 @@ test("parseExtensionHostResponse accepts jobs responses with queued job payloads
         articleUrl: "https://arxiv.org/abs/2401.01234",
         source: "arxiv",
         title: "Queued Paper",
-        autoClose: true
+        autoClose: true,
+        purpose: "webpage"
       }
     ]
   });
@@ -136,9 +159,36 @@ test("parseExtensionHostResponse accepts jobs responses with queued job payloads
         articleUrl: "https://arxiv.org/abs/2401.01234",
         source: "arxiv",
         title: "Queued Paper",
-        autoClose: true
+        autoClose: true,
+        purpose: "webpage"
       }
     ]
+  });
+});
+
+test("parseExtensionHostResponse accepts webpage_registered responses", () => {
+  const response = parseExtensionHostResponse({
+    type: "webpage_registered",
+    jobId: "job-webpage",
+    articleUrl: "https://www.science.org/doi/10.1126/science.adz8659",
+    paperKey: "science-10.1126-science.adz8659",
+    markdownPath: "knowledge-base/wiki/sources/science-10.1126-science.adz8659/parses/webpage/document.md",
+    parsePath: "knowledge-base/wiki/sources/science-10.1126-science.adz8659/parses/webpage/parse.json",
+    qualityPath: "knowledge-base/wiki/sources/science-10.1126-science.adz8659/parses/webpage/quality.json",
+    chunksPath: "knowledge-base/wiki/sources/science-10.1126-science.adz8659/chunks/webpage.jsonl",
+    title: "Science Paper"
+  });
+
+  assert.deepEqual(response, {
+    type: "webpage_registered",
+    jobId: "job-webpage",
+    articleUrl: "https://www.science.org/doi/10.1126/science.adz8659",
+    paperKey: "science-10.1126-science.adz8659",
+    markdownPath: "knowledge-base/wiki/sources/science-10.1126-science.adz8659/parses/webpage/document.md",
+    parsePath: "knowledge-base/wiki/sources/science-10.1126-science.adz8659/parses/webpage/parse.json",
+    qualityPath: "knowledge-base/wiki/sources/science-10.1126-science.adz8659/parses/webpage/quality.json",
+    chunksPath: "knowledge-base/wiki/sources/science-10.1126-science.adz8659/chunks/webpage.jsonl",
+    title: "Science Paper"
   });
 });
 
@@ -165,8 +215,8 @@ test("parseExtensionHostResponse accepts registered responses", () => {
     type: "registered",
     jobId: "job-123",
     articleUrl: "https://example.com/paper",
-    downloadPath: "downloads/papers/external-paper.pdf",
-    recordPath: "downloads/papers/index/external-paper.json",
+    downloadPath: "knowledge-base/raw/pdfs/external-paper.pdf",
+    recordPath: "knowledge-base/records/external-paper.json",
     fileSha256: "abc123",
     title: "External Paper"
   });
@@ -175,8 +225,8 @@ test("parseExtensionHostResponse accepts registered responses", () => {
     type: "registered",
     jobId: "job-123",
     articleUrl: "https://example.com/paper",
-    downloadPath: "downloads/papers/external-paper.pdf",
-    recordPath: "downloads/papers/index/external-paper.json",
+    downloadPath: "knowledge-base/raw/pdfs/external-paper.pdf",
+    recordPath: "knowledge-base/records/external-paper.json",
     fileSha256: "abc123",
     title: "External Paper"
   });

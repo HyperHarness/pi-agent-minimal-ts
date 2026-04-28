@@ -120,7 +120,7 @@ rm -rf /tmp/pi-agent-opendataloader-check
 mkdir -p /tmp/pi-agent-opendataloader-check
 
 opendataloader-pdf \
-  downloads/papers/arxiv-2406.06015.pdf \
+  knowledge-base/raw/pdfs/arxiv-2406.06015.pdf \
   --output-dir /tmp/pi-agent-opendataloader-check \
   --format markdown,json \
   --quiet
@@ -144,7 +144,7 @@ node --input-type=module -e '
 import { parsePaper, searchPaperText } from "./dist/src/index.js";
 const parsed = await parsePaper({
   workspaceDir: process.cwd(),
-  path: "downloads/papers/arxiv-2406.06015.pdf",
+  path: "knowledge-base/raw/pdfs/arxiv-2406.06015.pdf",
   engine: "opendataloader-local",
   force: true
 });
@@ -170,10 +170,11 @@ arxiv-2406.06015 good 35
 After downloading a paper:
 
 ```text
-parse_paper with recordPath downloads/papers/index/arxiv-2406.06015.json
+parse_paper with recordPath knowledge-base/records/arxiv-2406.06015.json
 inspect_paper with paperKey arxiv-2406.06015
 search_paper_text with paperKey arxiv-2406.06015 and query superconducting
 read_paper_section with paperKey arxiv-2406.06015 and sectionId section-0003
 ```
 
 The default `parse_paper` engine is `auto`, which starts with `opendataloader-local`.
+If OpenDataLoader fails on a difficult PDF, for example because Java runs out of heap while parsing malformed embedded fonts, the reader automatically falls back to Docling first and then to `plain-text-baseline` if Docling also fails. The baseline extracts decoded PDF content streams where possible, so it can produce usable searchable markdown instead of raw PDF object syntax.

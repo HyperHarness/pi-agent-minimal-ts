@@ -54,6 +54,14 @@ type FetchUrlTool = {
   ) => Promise<ToolResult>;
 };
 
+type FetchPaperWebpageTool = {
+  execute: (
+    toolCallId: string,
+    args: { url: string; paperKey?: string; save?: boolean; force?: boolean },
+    signal: undefined,
+  ) => Promise<ToolResult>;
+};
+
 type SearchPapersTool = {
   execute: (
     toolCallId: string,
@@ -92,7 +100,7 @@ type ParsePaperTool = {
     args: {
       path?: string;
       recordPath?: string;
-      engine?: "auto" | "opendataloader-local" | "opendataloader-hybrid" | "plain-text-baseline";
+      engine?: "auto" | "opendataloader-local" | "opendataloader-hybrid" | "docling" | "plain-text-baseline";
       force?: boolean;
     },
     signal: undefined,
@@ -112,7 +120,7 @@ type ReadPaperSectionTool = {
     toolCallId: string,
     args: {
       paperKey: string;
-      engine?: "opendataloader-local" | "opendataloader-hybrid" | "plain-text-baseline";
+      engine?: "opendataloader-local" | "opendataloader-hybrid" | "docling" | "plain-text-baseline" | "webpage";
       sectionId?: string;
       pageFrom?: number;
       pageTo?: number;
@@ -127,7 +135,7 @@ type SearchPaperTextTool = {
     toolCallId: string,
     args: {
       paperKey: string;
-      engine?: "opendataloader-local" | "opendataloader-hybrid" | "plain-text-baseline";
+      engine?: "opendataloader-local" | "opendataloader-hybrid" | "docling" | "plain-text-baseline" | "webpage";
       query: string;
       maxResults?: number;
     },
@@ -140,7 +148,7 @@ type WritePaperWikiSourceTool = {
     toolCallId: string,
     args: {
       paperKey: string;
-      engine?: "opendataloader-local" | "opendataloader-hybrid" | "plain-text-baseline";
+      engine?: "opendataloader-local" | "opendataloader-hybrid" | "docling" | "plain-text-baseline" | "webpage";
       title?: string;
       summaryMarkdown: string;
       tags?: string[];
@@ -211,6 +219,20 @@ function getFetchUrlTool(
   assert.ok(fetchUrlTool);
   assert.equal(typeof fetchUrlTool.execute, "function");
   return fetchUrlTool as FetchUrlTool;
+}
+
+function getFetchPaperWebpageTool(
+  workspace: string,
+  dependencies?: Parameters<typeof createTools>[1],
+): FetchPaperWebpageTool {
+  const tools = createTools(workspace, dependencies) as ReadonlyArray<{
+    name: string;
+    execute?: FetchPaperWebpageTool["execute"];
+  }>;
+  const fetchPaperWebpageTool = tools.find((tool) => tool.name === "fetch_paper_webpage");
+  assert.ok(fetchPaperWebpageTool);
+  assert.equal(typeof fetchPaperWebpageTool.execute, "function");
+  return fetchPaperWebpageTool as FetchPaperWebpageTool;
 }
 
 function getSearchPapersTool(
@@ -455,6 +477,7 @@ test("createTools exposes the unified built-in tool set", async () => {
       "read_file",
       "web_search",
       "fetch_url",
+      "fetch_paper_webpage",
       "search_papers",
       "download_paper",
       "register_manual_paper_download",
@@ -570,6 +593,143 @@ test("fetch_url delegates to the injected fetch client and returns JSON text wit
     assert.deepEqual(result.details, {
       url: "https://example.com/article",
     });
+  } finally {
+    await rm(workspace, { recursive: true, force: true });
+  }
+});
+
+test("fetch_paper_webpage delegates to the injected article webpage client and returns JSON text with details", async () => {
+  const workspace = await mkdtemp(path.join(tmpdir(), "pi-agent-tools-"));
+  const capturedCalls: Array<{ url: string }> = [];
+  const capturedSaves: Array<{ paperKey?: string; force?: boolean; markdown: string }> = [];
+
+  try {
+    const fetchPaperWebpageTool = getFetchPaperWebpageTool(workspace, {
+      fetchPaperWebPage: async (options) => {
+        capturedCalls.push(options);
+        return {
+          url: options.url,
+          title: "Paper title",
+          markdown: "# Paper title\n\nFull article text.",
+          metadata: {
+            title: "Paper title",
+            doi: "10.1234/example",
+            journal: "Example Journal",
+            authors: ["A. Author"],
+          },
+          access: {
+            status: "full_text",
+            signals: [],
+          },
+          stats: {
+            chars: 32,
+            wordsApprox: 5,
+            navigationLinesRemoved: 3,
+            extractedFrom: "article",
+          },
+        };
+      },
+      savePaperWebPageParse: async (options) => {
+        capturedSaves.push({
+          ...(options.paperKey ? { paperKey: options.paperKey } : {}),
+          ...(options.force !== undefined ? { force: options.force } : {}),
+          markdown: options.extraction.markdown,
+        });
+        return {
+          status: "parsed",
+          paperKey: options.paperKey ?? "example-paper",
+          engine: "webpage",
+          pdfSha256: "web-sha",
+          artifacts: {
+            sourcePath: path.join(workspace, "knowledge-base/wiki/sources/example-paper/source.json"),
+            parsePath: path.join(workspace, "knowledge-base/wiki/sources/example-paper/parses/webpage/parse.json"),
+            markdownPath: path.join(workspace, "knowledge-base/wiki/sources/example-paper/parses/webpage/document.md"),
+            qualityPath: path.join(workspace, "knowledge-base/wiki/sources/example-paper/parses/webpage/quality.json"),
+            chunksPath: path.join(workspace, "knowledge-base/wiki/sources/example-paper/chunks/webpage.jsonl"),
+          },
+          quality: {
+            status: "good",
+            score: 1,
+            pages: 1,
+            totalTextLength: 32,
+            emptyPageCount: 0,
+            headingCount: 1,
+            tableCount: 0,
+            figureOrCaptionCount: 0,
+            warnings: [],
+          },
+          sections: [],
+        };
+      },
+    });
+
+    const result = await fetchPaperWebpageTool.execute(
+      "call-paper-webpage",
+      { url: "https://example.com/article", paperKey: "example-paper", force: true },
+      undefined,
+    );
+
+    const expected = {
+      url: "https://example.com/article",
+      title: "Paper title",
+      markdown: "# Paper title\n\nFull article text.",
+      metadata: {
+        title: "Paper title",
+        doi: "10.1234/example",
+        journal: "Example Journal",
+        authors: ["A. Author"],
+      },
+      access: {
+        status: "full_text",
+        signals: [],
+      },
+      stats: {
+        chars: 32,
+        wordsApprox: 5,
+        navigationLinesRemoved: 3,
+        extractedFrom: "article",
+      },
+      savedParse: {
+        status: "parsed",
+        paperKey: "example-paper",
+        engine: "webpage",
+        pdfSha256: "web-sha",
+        artifacts: {
+          sourcePath: path.join(workspace, "knowledge-base/wiki/sources/example-paper/source.json"),
+          parsePath: path.join(workspace, "knowledge-base/wiki/sources/example-paper/parses/webpage/parse.json"),
+          markdownPath: path.join(workspace, "knowledge-base/wiki/sources/example-paper/parses/webpage/document.md"),
+          qualityPath: path.join(workspace, "knowledge-base/wiki/sources/example-paper/parses/webpage/quality.json"),
+          chunksPath: path.join(workspace, "knowledge-base/wiki/sources/example-paper/chunks/webpage.jsonl"),
+        },
+        quality: {
+          status: "good",
+          score: 1,
+          pages: 1,
+          totalTextLength: 32,
+          emptyPageCount: 0,
+          headingCount: 1,
+          tableCount: 0,
+          figureOrCaptionCount: 0,
+          warnings: [],
+        },
+        sections: [],
+      },
+    };
+    assert.deepEqual(capturedCalls, [{ url: "https://example.com/article" }]);
+    assert.deepEqual(capturedSaves, [
+      {
+        paperKey: "example-paper",
+        force: true,
+        markdown: "# Paper title\n\nFull article text.",
+      },
+    ]);
+    assert.deepEqual(result.content, [
+      {
+        type: "text",
+        text: JSON.stringify(expected),
+      },
+    ]);
+    assert.deepEqual(result.details, expected);
   } finally {
     await rm(workspace, { recursive: true, force: true });
   }
@@ -966,9 +1126,8 @@ test("download_paper uses the injected paper manager client for supported-publis
       fallbackUrl: "https://www.science.org/doi/10.1126/science.adz8659",
       recordPath: path.join(
         workspace,
-        "downloads",
-        "papers",
-        "index",
+        "knowledge-base",
+        "records",
         "science-10.1126-science.adz8659.json",
       ),
       failure: {
@@ -1037,9 +1196,8 @@ test("download_paper opens manual fallback when the manager client download is n
       fallbackUrl: articleUrl,
       recordPath: path.join(
         workspace,
-        "downloads",
-        "papers",
-        "index",
+        "knowledge-base",
+        "records",
         "science-10.1126-science.adz8659.json",
       ),
       failure: {
@@ -1096,9 +1254,8 @@ test("download_paper opens manual fallback when the manager client returns a cod
       fallbackUrl: articleUrl,
       recordPath: path.join(
         workspace,
-        "downloads",
-        "papers",
-        "index",
+        "knowledge-base",
+        "records",
         "aps-10.1103-PhysRevLett.134.090601.json",
       ),
       failure: {
@@ -1163,9 +1320,8 @@ test("download_paper opens manual fallback when canonicalId cannot be derived fr
       fallbackUrl: articleUrl,
       recordPath: path.join(
         workspace,
-        "downloads",
-        "papers",
-        "index",
+        "knowledge-base",
+        "records",
         `science-${fallbackCanonicalId}.json`,
       ),
       failure: {
@@ -1229,11 +1385,11 @@ test("parse_paper delegates to the injected paper reader dependency and returns 
         engine: options.engine === "plain-text-baseline" ? "plain-text-baseline" as const : "opendataloader-local" as const,
         pdfSha256: "abc123",
         artifacts: {
-          sourcePath: path.join(options.workspaceDir, "downloads/papers/llm-wiki/intermediate/arxiv-2406.06015/source.json"),
-          parsePath: path.join(options.workspaceDir, "downloads/papers/llm-wiki/intermediate/arxiv-2406.06015/parses/plain-text-baseline/parse.json"),
-          markdownPath: path.join(options.workspaceDir, "downloads/papers/llm-wiki/intermediate/arxiv-2406.06015/parses/plain-text-baseline/document.md"),
-          qualityPath: path.join(options.workspaceDir, "downloads/papers/llm-wiki/intermediate/arxiv-2406.06015/parses/plain-text-baseline/quality.json"),
-          chunksPath: path.join(options.workspaceDir, "downloads/papers/llm-wiki/intermediate/arxiv-2406.06015/chunks/plain-text-baseline.jsonl"),
+          sourcePath: path.join(options.workspaceDir, "knowledge-base/wiki/sources/arxiv-2406.06015/source.json"),
+          parsePath: path.join(options.workspaceDir, "knowledge-base/wiki/sources/arxiv-2406.06015/parses/plain-text-baseline/parse.json"),
+          markdownPath: path.join(options.workspaceDir, "knowledge-base/wiki/sources/arxiv-2406.06015/parses/plain-text-baseline/document.md"),
+          qualityPath: path.join(options.workspaceDir, "knowledge-base/wiki/sources/arxiv-2406.06015/parses/plain-text-baseline/quality.json"),
+          chunksPath: path.join(options.workspaceDir, "knowledge-base/wiki/sources/arxiv-2406.06015/chunks/plain-text-baseline.jsonl"),
         },
         quality: {
           status: "good" as const,
@@ -1259,7 +1415,7 @@ test("parse_paper delegates to the injected paper reader dependency and returns 
     });
 
     const result = await tool.execute("parse-call", {
-      path: "downloads/papers/arxiv-2406.06015.pdf",
+      path: "knowledge-base/raw/pdfs/arxiv-2406.06015.pdf",
       engine: "plain-text-baseline",
       force: true,
     }, undefined);
@@ -1372,10 +1528,10 @@ test("write_paper_wiki_source delegates to the injected wiki dependency and retu
         return {
           paperKey: options.paperKey,
           title: options.title ?? "Paper title",
-          sourcePath: "downloads/papers/llm-wiki/sources/arxiv-2406.06015.md",
-          indexPath: "downloads/papers/llm-wiki/index.md",
-          logPath: "downloads/papers/llm-wiki/log.md",
-          schemaPath: "downloads/papers/llm-wiki/schema.md",
+          sourcePath: "knowledge-base/wiki/sources/arxiv-2406.06015.md",
+          indexPath: "knowledge-base/wiki/index.md",
+          logPath: "knowledge-base/wiki/log.md",
+          schemaPath: "knowledge-base/wiki/schema.md",
         };
       },
     });
@@ -1394,7 +1550,7 @@ test("write_paper_wiki_source delegates to the injected wiki dependency and retu
         tags: ["quantum"],
       },
     ]);
-    assert.equal((result.details as { sourcePath?: string }).sourcePath, "downloads/papers/llm-wiki/sources/arxiv-2406.06015.md");
+    assert.equal((result.details as { sourcePath?: string }).sourcePath, "knowledge-base/wiki/sources/arxiv-2406.06015.md");
   } finally {
     await rm(workspace, { recursive: true, force: true });
   }
@@ -1410,7 +1566,7 @@ test("search_paper_wiki delegates to the injected wiki search dependency and ret
           {
             paperKey: "arxiv-2406.06015",
             title: "Paper title",
-            path: "downloads/papers/llm-wiki/sources/arxiv-2406.06015.md",
+            path: "knowledge-base/wiki/sources/arxiv-2406.06015.md",
             snippet: "query match",
           },
         ],

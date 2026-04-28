@@ -33,6 +33,22 @@ export function evaluateParseQuality(document: ParsedPaperDocument): PaperParseQ
     (sum, element) => sum + (element.text.match(/\uFFFD/g)?.length ?? 0),
     0
   );
+  const pdfObjectDumpCount = document.elements.reduce(
+    (sum, element) => sum +
+      (element.text.match(/(?:%PDF-| endobj | endstream | xref | trailer )/g)?.length ?? 0),
+    0
+  );
+  const referenceTextLength = document.elements
+    .filter((element) => element.type === "reference")
+    .reduce((sum, element) => sum + element.text.trim().length, 0);
+  const hasMainBodySection = document.sections.some((section) => {
+    if (/^supplementary materials?$/i.test(section.title.trim())) {
+      return false;
+    }
+
+    return /(?:introduction|background|results?|discussion|methods?|materials|conclusion|data availability)/i
+      .test(section.title);
+  });
 
   const warnings: string[] = [];
   if (totalTextLength < 1500) {
@@ -47,6 +63,19 @@ export function evaluateParseQuality(document: ParsedPaperDocument): PaperParseQ
   if (replacementCharacterCount > 20) {
     warnings.push("Extracted text contains many replacement characters.");
   }
+  if (pdfObjectDumpCount > 5) {
+    warnings.push("Extracted text looks like raw PDF object syntax rather than paper body text.");
+  }
+  if (document.engine === "webpage" && !hasMainBodySection) {
+    warnings.push("No main body sections were detected; the webpage may expose only abstract, references, or access-limited text.");
+  }
+  if (
+    document.engine === "webpage" &&
+    totalTextLength > 0 &&
+    referenceTextLength / totalTextLength > 0.65
+  ) {
+    warnings.push("References dominate the extracted webpage text; article body access may be limited.");
+  }
 
   let score = 1;
   if (totalTextLength < 1500) {
@@ -59,6 +88,19 @@ export function evaluateParseQuality(document: ParsedPaperDocument): PaperParseQ
     score -= Math.min(0.25, emptyPageCount / Math.max(1, document.pages) * 0.5);
   }
   if (replacementCharacterCount > 20) {
+    score -= 0.2;
+  }
+  if (pdfObjectDumpCount > 5) {
+    score -= 0.8;
+  }
+  if (document.engine === "webpage" && !hasMainBodySection) {
+    score -= 0.35;
+  }
+  if (
+    document.engine === "webpage" &&
+    totalTextLength > 0 &&
+    referenceTextLength / totalTextLength > 0.65
+  ) {
     score -= 0.2;
   }
   score = Math.max(0, Number(score.toFixed(2)));

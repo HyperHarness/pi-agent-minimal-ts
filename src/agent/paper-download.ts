@@ -2,6 +2,7 @@ import { mkdir } from "node:fs/promises";
 import path from "node:path";
 import { getPublisherAdapter } from "./publisher-adapters/index.js";
 import { PaperBrowserSessionError, type PaperBrowserSession } from "./browser-session.js";
+import { resolvePaperLibraryPaths } from "./knowledge-base.js";
 import type { SupportedPaperSource } from "./paper-types.js";
 
 export class PaperDownloadError extends Error {
@@ -200,7 +201,7 @@ export async function downloadPaperPdf(options: {
     }) ??
     resolveOriginalPdfFilename(finalPdfUrl) ??
     "downloaded-paper.pdf";
-  const outputDir = path.join(options.workspaceDir, "downloads", "papers");
+  const outputDir = resolvePaperLibraryPaths(options.workspaceDir).rawPdfRoot;
   try {
     await mkdir(outputDir, { recursive: true });
   } catch (error) {

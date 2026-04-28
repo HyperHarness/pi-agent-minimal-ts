@@ -10,7 +10,10 @@ export type ExtensionJobStatus =
   | "awaiting_user_verification"
   | "awaiting_user_manual_download"
   | "manual_download_observed"
-  | "downloaded";
+  | "downloaded"
+  | "webpage_snapshot_ready";
+
+export type ExtensionJobPurpose = "download" | "webpage";
 
 export interface ExtensionPaperJobPayload {
   jobId: string;
@@ -18,6 +21,7 @@ export interface ExtensionPaperJobPayload {
   source: PaperSource;
   title?: string;
   autoClose?: boolean;
+  purpose?: ExtensionJobPurpose;
 }
 
 export type ExtensionHostMessage =
@@ -32,6 +36,15 @@ export type ExtensionHostMessage =
       source: PaperSource;
       downloadPath: string;
       pdfUrl?: string;
+      title?: string;
+    }
+  | {
+      type: "register_webpage_snapshot";
+      jobId: string;
+      articleUrl: string;
+      source: PaperSource;
+      html: string;
+      finalUrl?: string;
       title?: string;
     }
   | {
@@ -58,6 +71,17 @@ export type ExtensionHostResponse =
       title?: string;
     }
   | {
+      type: "webpage_registered";
+      jobId: string;
+      articleUrl: string;
+      paperKey: string;
+      markdownPath: string;
+      parsePath: string;
+      qualityPath: string;
+      chunksPath: string;
+      title?: string;
+    }
+  | {
       type: "status_ack";
       jobId: string;
       status: ExtensionJobStatus;
@@ -81,8 +105,11 @@ const VALID_JOB_STATUSES = new Set<ExtensionJobStatus>([
   "awaiting_user_verification",
   "awaiting_user_manual_download",
   "manual_download_observed",
-  "downloaded"
+  "downloaded",
+  "webpage_snapshot_ready"
 ]);
+
+const VALID_JOB_PURPOSES = new Set<ExtensionJobPurpose>(["download", "webpage"]);
 
 function parseRecord(value: unknown, label: string): Record<string, unknown> {
   if (typeof value !== "object" || value === null || Array.isArray(value)) {
@@ -131,6 +158,21 @@ function parseOptionalBoolean(
   return value;
 }
 
+function parseOptionalJobPurpose(
+  record: Record<string, unknown>,
+  fieldName: string
+): ExtensionJobPurpose | undefined {
+  const value = record[fieldName];
+  if (value === undefined) {
+    return undefined;
+  }
+  if (typeof value !== "string" || !VALID_JOB_PURPOSES.has(value as ExtensionJobPurpose)) {
+    throw new Error(`${fieldName} must be a valid ExtensionJobPurpose.`);
+  }
+
+  return value as ExtensionJobPurpose;
+}
+
 function parsePaperSource(record: Record<string, unknown>, fieldName: string): PaperSource {
   const source = parseRequiredString(record, fieldName);
   if (!VALID_PAPER_SOURCES.has(source as PaperSource)) {
@@ -170,7 +212,8 @@ function parseExtensionPaperJobPayload(value: unknown): ExtensionPaperJobPayload
     articleUrl: parseRequiredString(record, "articleUrl"),
     source: parsePaperSource(record, "source"),
     ...parseOptionalFields(record, ["title"]),
-    ...parseOptionalBooleanField(record, "autoClose")
+    ...parseOptionalBooleanField(record, "autoClose"),
+    ...parseOptionalJobPurposeField(record, "purpose")
   };
 }
 
@@ -197,6 +240,14 @@ function parseOptionalBooleanField(
   return value === undefined ? {} : { [fieldName]: value };
 }
 
+function parseOptionalJobPurposeField(
+  record: Record<string, unknown>,
+  fieldName: string
+): Record<string, ExtensionJobPurpose> {
+  const value = parseOptionalJobPurpose(record, fieldName);
+  return value === undefined ? {} : { [fieldName]: value };
+}
+
 export function parseExtensionHostMessage(value: unknown): ExtensionHostMessage {
   const record = parseRecord(value, "extension host message");
   const type = parseRequiredString(record, "type");
@@ -216,6 +267,17 @@ export function parseExtensionHostMessage(value: unknown): ExtensionHostMessage 
       source: parsePaperSource(record, "source"),
       downloadPath: parseRequiredString(record, "downloadPath"),
       ...parseOptionalFields(record, ["title", "pdfUrl"])
+    };
+  }
+
+  if (type === "register_webpage_snapshot") {
+    return {
+      type,
+      jobId: parseRequiredString(record, "jobId"),
+      articleUrl: parseRequiredString(record, "articleUrl"),
+      source: parsePaperSource(record, "source"),
+      html: parseRequiredString(record, "html"),
+      ...parseOptionalFields(record, ["title", "finalUrl"])
     };
   }
 
@@ -265,6 +327,20 @@ export function parseExtensionHostResponse(value: unknown): ExtensionHostRespons
       downloadPath: parseRequiredString(record, "downloadPath"),
       recordPath: parseRequiredString(record, "recordPath"),
       fileSha256: parseRequiredString(record, "fileSha256"),
+      ...parseOptionalFields(record, ["title"])
+    };
+  }
+
+  if (type === "webpage_registered") {
+    return {
+      type,
+      jobId: parseRequiredString(record, "jobId"),
+      articleUrl: parseRequiredString(record, "articleUrl"),
+      paperKey: parseRequiredString(record, "paperKey"),
+      markdownPath: parseRequiredString(record, "markdownPath"),
+      parsePath: parseRequiredString(record, "parsePath"),
+      qualityPath: parseRequiredString(record, "qualityPath"),
+      chunksPath: parseRequiredString(record, "chunksPath"),
       ...parseOptionalFields(record, ["title"])
     };
   }

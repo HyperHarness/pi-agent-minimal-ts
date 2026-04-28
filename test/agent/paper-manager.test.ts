@@ -1018,13 +1018,11 @@ test("downloadPaper uses arXiv fallback when a prior publisher artifact is HTML"
   const apsPdfUrl = "https://journals.aps.org/prxquantum/pdf/10.1103/k3d5-v43c";
   const arxivPdfUrl = "https://arxiv.org/pdf/2406.06015.pdf";
   const pdfBytes = Buffer.from("%PDF-1.7\narxiv preprint\n", "utf8");
-  const htmlArtifactPath = path.join(
+  const htmlArtifactPath = resolvePaperPdfPath({
     workspaceDir,
-    "downloads",
-    "papers",
-    "raw",
-    "aps-10.1103-k3d5-v43c.htm"
-  );
+    source: "aps",
+    canonicalId: "10.1103/k3d5-v43c"
+  }).replace(/\.pdf$/i, ".htm");
   const submittedJobs: unknown[] = [];
 
   try {

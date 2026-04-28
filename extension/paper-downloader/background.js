@@ -312,6 +312,51 @@ async function handlePaperPageClassified(message, sender) {
 
     await reportJobStatus(job, "page_classified", message.message);
 
+    if (job.purpose === "webpage") {
+      if (!message.html) {
+        await reportJobStatus(
+          job,
+          "awaiting_user_verification",
+          "The page loaded, but no article HTML snapshot was available."
+        );
+        return;
+      }
+
+      const response = await sendNativeMessage({
+        type: "register_webpage_snapshot",
+        jobId: job.jobId,
+        articleUrl: job.articleUrl,
+        source: job.source,
+        html: message.html,
+        ...(message.finalUrl ? { finalUrl: message.finalUrl } : {}),
+        ...(message.title ? { title: message.title } : job.title ? { title: job.title } : {})
+      });
+
+      if (response && response.type === "webpage_registered") {
+        await reportJobStatus(
+          job,
+          "webpage_snapshot_ready",
+          "Registered webpage snapshot and saved parsed article artifacts."
+        );
+        jobsById.delete(job.jobId);
+        if (typeof job.tabId === "number") {
+          jobsByTabId.delete(job.tabId);
+        }
+        await persistState();
+        await closeCompletedJobTab(job);
+        return;
+      }
+
+      await reportJobStatus(
+        job,
+        "awaiting_user_verification",
+        response && response.message
+          ? response.message
+          : "The webpage snapshot could not be registered by the native host."
+      );
+      return;
+    }
+
     if (message.pdfUrl) {
       if (job.source === "science") {
         await enterPublisherManualDownloadMode(job, message.pdfUrl);

@@ -1,8 +1,9 @@
 import test from "node:test";
 import assert from "node:assert/strict";
-import { mkdir, mkdtemp, readFile, rm, writeFile } from "node:fs/promises";
+import { chmod, mkdir, mkdtemp, readFile, rm, writeFile } from "node:fs/promises";
 import os from "node:os";
 import path from "node:path";
+import { deflateSync } from "node:zlib";
 import {
   inspectPaper,
   parsePaper,
@@ -17,15 +18,44 @@ import { PaperReaderError } from "../../src/agent/paper-reader/types.js";
 
 async function createWorkspace(): Promise<string> {
   const workspace = await mkdtemp(path.join(os.tmpdir(), "pi-paper-reader-"));
-  await mkdir(path.join(workspace, "downloads", "papers", "index"), { recursive: true });
+  await mkdir(path.join(workspace, "knowledge-base", "records"), { recursive: true });
   return workspace;
 }
 
 async function writePdf(workspace: string, filename: string, text: string): Promise<string> {
-  const pdfPath = path.join(workspace, "downloads", "papers", filename);
+  const pdfPath = path.join(workspace, "knowledge-base", "raw", "pdfs", filename);
   await mkdir(path.dirname(pdfPath), { recursive: true });
   await writeFile(pdfPath, `%PDF-1.4\n${text}\n%%EOF\n`, "utf8");
   return pdfPath;
+}
+
+async function writePdfWithFlateTextStream(workspace: string, filename: string): Promise<string> {
+  const pdfPath = path.join(workspace, "knowledge-base", "raw", "pdfs", filename);
+  const content = "BT /F1 1 Tf [(Cosmic-ray-induced)-220(correlated)-220(errors)]TJ T* [(superconducting)-220(qubit)-220(array)]TJ ET";
+  const compressed = deflateSync(Buffer.from(content, "latin1"));
+  const pdf = Buffer.concat([
+    Buffer.from([
+      "%PDF-1.4",
+      "1 0 obj <</Type/Catalog/Pages 2 0 R>> endobj",
+      "2 0 obj <</Type/Pages/Kids[3 0 R]/Count 1>> endobj",
+      "3 0 obj <</Type/Page/Parent 2 0 R/Contents 4 0 R>> endobj",
+      `4 0 obj <</Length ${compressed.length}/Filter/FlateDecode>>`,
+      "stream",
+      ""
+    ].join("\n"), "latin1"),
+    compressed,
+    Buffer.from("\nendstream\nendobj\n%%EOF\n", "latin1")
+  ]);
+  await mkdir(path.dirname(pdfPath), { recursive: true });
+  await writeFile(pdfPath, pdf);
+  return pdfPath;
+}
+
+async function writeExecutableScript(dir: string, filename: string, source: string): Promise<string> {
+  const scriptPath = path.join(dir, filename);
+  await writeFile(scriptPath, source, "utf8");
+  await chmod(scriptPath, 0o755);
+  return scriptPath;
 }
 
 test("parsePaper writes reading artifacts and reuses a same-hash cache", async () => {
@@ -46,7 +76,7 @@ test("parsePaper writes reading artifacts and reuses a same-hash cache", async (
     assert.equal(first.paperKey, "arxiv-2406.06015");
     assert.equal(first.engine, "plain-text-baseline");
     assert.equal(first.sections[0]?.title, "arxiv-2406.06015");
-    assert.match(first.artifacts.markdownPath, /downloads\/papers\/llm-wiki\/intermediate\/arxiv-2406\.06015\/parses\/plain-text-baseline\/document\.md$/);
+    assert.match(first.artifacts.markdownPath, /knowledge-base\/wiki\/sources\/arxiv-2406\.06015\/parses\/plain-text-baseline\/document\.md$/);
 
     const second = await parsePaper({
       workspaceDir: workspace,
@@ -62,6 +92,87 @@ test("parsePaper writes reading artifacts and reuses a same-hash cache", async (
     assert.match(parseJson.elements.map((element) => element.text).join("\n"), /superconducting qubits/);
   } finally {
     await rm(workspace, { recursive: true, force: true });
+  }
+});
+
+test("plain-text-baseline extracts PDF content streams instead of raw object syntax", async () => {
+  const workspace = await createWorkspace();
+  try {
+    const pdfPath = await writePdfWithFlateTextStream(workspace, "nature-s41467-025-59778-z.pdf");
+
+    const result = await parsePaper({
+      workspaceDir: workspace,
+      path: pdfPath,
+      engine: "plain-text-baseline"
+    });
+
+    assert.equal(result.status, "parsed");
+    assert.equal(result.quality.pages, 1);
+    const markdown = await readFile(result.artifacts.markdownPath, "utf8");
+    assert.match(markdown, /Cosmic-ray-induced correlated errors/);
+    assert.match(markdown, /superconducting qubit array/);
+    assert.doesNotMatch(markdown, /endobj|endstream|xref/);
+  } finally {
+    await rm(workspace, { recursive: true, force: true });
+  }
+});
+
+test("parsePaper auto falls back to docling when OpenDataLoader fails", async () => {
+  const workspace = await createWorkspace();
+  const previousDoclingBin = process.env.PI_PAPER_READER_DOCLING_BIN;
+  let binDir: string | undefined;
+  try {
+    const pdfPath = await writePdf(workspace, "nature-s41467-025-59778-z.pdf", "docling fallback paper");
+    binDir = await mkdtemp(path.join(os.tmpdir(), "pi-paper-reader-bin-"));
+    const failingOpenDataLoader = await writeExecutableScript(
+      binDir,
+      "opendataloader-fail",
+      "#!/usr/bin/env sh\nprintf 'simulated OpenDataLoader failure' >&2\nexit 2\n"
+    );
+    const fakeDocling = await writeExecutableScript(
+      binDir,
+      "docling",
+      `#!/usr/bin/env node
+const fs = require("node:fs");
+const path = require("node:path");
+const outputIndex = process.argv.indexOf("--output");
+const outputDir = outputIndex >= 0 ? process.argv[outputIndex + 1] : process.cwd();
+fs.mkdirSync(outputDir, { recursive: true });
+fs.writeFileSync(path.join(outputDir, "docling.json"), JSON.stringify({
+  name: "docling-fallback",
+  pages: { "1": {} },
+  texts: [
+    { label: "section_header", text: "Docling fallback title", level: 1, prov: [{ page_no: 1, bbox: { l: 1, t: 2, r: 3, b: 4 } }] },
+    { label: "text", text: "Cosmic-ray-induced correlated errors were extracted by Docling.", prov: [{ page_no: 1 }] }
+  ]
+}));
+`
+    );
+    process.env.PI_PAPER_READER_DOCLING_BIN = fakeDocling;
+
+    const result = await parsePaper({
+      workspaceDir: workspace,
+      path: pdfPath,
+      engine: "auto",
+      opendataloaderBin: failingOpenDataLoader,
+      force: true
+    });
+
+    assert.equal(result.status, "parsed");
+    assert.equal(result.engine, "docling");
+    const markdown = await readFile(result.artifacts.markdownPath, "utf8");
+    assert.match(markdown, /Docling fallback title/);
+    assert.match(markdown, /Cosmic-ray-induced correlated errors/);
+  } finally {
+    if (previousDoclingBin === undefined) {
+      delete process.env.PI_PAPER_READER_DOCLING_BIN;
+    } else {
+      process.env.PI_PAPER_READER_DOCLING_BIN = previousDoclingBin;
+    }
+    await rm(workspace, { recursive: true, force: true });
+    if (binDir) {
+      await rm(binDir, { recursive: true, force: true });
+    }
   }
 });
 
@@ -88,11 +199,11 @@ test("writePaperWikiSource saves an LLM source summary and searchPaperWiki finds
       keyFindings: ["Neutral atom arrays are the central experimental platform."]
     });
 
-    assert.equal(source.sourcePath, "downloads/papers/llm-wiki/sources/arxiv-2601.00003.md");
-    assert.equal(source.indexPath, "downloads/papers/llm-wiki/index.md");
+    assert.equal(source.sourcePath, "knowledge-base/wiki/sources/arxiv-2601.00003.md");
+    assert.equal(source.indexPath, "knowledge-base/wiki/index.md");
     const markdown = await readFile(path.join(workspace, source.sourcePath), "utf8");
     assert.match(markdown, /type: "paper-source-summary"/);
-    assert.match(markdown, /parse_markdown: "downloads\/papers\/llm-wiki\/intermediate\/arxiv-2601\.00003\/parses\/plain-text-baseline\/document\.md"/);
+    assert.match(markdown, /parse_markdown: "knowledge-base\/wiki\/sources\/arxiv-2601\.00003\/parses\/plain-text-baseline\/document\.md"/);
 
     const search = await searchPaperWiki({
       workspaceDir: workspace,
@@ -135,7 +246,7 @@ test("parsePaper resolves downloaded paper records", async () => {
   const workspace = await createWorkspace();
   try {
     const pdfPath = await writePdf(workspace, "arxiv-2401.01234.pdf", "record backed paper");
-    const recordPath = path.join(workspace, "downloads", "papers", "index", "arxiv-2401.01234.json");
+    const recordPath = path.join(workspace, "knowledge-base", "records", "arxiv-2401.01234.json");
     await writeFile(recordPath, `${JSON.stringify({
       source: "arxiv",
       articleUrl: "https://arxiv.org/abs/2401.01234",
@@ -223,7 +334,7 @@ test("searchPaperText returns snippets with page and section metadata", async ()
   }
 });
 
-test("parsePaper rejects PDFs outside downloads/papers", async () => {
+test("parsePaper rejects PDFs outside knowledge-base/raw/pdfs", async () => {
   const workspace = await createWorkspace();
   try {
     const pdfPath = path.join(workspace, "outside.pdf");

@@ -212,8 +212,9 @@ test("downloadPaperPdf returns output metadata for a successful download", async
 
   const expectedPath = path.join(
     workspaceDir,
-    "downloads",
-    "papers",
+    "knowledge-base",
+    "raw",
+    "pdfs",
     "science-10.1126-science.adz8659.pdf"
   );
   assert.equal(result.path, expectedPath);
@@ -286,8 +287,9 @@ test("downloadPaperPdf derives the APS canonical PDF URL when the article page h
     result.path,
     path.join(
       workspaceDir,
-      "downloads",
-      "papers",
+      "knowledge-base",
+      "raw",
+      "pdfs",
       "aps-10.1103-PhysRevLett.134.090601.pdf"
     )
   );
@@ -345,8 +347,9 @@ test("downloadPaperPdf formats Nature output filenames from the article identifi
 
   const expectedPath = path.join(
     workspaceDir,
-    "downloads",
-    "papers",
+    "knowledge-base",
+    "raw",
+    "pdfs",
     "nature-s41586-019-1666-5.pdf"
   );
   assert.equal(result.path, expectedPath);

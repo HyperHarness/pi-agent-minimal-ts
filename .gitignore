@@ -3,3 +3,9 @@ dist/
 .env
 .env.*
 .worktrees/
+.browser-profile/
+.codex
+downloads/
+knowledge-base/
+scripts/paper-extension-host.cmd
+scripts/paper-extension-host.exe

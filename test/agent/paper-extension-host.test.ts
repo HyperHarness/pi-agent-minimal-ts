@@ -536,6 +536,59 @@ test("handleExtensionHostMessage appends job status handoffs and acknowledges th
   }
 });
 
+test("handleExtensionHostMessage registers webpage snapshots as parsed wiki artifacts", async () => {
+  const workspaceDir = await createWorkspaceDir();
+  const articleUrl = "https://www.science.org/doi/10.1126/science.adz8659";
+
+  try {
+    const response = await handleExtensionHostMessage({
+      workspaceDir,
+      now: () => new Date("2026-04-25T11:30:00.000Z"),
+      message: {
+        type: "register_webpage_snapshot",
+        jobId: "job-webpage",
+        articleUrl,
+        finalUrl: `${articleUrl}?browser=1`,
+        source: "science",
+        title: "Science webpage",
+        html: `
+          <html>
+            <head>
+              <meta name="citation_title" content="Science webpage title">
+              <meta name="citation_doi" content="10.1126/science.adz8659">
+            </head>
+            <body>
+              <main>
+                <h1>Science webpage title</h1>
+                <section><h2>Abstract</h2><p>Browser extension captured this Science article.</p></section>
+                <section><h2>References</h2><p>1. Reference.</p></section>
+              </main>
+            </body>
+          </html>
+        `
+      }
+    });
+
+    assert.equal(response.type, "webpage_registered");
+    assert.equal(response.jobId, "job-webpage");
+    assert.equal(response.articleUrl, articleUrl);
+    assert.equal(response.paperKey, "science-10.1126-science.adz8659");
+    assert.match(response.markdownPath, /knowledge-base\/wiki\/sources\/science-10\.1126-science\.adz8659\/parses\/webpage\/document\.md$/);
+    assert.match(response.parsePath, /knowledge-base\/wiki\/sources\/science-10\.1126-science\.adz8659\/parses\/webpage\/parse\.json$/);
+    assert.match(response.qualityPath, /knowledge-base\/wiki\/sources\/science-10\.1126-science\.adz8659\/parses\/webpage\/quality\.json$/);
+    assert.match(response.chunksPath, /knowledge-base\/wiki\/sources\/science-10\.1126-science\.adz8659\/chunks\/webpage\.jsonl$/);
+
+    const markdown = await readFile(response.markdownPath, "utf8");
+    assert.match(markdown, /Browser extension captured this Science article/);
+    const events = await readPaperDownloadJobEvents({ workspaceDir });
+    assert.equal(events.at(-1)?.status, "webpage_snapshot_ready");
+    assert.equal(events.at(-1)?.purpose, "webpage");
+    assert.equal(events.at(-1)?.paperKey, "science-10.1126-science.adz8659");
+  } finally {
+    await rm(workspaceDir, { recursive: true, force: true });
+  }
+});
+
 test("handleExtensionHostMessage poll_jobs returns latest queued jobs with sources", async () => {
   const workspaceDir = await createWorkspaceDir();
 
@@ -549,7 +602,8 @@ test("handleExtensionHostMessage poll_jobs returns latest queued jobs with sourc
         articleUrl: "https://www.nature.com/articles/s41586-019-1666-5",
         source: "nature",
         title: "Queued Nature",
-        autoClose: true
+        autoClose: true,
+        purpose: "webpage"
       }
     });
     await appendPaperDownloadJobEvent({
@@ -597,7 +651,8 @@ test("handleExtensionHostMessage poll_jobs returns latest queued jobs with sourc
             articleUrl: "https://www.nature.com/articles/s41586-019-1666-5",
             source: "nature",
             title: "Queued Nature",
-            autoClose: true
+            autoClose: true,
+            purpose: "webpage"
           }
         ]
       }

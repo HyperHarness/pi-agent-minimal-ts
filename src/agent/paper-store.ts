@@ -1,6 +1,10 @@
 import { createHash } from "node:crypto";
 import { access, mkdir, readFile, writeFile } from "node:fs/promises";
 import path from "node:path";
+import {
+  isPathInsideDirectory,
+  resolvePaperLibraryPaths
+} from "./knowledge-base.js";
 import type { DownloadablePaperSource, PaperRecord, PaperSource } from "./paper-types.js";
 
 type DownloadedPaperRecord = Extract<PaperRecord, { status: "downloaded" }>;
@@ -43,7 +47,7 @@ function sanitizeCanonicalId(value: string): string {
 }
 
 function getRecordIndexDir(workspaceDir: string): string {
-  return path.join(workspaceDir, "downloads", "papers", "index");
+  return resolvePaperLibraryPaths(workspaceDir).recordsRoot;
 }
 
 function getExternalRecordFilename(articleUrl: string): string {
@@ -57,7 +61,7 @@ export function resolveExternalPaperPdfPath(input: {
   articleUrl: string;
 }): string {
   const filename = getExternalRecordFilename(input.articleUrl).replace(/\.json$/, ".pdf");
-  return path.join(input.workspaceDir, "downloads", "papers", "raw", filename);
+  return path.join(resolvePaperLibraryPaths(input.workspaceDir).rawPdfRoot, filename);
 }
 
 export function resolvePaperPdfPath(input: {
@@ -66,7 +70,7 @@ export function resolvePaperPdfPath(input: {
   canonicalId: string;
 }): string {
   const filename = `${sanitizeFilenameComponent(input.source)}-${sanitizeCanonicalId(input.canonicalId)}.pdf`;
-  return path.join(input.workspaceDir, "downloads", "papers", "raw", filename);
+  return path.join(resolvePaperLibraryPaths(input.workspaceDir).rawPdfRoot, filename);
 }
 
 export function resolvePaperRecordPath(input: {
@@ -86,18 +90,6 @@ export function resolvePaperRecordPath(input: {
       : `${sanitizeFilenameComponent(input.source)}-${canonicalId}.json`;
 
   return path.join(getRecordIndexDir(input.workspaceDir), filename);
-}
-
-function isPathInsideDirectory(rootDir: string, candidatePath: string): boolean {
-  const relativePath = path.relative(rootDir, candidatePath);
-  return (
-    relativePath === "" ||
-    (
-      relativePath !== ".." &&
-      !relativePath.startsWith(`..${path.sep}`) &&
-      !path.isAbsolute(relativePath)
-    )
-  );
 }
 
 function resolveIndexedDownloadPath(input: {
@@ -121,13 +113,14 @@ function resolveIndexedDownloadPath(input: {
     candidates.push(path.posix.join("/", ...uncWslMatch[1].split(/[\\/]+/).filter(Boolean)));
   }
 
-  const papersDir = path.resolve(input.workspaceDir, "downloads", "papers");
+  const paths = resolvePaperLibraryPaths(input.workspaceDir);
+  const allowedRoots = [paths.rawPdfRoot].map((candidate) => path.resolve(candidate));
 
   for (const candidate of candidates) {
     const resolvedPath = path.isAbsolute(candidate)
       ? path.resolve(candidate)
       : path.resolve(input.workspaceDir, candidate);
-    if (isPathInsideDirectory(papersDir, resolvedPath)) {
+    if (allowedRoots.some((root) => isPathInsideDirectory(root, resolvedPath))) {
       return resolvedPath;
     }
   }

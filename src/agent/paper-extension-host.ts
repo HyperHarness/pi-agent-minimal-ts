@@ -12,6 +12,8 @@ import {
   type ExtensionHostMessage,
   type ExtensionHostResponse
 } from "./paper-extension-protocol.js";
+import { parsePaperWebPageHtml } from "./paper-webpage-fetch.js";
+import { savePaperWebPageParse } from "./paper-reader/engines/webpage.js";
 import {
   readPaperRecord,
   resolveExternalPaperPdfPath,
@@ -81,6 +83,7 @@ export async function handleExtensionHostMessage(options: {
         jobId: job.jobId,
         articleUrl: job.articleUrl,
         source: job.source as NonNullable<typeof job.source>,
+        ...(job.purpose === undefined ? {} : { purpose: job.purpose }),
         ...(job.title ? { title: job.title } : {}),
         ...(job.autoClose === undefined ? {} : { autoClose: job.autoClose })
       }));
@@ -114,11 +117,78 @@ export async function handleExtensionHostMessage(options: {
     };
   }
 
+  if (message.type === "register_webpage_snapshot") {
+    return registerWebpageSnapshot({
+      workspaceDir: options.workspaceDir,
+      message,
+      recordedAt
+    });
+  }
+
   return registerDownloadedPaper({
     workspaceDir: options.workspaceDir,
     message,
     recordedAt
   });
+}
+
+async function registerWebpageSnapshot(options: {
+  workspaceDir: string;
+  message: Extract<ExtensionHostMessage, { type: "register_webpage_snapshot" }>;
+  recordedAt: string;
+}): Promise<ExtensionHostResponse> {
+  try {
+    const pageUrl = options.message.finalUrl ?? options.message.articleUrl;
+    const extraction = parsePaperWebPageHtml({
+      url: pageUrl,
+      html: options.message.html
+    });
+    const saved = await savePaperWebPageParse({
+      workspaceDir: options.workspaceDir,
+      extraction,
+      force: true
+    });
+
+    await appendPaperDownloadJobEvent({
+      workspaceDir: options.workspaceDir,
+      event: {
+        jobId: options.message.jobId,
+        recordedAt: options.recordedAt,
+        status: "webpage_snapshot_ready",
+        articleUrl: options.message.articleUrl,
+        source: options.message.source,
+        purpose: "webpage",
+        ...(options.message.title ? { title: options.message.title } : {}),
+        ...(options.message.finalUrl ? { finalUrl: options.message.finalUrl } : {}),
+        paperKey: saved.paperKey,
+        markdownPath: saved.artifacts.markdownPath,
+        parsePath: saved.artifacts.parsePath,
+        qualityPath: saved.artifacts.qualityPath,
+        chunksPath: saved.artifacts.chunksPath,
+        message: extraction.access.status === "access_limited"
+          ? extraction.access.message
+          : "Registered webpage snapshot and saved parsed article artifacts."
+      }
+    });
+
+    return {
+      type: "webpage_registered",
+      jobId: options.message.jobId,
+      articleUrl: options.message.articleUrl,
+      paperKey: saved.paperKey,
+      markdownPath: saved.artifacts.markdownPath,
+      parsePath: saved.artifacts.parsePath,
+      qualityPath: saved.artifacts.qualityPath,
+      chunksPath: saved.artifacts.chunksPath,
+      ...(extraction.title ? { title: extraction.title } : {})
+    };
+  } catch (error) {
+    return registrationError({
+      jobId: options.message.jobId,
+      code: "webpage_registration_failed",
+      message: error instanceof Error ? error.message : "Unable to register webpage snapshot."
+    });
+  }
 }
 
 async function registerDownloadedPaper(options: {

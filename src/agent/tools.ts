@@ -24,11 +24,15 @@ import {
   readPaperSection,
   searchPaperText
 } from "./paper-reader/paper-reader.js";
+import { savePaperWebPageParse } from "./paper-reader/engines/webpage.js";
 import {
   searchPaperWiki,
   writePaperWikiSource
 } from "./paper-wiki/paper-wiki.js";
-import type { PaperExtensionBridge } from "./paper-extension-bridge.js";
+import {
+  createPaperExtensionJob,
+  type PaperExtensionBridge
+} from "./paper-extension-bridge.js";
 import {
   createPaperBrowserManagerClient,
   type PaperBrowserManagerClient
@@ -37,8 +41,9 @@ import { createPaperBrowserManagerServer, startPaperBrowserManagerHttpServer } f
 import { searchApsPapers } from "./aps-search.js";
 import { getPublisherAdapter } from "./publisher-adapters/index.js";
 import { fetchWebPage } from "./web-fetch.js";
+import { fetchPaperWebPage } from "./paper-webpage-fetch.js";
 import { searchWeb, type WebSearchResult } from "./web-search.js";
-import type { PaperSearchResult } from "./paper-types.js";
+import type { PaperSearchResult, SupportedPaperSource } from "./paper-types.js";
 
 const getTimeParameters = Type.Object({
   timezone: Type.Optional(Type.String({ description: "Optional IANA timezone name." }))
@@ -57,6 +62,29 @@ const webSearchParameters = Type.Object({
 
 const fetchUrlParameters = Type.Object({
   url: Type.String({ description: "HTTP or HTTPS URL to fetch." })
+});
+
+const fetchPaperWebpageParameters = Type.Object({
+  url: Type.String({ description: "HTTP or HTTPS scientific paper article page URL to fetch." }),
+  paperKey: Type.Optional(
+    Type.String({
+      description:
+        "Optional paper key to use under knowledge-base/wiki/sources/. Defaults to a publisher-derived key such as nature-s41467-025-59778-z."
+    })
+  ),
+  save: Type.Optional(
+    Type.Boolean({
+      description:
+        "Whether to save the extracted webpage parse under knowledge-base/wiki/sources/. Defaults to true."
+    })
+  ),
+  force: Type.Optional(Type.Boolean({ description: "Re-fetch and overwrite the cached webpage parse." })),
+  useExtensionFallback: Type.Optional(
+    Type.Boolean({
+      description:
+        "Queue a browser-extension webpage snapshot job when direct HTML fetch is blocked. Defaults to true."
+    })
+  )
 });
 
 const searchPapersParameters = Type.Object({
@@ -91,7 +119,7 @@ const openPaperPageForLoginParameters = Type.Object({
 
 const parsePaperParameters = Type.Object({
   path: Type.Optional(
-    Type.String({ description: "Workspace-relative or workspace-absolute PDF path under downloads/papers/." })
+    Type.String({ description: "Workspace-relative or absolute PDF path under knowledge-base/raw/pdfs/." })
   ),
   recordPath: Type.Optional(
     Type.String({ description: "Workspace-relative or workspace-absolute paper record JSON path." })
@@ -101,6 +129,7 @@ const parsePaperParameters = Type.Object({
       Type.Literal("auto"),
       Type.Literal("opendataloader-local"),
       Type.Literal("opendataloader-hybrid"),
+      Type.Literal("docling"),
       Type.Literal("plain-text-baseline")
     ], { description: "Parser engine to use. Defaults to auto." })
   ),
@@ -109,7 +138,7 @@ const parsePaperParameters = Type.Object({
 
 const inspectPaperParameters = Type.Object({
   path: Type.Optional(
-    Type.String({ description: "Workspace-relative or workspace-absolute PDF path under downloads/papers/." })
+    Type.String({ description: "Workspace-relative or absolute PDF path under knowledge-base/raw/pdfs/." })
   ),
   recordPath: Type.Optional(
     Type.String({ description: "Workspace-relative or workspace-absolute paper record JSON path." })
@@ -121,7 +150,9 @@ const paperReaderEngineParameter = Type.Optional(
   Type.Union([
     Type.Literal("opendataloader-local"),
     Type.Literal("opendataloader-hybrid"),
-    Type.Literal("plain-text-baseline")
+    Type.Literal("docling"),
+    Type.Literal("plain-text-baseline"),
+    Type.Literal("webpage")
   ], { description: "Parsed engine to read from. Defaults to the best available parse." })
 );
 
@@ -165,6 +196,7 @@ type GetTimeParameters = Static<typeof getTimeParameters>;
 type ReadFileParameters = Static<typeof readFileParameters>;
 type WebSearchParameters = Static<typeof webSearchParameters>;
 type FetchUrlParameters = Static<typeof fetchUrlParameters>;
+type FetchPaperWebpageParameters = Static<typeof fetchPaperWebpageParameters>;
 type SearchPapersParameters = Static<typeof searchPapersParameters>;
 type DownloadPaperParameters = Static<typeof downloadPaperParameters>;
 type RegisterManualPaperDownloadParameters = Static<typeof registerManualPaperDownloadParameters>;
@@ -230,6 +262,18 @@ type WebSearchTool = AgentTool<
   SearchToolDetails
 >;
 type FetchUrlTool = AgentTool<typeof fetchUrlParameters, { url: string }>;
+type FetchPaperWebpageDetails =
+  | (Awaited<ReturnType<typeof fetchPaperWebPage>> & {
+      savedParse?: Awaited<ReturnType<typeof savePaperWebPageParse>>;
+    })
+  | (Awaited<ReturnType<PaperExtensionBridge["submitJob"]>> & {
+      purpose: "webpage";
+      directFetchError: string;
+    });
+type FetchPaperWebpageTool = AgentTool<
+  typeof fetchPaperWebpageParameters,
+  FetchPaperWebpageDetails
+>;
 type SearchPapersTool = AgentTool<
   typeof searchPapersParameters,
   SearchToolDetails
@@ -326,6 +370,14 @@ function assertSupportedPaperPublisherUrl(input: string): void {
   getPublisherAdapter(url.toString());
 }
 
+function resolveExtensionPaperSource(input: string): SupportedPaperSource | "external" {
+  try {
+    return getPublisherAdapter(input).id;
+  } catch {
+    return "external";
+  }
+}
+
 const PAPER_DOWNLOAD_ERROR_CODES = new Set<PaperDownloadError["code"]>([
   "unsupported_publisher",
   "browser_session_unavailable",
@@ -365,6 +417,8 @@ async function assertDownloadedFileIsPdf(pdfPath: string): Promise<void> {
 export interface ToolDependencies {
   searchWeb?: typeof searchWeb;
   fetchWebPage?: typeof fetchWebPage;
+  fetchPaperWebPage?: typeof fetchPaperWebPage;
+  savePaperWebPageParse?: typeof savePaperWebPageParse;
   searchPapers?: typeof searchPapers;
   searchApsPapers?: typeof searchApsPapers;
   downloadPaper?: typeof downloadPaper;
@@ -392,6 +446,7 @@ export type AgentTools = [
   ReadFileTool,
   WebSearchTool,
   FetchUrlTool,
+  FetchPaperWebpageTool,
   SearchPapersTool,
   DownloadPaperTool,
   RegisterManualPaperDownloadTool,
@@ -422,6 +477,8 @@ export function createTools(workspaceDir: string, dependencies: ToolDependencies
   const resolvedWorkspaceDir = path.resolve(workspaceDir);
   const searchWebImpl = dependencies.searchWeb ?? searchWeb;
   const fetchWebPageImpl = dependencies.fetchWebPage ?? fetchWebPage;
+  const fetchPaperWebPageImpl = dependencies.fetchPaperWebPage ?? fetchPaperWebPage;
+  const savePaperWebPageParseImpl = dependencies.savePaperWebPageParse ?? savePaperWebPageParse;
   const searchApsPapersImpl = dependencies.searchApsPapers ?? searchApsPapers;
   const searchPapersImpl =
     dependencies.searchPapers ??
@@ -699,6 +756,60 @@ export function createTools(workspaceDir: string, dependencies: ToolDependencies
     }
   };
 
+  const fetchPaperWebpageTool: FetchPaperWebpageTool = {
+    name: "fetch_paper_webpage",
+    label: "Fetch Paper Webpage",
+    description:
+      "Fetches a scientific paper article page and returns untruncated article markdown with navigation, header, footer, sharing, advertising, and recommendation noise removed. Prefer this over fetch_url when reading a publisher article webpage.",
+    parameters: fetchPaperWebpageParameters,
+    execute: async (_toolCallId: string, args: FetchPaperWebpageParameters) => {
+      try {
+        const result = await fetchPaperWebPageImpl({ url: args.url });
+        const savedParse = args.save === false
+          ? undefined
+          : await savePaperWebPageParseImpl({
+            workspaceDir: resolvedWorkspaceDir,
+            extraction: result,
+            ...(args.paperKey ? { paperKey: args.paperKey } : {}),
+            ...(args.force !== undefined ? { force: args.force } : {})
+          });
+        const output = {
+          ...result,
+          ...(savedParse ? { savedParse } : {})
+        };
+
+        return {
+          content: [{ type: "text", text: JSON.stringify(output) }],
+          details: output
+        };
+      } catch (error) {
+        if (args.useExtensionFallback === false || dependencies.extensionBridge === undefined) {
+          throw error;
+        }
+
+        const source = resolveExtensionPaperSource(args.url);
+        const queued = await dependencies.extensionBridge.submitJob(
+          createPaperExtensionJob({
+            articleUrl: args.url,
+            source,
+            purpose: "webpage",
+            autoClose: true
+          })
+        );
+        const output = {
+          ...queued,
+          purpose: "webpage" as const,
+          directFetchError: error instanceof Error ? error.message : "Direct paper webpage fetch failed."
+        };
+
+        return {
+          content: [{ type: "text", text: JSON.stringify(output) }],
+          details: output
+        };
+      }
+    }
+  };
+
   const searchPapersTool: SearchPapersTool = {
     name: "search_papers",
     label: "Search Papers",
@@ -791,7 +902,7 @@ export function createTools(workspaceDir: string, dependencies: ToolDependencies
     name: "parse_paper",
     label: "Parse Paper",
     description:
-      "Parses a downloaded PDF from downloads/papers/ into structured reading artifacts. Use a path or recordPath returned by download_paper. The default engine uses OpenDataLoader; use plain-text-baseline only for debugging.",
+      "Parses a downloaded PDF from knowledge-base/raw/pdfs/ into structured reading artifacts. Use a path or recordPath returned by download_paper. The default auto engine starts with OpenDataLoader, falls back to Docling when advanced parsing fails, then uses the plain text baseline as the final fallback.",
     parameters: parsePaperParameters,
     executionMode: "sequential",
     execute: async (_toolCallId: string, args: ParsePaperParameters) => {
@@ -884,7 +995,7 @@ export function createTools(workspaceDir: string, dependencies: ToolDependencies
     name: "write_paper_wiki_source",
     label: "Write Paper Wiki Source",
     description:
-      "Saves an LLM-authored, provenance-tracked paper summary into downloads/papers/llm-wiki/sources/ for later knowledge retrieval. Use after parse_paper and grounded reading.",
+      "Saves an LLM-authored, provenance-tracked paper summary into knowledge-base/wiki/sources/ for later knowledge retrieval. Use after parse_paper and grounded reading.",
     parameters: writePaperWikiSourceParameters,
     executionMode: "sequential",
     execute: async (_toolCallId: string, args: WritePaperWikiSourceParameters) => {
@@ -912,7 +1023,7 @@ export function createTools(workspaceDir: string, dependencies: ToolDependencies
     name: "search_paper_wiki",
     label: "Search Paper Wiki",
     description:
-      "Searches LLM-authored paper source summaries under downloads/papers/llm-wiki/sources/. Use this for knowledge retrieval after paper summaries have been written.",
+      "Searches LLM-authored paper source summaries under knowledge-base/wiki/sources/. Use this for knowledge retrieval after paper summaries have been written.",
     parameters: searchPaperWikiParameters,
     execute: async (_toolCallId: string, args: SearchPaperWikiParameters) => {
       const result = await searchPaperWikiImpl({
@@ -933,6 +1044,7 @@ export function createTools(workspaceDir: string, dependencies: ToolDependencies
     readFileTool,
     webSearchTool,
     fetchUrlTool,
+    fetchPaperWebpageTool,
     searchPapersTool,
     downloadPaperTool,
     registerManualPaperDownloadTool,

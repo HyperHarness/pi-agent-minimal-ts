@@ -8,19 +8,21 @@ Turn the paper downloader and reader into a compact LLM-maintained scientific li
 
 ## Directory Layout
 
-Use one paper workspace under `downloads/papers/`:
+Use one knowledge base under `knowledge-base/` by default. The knowledge base can be moved outside the code checkout with `PI_KNOWLEDGE_BASE_DIR=/absolute/path/to/knowledge-base`, which keeps the open-source code repository separate from the large, private wiki knowledge base.
 
 ```text
-downloads/papers/
+knowledge-base/
   raw/
-    <paper-key>.pdf
-  index/
+    pdfs/
+      <paper-key>.pdf
+  records/
     <paper-key>.json
-  llm-wiki/
+  wiki/
     schema.md
     index.md
     log.md
-    intermediate/
+    sources/
+      <paper-key>.md
       <paper-key>/
         source.json
         parses/
@@ -30,20 +32,19 @@ downloads/papers/
             quality.json
         chunks/
           <engine>.jsonl
-    sources/
-      <paper-key>.md
-    wiki/
+    pages/
+    manifests/
     assets/
+    state/
 ```
-
-Compatibility rule: older PDFs directly under `downloads/papers/*.pdf` remain readable, but new downloads should write raw PDFs into `downloads/papers/raw/`.
 
 ## Layer Semantics
 
-- `raw/`: original PDFs. The agent may create them during download but should not mutate them during reading or summarization.
-- `llm-wiki/intermediate/`: parser output from OpenDataLoader or fallback engines. This is machine-derived evidence, not the final knowledge source.
-- `llm-wiki/sources/`: LLM-written, provenance-tracked paper summaries. These are the default retrieval corpus for knowledge questions.
-- `llm-wiki/wiki/`: future synthesis pages across multiple papers, such as topic pages, comparisons, and evolving claims.
+- `raw/pdfs/`: original PDFs. The agent may create them during download but should not mutate them during reading or summarization.
+- `wiki/sources/<paper-key>/`: parser output from OpenDataLoader or fallback engines. This is machine-derived evidence for one paper source.
+- `wiki/sources/<paper-key>.md`: LLM-written, provenance-tracked paper summaries. These are the default retrieval corpus for knowledge questions.
+- `wiki/pages/`: future synthesis pages across multiple papers, such as topic pages, comparisons, and evolving claims.
+- `wiki/manifests/`: future machine-readable provenance for final source summaries.
 - `index.md`: content-oriented catalog for navigation.
 - `log.md`: chronological append-only audit trail.
 - `schema.md`: local conventions for future agent sessions.
@@ -51,17 +52,17 @@ Compatibility rule: older PDFs directly under `downloads/papers/*.pdf` remain re
 ## Tool Flow
 
 1. Download or register a PDF with `download_paper` or `register_manual_paper_download`.
-2. Parse it with `parse_paper`; this writes intermediate markdown and JSON.
+2. Parse it with `parse_paper`; this writes evidence markdown and JSON under that paper's source directory.
 3. Inspect and read the parsed paper using `inspect_paper`, `read_paper_section`, and `search_paper_text`.
-4. Write the grounded LLM summary with `write_paper_wiki_source`; this creates or updates `llm-wiki/sources/<paper-key>.md`, `index.md`, and `log.md`.
+4. Write the grounded LLM summary with `write_paper_wiki_source`; this creates or updates `wiki/sources/<paper-key>.md`, `index.md`, and `log.md`.
 5. Use `search_paper_wiki` for retrieval over the LLM-authored source layer.
 
 The agent should not treat `document.md` as the long-term knowledge source. It is the evidence layer used to write and verify `sources/<paper-key>.md`.
 
 ## First Implementation Scope
 
-- Move future raw PDF downloads to `downloads/papers/raw/`.
-- Move parser artifacts from `downloads/papers/reading/` to `downloads/papers/llm-wiki/intermediate/`.
+- Move future raw PDF downloads to `knowledge-base/raw/pdfs/`.
+- Store parser artifacts under `knowledge-base/wiki/sources/<paper-key>/`.
 - Add `write_paper_wiki_source` for LLM-authored source summaries.
 - Add `search_paper_wiki` for lexical retrieval over source summaries.
 - Keep the system intentionally simple: no vector database until the source layer and conventions prove useful.

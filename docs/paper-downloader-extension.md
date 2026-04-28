@@ -9,7 +9,7 @@ Use this path for `download_paper` on supported publisher and external URLs. arX
 - Opens publisher and external paper pages in your normal browser profile.
 - Attempts one direct PDF download when a PDF URL is available.
 - Keeps the tab open when the page needs login, verification, or manual download.
-- Watches completed browser PDF downloads and registers them in `downloads/papers/`.
+- Watches completed browser PDF downloads and registers them in `knowledge-base/raw/pdfs/`.
 - Lets later `download_paper` calls return `already_downloaded` from the local index.
 
 ## Prerequisites

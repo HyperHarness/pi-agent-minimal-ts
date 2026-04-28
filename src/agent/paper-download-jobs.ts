@@ -1,6 +1,6 @@
 import { appendFile, mkdir, readFile } from "node:fs/promises";
 import path from "node:path";
-import type { ExtensionJobStatus } from "./paper-extension-protocol.js";
+import type { ExtensionJobPurpose, ExtensionJobStatus } from "./paper-extension-protocol.js";
 import type { PaperSource } from "./paper-types.js";
 
 export interface PaperDownloadJobEvent {
@@ -9,6 +9,7 @@ export interface PaperDownloadJobEvent {
   status: ExtensionJobStatus;
   articleUrl: string;
   source?: PaperSource;
+  purpose?: ExtensionJobPurpose;
   title?: string;
   autoClose?: boolean;
   tabId?: number;
@@ -16,6 +17,12 @@ export interface PaperDownloadJobEvent {
   recordPath?: string;
   downloadPath?: string;
   fileSha256?: string;
+  paperKey?: string;
+  finalUrl?: string;
+  markdownPath?: string;
+  parsePath?: string;
+  qualityPath?: string;
+  chunksPath?: string;
   message?: string;
 }
 
@@ -29,10 +36,12 @@ const VALID_JOB_STATUSES = new Set<ExtensionJobStatus>([
   "awaiting_user_verification",
   "awaiting_user_manual_download",
   "manual_download_observed",
-  "downloaded"
+  "downloaded",
+  "webpage_snapshot_ready"
 ]);
 
 const VALID_PAPER_SOURCES = new Set<PaperSource>(["arxiv", "science", "nature", "aps", "external"]);
+const VALID_JOB_PURPOSES = new Set<ExtensionJobPurpose>(["download", "webpage"]);
 
 export function resolvePaperDownloadJobsPath(options: { workspaceDir: string }): string {
   return path.join(options.workspaceDir, ".browser-profile", "paper-download-jobs.jsonl");
@@ -128,16 +137,37 @@ function parsePaperDownloadJobEvent(value: unknown): PaperDownloadJobEvent | nul
     status,
     articleUrl,
     ...parseOptionalPaperSourceField(record, "source"),
+    ...parseOptionalJobPurposeField(record, "purpose"),
     ...parseOptionalStringFields(record, [
       "title",
       "recordPath",
       "downloadPath",
       "fileSha256",
+      "paperKey",
+      "finalUrl",
+      "markdownPath",
+      "parsePath",
+      "qualityPath",
+      "chunksPath",
       "message"
     ]),
     ...parseOptionalBooleanField(record, "autoClose"),
     ...parseOptionalNumberFields(record, ["tabId", "downloadId"])
   };
+}
+
+function parseOptionalJobPurposeField(
+  record: Record<string, unknown>,
+  fieldName: string
+): Record<string, ExtensionJobPurpose> {
+  const value = record[fieldName];
+  if (value === undefined) {
+    return {};
+  }
+
+  return typeof value === "string" && VALID_JOB_PURPOSES.has(value as ExtensionJobPurpose)
+    ? { [fieldName]: value as ExtensionJobPurpose }
+    : {};
 }
 
 function parseRequiredString(value: unknown): string | null {

@@ -1,10 +1,10 @@
 import { appendFile, readFile, writeFile } from "node:fs/promises";
 import path from "node:path";
 import {
-  getPaperParseArtifactPaths,
   listPaperParseEngines,
   readParsedPaperDocument,
-  readPaperSourceByKey
+  readPaperSourceByKey,
+  resolvePaperParseArtifactPaths
 } from "../paper-reader/paper-reader-store.js";
 import type { ConcretePaperParseEngine } from "../paper-reader/types.js";
 import { PaperReaderError } from "../paper-reader/types.js";
@@ -28,9 +28,11 @@ const DEFAULT_WIKI_SEARCH_RESULTS = 8;
 
 function sortEnginesByPreference(engines: ConcretePaperParseEngine[]): ConcretePaperParseEngine[] {
   const priority: Record<ConcretePaperParseEngine, number> = {
-    "opendataloader-hybrid": 0,
-    "opendataloader-local": 1,
-    "plain-text-baseline": 2
+    "webpage": 0,
+    "opendataloader-hybrid": 1,
+    "opendataloader-local": 2,
+    "docling": 3,
+    "plain-text-baseline": 4
   };
   return engines.slice().sort((left, right) => priority[left] - priority[right]);
 }
@@ -158,7 +160,7 @@ export async function writePaperWikiSource(input: PaperWikiSourceInput): Promise
     })
   ]);
   const title = input.title?.trim() || document.title || source?.title || input.paperKey;
-  const artifacts = getPaperParseArtifactPaths({
+  const artifacts = await resolvePaperParseArtifactPaths({
     workspaceDir: input.workspaceDir,
     paperKey: input.paperKey,
     engine
@@ -173,7 +175,7 @@ title: ${quoteYaml(title)}
 created_at: ${quoteYaml(now)}
 updated_at: ${quoteYaml(now)}
 pdf_sha256: ${quoteYaml(document.pdfSha256)}
-raw_pdf: ${quoteYaml(source ? relativeToWorkspace(input.workspaceDir, source.pdfPath) : "")}
+raw_pdf: ${quoteYaml(source?.pdfPath ? relativeToWorkspace(input.workspaceDir, source.pdfPath) : "")}
 record: ${quoteYaml(source?.recordPath ? relativeToWorkspace(input.workspaceDir, source.recordPath) : "")}
 article_url: ${quoteYaml(source?.articleUrl ?? "")}
 parse_engine: ${quoteYaml(engine)}

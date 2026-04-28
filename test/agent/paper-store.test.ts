@@ -17,6 +17,7 @@ import {
   resolvePaperRecordPath,
   writePaperRecord
 } from "../../src/agent/paper-store.js";
+import { resolvePaperLibraryPaths } from "../../src/agent/knowledge-base.js";
 
 type Assert<T extends true> = T;
 type IsEqual<A, B> =
@@ -72,7 +73,7 @@ const invalidExternalPaperRecord = {
   source: "external",
   articleUrl: "https://example.com/paper",
   openedUrl: "https://example.com/paper",
-  downloadPath: "downloads/papers/external.pdf",
+  downloadPath: "knowledge-base/raw/pdfs/external.pdf",
   recordedAt: "2026-04-23T14:00:00.000Z",
   handlingMethod: "system_browser_open",
   status: "external_opened"
@@ -86,7 +87,7 @@ const externalDownloadedPaperRecord = {
   recordedAt: "2026-04-25T10:00:00.000Z",
   handlingMethod: "manual_file_import",
   status: "downloaded",
-  downloadPath: "downloads/papers/external-example.com-123456789abc.pdf",
+  downloadPath: "knowledge-base/raw/pdfs/external-example.com-123456789abc.pdf",
   fileSha256: "abc123",
   title: "External Paper"
 } satisfies PaperRecord;
@@ -97,7 +98,7 @@ const manualFallbackResult = {
   canonicalId: "10.1126/science.adz8659",
   articleUrl: "https://www.science.org/doi/10.1126/science.adz8659",
   fallbackUrl: "https://www.science.org/doi/10.1126/science.adz8659",
-  recordPath: "downloads/papers/index/science-10.1126-science.adz8659.json",
+  recordPath: "knowledge-base/records/science-10.1126-science.adz8659.json",
   failure: {
     code: "PAYWALL",
     message: "Opened article in browser."
@@ -128,7 +129,7 @@ test("resolvePaperPdfPath uses source-specific filenames", async () => {
         source: "arxiv",
         canonicalId: "2401.01234"
       }),
-      path.join(workspaceDir, "downloads", "papers", "raw", "arxiv-2401.01234.pdf")
+      path.join(workspaceDir, "knowledge-base", "raw", "pdfs", "arxiv-2401.01234.pdf")
     );
 
     assert.equal(
@@ -137,7 +138,7 @@ test("resolvePaperPdfPath uses source-specific filenames", async () => {
         source: "science",
         canonicalId: "10.1126/science.adz8659"
       }),
-      path.join(workspaceDir, "downloads", "papers", "raw", "science-10.1126-science.adz8659.pdf")
+      path.join(workspaceDir, "knowledge-base", "raw", "pdfs", "science-10.1126-science.adz8659.pdf")
     );
 
     assert.equal(
@@ -146,7 +147,7 @@ test("resolvePaperPdfPath uses source-specific filenames", async () => {
         source: "nature",
         canonicalId: "s41586-019-1666-5"
       }),
-      path.join(workspaceDir, "downloads", "papers", "raw", "nature-s41586-019-1666-5.pdf")
+      path.join(workspaceDir, "knowledge-base", "raw", "pdfs", "nature-s41586-019-1666-5.pdf")
     );
 
     assert.equal(
@@ -157,14 +158,52 @@ test("resolvePaperPdfPath uses source-specific filenames", async () => {
       }),
       path.join(
         workspaceDir,
-        "downloads",
-        "papers",
+        "knowledge-base",
         "raw",
+        "pdfs",
         "aps-10.1103-PhysRevLett.133.123456.pdf"
       )
     );
   } finally {
     await rm(workspaceDir, { recursive: true, force: true });
+  }
+});
+
+test("knowledge base paths can be moved outside the code workspace", async () => {
+  const workspaceDir = await mkdtemp(path.join(os.tmpdir(), "paper-store-"));
+  const libraryDir = await mkdtemp(path.join(os.tmpdir(), "knowledge-base-external-"));
+  const previousLibraryDir = process.env.PI_KNOWLEDGE_BASE_DIR;
+
+  try {
+    process.env.PI_KNOWLEDGE_BASE_DIR = libraryDir;
+    const paths = resolvePaperLibraryPaths(workspaceDir);
+
+    assert.equal(paths.libraryRoot, libraryDir);
+    assert.equal(
+      resolvePaperPdfPath({
+        workspaceDir,
+        source: "arxiv",
+        canonicalId: "2401.01234"
+      }),
+      path.join(libraryDir, "raw", "pdfs", "arxiv-2401.01234.pdf")
+    );
+    assert.equal(
+      resolvePaperRecordPath({
+        workspaceDir,
+        source: "arxiv",
+        canonicalId: "2401.01234",
+        articleUrl: "https://arxiv.org/abs/2401.01234"
+      }),
+      path.join(libraryDir, "records", "arxiv-2401.01234.json")
+    );
+  } finally {
+    if (previousLibraryDir === undefined) {
+      delete process.env.PI_KNOWLEDGE_BASE_DIR;
+    } else {
+      process.env.PI_KNOWLEDGE_BASE_DIR = previousLibraryDir;
+    }
+    await rm(workspaceDir, { recursive: true, force: true });
+    await rm(libraryDir, { recursive: true, force: true });
   }
 });
 
@@ -193,9 +232,8 @@ test("resolvePaperRecordPath uses canonical ids for supported sources and hostna
       }),
       path.join(
         workspaceDir,
-        "downloads",
-        "papers",
-        "index",
+        "knowledge-base",
+        "records",
         "science-10.1126-science.adz8659.json"
       )
     );
@@ -207,7 +245,7 @@ test("resolvePaperRecordPath uses canonical ids for supported sources and hostna
     });
 
     assert.equal(
-      externalRecordPath.startsWith(path.join(workspaceDir, "downloads", "papers", "index")),
+      externalRecordPath.startsWith(path.join(workspaceDir, "knowledge-base", "records")),
       true
     );
     assert.equal(path.basename(externalRecordPath).startsWith("external-example.com-"), true);
@@ -229,7 +267,7 @@ test("resolvePaperRecordPath rejects canonical ids that sanitize to an empty fil
   );
 });
 
-test("writePaperRecord persists external_opened records under downloads/papers/index", async () => {
+test("writePaperRecord persists external_opened records under knowledge-base/records", async () => {
   const workspaceDir = await mkdtemp(path.join(os.tmpdir(), "paper-store-"));
 
   try {
@@ -247,7 +285,7 @@ test("writePaperRecord persists external_opened records under downloads/papers/i
 
     const saved = JSON.parse(await readFile(recordPath, "utf8"));
 
-    assert.equal(recordPath.startsWith(path.join(workspaceDir, "downloads", "papers", "index")), true);
+    assert.equal(recordPath.startsWith(path.join(workspaceDir, "knowledge-base", "records")), true);
     assert.equal(path.basename(recordPath).startsWith("external-example.com-"), true);
     assert.equal(saved.status, "external_opened");
     assert.equal(saved.source, "external");
@@ -271,9 +309,8 @@ test("writePaperRecord persists supported source records with pretty-printed fai
       recordPath,
       path.join(
         workspaceDir,
-        "downloads",
-        "papers",
-        "index",
+        "knowledge-base",
+        "records",
         "science-10.1126-science.adz8659.json"
       )
     );

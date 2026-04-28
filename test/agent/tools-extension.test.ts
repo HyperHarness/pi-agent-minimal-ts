@@ -192,9 +192,8 @@ test("download_paper allows legacy fallback when usePlaywrightPaperFallback is e
       fallbackUrl: articleUrl,
       recordPath: path.join(
         workspace,
-        "downloads",
-        "papers",
-        "index",
+        "knowledge-base",
+        "records",
         "aps-10.1103-PhysRevLett.134.090601.json",
       ),
       failure: {

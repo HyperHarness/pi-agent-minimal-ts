@@ -52,7 +52,7 @@ test("paper browser manager protocol types accept representative values", () => 
   };
   const downloadResponse: DownloadPdfResponse = {
     status: "downloaded",
-    path: "C:/work/papers/downloads/papers/science-10.1126-science.adz8659.pdf",
+    path: "C:/work/papers/knowledge-base/raw/pdfs/science-10.1126-science.adz8659.pdf",
     publisher: "science",
     articleUrl: downloadRequest.url,
     finalArticleUrl: openResponse.openedUrl,

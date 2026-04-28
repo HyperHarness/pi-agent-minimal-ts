@@ -1,44 +1,49 @@
 import { mkdir, readdir, readFile, writeFile } from "node:fs/promises";
 import path from "node:path";
+import { resolvePaperLibraryPaths } from "../knowledge-base.js";
 
 export function getPapersDir(workspaceDir: string): string {
-  return path.join(workspaceDir, "downloads", "papers");
+  return resolvePaperLibraryPaths(workspaceDir).libraryRoot;
 }
 
 export function getRawPapersDir(workspaceDir: string): string {
-  return path.join(getPapersDir(workspaceDir), "raw");
+  return resolvePaperLibraryPaths(workspaceDir).rawPdfRoot;
 }
 
 export function getPaperWikiDir(workspaceDir: string): string {
-  return path.join(getPapersDir(workspaceDir), "llm-wiki");
-}
-
-export function getPaperWikiIntermediateDir(workspaceDir: string): string {
-  return path.join(getPaperWikiDir(workspaceDir), "intermediate");
+  return resolvePaperLibraryPaths(workspaceDir).wikiRoot;
 }
 
 export function getPaperWikiSourcesDir(workspaceDir: string): string {
-  return path.join(getPaperWikiDir(workspaceDir), "sources");
+  return resolvePaperLibraryPaths(workspaceDir).sourcesRoot;
 }
 
 export function getPaperWikiPagesDir(workspaceDir: string): string {
-  return path.join(getPaperWikiDir(workspaceDir), "wiki");
+  return resolvePaperLibraryPaths(workspaceDir).pagesRoot;
 }
 
 export function getPaperWikiAssetsDir(workspaceDir: string): string {
-  return path.join(getPaperWikiDir(workspaceDir), "assets");
+  return resolvePaperLibraryPaths(workspaceDir).assetsRoot;
+}
+
+export function getPaperWikiManifestsDir(workspaceDir: string): string {
+  return resolvePaperLibraryPaths(workspaceDir).manifestsRoot;
+}
+
+export function getPaperWikiStateDir(workspaceDir: string): string {
+  return resolvePaperLibraryPaths(workspaceDir).stateRoot;
 }
 
 export function getPaperWikiSchemaPath(workspaceDir: string): string {
-  return path.join(getPaperWikiDir(workspaceDir), "schema.md");
+  return resolvePaperLibraryPaths(workspaceDir).schemaPath;
 }
 
 export function getPaperWikiIndexPath(workspaceDir: string): string {
-  return path.join(getPaperWikiDir(workspaceDir), "index.md");
+  return resolvePaperLibraryPaths(workspaceDir).indexPath;
 }
 
 export function getPaperWikiLogPath(workspaceDir: string): string {
-  return path.join(getPaperWikiDir(workspaceDir), "log.md");
+  return resolvePaperLibraryPaths(workspaceDir).logPath;
 }
 
 export function sanitizeWikiFilename(value: string): string {
@@ -69,10 +74,11 @@ This directory is maintained by the agent as a compact scientific-paper wiki.
 
 ## Layers
 
-- Raw PDFs live in \`../raw/\` and are immutable acquisition artifacts.
-- Parsed PDF output lives in \`intermediate/<paper-key>/\` and is derived data.
-- LLM-authored retrieval sources live in \`sources/<paper-key>.md\`.
-- Higher-level synthesis pages can live in \`wiki/\` when the source layer is stable.
+- Raw PDFs live in \`../raw/pdfs/\` and are immutable acquisition artifacts.
+- Parsed PDF output lives in \`sources/<paper-key>/\` and is derived evidence for that source.
+- LLM-authored retrieval summaries live in \`sources/<paper-key>.md\`.
+- Higher-level synthesis pages can live in \`pages/\` when the source layer is stable.
+- Source manifests can live in \`manifests/\` for migration and audit tooling.
 
 ## Conventions
 
@@ -95,10 +101,11 @@ const INITIAL_LOG = `# Paper LLM Wiki Log
 export async function ensurePaperWikiScaffold(workspaceDir: string): Promise<void> {
   await Promise.all([
     mkdir(getRawPapersDir(workspaceDir), { recursive: true }),
-    mkdir(getPaperWikiIntermediateDir(workspaceDir), { recursive: true }),
     mkdir(getPaperWikiSourcesDir(workspaceDir), { recursive: true }),
     mkdir(getPaperWikiPagesDir(workspaceDir), { recursive: true }),
-    mkdir(getPaperWikiAssetsDir(workspaceDir), { recursive: true })
+    mkdir(getPaperWikiAssetsDir(workspaceDir), { recursive: true }),
+    mkdir(getPaperWikiManifestsDir(workspaceDir), { recursive: true }),
+    mkdir(getPaperWikiStateDir(workspaceDir), { recursive: true })
   ]);
 
   await Promise.all([

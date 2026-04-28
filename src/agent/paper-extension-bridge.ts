@@ -1,5 +1,6 @@
 import { createHash } from "node:crypto";
 import { appendPaperDownloadJobEvent } from "./paper-download-jobs.js";
+import type { ExtensionJobPurpose } from "./paper-extension-protocol.js";
 import type { ExtensionPaperJobResult, SupportedPaperSource } from "./paper-types.js";
 
 type ExtensionPaperSource = SupportedPaperSource | "external";
@@ -10,6 +11,7 @@ export interface ExtensionPaperJob {
   source: ExtensionPaperSource;
   title?: string;
   autoClose?: boolean;
+  purpose?: ExtensionJobPurpose;
 }
 
 export type ExtensionBridgeSubmitResult = ExtensionPaperJobResult;
@@ -25,6 +27,7 @@ export function createPaperExtensionJob(options: {
   source: ExtensionPaperSource;
   title?: string;
   autoClose?: boolean;
+  purpose?: ExtensionJobPurpose;
 }): ExtensionPaperJob {
   const hash = createHash("sha1")
     .update(`${options.source}:${options.articleUrl}`)
@@ -35,7 +38,8 @@ export function createPaperExtensionJob(options: {
     articleUrl: options.articleUrl,
     source: options.source,
     ...(options.title ? { title: options.title } : {}),
-    ...(options.autoClose === undefined ? {} : { autoClose: options.autoClose })
+    ...(options.autoClose === undefined ? {} : { autoClose: options.autoClose }),
+    ...(options.purpose === undefined ? {} : { purpose: options.purpose })
   };
 }
 
@@ -59,6 +63,7 @@ export function createQueuedPaperExtensionBridge(options: {
           status: "queued",
           articleUrl: job.articleUrl,
           source: job.source,
+          ...(job.purpose === undefined ? {} : { purpose: job.purpose }),
           ...(job.title ? { title: job.title } : {}),
           ...(job.autoClose === undefined ? {} : { autoClose: job.autoClose }),
           message
@@ -70,7 +75,9 @@ export function createQueuedPaperExtensionBridge(options: {
         source: job.source,
         articleUrl: job.articleUrl,
         jobId: queuedJobId,
-        message
+        message: job.purpose === "webpage"
+          ? "Paper webpage snapshot job queued for the browser extension."
+          : message
       };
     }
   };

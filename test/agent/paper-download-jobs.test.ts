@@ -67,7 +67,7 @@ test("appendPaperDownloadJobEvent appends JSONL events and reads statuses in ord
         recordedAt: "2026-04-25T03:01:00.000Z",
         status: "downloaded",
         articleUrl: "https://arxiv.org/abs/2401.01234",
-        downloadPath: "downloads/papers/paper.pdf",
+        downloadPath: "knowledge-base/raw/pdfs/paper.pdf",
         fileSha256: "abc123"
       }
     });
@@ -77,7 +77,7 @@ test("appendPaperDownloadJobEvent appends JSONL events and reads statuses in ord
       await readFile(jobsPath, "utf8"),
       [
         '{"jobId":"job-1","recordedAt":"2026-04-25T03:00:00.000Z","status":"queued","articleUrl":"https://arxiv.org/abs/2401.01234","source":"arxiv","autoClose":true}',
-        '{"jobId":"job-1","recordedAt":"2026-04-25T03:01:00.000Z","status":"downloaded","articleUrl":"https://arxiv.org/abs/2401.01234","downloadPath":"downloads/papers/paper.pdf","fileSha256":"abc123"}',
+        '{"jobId":"job-1","recordedAt":"2026-04-25T03:01:00.000Z","status":"downloaded","articleUrl":"https://arxiv.org/abs/2401.01234","downloadPath":"knowledge-base/raw/pdfs/paper.pdf","fileSha256":"abc123"}',
         ""
       ].join("\n")
     );
@@ -108,7 +108,7 @@ test("summarizePaperDownloadJobs merges latest status while preserving prior met
       recordedAt: "2026-04-25T03:01:00.000Z",
       status: "downloaded",
       articleUrl: "https://arxiv.org/abs/2401.01234",
-      downloadPath: "downloads/papers/paper.pdf",
+      downloadPath: "knowledge-base/raw/pdfs/paper.pdf",
       fileSha256: "abc123"
     }
   ]);
@@ -122,7 +122,7 @@ test("summarizePaperDownloadJobs merges latest status while preserving prior met
       source: "arxiv",
       title: "Queued Paper",
       autoClose: true,
-      downloadPath: "downloads/papers/paper.pdf",
+      downloadPath: "knowledge-base/raw/pdfs/paper.pdf",
       fileSha256: "abc123"
     }
   ]);

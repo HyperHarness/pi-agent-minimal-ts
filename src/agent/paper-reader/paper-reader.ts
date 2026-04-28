@@ -1,6 +1,7 @@
 import path from "node:path";
 import { readFile } from "node:fs/promises";
 import { createPaperChunks } from "./chunks.js";
+import { parseWithDocling } from "./engines/docling.js";
 import { parseWithOpenDataLoader } from "./engines/opendataloader.js";
 import { parseWithPlainTextBaseline } from "./engines/plain-text-baseline.js";
 import {
@@ -84,9 +85,11 @@ function resolveConcreteEngine(engine: PaperParseEngine | undefined): ConcretePa
 
 function sortEnginesByPreference(engines: ConcretePaperParseEngine[]): ConcretePaperParseEngine[] {
   const priority: Record<ConcretePaperParseEngine, number> = {
-    "opendataloader-hybrid": 0,
-    "opendataloader-local": 1,
-    "plain-text-baseline": 2
+    "webpage": 0,
+    "opendataloader-hybrid": 1,
+    "opendataloader-local": 2,
+    "docling": 3,
+    "plain-text-baseline": 4
   };
   return engines.slice().sort((left, right) => priority[left] - priority[right]);
 }
@@ -123,6 +126,15 @@ async function runParser(input: {
   if (input.engine === "plain-text-baseline") {
     return parseWithPlainTextBaseline(input);
   }
+  if (input.engine === "docling") {
+    return parseWithDocling(input);
+  }
+  if (input.engine === "webpage") {
+    throw new PaperReaderError(
+      "parse_failed",
+      "The webpage engine is produced by fetch_paper_webpage, not parse_paper."
+    );
+  }
 
   return parseWithOpenDataLoader({
     pdfPath: input.pdfPath,
@@ -143,20 +155,25 @@ async function parseWithConcreteEngine(input: {
   opendataloaderBin?: string;
 }): Promise<PaperParseResult> {
   const resolved = await resolvePaperSource(input);
+  if (!resolved.source.pdfPath || !resolved.source.pdfSha256) {
+    throw new PaperReaderError("paper_not_found", "Resolved paper source does not point to a PDF.");
+  }
+  const pdfPath = resolved.source.pdfPath;
+  const pdfSha256 = resolved.source.pdfSha256;
   const cached = input.force === true
     ? null
     : await readCachedParse({
       workspaceDir: input.workspaceDir,
       paperKey: resolved.source.paperKey,
       engine: input.engine,
-      pdfSha256: resolved.source.pdfSha256
+      pdfSha256
     });
   if (cached) {
     return {
       status: "already_parsed",
       paperKey: resolved.source.paperKey,
       engine: input.engine,
-      pdfSha256: resolved.source.pdfSha256,
+      pdfSha256,
       artifacts: cached.artifacts,
       quality: cached.quality,
       sections: toSectionPreview(cached.document.sections)
@@ -165,9 +182,9 @@ async function parseWithConcreteEngine(input: {
 
   const parsed = await runParser({
     engine: input.engine,
-    pdfPath: resolved.source.pdfPath,
+    pdfPath,
     paperKey: resolved.source.paperKey,
-    pdfSha256: resolved.source.pdfSha256,
+    pdfSha256,
     ...(resolved.source.title ? { title: resolved.source.title } : {}),
     ...(input.opendataloaderBin ? { opendataloaderBin: input.opendataloaderBin } : {})
   });
@@ -186,7 +203,7 @@ async function parseWithConcreteEngine(input: {
     status: "parsed",
     paperKey: resolved.source.paperKey,
     engine: input.engine,
-    pdfSha256: resolved.source.pdfSha256,
+    pdfSha256,
     artifacts,
     quality,
     sections: toSectionPreview(parsed.document.sections)
@@ -206,14 +223,41 @@ export async function parsePaper(options: ParsePaperOptions): Promise<PaperParse
     });
   }
 
-  const localResult = await parseWithConcreteEngine({
-    workspaceDir: options.workspaceDir,
-    ...(options.path ? { path: options.path } : {}),
-    ...(options.recordPath ? { recordPath: options.recordPath } : {}),
-    engine: "opendataloader-local",
-    ...(options.force !== undefined ? { force: options.force } : {}),
-    ...(options.opendataloaderBin ? { opendataloaderBin: options.opendataloaderBin } : {})
-  });
+  let localResult: PaperParseResult;
+  try {
+    localResult = await parseWithConcreteEngine({
+      workspaceDir: options.workspaceDir,
+      ...(options.path ? { path: options.path } : {}),
+      ...(options.recordPath ? { recordPath: options.recordPath } : {}),
+      engine: "opendataloader-local",
+      ...(options.force !== undefined ? { force: options.force } : {}),
+      ...(options.opendataloaderBin ? { opendataloaderBin: options.opendataloaderBin } : {})
+    });
+  } catch (error) {
+    if (error instanceof PaperReaderError && error.code === "parse_failed") {
+      try {
+        return await parseWithConcreteEngine({
+          workspaceDir: options.workspaceDir,
+          ...(options.path ? { path: options.path } : {}),
+          ...(options.recordPath ? { recordPath: options.recordPath } : {}),
+          engine: "docling",
+          ...(options.force !== undefined ? { force: options.force } : {})
+        });
+      } catch (doclingError) {
+        if (!(doclingError instanceof PaperReaderError) || doclingError.code !== "parse_failed") {
+          throw doclingError;
+        }
+      }
+      return parseWithConcreteEngine({
+        workspaceDir: options.workspaceDir,
+        ...(options.path ? { path: options.path } : {}),
+        ...(options.recordPath ? { recordPath: options.recordPath } : {}),
+        engine: "plain-text-baseline",
+        ...(options.force !== undefined ? { force: options.force } : {})
+      });
+    }
+    throw error;
+  }
 
   if (localResult.quality.status !== "needs_hybrid") {
     return localResult;
@@ -231,6 +275,28 @@ export async function parsePaper(options: ParsePaperOptions): Promise<PaperParse
   } catch (error) {
     if (error instanceof PaperReaderError && error.code === "hybrid_server_unavailable") {
       return localResult;
+    }
+    if (error instanceof PaperReaderError && error.code === "parse_failed") {
+      try {
+        return await parseWithConcreteEngine({
+          workspaceDir: options.workspaceDir,
+          ...(options.path ? { path: options.path } : {}),
+          ...(options.recordPath ? { recordPath: options.recordPath } : {}),
+          engine: "docling",
+          ...(options.force !== undefined ? { force: options.force } : {})
+        });
+      } catch (doclingError) {
+        if (doclingError instanceof PaperReaderError && doclingError.code === "parse_failed") {
+          return parseWithConcreteEngine({
+            workspaceDir: options.workspaceDir,
+            ...(options.path ? { path: options.path } : {}),
+            ...(options.recordPath ? { recordPath: options.recordPath } : {}),
+            engine: "plain-text-baseline",
+            ...(options.force !== undefined ? { force: options.force } : {})
+          });
+        }
+        throw doclingError;
+      }
     }
     throw error;
   }
