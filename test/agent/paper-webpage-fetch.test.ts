@@ -4,6 +4,7 @@ import { mkdtemp, readFile, rm } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import path from "node:path";
 import {
+  diagnosePaperWebPageHtml,
   fetchPaperWebPage,
   parsePaperWebPageHtml
 } from "../../src/agent/paper-webpage-fetch.js";
@@ -170,6 +171,171 @@ test("Science webpage parsing removes access chrome and flags abstract-only page
   }
 });
 
+test("APS webpage parsing can diagnose body-level article text outside the default main panel", () => {
+  const fullText = `
+    <section id="article-text" class="article-text">
+      <h2>Article Text</h2>
+      <p>We present an explicit construction of a relativistic quantum computing architecture.</p>
+      <p>${"The relativistic qubit trajectory supplies a tunable gate parameter. ".repeat(130)}</p>
+      <h2>Conclusion</h2>
+      <p>The architecture forms a universal gate set in the full article text.</p>
+    </section>
+  `;
+  const html = `
+    <html>
+      <head>
+        <meta name="citation_title" content="Universal Quantum Computer from Relativistic Motion">
+        <meta name="citation_doi" content="10.1103/PhysRevLett.134.190601">
+        <meta name="citation_journal_title" content="Physical Review Letters">
+      </head>
+      <body>
+        <header>Physical Review Letters Search Subscribe</header>
+        <main>
+          <h1>Universal Quantum Computer from Relativistic Motion</h1>
+          <h2>Abstract</h2>
+          <p>We present an explicit construction using relativistic quantum motion.</p>
+          <h2>Article Text</h2>
+          <h2>Supplemental Material</h2>
+          <h2>References (53)</h2>
+          <p>M. A. Nielsen and I. L. Chuang, Quantum Computation and Quantum Information.</p>
+        </main>
+        ${fullText}
+        <footer>Published by the American Physical Society</footer>
+      </body>
+    </html>
+  `;
+
+  const diagnostic = diagnosePaperWebPageHtml({
+    url: "https://journals.aps.org/prl/abstract/10.1103/PhysRevLett.134.190601",
+    html
+  });
+  const extraction = parsePaperWebPageHtml({
+    url: "https://journals.aps.org/prl/abstract/10.1103/PhysRevLett.134.190601",
+    html
+  });
+
+  assert.equal(diagnostic.selected.selector, "body");
+  assert.ok(diagnostic.candidates.some((candidate) => candidate.selector === "main"));
+  assert.equal(extraction.stats.extractedFrom, "body");
+  assert.match(extraction.markdown, /## Article Text/);
+  assert.match(extraction.markdown, /relativistic qubit trajectory supplies a tunable gate parameter/);
+  assert.match(extraction.markdown, /## Conclusion/);
+  assert.doesNotMatch(extraction.markdown, /Search Subscribe/);
+});
+
+test("APS webpage parsing flags authorization-required pages as access-limited", async () => {
+  const workspace = await mkdtemp(path.join(tmpdir(), "pi-paper-aps-access-"));
+  try {
+    const extraction = parsePaperWebPageHtml({
+      url: "https://journals.aps.org/prl/abstract/10.1103/rqkg-dw31#fulltext",
+      html: `
+        <html>
+          <head>
+            <meta name="citation_title" content="Experimental Quantum Error Correction below the Surface Code Threshold via All-Microwave Leakage Suppression">
+            <meta name="citation_doi" content="10.1103/rqkg-dw31">
+            <meta name="citation_journal_title" content="Physical Review Letters">
+          </head>
+          <body>
+            <main>
+              <h1>Experimental Quantum Error Correction below the Surface Code Threshold via All-Microwave Leakage Suppression</h1>
+              <h2>Abstract</h2>
+              <p>Quantum error correction enables practical quantum computing.</p>
+              <h2>Article Text</h2>
+              <h1>Authorization Required</h1>
+              <p>We need you to provide your credentials before accessing this content.</p>
+              <p>APS Member Log In</p>
+              <h2>Other Options</h2>
+              <ul>
+                <li>Buy Article</li>
+                <li>Log in with APS Journals Account</li>
+                <li>Log in with username/password provided by your institution</li>
+              </ul>
+              <h2>Supplemental Material (Subscription Required)</h2>
+              <h2>References (Subscription Required)</h2>
+            </main>
+          </body>
+        </html>
+      `
+    });
+
+    assert.equal(extraction.access.status, "access_limited");
+    assert.ok(extraction.access.signals.includes("aps_authorization_required"));
+    assert.ok(extraction.access.signals.includes("aps_credentials_required"));
+    assert.ok(extraction.access.signals.includes("aps_subscription_required"));
+    assert.match(extraction.access.message ?? "", /log in/i);
+
+    const result = await savePaperWebPageParse({
+      workspaceDir: workspace,
+      extraction
+    });
+
+    assert.ok(["poor", "needs_hybrid"].includes(result.quality.status));
+    assert.ok(
+      result.quality.warnings.some((warning) =>
+        warning.includes("Ask the user to log in")
+      )
+    );
+  } finally {
+    await rm(workspace, { recursive: true, force: true });
+  }
+});
+
+test("Nature webpage parsing flags subscription previews as access-limited", async () => {
+  const workspace = await mkdtemp(path.join(tmpdir(), "pi-paper-nature-access-"));
+  try {
+    const extraction = parsePaperWebPageHtml({
+      url: "https://www.nature.com/articles/s41567-022-01591-2",
+      html: `
+        <html>
+          <head>
+            <meta name="citation_title" content="Parity measurement in the strong dispersive regime of circuit quantum acoustodynamics">
+            <meta name="citation_doi" content="10.1038/s41567-022-01591-2">
+            <meta name="citation_journal_title" content="Nature Physics">
+          </head>
+          <body>
+            <article>
+              <h1>Parity measurement in the strong dispersive regime of circuit quantum acoustodynamics</h1>
+              <h2>Abstract</h2>
+              <p>Mechanical resonators are emerging as an important new platform for quantum science and technologies.</p>
+              <p>Access through your institution</p>
+              <p>Buy or subscribe</p>
+              <p>This is a preview of subscription content, access via your institution</p>
+              <h2>Access options</h2>
+              <p>Access Nature and 54 other Nature Portfolio journals</p>
+              <h3>Buy this article</h3>
+              <p>Purchase on SpringerLink</p>
+              <p>Instant access to the full article PDF.</p>
+              <h2>Data availability</h2>
+              <p>Source data are provided with this paper.</p>
+              <h2>References</h2>
+              <p>${"Reference metadata ".repeat(180)}</p>
+            </article>
+          </body>
+        </html>
+      `
+    });
+
+    assert.equal(extraction.access.status, "access_limited");
+    assert.ok(extraction.access.signals.includes("nature_preview_subscription"));
+    assert.ok(extraction.access.signals.includes("nature_institution_access"));
+    assert.ok(extraction.access.signals.includes("nature_springerlink_purchase"));
+
+    const result = await savePaperWebPageParse({
+      workspaceDir: workspace,
+      extraction
+    });
+
+    assert.ok(["poor", "needs_hybrid"].includes(result.quality.status));
+    assert.ok(
+      result.quality.warnings.some((warning) =>
+        warning.includes("Ask the user to log in")
+      )
+    );
+  } finally {
+    await rm(workspace, { recursive: true, force: true });
+  }
+});
+
 test("savePaperWebPageParse writes webpage artifacts under wiki sources", async () => {
   const workspace = await mkdtemp(path.join(tmpdir(), "pi-paper-webpage-"));
   try {
@@ -250,6 +416,53 @@ test("savePaperWebPageParse writes webpage artifacts under wiki sources", async 
       extraction
     });
     assert.equal(cached.status, "already_parsed");
+  } finally {
+    await rm(workspace, { recursive: true, force: true });
+  }
+});
+
+test("arXiv HTML webpage parses under canonical arxiv key and keeps inline citation links", async () => {
+  const workspace = await mkdtemp(path.join(tmpdir(), "pi-paper-webpage-arxiv-"));
+  try {
+    const extraction = parsePaperWebPageHtml({
+      url: "https://arxiv.org/html/2601.00425v1",
+      html: `
+        <html>
+          <head>
+            <meta name="citation_title" content="Chip-scale superconducting quantum gravimeter">
+            <meta name="citation_author" content="Alice Example">
+          </head>
+          <body>
+            <article>
+              <h1>Chip-scale superconducting quantum gravimeter</h1>
+              <h6>Abstract</h6>
+              <p>${"Long arXiv article body with inline citations and author-specific structure. ".repeat(140)}</p>
+              <p>
+                Prior work is cited directly inline
+                <a href="https://doi.org/10.1103/PhysRevLett.134.190601">Phys. Rev. Lett. 134, 190601</a>
+                instead of in a References section.
+              </p>
+            </article>
+          </body>
+        </html>
+      `
+    });
+
+    assert.equal(extraction.metadata.referenceLinks?.[0]?.kind, "doi");
+    assert.match(extraction.metadata.referenceSummary ?? "", /linked citation/);
+
+    const result = await savePaperWebPageParse({
+      workspaceDir: workspace,
+      extraction
+    });
+
+    assert.equal(result.paperKey, "arxiv-2601.00425");
+    assert.equal(result.quality.status, "good");
+    assert.ok(
+      !result.quality.warnings.some((warning) =>
+        warning.includes("No main body sections were detected")
+      )
+    );
   } finally {
     await rm(workspace, { recursive: true, force: true });
   }

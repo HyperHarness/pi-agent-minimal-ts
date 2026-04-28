@@ -312,49 +312,62 @@ async function handlePaperPageClassified(message, sender) {
 
     await reportJobStatus(job, "page_classified", message.message);
 
-    if (job.purpose === "webpage") {
+    var shouldRegisterWebpageSnapshot =
+      job.purpose === "webpage" || job.purpose === "download_and_webpage";
+    if (shouldRegisterWebpageSnapshot) {
       if (!message.html) {
         await reportJobStatus(
           job,
           "awaiting_user_verification",
           "The page loaded, but no article HTML snapshot was available."
         );
-        return;
-      }
-
-      const response = await sendNativeMessage({
-        type: "register_webpage_snapshot",
-        jobId: job.jobId,
-        articleUrl: job.articleUrl,
-        source: job.source,
-        html: message.html,
-        ...(message.finalUrl ? { finalUrl: message.finalUrl } : {}),
-        ...(message.title ? { title: message.title } : job.title ? { title: job.title } : {})
-      });
-
-      if (response && response.type === "webpage_registered") {
-        await reportJobStatus(
-          job,
-          "webpage_snapshot_ready",
-          "Registered webpage snapshot and saved parsed article artifacts."
-        );
-        jobsById.delete(job.jobId);
-        if (typeof job.tabId === "number") {
-          jobsByTabId.delete(job.tabId);
+        if (job.purpose === "webpage") {
+          return;
         }
-        await persistState();
-        await closeCompletedJobTab(job);
-        return;
-      }
+      } else {
+        const response = await sendNativeMessage({
+          type: "register_webpage_snapshot",
+          jobId: job.jobId,
+          articleUrl: job.articleUrl,
+          source: job.source,
+          html: message.html,
+          ...(message.finalUrl ? { finalUrl: message.finalUrl } : {}),
+          ...(message.title ? { title: message.title } : job.title ? { title: job.title } : {})
+        });
 
-      await reportJobStatus(
-        job,
-        "awaiting_user_verification",
-        response && response.message
-          ? response.message
-          : "The webpage snapshot could not be registered by the native host."
-      );
-      return;
+        if (response && response.type === "webpage_registered") {
+          await reportJobStatus(
+            job,
+            "webpage_snapshot_ready",
+            "Registered webpage snapshot and saved parsed article artifacts."
+          );
+          if (job.purpose === "webpage") {
+            jobsById.delete(job.jobId);
+            if (typeof job.tabId === "number") {
+              jobsByTabId.delete(job.tabId);
+            }
+            await persistState();
+            await closeCompletedJobTab(job);
+            return;
+          }
+        } else {
+          await reportJobStatus(
+            job,
+            "awaiting_user_verification",
+            response && response.message
+              ? response.message
+              : "The webpage snapshot could not be registered by the native host."
+          );
+          if (job.purpose === "webpage") {
+            return;
+          }
+        }
+
+        if (job.purpose === "download_and_webpage") {
+          job.webpageSnapshotRegistered = response && response.type === "webpage_registered";
+          await persistState();
+        }
+      }
     }
 
     if (message.pdfUrl) {

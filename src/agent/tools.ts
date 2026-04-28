@@ -43,7 +43,8 @@ import { getPublisherAdapter } from "./publisher-adapters/index.js";
 import { fetchWebPage } from "./web-fetch.js";
 import { fetchPaperWebPage } from "./paper-webpage-fetch.js";
 import { searchWeb, type WebSearchResult } from "./web-search.js";
-import type { PaperSearchResult, SupportedPaperSource } from "./paper-types.js";
+import type { PaperDownloadResult, PaperSearchResult, SupportedPaperSource } from "./paper-types.js";
+import { buildArxivHtmlUrl } from "./arxiv.js";
 
 const getTimeParameters = Type.Object({
   timezone: Type.Optional(Type.String({ description: "Optional IANA timezone name." }))
@@ -278,13 +279,41 @@ type SearchPapersTool = AgentTool<
   typeof searchPapersParameters,
   SearchToolDetails
 >;
+type DownloadPaperReadingClosure =
+  | {
+      status: "parsed" | "already_parsed";
+      strategy: "pdf" | "webpage";
+      paperKey: string;
+      engine: Awaited<ReturnType<typeof parsePaper>>["engine"];
+      markdownPath: string;
+      parsePath: string;
+      qualityPath: string;
+      chunksPath: string;
+      quality: Awaited<ReturnType<typeof parsePaper>>["quality"];
+    }
+  | {
+      status: "queued";
+      strategy: "webpage" | "pdf";
+      jobId?: string;
+      message: string;
+    }
+  | {
+      status: "failed";
+      strategy: "webpage" | "pdf";
+      message: string;
+    };
+type DownloadPaperClosedLoopDetails = PaperDownloadResult & {
+  reading?: DownloadPaperReadingClosure;
+};
 type DownloadPaperTool = AgentTool<
   typeof downloadPaperParameters,
-  Awaited<ReturnType<typeof downloadPaper>>
+  DownloadPaperClosedLoopDetails
 >;
 type RegisterManualPaperDownloadTool = AgentTool<
   typeof registerManualPaperDownloadParameters,
-  Awaited<ReturnType<typeof registerManualPaperDownload>>
+  Awaited<ReturnType<typeof registerManualPaperDownload>> & {
+    reading?: DownloadPaperReadingClosure;
+  }
 >;
 type OpenPaperPageForLoginResult = {
   url?: string;
@@ -339,6 +368,31 @@ function summarizePaperSearchResults(results: PaperSearchResult[]): SearchResult
       ...(primarySource?.canonicalId ? { canonicalId: primarySource.canonicalId } : {})
     };
   });
+}
+
+function summarizeParseResult(
+  result: Awaited<ReturnType<typeof parsePaper>>,
+  strategy: "pdf" | "webpage"
+): DownloadPaperReadingClosure {
+  return {
+    status: result.status,
+    strategy,
+    paperKey: result.paperKey,
+    engine: result.engine,
+    markdownPath: result.artifacts.markdownPath,
+    parsePath: result.artifacts.parsePath,
+    qualityPath: result.artifacts.qualityPath,
+    chunksPath: result.artifacts.chunksPath,
+    quality: result.quality
+  };
+}
+
+function isWebpageFirstPublisher(source: string): source is SupportedPaperSource {
+  return source === "aps" || source === "nature" || source === "science";
+}
+
+function formatReadingError(error: unknown, fallback: string): string {
+  return error instanceof Error && error.message ? error.message : fallback;
 }
 type OpenPaperPageForLoginTool = AgentTool<
   typeof openPaperPageForLoginParameters,
@@ -677,11 +731,120 @@ export function createTools(workspaceDir: string, dependencies: ToolDependencies
     (async (options: { workspaceDir: string; url: string }) =>
       paperBrowserManagerClient.openArticle({ url: options.url }));
 
+  const parseDownloadedPdfForReading = async (
+    recordPath: string
+  ): Promise<DownloadPaperReadingClosure> => {
+    try {
+      return summarizeParseResult(
+        await parsePaperImpl({
+          workspaceDir: resolvedWorkspaceDir,
+          recordPath
+        }),
+        "pdf"
+      );
+    } catch (error) {
+      return {
+        status: "failed",
+        strategy: "pdf",
+        message: formatReadingError(error, "Downloaded PDF could not be parsed into markdown.")
+      };
+    }
+  };
+
+  const parseArxivWebpageForReading = async (
+    canonicalId: string
+  ): Promise<DownloadPaperReadingClosure | undefined> => {
+    try {
+      const extraction = await fetchPaperWebPageImpl({
+        url: buildArxivHtmlUrl(canonicalId)
+      });
+      return summarizeParseResult(
+        await savePaperWebPageParseImpl({
+          workspaceDir: resolvedWorkspaceDir,
+          extraction,
+          paperKey: `arxiv-${canonicalId}`
+        }),
+        "webpage"
+      );
+    } catch {
+      return undefined;
+    }
+  };
+
+  const describeDownloadReadingClosure = async (
+    result: PaperDownloadResult
+  ): Promise<DownloadPaperReadingClosure | undefined> => {
+    if (result.status === "downloaded" || result.status === "already_downloaded") {
+      if (result.source === "arxiv") {
+        return (
+          await parseArxivWebpageForReading(result.canonicalId)
+        ) ?? parseDownloadedPdfForReading(result.recordPath);
+      }
+
+      if (result.source === "external") {
+        return parseDownloadedPdfForReading(result.recordPath);
+      }
+
+      if (isWebpageFirstPublisher(result.source)) {
+        if (dependencies.extensionBridge === undefined) {
+          return {
+            status: "failed",
+            strategy: "webpage",
+            message:
+              "Publisher papers are read from webpage markdown first, but no browser extension bridge is configured to capture the article page."
+          };
+        }
+
+        try {
+          const queued = await dependencies.extensionBridge.submitJob(
+            createPaperExtensionJob({
+              articleUrl: result.articleUrl,
+              source: result.source,
+              purpose: "webpage",
+              autoClose: true
+            })
+          );
+          return {
+            status: "queued",
+            strategy: "webpage",
+            jobId: queued.jobId,
+            message:
+              "Publisher PDF is downloaded. Browser extension webpage capture was queued so the reading source markdown can be generated."
+          };
+        } catch (error) {
+          return {
+            status: "failed",
+            strategy: "webpage",
+            message: formatReadingError(error, "Publisher webpage markdown capture could not be queued.")
+          };
+        }
+      }
+    }
+
+    if (result.status === "extension_job_queued" && isWebpageFirstPublisher(result.source)) {
+      return {
+        status: "queued",
+        strategy: "webpage",
+        jobId: result.jobId,
+        message:
+          "Browser extension will capture the publisher webpage markdown and download the PDF. The download is complete only after markdown artifacts are saved."
+      };
+    }
+
+    return undefined;
+  };
+
   let cleanupPromise: Promise<void> | undefined;
   const closePaperManager = async (): Promise<void> => {
     cleanupPromise ??= paperBrowserManagerClient.close();
     await cleanupPromise;
   };
+
+  const shouldDescribeDownloadReadingClosure =
+    dependencies.downloadPaper === undefined ||
+    dependencies.fetchPaperWebPage !== undefined ||
+    dependencies.savePaperWebPageParse !== undefined ||
+    dependencies.parsePaper !== undefined;
 
   const getTimeTool: GetTimeTool = {
     name: "get_time",
@@ -836,16 +999,23 @@ export function createTools(workspaceDir: string, dependencies: ToolDependencies
     name: "download_paper",
     label: "Download Paper",
     description:
-      "Downloads a paper by id or URL through the unified paper manager, reusing the managed browser flow for supported publishers. When downloading a publisher URL from search_papers, pass the returned title so the manager can try an exact-title arXiv preprint fallback if the publisher download fails.",
+      "Downloads a paper by id or URL through the unified paper manager and closes the reading loop by generating or queuing markdown artifacts. APS, Nature, and Science use browser-extension webpage capture first; arXiv and other PDFs are parsed after download. When downloading a publisher URL from search_papers, pass the returned title so the manager can try an exact-title arXiv preprint fallback if the publisher download fails.",
     parameters: downloadPaperParameters,
     executionMode: "sequential",
     execute: async (_toolCallId: string, args: DownloadPaperParameters) => {
-      const result = await downloadPaperImpl({
+      const rawResult = await downloadPaperImpl({
         workspaceDir: resolvedWorkspaceDir,
         ...(args.id ? { id: args.id } : {}),
         ...(args.url ? { url: args.url } : {}),
         ...(args.title ? { title: args.title } : {})
       });
+      const reading = shouldDescribeDownloadReadingClosure
+        ? await describeDownloadReadingClosure(rawResult)
+        : undefined;
+      const result: DownloadPaperClosedLoopDetails = {
+        ...rawResult,
+        ...(reading ? { reading } : {})
+      };
 
       return {
         content: [{ type: "text", text: JSON.stringify(result) }],
@@ -869,10 +1039,17 @@ export function createTools(workspaceDir: string, dependencies: ToolDependencies
         pdfPath: resolvedPdfPath,
         ...(args.title ? { title: args.title } : {})
       });
+      const reading = dependencies.registerManualPaperDownload === undefined
+        ? await parseDownloadedPdfForReading(result.recordPath)
+        : undefined;
+      const output = {
+        ...result,
+        ...(reading ? { reading } : {})
+      };
 
       return {
-        content: [{ type: "text", text: JSON.stringify(result) }],
-        details: result
+        content: [{ type: "text", text: JSON.stringify(output) }],
+        details: output
       };
     }
   };

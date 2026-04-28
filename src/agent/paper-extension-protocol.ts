@@ -13,7 +13,7 @@ export type ExtensionJobStatus =
   | "downloaded"
   | "webpage_snapshot_ready";
 
-export type ExtensionJobPurpose = "download" | "webpage";
+export type ExtensionJobPurpose = "download" | "webpage" | "download_and_webpage";
 
 export interface ExtensionPaperJobPayload {
   jobId: string;
@@ -109,7 +109,11 @@ const VALID_JOB_STATUSES = new Set<ExtensionJobStatus>([
   "webpage_snapshot_ready"
 ]);
 
-const VALID_JOB_PURPOSES = new Set<ExtensionJobPurpose>(["download", "webpage"]);
+const VALID_JOB_PURPOSES = new Set<ExtensionJobPurpose>([
+  "download",
+  "webpage",
+  "download_and_webpage"
+]);
 
 function parseRecord(value: unknown, label: string): Record<string, unknown> {
   if (typeof value !== "object" || value === null || Array.isArray(value)) {

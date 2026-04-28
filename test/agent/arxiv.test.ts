@@ -1,6 +1,7 @@
 import test from "node:test";
 import assert from "node:assert/strict";
 import {
+  buildArxivHtmlUrl,
   buildArxivPdfUrl,
   downloadArxivPdf,
   parseArxivLocator,
@@ -55,6 +56,13 @@ test("buildArxivPdfUrl accepts legacy identifiers", () => {
   );
 });
 
+test("buildArxivHtmlUrl accepts modern identifiers", () => {
+  assert.equal(
+    buildArxivHtmlUrl("2601.00425v1"),
+    "https://arxiv.org/html/2601.00425"
+  );
+});
+
 test("buildArxivPdfUrl rejects malformed identifiers", () => {
   assert.throws(() => buildArxivPdfUrl("not an arxiv id"), /arXiv/i);
 });
@@ -63,6 +71,7 @@ test("parseArxivLocator canonicalizes arXiv PDF URLs", () => {
   assert.deepEqual(parseArxivLocator("https://arxiv.org/pdf/2401.01234.pdf"), {
     id: "2401.01234",
     absUrl: "https://arxiv.org/abs/2401.01234",
+    htmlUrl: "https://arxiv.org/html/2401.01234",
     pdfUrl: "https://arxiv.org/pdf/2401.01234.pdf"
   });
 });
@@ -71,7 +80,17 @@ test("parseArxivLocator strips arXiv version suffixes from abs URLs", () => {
   assert.deepEqual(parseArxivLocator("https://arxiv.org/abs/2401.01234v2"), {
     id: "2401.01234",
     absUrl: "https://arxiv.org/abs/2401.01234",
+    htmlUrl: "https://arxiv.org/html/2401.01234",
     pdfUrl: "https://arxiv.org/pdf/2401.01234.pdf"
+  });
+});
+
+test("parseArxivLocator canonicalizes arXiv HTML URLs", () => {
+  assert.deepEqual(parseArxivLocator("https://arxiv.org/html/2601.00425v1"), {
+    id: "2601.00425",
+    absUrl: "https://arxiv.org/abs/2601.00425",
+    htmlUrl: "https://arxiv.org/html/2601.00425",
+    pdfUrl: "https://arxiv.org/pdf/2601.00425.pdf"
   });
 });
 

@@ -41,7 +41,11 @@ const VALID_JOB_STATUSES = new Set<ExtensionJobStatus>([
 ]);
 
 const VALID_PAPER_SOURCES = new Set<PaperSource>(["arxiv", "science", "nature", "aps", "external"]);
-const VALID_JOB_PURPOSES = new Set<ExtensionJobPurpose>(["download", "webpage"]);
+const VALID_JOB_PURPOSES = new Set<ExtensionJobPurpose>([
+  "download",
+  "webpage",
+  "download_and_webpage"
+]);
 
 export function resolvePaperDownloadJobsPath(options: { workspaceDir: string }): string {
   return path.join(options.workspaceDir, ".browser-profile", "paper-download-jobs.jsonl");

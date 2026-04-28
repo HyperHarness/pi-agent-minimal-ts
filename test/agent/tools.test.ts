@@ -829,6 +829,93 @@ test("download_paper delegates id inputs to the injected paper manager dependenc
   }
 });
 
+test("download_paper prefers arXiv HTML webpage markdown before PDF parsing", async () => {
+  const workspace = await mkdtemp(path.join(tmpdir(), "pi-agent-tools-"));
+  const recordPath = path.join(workspace, "papers", "arxiv-2601.00425.json");
+  const pdfPath = path.join(workspace, "papers", "arxiv-2601.00425.pdf");
+  const managerResult: PaperDownloadResult = {
+    status: "downloaded",
+    source: "arxiv",
+    canonicalId: "2601.00425",
+    articleUrl: "https://arxiv.org/abs/2601.00425",
+    finalPdfUrl: "https://arxiv.org/pdf/2601.00425.pdf",
+    path: pdfPath,
+    recordPath,
+  };
+  const calls: string[] = [];
+
+  try {
+    const downloadPaperTool = getDownloadPaperTool(workspace, {
+      downloadPaper: async () => managerResult,
+      fetchPaperWebPage: async (options) => {
+        calls.push(`fetch:${options.url}`);
+        return {
+          url: options.url,
+          title: "Arxiv HTML Paper",
+          markdown: "# Arxiv HTML Paper\n\nFull article text from arXiv HTML.",
+          metadata: {
+            title: "Arxiv HTML Paper",
+            authors: [],
+          },
+          access: {
+            status: "full_text",
+            signals: [],
+          },
+          stats: {
+            chars: 48,
+            wordsApprox: 8,
+            navigationLinesRemoved: 0,
+            extractedFrom: "article",
+          },
+        };
+      },
+      savePaperWebPageParse: async (options) => {
+        calls.push(`save:${options.paperKey}`);
+        return {
+          status: "parsed",
+          paperKey: options.paperKey ?? "arxiv-2601.00425",
+          engine: "webpage",
+          pdfSha256: "webpage-hash",
+          artifacts: {
+            sourcePath: path.join(workspace, "knowledge-base/wiki/sources/arxiv-2601.00425/source.json"),
+            parsePath: path.join(workspace, "knowledge-base/wiki/sources/arxiv-2601.00425/parses/webpage/parse.json"),
+            markdownPath: path.join(workspace, "knowledge-base/wiki/sources/arxiv-2601.00425/parses/webpage/document.md"),
+            qualityPath: path.join(workspace, "knowledge-base/wiki/sources/arxiv-2601.00425/parses/webpage/quality.json"),
+            chunksPath: path.join(workspace, "knowledge-base/wiki/sources/arxiv-2601.00425/chunks/webpage.jsonl"),
+          },
+          quality: {
+            status: "good",
+            score: 1,
+            pages: 1,
+            totalTextLength: 48,
+            emptyPageCount: 0,
+            headingCount: 1,
+            tableCount: 0,
+            figureOrCaptionCount: 0,
+            warnings: [],
+          },
+          sections: [],
+        };
+      },
+    });
+
+    const result = await downloadPaperTool.execute(
+      "call-arxiv-html",
+      { id: "2601.00425" },
+      undefined,
+    );
+
+    assert.deepEqual(calls, [
+      "fetch:https://arxiv.org/html/2601.00425",
+      "save:arxiv-2601.00425",
+    ]);
+    assert.equal((result.details as { reading?: { strategy?: string } }).reading?.strategy, "webpage");
+    assert.equal((result.details as { reading?: { engine?: string } }).reading?.engine, "webpage");
+  } finally {
+    await rm(workspace, { recursive: true, force: true });
+  }
+});
+
 test("download_paper delegates url inputs to the injected paper manager dependency and returns manager details", async () => {
   const workspace = await mkdtemp(path.join(tmpdir(), "pi-agent-tools-"));
   const recordPath = path.join(workspace, "papers", "science-10.1126-science.adz8659.json");

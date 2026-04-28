@@ -284,6 +284,17 @@ function classifyPaperUrl(
         };
       }
 
+      if (path.startsWith("/html/")) {
+        const canonicalId = decodeURIComponent(path.slice("/html/".length));
+        return {
+          source: "arxiv",
+          canonicalId,
+          articleUrl: `https://arxiv.org/abs/${canonicalId}`,
+          pdfUrl: `https://arxiv.org/pdf/${canonicalId}.pdf`,
+          action: "direct_download"
+        };
+      }
+
       if (path.startsWith("/pdf/")) {
         const canonicalId = decodeURIComponent(path.slice("/pdf/".length).replace(/\.pdf$/i, ""));
         return {
@@ -552,12 +563,14 @@ async function submitPaperExtensionJob(input: {
   articleUrl: string;
   source: SupportedPaperSource | "external";
   title?: string;
+  purpose?: "download" | "webpage" | "download_and_webpage";
 }): Promise<PaperDownloadResult> {
   return input.bridge.submitJob(
     createPaperExtensionJob({
       articleUrl: input.articleUrl,
       source: input.source,
-      ...(input.title ? { title: input.title } : {})
+      ...(input.title ? { title: input.title } : {}),
+      ...(input.purpose ? { purpose: input.purpose } : {})
     })
   );
 }
@@ -1140,11 +1153,12 @@ export async function downloadPaper(options: DownloadPaperOptions): Promise<Pape
   if (options.extensionBridge) {
     try {
       return await submitPaperExtensionJob({
-          bridge: options.extensionBridge,
-          articleUrl: classification.articleUrl,
-          source: classification.source,
-          title: options.title
-        });
+        bridge: options.extensionBridge,
+        articleUrl: classification.articleUrl,
+        source: classification.source,
+        title: options.title,
+        purpose: "download_and_webpage"
+      });
     } catch (error) {
       if (options.usePlaywrightFallback !== true) {
         const arxivFallback = await tryDownloadArxivPreprintByTitle({

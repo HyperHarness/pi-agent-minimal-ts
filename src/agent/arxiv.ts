@@ -16,6 +16,7 @@ export interface SearchArxivOptions {
 export interface ArxivLocator {
   id: string;
   absUrl: string;
+  htmlUrl: string;
   pdfUrl: string;
 }
 
@@ -82,6 +83,10 @@ export function buildArxivAbsUrl(id: string): string {
   return `https://arxiv.org/abs/${normalizeArxivId(id)}`;
 }
 
+export function buildArxivHtmlUrl(id: string): string {
+  return `https://arxiv.org/html/${normalizeArxivId(id)}`;
+}
+
 export function buildArxivPdfUrl(id: string): string {
   return `https://arxiv.org/pdf/${normalizeArxivId(id)}.pdf`;
 }
@@ -102,6 +107,10 @@ function extractArxivIdFromUrl(input: string): string | null {
       return path.slice("/pdf/".length).replace(/\.pdf$/i, "");
     }
 
+    if (path.startsWith("/html/")) {
+      return path.slice("/html/".length);
+    }
+
     return null;
   } catch {
     return null;
@@ -115,6 +124,7 @@ export function parseArxivLocator(input: string): ArxivLocator {
   return {
     id,
     absUrl: buildArxivAbsUrl(id),
+    htmlUrl: buildArxivHtmlUrl(id),
     pdfUrl: buildArxivPdfUrl(id)
   };
 }

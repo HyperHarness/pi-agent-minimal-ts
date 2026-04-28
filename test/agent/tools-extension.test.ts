@@ -101,12 +101,25 @@ test("download_paper uses injected extension bridge for publisher URLs", async (
     const result = await tool.execute("tool-extension-publisher", { url: articleUrl }, undefined);
 
     assert.equal(submittedJobs.length, 1);
+    assert.deepEqual(submittedJobs[0], {
+      jobId: (submittedJobs[0] as { jobId: string }).jobId,
+      articleUrl,
+      source: "nature",
+      purpose: "download_and_webpage",
+    });
     assert.deepEqual(result.details, {
       status: "extension_job_queued",
       source: "nature",
       articleUrl,
       jobId: (submittedJobs[0] as { jobId: string }).jobId,
       message: "Queued by injected extension bridge.",
+      reading: {
+        status: "queued",
+        strategy: "webpage",
+        jobId: (submittedJobs[0] as { jobId: string }).jobId,
+        message:
+          "Browser extension will capture the publisher webpage markdown and download the PDF. The download is complete only after markdown artifacts are saved.",
+      },
     });
   } finally {
     await rm(workspace, { recursive: true, force: true });

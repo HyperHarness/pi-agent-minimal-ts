@@ -18,6 +18,7 @@ import type {
 import type { PaperWebPageExtraction } from "../../paper-webpage-fetch.js";
 import { getPublisherAdapter } from "../../publisher-adapters/index.js";
 import { resolvePublisherCanonicalIdFromArticleUrl } from "../../paper-download.js";
+import { parseArxivLocator } from "../../arxiv.js";
 
 export interface SavePaperWebPageParseOptions {
   workspaceDir: string;
@@ -42,6 +43,13 @@ function sanitizePaperKey(value: string): string {
 }
 
 function paperKeyFromUrl(url: string): string | undefined {
+  try {
+    const locator = parseArxivLocator(url);
+    return sanitizePaperKey(`arxiv-${locator.id}`);
+  } catch {
+    // Continue with publisher URL matching.
+  }
+
   try {
     const adapter = getPublisherAdapter(url);
     const canonicalId = resolvePublisherCanonicalIdFromArticleUrl({
@@ -206,6 +214,16 @@ function resolvePublisherMetadata(url: string): {
   source?: string;
   canonicalId?: string;
 } {
+  try {
+    const locator = parseArxivLocator(url);
+    return {
+      source: "arxiv",
+      canonicalId: locator.id
+    };
+  } catch {
+    // Continue with supported publisher URL matching.
+  }
+
   try {
     const adapter = getPublisherAdapter(url);
     const canonicalId = resolvePublisherCanonicalIdFromArticleUrl({

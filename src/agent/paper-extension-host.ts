@@ -14,6 +14,8 @@ import {
 } from "./paper-extension-protocol.js";
 import { parsePaperWebPageHtml } from "./paper-webpage-fetch.js";
 import { savePaperWebPageParse } from "./paper-reader/engines/webpage.js";
+import { parsePaper } from "./paper-reader/paper-reader.js";
+import type { PaperParseResult } from "./paper-reader/types.js";
 import {
   readPaperRecord,
   resolveExternalPaperPdfPath,
@@ -334,6 +336,11 @@ async function registerExternalDownload(options: {
       ...(title ? { title } : {})
     }
   });
+  const parseResult = await tryParseRegisteredPdf({
+    workspaceDir: options.workspaceDir,
+    recordPath,
+    pdfBytes: options.pdfBytes
+  });
 
   await appendDownloadedJobEvent({
     workspaceDir: options.workspaceDir,
@@ -342,7 +349,8 @@ async function registerExternalDownload(options: {
     downloadPath,
     recordPath,
     fileSha256,
-    title
+    title,
+    parseResult
   });
 
   return {
@@ -436,6 +444,11 @@ async function registerSupportedPublisherDownload(options: {
       downloadPath
     }
   });
+  const parseResult = await tryParseRegisteredPdf({
+    workspaceDir: options.workspaceDir,
+    recordPath,
+    pdfBytes: options.pdfBytes
+  });
 
   await appendDownloadedJobEvent({
     workspaceDir: options.workspaceDir,
@@ -444,7 +457,8 @@ async function registerSupportedPublisherDownload(options: {
     downloadPath,
     recordPath,
     fileSha256,
-    title
+    title,
+    parseResult
   });
 
   return {
@@ -570,6 +584,7 @@ async function appendDownloadedJobEvent(options: {
   recordPath: string;
   fileSha256: string;
   title?: string;
+  parseResult?: PaperParseResult;
 }): Promise<void> {
   await appendPaperDownloadJobEvent({
     workspaceDir: options.workspaceDir,
@@ -582,9 +597,35 @@ async function appendDownloadedJobEvent(options: {
       downloadPath: options.downloadPath,
       recordPath: options.recordPath,
       fileSha256: options.fileSha256,
+      ...(options.parseResult ? {
+        paperKey: options.parseResult.paperKey,
+        markdownPath: options.parseResult.artifacts.markdownPath,
+        parsePath: options.parseResult.artifacts.parsePath,
+        qualityPath: options.parseResult.artifacts.qualityPath,
+        chunksPath: options.parseResult.artifacts.chunksPath
+      } : {}),
       ...(options.title ? { title: options.title } : {})
     }
   });
+}
+
+async function tryParseRegisteredPdf(input: {
+  workspaceDir: string;
+  recordPath: string;
+  pdfBytes: Buffer;
+}): Promise<PaperParseResult | undefined> {
+  if (input.pdfBytes.byteLength < 1024) {
+    return undefined;
+  }
+
+  try {
+    return await parsePaper({
+      workspaceDir: input.workspaceDir,
+      recordPath: input.recordPath
+    });
+  } catch {
+    return undefined;
+  }
 }
 
 function registrationError(input: {

@@ -477,6 +477,36 @@ test("downloadPaper downloads arXiv ids, writes the PDF file, and returns downlo
   }
 });
 
+test("downloadPaper treats arXiv HTML URLs as arXiv papers", async () => {
+  const workspaceDir = await mkdtemp(path.join(os.tmpdir(), "paper-manager-"));
+  const pdfBytes = Buffer.from("%PDF-1.4\nmock pdf\n", "utf8");
+  const fetchCalls: string[] = [];
+
+  try {
+    const result = await downloadPaper({
+      workspaceDir,
+      url: "https://arxiv.org/html/2601.00425v1",
+      fetchImpl: async (input) => {
+        fetchCalls.push(String(input));
+        return new Response(pdfBytes, {
+          status: 200,
+          headers: {
+            "content-type": "application/pdf"
+          }
+        });
+      }
+    });
+
+    assert.deepEqual(fetchCalls, ["https://arxiv.org/pdf/2601.00425.pdf"]);
+    assert.equal(result.status, "downloaded");
+    assert.equal(result.source, "arxiv");
+    assert.equal(result.canonicalId, "2601.00425");
+    assert.equal(result.articleUrl, "https://arxiv.org/abs/2601.00425");
+  } finally {
+    await rm(workspaceDir, { recursive: true, force: true });
+  }
+});
+
 test("downloadPaper returns an existing arXiv download without fetching it again", async () => {
   const workspaceDir = await mkdtemp(path.join(os.tmpdir(), "paper-manager-"));
   const pdfPath = resolvePaperPdfPath({
@@ -795,7 +825,8 @@ test("downloadPaper falls back to the extension bridge when direct APS PDF fetch
       {
         jobId: "paper-aps-6004bdc34f5d",
         articleUrl,
-        source: "aps"
+        source: "aps",
+        purpose: "download_and_webpage"
       }
     ]);
     assert.deepEqual(result, {

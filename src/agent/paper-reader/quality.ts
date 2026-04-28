@@ -66,7 +66,7 @@ export function evaluateParseQuality(document: ParsedPaperDocument): PaperParseQ
   if (pdfObjectDumpCount > 5) {
     warnings.push("Extracted text looks like raw PDF object syntax rather than paper body text.");
   }
-  if (document.engine === "webpage" && !hasMainBodySection) {
+  if (document.engine === "webpage" && !hasMainBodySection && totalTextLength < 8000) {
     warnings.push("No main body sections were detected; the webpage may expose only abstract, references, or access-limited text.");
   }
   if (
@@ -93,7 +93,7 @@ export function evaluateParseQuality(document: ParsedPaperDocument): PaperParseQ
   if (pdfObjectDumpCount > 5) {
     score -= 0.8;
   }
-  if (document.engine === "webpage" && !hasMainBodySection) {
+  if (document.engine === "webpage" && !hasMainBodySection && totalTextLength < 8000) {
     score -= 0.35;
   }
   if (

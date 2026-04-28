@@ -53,7 +53,8 @@ test("downloadPaper routes supported publisher URLs through the extension bridge
       {
         jobId: expectedJobId("science", articleUrl),
         articleUrl,
-        source: "science"
+        source: "science",
+        purpose: "download_and_webpage"
       }
     ]);
     assert.deepEqual(result, {

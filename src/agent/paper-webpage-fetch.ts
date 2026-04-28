@@ -18,6 +18,14 @@ export interface PaperWebPageMetadata {
   journal?: string;
   publicationDate?: string;
   authors: string[];
+  referenceLinks?: PaperWebPageReferenceLink[];
+  referenceSummary?: string;
+}
+
+export interface PaperWebPageReferenceLink {
+  url: string;
+  label?: string;
+  kind: "arxiv" | "doi" | "publisher" | "scholarly_url";
 }
 
 export interface PaperWebPageAccessStatus {
@@ -38,6 +46,26 @@ export interface PaperWebPageExtraction {
     navigationLinesRemoved: number;
     extractedFrom: "article" | "main" | "body";
   };
+}
+
+export interface PaperWebPageHtmlCandidateDiagnostic {
+  selector: string;
+  extractedFrom: PaperWebPageExtraction["stats"]["extractedFrom"];
+  htmlChars: number;
+  textCharsApprox: number;
+  headingCountApprox: number;
+  sectionSignals: string[];
+  score: number;
+  preview: string;
+}
+
+export interface PaperWebPageHtmlDiagnostic {
+  selected: PaperWebPageHtmlCandidateDiagnostic;
+  candidates: PaperWebPageHtmlCandidateDiagnostic[];
+  unfilteredMarkdownChars: number;
+  filteredMarkdownChars: number;
+  removedLines: number;
+  removedBlocks: number;
 }
 
 const DEFAULT_USER_AGENT = "pi-agent-minimal-ts/1.0";
@@ -127,7 +155,23 @@ const ACCESS_LIMITED_SIGNAL_PATTERNS = [
   { label: "login_full_text", pattern: /Log in to view the full text/i },
   { label: "aaas_login", pattern: /AAAS ID LOGIN|AAAS login provides access to Science/i },
   { label: "institution_options", pattern: /Loading institution options/i },
-  { label: "purchase_access", pattern: /Purchase digital access to this article/i }
+  { label: "purchase_access", pattern: /Purchase digital access to this article/i },
+  { label: "nature_preview_subscription", pattern: /This is a preview of subscription content/i },
+  { label: "nature_institution_access", pattern: /Access through your institution/i },
+  { label: "nature_buy_or_subscribe", pattern: /Buy or subscribe/i },
+  { label: "nature_access_options", pattern: /Access options/i },
+  { label: "nature_buy_article", pattern: /Buy this article/i },
+  { label: "nature_springerlink_purchase", pattern: /Purchase on SpringerLink/i },
+  { label: "nature_full_article_pdf_purchase", pattern: /Instant access to the full article PDF/i },
+  { label: "aps_authorization_required", pattern: /Authorization Required/i },
+  {
+    label: "aps_credentials_required",
+    pattern: /provide your credentials before accessing this content/i
+  },
+  { label: "aps_member_login", pattern: /APS Member Log In/i },
+  { label: "aps_journals_account", pattern: /Log in with APS Journals Account/i },
+  { label: "aps_institution_login", pattern: /Log in with username\/password provided by your institution/i },
+  { label: "aps_subscription_required", pattern: /Subscription Required/i }
 ];
 
 const ACCESS_LIMITED_MESSAGE =
@@ -229,56 +273,116 @@ function extractBodyHtml(html: string): string {
   return html.match(/<body\b[^>]*>([\s\S]*?)<\/body>/i)?.[1] ?? html;
 }
 
-function selectArticleHtml(html: string): {
+function countHeadingTagsApprox(html: string): number {
+  return [...html.matchAll(/<h[1-6]\b/gi)].length;
+}
+
+function plainTextFromHtmlForDiagnostics(html: string): string {
+  return compactLine(htmlToMarkdown(html).replace(/^#{1,6}\s+/gm, ""));
+}
+
+function getArticleSectionSignals(html: string): string[] {
+  const normalized = html.toLowerCase();
+  return [
+    "abstract",
+    "introduction",
+    "results",
+    "discussion",
+    "methods",
+    "data availability",
+    "article text",
+    "references"
+  ].filter((signal) => normalized.includes(signal));
+}
+
+function buildHtmlCandidateDiagnostics(html: string): Array<PaperWebPageHtmlCandidateDiagnostic & {
   html: string;
-  extractedFrom: PaperWebPageExtraction["stats"]["extractedFrom"];
-} {
+}> {
   const candidates = [
     ...findElementHtmlCandidates(html, "main").map((candidate) => ({
       html: candidate,
+      selector: "main",
       extractedFrom: "main" as const
     })),
     ...findElementHtmlCandidates(html, "article").map((candidate) => ({
       html: candidate,
+      selector: "article",
       extractedFrom: "article" as const
-    }))
+    })),
+    {
+      html: extractBodyHtml(html),
+      selector: "body",
+      extractedFrom: "body" as const
+    }
   ];
+
+  return candidates.map((candidate) => {
+    const sectionSignals = getArticleSectionSignals(candidate.html);
+    const articleBodySignal = /<[^>]+(?:article body|article-main|main-column|article[-_\s]?text|full[-_\s]?text)[^>]*>/i.test(
+      candidate.html
+    )
+      ? 10
+      : 0;
+    const bodyPenalty = candidate.extractedFrom === "body" ? 30_000 : 0;
+    const score =
+      candidate.html.length + sectionSignals.length * 20_000 + articleBodySignal * 20_000 - bodyPenalty;
+    const plainText = plainTextFromHtmlForDiagnostics(candidate.html);
+
+    return {
+      ...candidate,
+      htmlChars: candidate.html.length,
+      textCharsApprox: plainText.length,
+      headingCountApprox: countHeadingTagsApprox(candidate.html),
+      sectionSignals,
+      score,
+      preview: plainText.slice(0, 280)
+    };
+  });
+}
+
+function selectArticleHtml(html: string): {
+  html: string;
+  extractedFrom: PaperWebPageExtraction["stats"]["extractedFrom"];
+  diagnostic: PaperWebPageHtmlCandidateDiagnostic;
+} {
+  const candidates = buildHtmlCandidateDiagnostics(html);
 
   let bestCandidate:
     | {
         html: string;
-        extractedFrom: "article" | "main";
+        extractedFrom: "article" | "main" | "body";
         score: number;
+        diagnostic: PaperWebPageHtmlCandidateDiagnostic;
       }
     | undefined;
 
   for (const candidate of candidates) {
-    const normalized = candidate.html.toLowerCase();
-    const sectionSignals = [
-      "abstract",
-      "introduction",
-      "results",
-      "discussion",
-      "methods",
-      "data availability",
-      "references"
-    ].filter((signal) => normalized.includes(signal)).length;
-    const articleBodySignal = /article body|article-main|main-column/i.test(candidate.html) ? 10 : 0;
-    const score = candidate.html.length + sectionSignals * 20_000 + articleBodySignal * 20_000;
-
-    if (bestCandidate === undefined || score > bestCandidate.score) {
-      bestCandidate = { ...candidate, score };
+    if (bestCandidate === undefined || candidate.score > bestCandidate.score) {
+      const { html: candidateHtml, ...diagnostic } = candidate;
+      bestCandidate = {
+        html: candidateHtml,
+        extractedFrom: candidate.extractedFrom,
+        score: candidate.score,
+        diagnostic
+      };
     }
   }
 
   if (bestCandidate) {
     return {
       html: bestCandidate.html,
-      extractedFrom: bestCandidate.extractedFrom
+      extractedFrom: bestCandidate.extractedFrom,
+      diagnostic: bestCandidate.diagnostic
     };
   }
 
-  return { html: extractBodyHtml(html), extractedFrom: "body" };
+  const bodyHtml = extractBodyHtml(html);
+  const diagnostic = buildHtmlCandidateDiagnostics(bodyHtml)[0];
+  if (!diagnostic) {
+    throw new Error("Unable to build webpage HTML candidate diagnostics.");
+  }
+  const { html: _html, ...candidateDiagnostic } = diagnostic;
+  return { html: bodyHtml, extractedFrom: "body", diagnostic: candidateDiagnostic };
 }
 
 function getAttribute(tag: string, attributeName: string): string | undefined {
@@ -331,9 +435,101 @@ function extractTitle(html: string): string | undefined {
   );
 }
 
-function extractMetadata(html: string): PaperWebPageMetadata {
+function classifyReferenceLink(url: URL): PaperWebPageReferenceLink["kind"] | undefined {
+  const hostname = url.hostname.toLowerCase().replace(/^www\./, "");
+  if (hostname === "doi.org" || hostname === "dx.doi.org") {
+    return "doi";
+  }
+  if (hostname === "arxiv.org") {
+    return "arxiv";
+  }
+  if (
+    /(?:nature\.com|science\.org|journals\.aps\.org|link\.aps\.org|springer\.com|link\.springer\.com|sciencedirect\.com|iopscience\.iop\.org|ieeexplore\.ieee\.org|dl\.acm\.org)$/i
+      .test(hostname)
+  ) {
+    return "publisher";
+  }
+  if (
+    /(?:pubmed\.ncbi\.nlm\.nih\.gov|ncbi\.nlm\.nih\.gov|semanticscholar\.org|adsabs\.harvard\.edu|inspirehep\.net|crossref\.org)$/i
+      .test(hostname)
+  ) {
+    return "scholarly_url";
+  }
+  return undefined;
+}
+
+function extractAnchorText(anchorHtml: string): string | undefined {
+  const text = compactLine(decodeHtmlEntities(anchorHtml.replace(/<[^>]+>/g, " ")));
+  return text || undefined;
+}
+
+function extractReferenceLinks(html: string, baseUrl: string): PaperWebPageReferenceLink[] {
+  const base = new URL(baseUrl);
+  const links: PaperWebPageReferenceLink[] = [];
+  const seen = new Set<string>();
+  const anchorPattern = /<a\b([^>]*)>([\s\S]*?)<\/a>/gi;
+  for (const match of html.matchAll(anchorPattern)) {
+    const attributes = match[1] ?? "";
+    const rawHref = getAttribute(attributes, "href");
+    if (!rawHref || /^(?:mailto:|tel:|#)/i.test(rawHref)) {
+      continue;
+    }
+
+    let linkUrl: URL;
+    try {
+      linkUrl = new URL(decodeHtmlEntities(rawHref), base);
+    } catch {
+      continue;
+    }
+
+    if (linkUrl.origin === base.origin && linkUrl.pathname === base.pathname && linkUrl.hash) {
+      continue;
+    }
+
+    const kind = classifyReferenceLink(linkUrl);
+    if (!kind) {
+      continue;
+    }
+
+    const normalizedUrl = linkUrl.toString();
+    if (seen.has(normalizedUrl)) {
+      continue;
+    }
+    seen.add(normalizedUrl);
+
+    const label = extractAnchorText(match[2] ?? "");
+    links.push({
+      url: normalizedUrl,
+      ...(label ? { label } : {}),
+      kind
+    });
+  }
+
+  return links.slice(0, 200);
+}
+
+function summarizeReferenceLinks(links: PaperWebPageReferenceLink[]): string | undefined {
+  if (links.length === 0) {
+    return undefined;
+  }
+
+  const counts = new Map<PaperWebPageReferenceLink["kind"], number>();
+  for (const link of links) {
+    counts.set(link.kind, (counts.get(link.kind) ?? 0) + 1);
+  }
+  const parts = Array.from(counts.entries())
+    .sort(([left], [right]) => left.localeCompare(right))
+    .map(([kind, count]) => `${count} ${kind.replace(/_/g, " ")}`);
+  return `Extracted ${links.length} linked citation/reference target${links.length === 1 ? "" : "s"} from the article body: ${parts.join(", ")}.`;
+}
+
+function extractMetadata(html: string, referenceHtml?: { html: string; baseUrl: string }): PaperWebPageMetadata {
   const title = extractTitle(html);
   const doi = extractMetaContent(html, ["citation_doi", "dc.identifier", "prism.doi"]);
+  const referenceLinks = referenceHtml
+    ? extractReferenceLinks(referenceHtml.html, referenceHtml.baseUrl)
+    : [];
+  const referenceSummary = summarizeReferenceLinks(referenceLinks);
 
   return {
     ...(title ? { title } : {}),
@@ -349,7 +545,9 @@ function extractMetadata(html: string): PaperWebPageMetadata {
           ])
         }
       : {}),
-    authors: extractMetaContents(html, ["citation_author", "dc.creator"])
+    authors: extractMetaContents(html, ["citation_author", "dc.creator"]),
+    ...(referenceLinks.length > 0 ? { referenceLinks } : {}),
+    ...(referenceSummary ? { referenceSummary } : {})
   };
 }
 
@@ -501,8 +699,11 @@ export function parsePaperWebPageHtml(options: {
   url: string;
   html: string;
 }): PaperWebPageExtraction {
-  const metadata = extractMetadata(options.html);
   const selected = selectArticleHtml(stripComments(options.html));
+  const metadata = extractMetadata(options.html, {
+    html: selected.html,
+    baseUrl: options.url
+  });
   const access = detectAccessStatus(selected.html);
   const cleanedBlocks = removeKnownNoiseBlocks(selected.html);
   const cleanedMarkdown = cleanMarkdown(htmlToMarkdown(cleanedBlocks.html));
@@ -519,6 +720,28 @@ export function parsePaperWebPageHtml(options: {
       navigationLinesRemoved: cleanedBlocks.removed + cleanedMarkdown.removedLines,
       extractedFrom: selected.extractedFrom
     }
+  };
+}
+
+export function diagnosePaperWebPageHtml(options: {
+  url: string;
+  html: string;
+}): PaperWebPageHtmlDiagnostic {
+  const selected = selectArticleHtml(stripComments(options.html));
+  const cleanedBlocks = removeKnownNoiseBlocks(selected.html);
+  const unfilteredMarkdown = htmlToMarkdown(selected.html);
+  const cleanedMarkdown = cleanMarkdown(htmlToMarkdown(cleanedBlocks.html));
+  const candidates = buildHtmlCandidateDiagnostics(stripComments(options.html))
+    .map(({ html: _html, ...candidate }) => candidate)
+    .sort((left, right) => right.score - left.score);
+
+  return {
+    selected: selected.diagnostic,
+    candidates,
+    unfilteredMarkdownChars: compactLine(unfilteredMarkdown).length,
+    filteredMarkdownChars: cleanedMarkdown.markdown.length,
+    removedLines: cleanedMarkdown.removedLines,
+    removedBlocks: cleanedBlocks.removed
   };
 }
 
