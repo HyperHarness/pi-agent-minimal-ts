@@ -110,13 +110,13 @@ type DownloadedExternalPaperRecord = {
   articleUrl: string;
   openedUrl?: string;
   recordedAt: string;
-  handlingMethod: "manual_file_import";
+  handlingMethod: "manual_file_import" | "direct_http";
   status: "downloaded";
   downloadPath: string;
   fileSha256: string;
   title?: string;
+  pdfUrl?: string;
   canonicalId?: never;
-  pdfUrl?: never;
   failure?: never;
 };
 
@@ -135,6 +135,17 @@ export interface DownloadedPaperResult {
   finalPdfUrl: string;
   path: string;
   recordPath: string;
+}
+
+export interface DownloadedExternalPaperResult {
+  status: "downloaded";
+  source: "external";
+  articleUrl: string;
+  finalPdfUrl: string;
+  path: string;
+  recordPath: string;
+  fileSha256: string;
+  title?: string;
 }
 
 type AlreadyDownloadedManagedPaperResult = {
@@ -158,7 +169,7 @@ type AlreadyDownloadedExternalPaperResult = {
   fileSha256: string;
   title?: string;
   canonicalId?: never;
-  finalPdfUrl?: never;
+  finalPdfUrl?: string;
 };
 
 export type AlreadyDownloadedPaperResult =
@@ -217,6 +228,7 @@ export interface RegisteredManualPaperDownloadResult {
 
 export type PaperDownloadResult =
   | DownloadedPaperResult
+  | DownloadedExternalPaperResult
   | AlreadyDownloadedPaperResult
   | ManualFallbackPaperResult
   | ExternalOpenedPaperResult

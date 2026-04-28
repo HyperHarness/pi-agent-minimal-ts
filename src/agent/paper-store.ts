@@ -146,10 +146,11 @@ function isDownloadedPaperRecord(value: unknown): value is DownloadedPaperRecord
 
   if (record.source === "external") {
     return (
-      record.handlingMethod === "manual_file_import" &&
+      (record.handlingMethod === "manual_file_import" || record.handlingMethod === "direct_http") &&
       typeof record.fileSha256 === "string" &&
       (record.openedUrl === undefined || typeof record.openedUrl === "string") &&
-      (record.title === undefined || typeof record.title === "string")
+      (record.title === undefined || typeof record.title === "string") &&
+      (record.pdfUrl === undefined || typeof record.pdfUrl === "string")
     );
   }
 

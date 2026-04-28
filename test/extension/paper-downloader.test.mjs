@@ -797,6 +797,77 @@ test("background keeps tab open when native host does not register completed dow
   ]);
 });
 
+test("background reports publisher HTML downloads as manual login required", async () => {
+  const fakeChrome = createFakeChrome({
+    jobs: [
+      {
+        jobId: "job-aps-html",
+        articleUrl: "https://journals.aps.org/prapplied/abstract/10.1103/k3d5-v43c",
+        source: "aps"
+      }
+    ],
+    downloadItems: {
+      502: {
+        id: 502,
+        filename: "C:\\Downloads\\aps-10.1103-k3d5-v43c.htm",
+        url: "https://journals.aps.org/prapplied/pdf/10.1103/k3d5-v43c",
+        mime: "text/html"
+      }
+    },
+    nativeHandler(message) {
+      if (message.type === "poll_jobs") {
+        return {
+          type: "jobs",
+          jobs: [
+            {
+              jobId: "job-aps-html",
+              articleUrl: "https://journals.aps.org/prapplied/abstract/10.1103/k3d5-v43c",
+              source: "aps"
+            }
+          ]
+        };
+      }
+      if (message.type === "register_download") {
+        return {
+          type: "error",
+          jobId: message.jobId,
+          code: "manual_login_required",
+          message:
+            "APS returned an HTML page instead of the article PDF. Log in or complete publisher verification in the browser extension tab, then retry the download."
+        };
+      }
+      return { type: "status_ack", jobId: message.jobId, status: message.status };
+    }
+  });
+
+  await importBackground(fakeChrome);
+  fakeChrome.events.onMessage.emit(
+    {
+      type: "paper_page_classified",
+      status: "page_classified",
+      pdfUrl: "https://journals.aps.org/prapplied/pdf/10.1103/k3d5-v43c"
+    },
+    { tab: { id: 100 } }
+  );
+  await flushAsyncWork();
+  fakeChrome.events.onChanged.emit({ id: 502, state: { current: "complete" } });
+  await flushAsyncWork();
+
+  assert.deepEqual(statusMessagesOf(fakeChrome, "awaiting_user_manual_download"), [
+    {
+      type: "job_status",
+      jobId: "job-aps-html",
+      articleUrl: "https://journals.aps.org/prapplied/abstract/10.1103/k3d5-v43c",
+      source: "aps",
+      status: "awaiting_user_manual_download",
+      message:
+        "APS returned an HTML page instead of the article PDF. Log in or complete publisher verification in the browser extension tab, then retry the download."
+    }
+  ]);
+  assert.equal(statusMessagesOf(fakeChrome, "automatic_download_failed").length, 0);
+  assert.ok(fakeChrome.storage.piAgentPaperDownloaderState.jobs["job-aps-html"].manualDownloadMode);
+});
+
 test("background manual association ignores non-PDF downloads from article referrer", async () => {
   const fakeChrome = createFakeChrome({
     jobs: [

@@ -224,6 +224,20 @@ async function registerDownloadedPaper(options: {
   }
 
   if (!pdfBytes.subarray(0, PDF_SIGNATURE.byteLength).equals(PDF_SIGNATURE)) {
+    if (isSupportedPublisherHtmlDownload({
+      source: options.message.source,
+      downloadPath: options.message.downloadPath,
+      bytes: pdfBytes
+    })) {
+      return registrationError({
+        jobId: options.message.jobId,
+        code: "manual_login_required",
+        message:
+          `${formatPublisherSource(options.message.source)} returned an HTML page instead of the article PDF. ` +
+          "Log in or complete publisher verification in the browser extension tab, then retry the download."
+      });
+    }
+
     return registrationError({
       jobId: options.message.jobId,
       code: "not_pdf",
@@ -656,6 +670,43 @@ function isScienceSupplementDownload(input: {
     const decodedBasename = safeDecodeURIComponent(basename).toLowerCase();
     return decodedBasename.endsWith("sm.pdf");
   });
+}
+
+function isSupportedPublisherHtmlDownload(input: {
+  source: string;
+  downloadPath: string;
+  bytes: Buffer;
+}): boolean {
+  if (!SUPPORTED_PUBLISHER_SOURCES.has(input.source as SupportedPaperSource)) {
+    return false;
+  }
+
+  const basename = input.downloadPath.split(/[\\/]/).pop()?.split(/[?#]/, 1)[0] ?? "";
+  const decodedBasename = safeDecodeURIComponent(basename).toLowerCase();
+  if (decodedBasename.endsWith(".htm") || decodedBasename.endsWith(".html")) {
+    return true;
+  }
+
+  const prefix = input.bytes.subarray(0, 512).toString("utf8").toLowerCase();
+  return (
+    prefix.includes("<!doctype html") ||
+    prefix.includes("<html") ||
+    prefix.includes("<head") ||
+    prefix.includes("<body")
+  );
+}
+
+function formatPublisherSource(source: string): string {
+  if (source === "aps") {
+    return "APS";
+  }
+  if (source === "science") {
+    return "Science";
+  }
+  if (source === "nature") {
+    return "Nature";
+  }
+  return "The publisher";
 }
 
 function safeDecodeURIComponent(value: string): string {

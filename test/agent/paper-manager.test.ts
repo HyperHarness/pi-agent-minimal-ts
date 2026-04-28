@@ -391,6 +391,39 @@ test("searchPapers treats unsupported www.aps.org hosts as external results", as
   ]);
 });
 
+test("searchPapers classifies link.aps.org DOI URLs as APS sources", async () => {
+  const results = await searchPapers({
+    query: "aps link doi",
+    searchArxivImpl: async () => [],
+    searchApsPapersImpl: async () => [],
+    searchWebImpl: async () => [
+      createWebResult({
+        title: "APS Link DOI",
+        url: "https://link.aps.org/doi/10.1103/k3d5-v43c",
+        snippet: "aps summary"
+      })
+    ]
+  });
+
+  assert.deepEqual(results, [
+    {
+      title: "APS Link DOI",
+      authors: [],
+      summary: "aps summary",
+      primarySource: "aps",
+      primaryAction: "authorized_download",
+      sources: [
+        {
+          source: "aps",
+          canonicalId: "10.1103/k3d5-v43c",
+          articleUrl: "https://link.aps.org/doi/10.1103/k3d5-v43c",
+          action: "authorized_download"
+        }
+      ]
+    } satisfies PaperSearchResult
+  ]);
+});
+
 test("searchPapers reorders merged candidates when a higher-priority source appears later", async () => {
   const results = await searchPapers({
     query: "ordering",
@@ -1281,6 +1314,79 @@ test("downloadPaper opens unsupported external URLs with explicit browser fallba
       handlingMethod: "system_browser_open",
       status: "external_opened"
     });
+  } finally {
+    await rm(workspaceDir, { recursive: true, force: true });
+  }
+});
+
+test("downloadPaper directly downloads Quantum Journal external PDFs", async () => {
+  const workspaceDir = await mkdtemp(path.join(os.tmpdir(), "paper-manager-"));
+  const articleUrl = "https://quantum-journal.org/papers/q-2025-05-05-1728/";
+  const pdfBytes = Buffer.from("%PDF-1.7\nquantum journal pdf\n", "utf8");
+  const fetchCalls: string[] = [];
+
+  try {
+    const result = await downloadPaper({
+      workspaceDir,
+      url: articleUrl,
+      title: "Hierarchical memories",
+      fetchImpl: async (url) => {
+        fetchCalls.push(String(url));
+        return new Response(pdfBytes, {
+          status: 200,
+          headers: { "content-type": "application/pdf" }
+        });
+      },
+      openPageInSystemChromeImpl: async () => {
+        throw new Error("Quantum Journal PDF should be downloaded directly.");
+      }
+    });
+
+    const expectedPdfUrl = "https://quantum-journal.org/papers/q-2025-05-05-1728/pdf/";
+    const expectedPdfPath = resolveExternalPaperPdfPath({ workspaceDir, articleUrl });
+    const expectedRecordPath = resolvePaperRecordPath({
+      workspaceDir,
+      source: "external",
+      articleUrl
+    });
+    const expectedSha256 = createHash("sha256").update(pdfBytes).digest("hex");
+
+    assert.deepEqual(fetchCalls, [expectedPdfUrl]);
+    assert.deepEqual(result, {
+      status: "downloaded",
+      source: "external",
+      articleUrl,
+      finalPdfUrl: expectedPdfUrl,
+      path: expectedPdfPath,
+      recordPath: expectedRecordPath,
+      fileSha256: expectedSha256,
+      title: "Hierarchical memories"
+    });
+    assert.equal(await readFile(expectedPdfPath, "utf8"), pdfBytes.toString("utf8"));
+    const savedRecord = JSON.parse(await readFile(expectedRecordPath, "utf8"));
+    assert.deepEqual(savedRecord, {
+      source: "external",
+      articleUrl,
+      recordedAt: savedRecord.recordedAt,
+      handlingMethod: "direct_http",
+      status: "downloaded",
+      pdfUrl: expectedPdfUrl,
+      downloadPath: expectedPdfPath,
+      fileSha256: expectedSha256,
+      title: "Hierarchical memories"
+    });
+
+    const existing = await downloadPaper({
+      workspaceDir,
+      url: articleUrl,
+      openPageInSystemChromeImpl: async () => {
+        throw new Error("direct external paper should be found in the local index");
+      }
+    });
+
+    assert.equal(existing.status, "already_downloaded");
+    assert.equal(existing.source, "external");
+    assert.equal(existing.finalPdfUrl, expectedPdfUrl);
   } finally {
     await rm(workspaceDir, { recursive: true, force: true });
   }

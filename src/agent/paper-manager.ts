@@ -354,6 +354,7 @@ function classifySupportedSource(url: URL): Extract<
 
   if (
     url.hostname === "journals.aps.org" ||
+    url.hostname === "link.aps.org" ||
     url.hostname === "aps.org"
   ) {
     const canonicalId = resolvePublisherCanonicalId({
@@ -703,6 +704,7 @@ function toAlreadyDownloadedPaperResult(match: DownloadedPaperRecordMatch): Pape
       recordPath: match.recordPath,
       recordedAt: match.record.recordedAt,
       fileSha256: match.record.fileSha256,
+      ...(match.record.pdfUrl ? { finalPdfUrl: match.record.pdfUrl } : {}),
       ...(match.record.title ? { title: match.record.title } : {})
     };
   }
@@ -723,6 +725,105 @@ function assertPdfBytes(pdfBytes: Buffer): void {
   if (!pdfBytes.subarray(0, 5).equals(Buffer.from("%PDF-"))) {
     throw new Error("Manual paper download must be a valid PDF.");
   }
+}
+
+function resolveDirectExternalPdfUrlCandidates(articleUrl: string): string[] {
+  let parsedUrl: URL;
+  try {
+    parsedUrl = new URL(articleUrl);
+  } catch {
+    return [];
+  }
+
+  const candidates = new Set<string>();
+  const normalizedUrl = new URL(parsedUrl);
+  normalizedUrl.hash = "";
+
+  const normalizedPath = normalizedUrl.pathname.replace(/\/+$/, "");
+  if (
+    normalizedPath.toLowerCase().endsWith(".pdf") ||
+    normalizedPath.toLowerCase().endsWith("/pdf")
+  ) {
+    candidates.add(normalizedUrl.toString());
+  }
+
+  if (
+    normalizedUrl.hostname === "quantum-journal.org" ||
+    normalizedUrl.hostname === "www.quantum-journal.org"
+  ) {
+    const paperPathMatch = normalizedPath.match(/^\/papers\/q-\d{4}-\d{2}-\d{2}-\d+$/i);
+    if (paperPathMatch) {
+      const pdfUrl = new URL(normalizedUrl);
+      pdfUrl.pathname = `${normalizedPath}/pdf/`;
+      pdfUrl.search = "";
+      candidates.add(pdfUrl.toString());
+    }
+  }
+
+  return [...candidates];
+}
+
+async function tryDownloadDirectExternalPaper(options: {
+  workspaceDir: string;
+  classification: Extract<ClassifiedPaperUrl, { source: "external" }>;
+  title?: string;
+  fetchImpl?: typeof fetch;
+}): Promise<PaperDownloadResult | null> {
+  const pdfUrlCandidates = resolveDirectExternalPdfUrlCandidates(options.classification.articleUrl);
+  if (pdfUrlCandidates.length === 0) {
+    return null;
+  }
+
+  for (const pdfUrl of pdfUrlCandidates) {
+    try {
+      const response = await (options.fetchImpl ?? fetch)(pdfUrl, { redirect: "follow" });
+      if (!response.ok) {
+        continue;
+      }
+
+      const pdfBytes = Buffer.from(await response.arrayBuffer());
+      assertPdfBytes(pdfBytes);
+
+      const pdfPath = resolveExternalPaperPdfPath({
+        workspaceDir: options.workspaceDir,
+        articleUrl: options.classification.articleUrl
+      });
+      await mkdir(path.dirname(pdfPath), { recursive: true });
+      await writeFile(pdfPath, pdfBytes);
+
+      const fileSha256 = createHash("sha256").update(pdfBytes).digest("hex");
+      const title = options.title?.trim();
+      const recordPath = await writePaperRecord({
+        workspaceDir: options.workspaceDir,
+        record: {
+          source: "external",
+          articleUrl: options.classification.articleUrl,
+          recordedAt: new Date().toISOString(),
+          handlingMethod: "direct_http",
+          status: "downloaded",
+          pdfUrl,
+          downloadPath: pdfPath,
+          fileSha256,
+          ...(title ? { title } : {})
+        }
+      });
+
+      return {
+        status: "downloaded",
+        source: "external",
+        articleUrl: options.classification.articleUrl,
+        finalPdfUrl: pdfUrl,
+        path: pdfPath,
+        recordPath,
+        fileSha256,
+        ...(title ? { title } : {})
+      };
+    } catch {
+      // Try the next deterministic candidate before falling back to browser/manual handling.
+    }
+  }
+
+  return null;
 }
 
 function resolveDirectPublisherPdfUrl(
@@ -1009,6 +1110,16 @@ export async function downloadPaper(options: DownloadPaperOptions): Promise<Pape
     });
     if (existingDownload) {
       return toAlreadyDownloadedPaperResult(existingDownload);
+    }
+
+    const directExternalDownload = await tryDownloadDirectExternalPaper({
+      workspaceDir: options.workspaceDir,
+      classification,
+      title: options.title,
+      fetchImpl: options.fetchImpl
+    });
+    if (directExternalDownload) {
+      return directExternalDownload;
     }
 
     if (options.extensionBridge) {

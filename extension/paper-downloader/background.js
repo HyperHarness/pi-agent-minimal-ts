@@ -591,11 +591,13 @@ async function registerCompletedDownload(downloadId) {
       const job = jobsById.get(trackedDownload.jobId);
       downloadsById.delete(downloadId);
       if (job) {
-        await reportJobStatus(
-          job,
-          "automatic_download_failed",
-          response.message || "Downloaded file could not be registered as a PDF."
-        );
+        const message = response.message || "Downloaded file could not be registered as a PDF.";
+        if (response.code === "manual_login_required") {
+          await reportJobStatus(job, "awaiting_user_manual_download", message);
+          job.manualDownloadMode = true;
+        } else {
+          await reportJobStatus(job, "automatic_download_failed", message);
+        }
       }
       await persistState();
     }

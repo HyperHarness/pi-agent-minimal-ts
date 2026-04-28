@@ -693,6 +693,38 @@ test("handleExtensionHostMessage returns structured not_pdf errors for non-PDF r
   }
 });
 
+test("handleExtensionHostMessage classifies publisher HTML downloads as manual login required", async () => {
+  const workspaceDir = await createWorkspaceDir();
+  const htmlPath = path.join(workspaceDir, "inbox", "aps-10.1103-k3d5-v43c.htm");
+
+  try {
+    await mkdir(path.dirname(htmlPath), { recursive: true });
+    await writeFile(htmlPath, "<!doctype html><html><body>Authorization Required</body></html>", "utf8");
+
+    assert.deepEqual(
+      await handleExtensionHostMessage({
+        workspaceDir,
+        message: {
+          type: "register_download",
+          jobId: "job-aps-html",
+          articleUrl: "https://journals.aps.org/prapplied/abstract/10.1103/k3d5-v43c",
+          source: "aps",
+          downloadPath: htmlPath
+        }
+      }),
+      {
+        type: "error",
+        jobId: "job-aps-html",
+        code: "manual_login_required",
+        message:
+          "APS returned an HTML page instead of the article PDF. Log in or complete publisher verification in the browser extension tab, then retry the download."
+      }
+    );
+  } finally {
+    await rm(workspaceDir, { recursive: true, force: true });
+  }
+});
+
 test("handleExtensionHostMessage returns structured errors for post-read registration failures", async () => {
   const workspaceDir = await createWorkspaceDir();
   const articleUrl = "https://example.com/unwritable-paper";
