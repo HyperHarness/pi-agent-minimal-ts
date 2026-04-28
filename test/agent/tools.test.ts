@@ -169,6 +169,22 @@ type SearchPaperWikiTool = {
   ) => Promise<ToolResult>;
 };
 
+type ListLocalPapersTool = {
+  execute: (
+    toolCallId: string,
+    args: { query?: string; status?: "all" | "downloaded" | "parsed" | "summarized"; maxResults?: number },
+    signal: undefined,
+  ) => Promise<ToolResult>;
+};
+
+type SearchLocalPapersTool = {
+  execute: (
+    toolCallId: string,
+    args: { query: string; maxResults?: number },
+    signal: undefined,
+  ) => Promise<ToolResult>;
+};
+
 type CreateToolsDependencies = NonNullable<Parameters<typeof createTools>[1]>;
 
 function getReadFileTool(workspace: string): ReadFileTool {
@@ -377,6 +393,34 @@ function getSearchPaperWikiTool(
   return tool as SearchPaperWikiTool;
 }
 
+function getListLocalPapersTool(
+  workspace: string,
+  dependencies?: Parameters<typeof createTools>[1],
+): ListLocalPapersTool {
+  const tools = createTools(workspace, dependencies) as ReadonlyArray<{
+    name: string;
+    execute?: ListLocalPapersTool["execute"];
+  }>;
+  const tool = tools.find((candidate) => candidate.name === "list_local_papers");
+  assert.ok(tool);
+  assert.equal(typeof tool.execute, "function");
+  return tool as ListLocalPapersTool;
+}
+
+function getSearchLocalPapersTool(
+  workspace: string,
+  dependencies?: Parameters<typeof createTools>[1],
+): SearchLocalPapersTool {
+  const tools = createTools(workspace, dependencies) as ReadonlyArray<{
+    name: string;
+    execute?: SearchLocalPapersTool["execute"];
+  }>;
+  const tool = tools.find((candidate) => candidate.name === "search_local_papers");
+  assert.ok(tool);
+  assert.equal(typeof tool.execute, "function");
+  return tool as SearchLocalPapersTool;
+}
+
 async function createDirectoryLink(targetDir: string, linkDir: string): Promise<void> {
   await symlink(targetDir, linkDir, process.platform === "win32" ? "junction" : "dir");
 }
@@ -488,6 +532,8 @@ test("createTools exposes the unified built-in tool set", async () => {
       "search_paper_text",
       "write_paper_wiki_source",
       "search_paper_wiki",
+      "list_local_papers",
+      "search_local_papers",
     ]);
 
     const webSearchTool = tools.find((tool) => tool.name === "web_search");
@@ -1666,6 +1712,75 @@ test("search_paper_wiki delegates to the injected wiki search dependency and ret
     }, undefined);
 
     assert.equal((result.details as { results?: unknown[] }).results?.length, 1);
+  } finally {
+    await rm(workspace, { recursive: true, force: true });
+  }
+});
+
+test("list_local_papers delegates to the injected local library dependency", async () => {
+  const workspace = await mkdtemp(path.join(tmpdir(), "pi-agent-tools-"));
+  try {
+    const tool = getListLocalPapersTool(workspace, {
+      listLocalPapers: async (options) => ({
+        total: 1,
+        count: 1,
+        results: [
+          {
+            paperKey: "nature-s41534-026-01233-y",
+            title: options.query,
+            status: options.status ?? "all",
+            hasPdf: true,
+            hasParsedArtifacts: true,
+            hasWikiSummary: false,
+            parses: [],
+          },
+        ],
+      }),
+    });
+
+    const result = await tool.execute("list-local-call", {
+      query: "qLDPC",
+      status: "parsed",
+      maxResults: 5,
+    }, undefined);
+
+    assert.equal((result.details as { total?: number }).total, 1);
+    assert.equal((result.details as { results?: Array<{ title?: string }> }).results?.[0]?.title, "qLDPC");
+  } finally {
+    await rm(workspace, { recursive: true, force: true });
+  }
+});
+
+test("search_local_papers delegates to the injected local library dependency", async () => {
+  const workspace = await mkdtemp(path.join(tmpdir(), "pi-agent-tools-"));
+  try {
+    const tool = getSearchLocalPapersTool(workspace, {
+      searchLocalPapers: async (options) => ({
+        query: options.query,
+        count: 1,
+        results: [
+          {
+            paper: {
+              paperKey: "arxiv-2406.06015",
+              hasPdf: true,
+              hasParsedArtifacts: true,
+              hasWikiSummary: true,
+              parses: [],
+            },
+            score: options.maxResults ?? 0,
+            matches: [{ field: "metadata", snippet: "query match" }],
+          },
+        ],
+      }),
+    });
+
+    const result = await tool.execute("search-local-call", {
+      query: "quantum",
+      maxResults: 3,
+    }, undefined);
+
+    assert.equal((result.details as { count?: number }).count, 1);
+    assert.equal((result.details as { results?: Array<{ score?: number }> }).results?.[0]?.score, 3);
   } finally {
     await rm(workspace, { recursive: true, force: true });
   }

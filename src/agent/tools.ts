@@ -45,6 +45,10 @@ import { fetchPaperWebPage } from "./paper-webpage-fetch.js";
 import { searchWeb, type WebSearchResult } from "./web-search.js";
 import type { PaperDownloadResult, PaperSearchResult, SupportedPaperSource } from "./paper-types.js";
 import { buildArxivHtmlUrl } from "./arxiv.js";
+import {
+  listLocalPapers,
+  searchLocalPapers
+} from "./local-paper-library.js";
 
 const getTimeParameters = Type.Object({
   timezone: Type.Optional(Type.String({ description: "Optional IANA timezone name." }))
@@ -193,6 +197,27 @@ const searchPaperWikiParameters = Type.Object({
   maxResults: Type.Optional(Type.Integer({ description: "Maximum matching source summaries to return.", minimum: 1 }))
 });
 
+const listLocalPapersParameters = Type.Object({
+  query: Type.Optional(Type.String({ description: "Optional metadata query to filter local papers." })),
+  status: Type.Optional(
+    Type.Union([
+      Type.Literal("all"),
+      Type.Literal("downloaded"),
+      Type.Literal("parsed"),
+      Type.Literal("summarized")
+    ], { description: "Which local paper layer to list. Defaults to all." })
+  ),
+  maxResults: Type.Optional(Type.Integer({ description: "Maximum local papers to return.", minimum: 1 }))
+});
+
+const searchLocalPapersParameters = Type.Object({
+  query: Type.String({
+    description:
+      "Keyword query to search across local paper records, LLM source summaries, and parsed markdown."
+  }),
+  maxResults: Type.Optional(Type.Integer({ description: "Maximum local paper matches to return.", minimum: 1 }))
+});
+
 type GetTimeParameters = Static<typeof getTimeParameters>;
 type ReadFileParameters = Static<typeof readFileParameters>;
 type WebSearchParameters = Static<typeof webSearchParameters>;
@@ -208,6 +233,8 @@ type ReadPaperSectionParameters = Static<typeof readPaperSectionParameters>;
 type SearchPaperTextParameters = Static<typeof searchPaperTextParameters>;
 type WritePaperWikiSourceParameters = Static<typeof writePaperWikiSourceParameters>;
 type SearchPaperWikiParameters = Static<typeof searchPaperWikiParameters>;
+type ListLocalPapersParameters = Static<typeof listLocalPapersParameters>;
+type SearchLocalPapersParameters = Static<typeof searchLocalPapersParameters>;
 
 function assertPathInsideDirectory(rootDir: string, candidatePath: string): void {
   const relativePath = path.relative(rootDir, candidatePath);
@@ -332,6 +359,14 @@ type WritePaperWikiSourceTool = AgentTool<
 type SearchPaperWikiTool = AgentTool<
   typeof searchPaperWikiParameters,
   Awaited<ReturnType<typeof searchPaperWiki>>
+>;
+type ListLocalPapersTool = AgentTool<
+  typeof listLocalPapersParameters,
+  Awaited<ReturnType<typeof listLocalPapers>>
+>;
+type SearchLocalPapersTool = AgentTool<
+  typeof searchLocalPapersParameters,
+  Awaited<ReturnType<typeof searchLocalPapers>>
 >;
 
 const MAX_SEARCH_RESULT_PREVIEWS = 5;
@@ -483,6 +518,8 @@ export interface ToolDependencies {
   searchPaperText?: typeof searchPaperText;
   writePaperWikiSource?: typeof writePaperWikiSource;
   searchPaperWiki?: typeof searchPaperWiki;
+  listLocalPapers?: typeof listLocalPapers;
+  searchLocalPapers?: typeof searchLocalPapers;
   openPaperPageForLogin?: OpenPaperPageForLoginDependency;
   browserSessionFactory?: ReturnType<typeof resolveDefaultPaperBrowserSessionFactory>;
   paperBrowserManagerClient?: PaperBrowserManagerClient;
@@ -510,7 +547,9 @@ export type AgentTools = [
   ReadPaperSectionTool,
   SearchPaperTextTool,
   WritePaperWikiSourceTool,
-  SearchPaperWikiTool
+  SearchPaperWikiTool,
+  ListLocalPapersTool,
+  SearchLocalPapersTool
 ] & ToolSetMetadata;
 
 export async function cleanupTools(tools: ReadonlyArray<AgentTool<any>> | undefined): Promise<void> {
@@ -543,6 +582,8 @@ export function createTools(workspaceDir: string, dependencies: ToolDependencies
       }));
   const writePaperWikiSourceImpl = dependencies.writePaperWikiSource ?? writePaperWikiSource;
   const searchPaperWikiImpl = dependencies.searchPaperWiki ?? searchPaperWiki;
+  const listLocalPapersImpl = dependencies.listLocalPapers ?? listLocalPapers;
+  const searchLocalPapersImpl = dependencies.searchLocalPapers ?? searchLocalPapers;
   const browserSessionFactoryImpl =
     dependencies.browserSessionFactory ??
     resolveDefaultPaperBrowserSessionFactory({ workspaceDir: resolvedWorkspaceDir });
@@ -1216,6 +1257,47 @@ export function createTools(workspaceDir: string, dependencies: ToolDependencies
     }
   };
 
+  const listLocalPapersTool: ListLocalPapersTool = {
+    name: "list_local_papers",
+    label: "List Local Papers",
+    description:
+      "Lists papers already known in the local knowledge base across records, raw PDFs, parsed artifacts, and LLM source summaries.",
+    parameters: listLocalPapersParameters,
+    execute: async (_toolCallId: string, args: ListLocalPapersParameters) => {
+      const result = await listLocalPapersImpl({
+        workspaceDir: resolvedWorkspaceDir,
+        ...(args.query ? { query: args.query } : {}),
+        ...(args.status ? { status: args.status } : {}),
+        ...(args.maxResults !== undefined ? { maxResults: args.maxResults } : {})
+      });
+
+      return {
+        content: [{ type: "text", text: JSON.stringify(result) }],
+        details: result
+      };
+    }
+  };
+
+  const searchLocalPapersTool: SearchLocalPapersTool = {
+    name: "search_local_papers",
+    label: "Search Local Papers",
+    description:
+      "Searches across the local knowledge base, including download records, LLM source summaries, and parsed markdown for all downloaded or parsed papers.",
+    parameters: searchLocalPapersParameters,
+    execute: async (_toolCallId: string, args: SearchLocalPapersParameters) => {
+      const result = await searchLocalPapersImpl({
+        workspaceDir: resolvedWorkspaceDir,
+        query: args.query,
+        ...(args.maxResults !== undefined ? { maxResults: args.maxResults } : {})
+      });
+
+      return {
+        content: [{ type: "text", text: JSON.stringify(result) }],
+        details: result
+      };
+    }
+  };
+
   const tools = [
     getTimeTool,
     readFileTool,
@@ -1231,7 +1313,9 @@ export function createTools(workspaceDir: string, dependencies: ToolDependencies
     readPaperSectionTool,
     searchPaperTextTool,
     writePaperWikiSourceTool,
-    searchPaperWikiTool
+    searchPaperWikiTool,
+    listLocalPapersTool,
+    searchLocalPapersTool
   ] as unknown as AgentTools;
 
   Object.defineProperties(tools, {

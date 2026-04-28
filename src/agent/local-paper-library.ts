@@ -1,0 +1,455 @@
+import { access, readdir, readFile } from "node:fs/promises";
+import type { Dirent } from "node:fs";
+import path from "node:path";
+import { resolvePaperLibraryPaths } from "./knowledge-base.js";
+import type { ConcretePaperParseEngine, PaperParseQualityReport, PaperReaderSource } from "./paper-reader/types.js";
+import type { PaperRecord, PaperSource } from "./paper-types.js";
+
+export type LocalPaperListStatus = "all" | "downloaded" | "parsed" | "summarized";
+
+export interface LocalPaperParseSummary {
+  engine: ConcretePaperParseEngine;
+  status?: PaperParseQualityReport["status"];
+  score?: number;
+  totalTextLength?: number;
+  markdownPath: string;
+  parsePath: string;
+  qualityPath: string;
+  chunksPath: string;
+  warnings: string[];
+}
+
+export interface LocalPaperEntry {
+  paperKey: string;
+  title?: string;
+  source?: PaperSource | string;
+  canonicalId?: string;
+  articleUrl?: string;
+  status?: string;
+  recordedAt?: string;
+  recordPath?: string;
+  pdfPath?: string;
+  hasPdf: boolean;
+  hasParsedArtifacts: boolean;
+  hasWikiSummary: boolean;
+  wikiSummaryPath?: string;
+  parses: LocalPaperParseSummary[];
+}
+
+export interface ListLocalPapersOptions {
+  workspaceDir: string;
+  query?: string;
+  status?: LocalPaperListStatus;
+  maxResults?: number;
+}
+
+export interface ListLocalPapersResult {
+  total: number;
+  count: number;
+  results: LocalPaperEntry[];
+}
+
+export interface LocalPaperSearchMatch {
+  field: "metadata" | "record" | "wiki_summary" | "parsed_markdown";
+  snippet: string;
+  path?: string;
+  engine?: ConcretePaperParseEngine;
+}
+
+export interface LocalPaperSearchResult {
+  paper: LocalPaperEntry;
+  score: number;
+  matches: LocalPaperSearchMatch[];
+}
+
+export interface SearchLocalPapersOptions {
+  workspaceDir: string;
+  query: string;
+  maxResults?: number;
+}
+
+export interface SearchLocalPapersResult {
+  query: string;
+  count: number;
+  results: LocalPaperSearchResult[];
+}
+
+const DEFAULT_LOCAL_PAPER_RESULTS = 20;
+const MAX_TEXT_SEARCH_BYTES = 2_000_000;
+
+const CONCRETE_ENGINES = new Set<ConcretePaperParseEngine>([
+  "opendataloader-local",
+  "opendataloader-hybrid",
+  "docling",
+  "plain-text-baseline",
+  "webpage"
+]);
+
+function relativeToWorkspace(workspaceDir: string, filePath: string): string {
+  return path.relative(workspaceDir, filePath).split(path.sep).join("/");
+}
+
+function compactText(value: string): string {
+  return value.replace(/\s+/g, " ").trim();
+}
+
+function createSnippet(text: string, query: string, maxLength = 320): string {
+  const compact = compactText(text);
+  const lowerText = compact.toLowerCase();
+  const lowerQuery = query.toLowerCase();
+  const index = lowerText.indexOf(lowerQuery);
+  if (index < 0) {
+    return compact.slice(0, maxLength);
+  }
+  const start = Math.max(0, index - 120);
+  const end = Math.min(compact.length, index + query.length + 180);
+  return `${start > 0 ? "... " : ""}${compact.slice(start, end)}${end < compact.length ? " ..." : ""}`;
+}
+
+function recordPaperKey(record: PaperRecord, recordPath: string): string {
+  if (record.source === "external") {
+    return path.basename(recordPath, ".json");
+  }
+  return `${record.source}-${record.canonicalId}`;
+}
+
+function readOptionalString(value: unknown): string | undefined {
+  return typeof value === "string" && value.trim() ? value : undefined;
+}
+
+function applyRecord(entry: LocalPaperEntry, record: PaperRecord, recordPath: string, workspaceDir: string): void {
+  const rawRecord = record as Record<string, unknown>;
+  entry.source = record.source;
+  entry.articleUrl = record.articleUrl;
+  entry.status = record.status;
+  entry.recordedAt = record.recordedAt;
+  entry.recordPath = relativeToWorkspace(workspaceDir, recordPath);
+  entry.title = entry.title ?? readOptionalString(rawRecord.title);
+  if ("canonicalId" in record && record.canonicalId) {
+    entry.canonicalId = record.canonicalId;
+  }
+  if ("downloadPath" in record && typeof record.downloadPath === "string") {
+    entry.pdfPath = path.isAbsolute(record.downloadPath)
+      ? record.downloadPath
+      : relativeToWorkspace(workspaceDir, path.resolve(workspaceDir, record.downloadPath));
+  }
+}
+
+function applySource(entry: LocalPaperEntry, source: PaperReaderSource, workspaceDir: string): void {
+  entry.title = entry.title ?? source.title;
+  entry.source = entry.source ?? source.source;
+  entry.canonicalId = entry.canonicalId ?? source.canonicalId;
+  entry.articleUrl = entry.articleUrl ?? source.articleUrl;
+  if (source.recordPath && !entry.recordPath) {
+    entry.recordPath = relativeToWorkspace(workspaceDir, source.recordPath);
+  }
+  if (source.pdfPath && !entry.pdfPath) {
+    entry.pdfPath = relativeToWorkspace(workspaceDir, source.pdfPath);
+  }
+}
+
+function createEmptyEntry(paperKey: string): LocalPaperEntry {
+  return {
+    paperKey,
+    hasPdf: false,
+    hasParsedArtifacts: false,
+    hasWikiSummary: false,
+    parses: []
+  };
+}
+
+async function pathExists(filePath: string | undefined): Promise<boolean> {
+  if (!filePath) {
+    return false;
+  }
+  try {
+    await access(filePath);
+    return true;
+  } catch {
+    return false;
+  }
+}
+
+async function readJsonFile<T>(filePath: string): Promise<T | undefined> {
+  try {
+    return JSON.parse(await readFile(filePath, "utf8")) as T;
+  } catch {
+    return undefined;
+  }
+}
+
+function resolveKnownPdfPath(workspaceDir: string, pdfPath: string | undefined): string | undefined {
+  if (!pdfPath) {
+    return undefined;
+  }
+  if (/^\\\\(?:wsl\.localhost|wsl\$)\\/i.test(pdfPath)) {
+    return undefined;
+  }
+  return path.isAbsolute(pdfPath) ? pdfPath : path.resolve(workspaceDir, pdfPath);
+}
+
+async function collectRecords(workspaceDir: string, entries: Map<string, LocalPaperEntry>): Promise<void> {
+  const paths = resolvePaperLibraryPaths(workspaceDir);
+  let recordFiles;
+  try {
+    recordFiles = await readdir(paths.recordsRoot, { withFileTypes: true });
+  } catch {
+    return;
+  }
+
+  for (const file of recordFiles) {
+    if (!file.isFile() || !file.name.endsWith(".json")) {
+      continue;
+    }
+    const recordPath = path.join(paths.recordsRoot, file.name);
+    const record = await readJsonFile<PaperRecord>(recordPath);
+    if (!record) {
+      continue;
+    }
+    const paperKey = recordPaperKey(record, recordPath);
+    const entry = entries.get(paperKey) ?? createEmptyEntry(paperKey);
+    applyRecord(entry, record, recordPath, workspaceDir);
+    entry.hasPdf = await pathExists(resolveKnownPdfPath(workspaceDir, entry.pdfPath));
+    entries.set(paperKey, entry);
+  }
+}
+
+async function collectParses(workspaceDir: string, entries: Map<string, LocalPaperEntry>): Promise<void> {
+  const paths = resolvePaperLibraryPaths(workspaceDir);
+  let sourceDirs;
+  try {
+    sourceDirs = await readdir(paths.sourceArtifactsRoot, { withFileTypes: true });
+  } catch {
+    return;
+  }
+
+  for (const sourceDir of sourceDirs) {
+    if (!sourceDir.isDirectory()) {
+      continue;
+    }
+    const paperKey = sourceDir.name;
+    const paperDir = path.join(paths.sourceArtifactsRoot, sourceDir.name);
+    const entry = entries.get(paperKey) ?? createEmptyEntry(paperKey);
+    const source = await readJsonFile<PaperReaderSource>(path.join(paperDir, "source.json"));
+    if (source) {
+      applySource(entry, source, workspaceDir);
+    }
+
+    const parsesDir = path.join(paperDir, "parses");
+    let parseDirs: Dirent[];
+    try {
+      parseDirs = await readdir(parsesDir, { withFileTypes: true });
+    } catch {
+      parseDirs = [];
+    }
+
+    const parses: LocalPaperParseSummary[] = [];
+    for (const parseDir of parseDirs) {
+      if (!parseDir.isDirectory() || !CONCRETE_ENGINES.has(parseDir.name as ConcretePaperParseEngine)) {
+        continue;
+      }
+      const engine = parseDir.name as ConcretePaperParseEngine;
+      const parseRoot = path.join(parsesDir, parseDir.name);
+      const qualityPath = path.join(parseRoot, "quality.json");
+      const quality = await readJsonFile<PaperParseQualityReport>(qualityPath);
+      parses.push({
+        engine,
+        ...(quality?.status ? { status: quality.status } : {}),
+        ...(typeof quality?.score === "number" ? { score: quality.score } : {}),
+        ...(typeof quality?.totalTextLength === "number" ? { totalTextLength: quality.totalTextLength } : {}),
+        markdownPath: relativeToWorkspace(workspaceDir, path.join(parseRoot, "document.md")),
+        parsePath: relativeToWorkspace(workspaceDir, path.join(parseRoot, "parse.json")),
+        qualityPath: relativeToWorkspace(workspaceDir, qualityPath),
+        chunksPath: relativeToWorkspace(workspaceDir, path.join(paperDir, "chunks", `${engine}.jsonl`)),
+        warnings: quality?.warnings ?? []
+      });
+    }
+    entry.parses = parses.sort((left, right) => left.engine.localeCompare(right.engine));
+    entry.hasParsedArtifacts = entry.parses.length > 0;
+    entry.hasPdf = entry.hasPdf || await pathExists(resolveKnownPdfPath(workspaceDir, entry.pdfPath));
+    entries.set(paperKey, entry);
+  }
+}
+
+async function collectWikiSummaries(workspaceDir: string, entries: Map<string, LocalPaperEntry>): Promise<void> {
+  const paths = resolvePaperLibraryPaths(workspaceDir);
+  let sourceFiles;
+  try {
+    sourceFiles = await readdir(paths.sourcesRoot, { withFileTypes: true });
+  } catch {
+    return;
+  }
+
+  for (const file of sourceFiles) {
+    if (!file.isFile() || !file.name.endsWith(".md")) {
+      continue;
+    }
+    const paperKey = path.basename(file.name, ".md");
+    const entry = entries.get(paperKey) ?? createEmptyEntry(paperKey);
+    entry.hasWikiSummary = true;
+    entry.wikiSummaryPath = relativeToWorkspace(workspaceDir, path.join(paths.sourcesRoot, file.name));
+    entries.set(paperKey, entry);
+  }
+}
+
+function matchesStatus(entry: LocalPaperEntry, status: LocalPaperListStatus): boolean {
+  if (status === "all") {
+    return true;
+  }
+  if (status === "downloaded") {
+    return entry.status === "downloaded" || entry.hasPdf;
+  }
+  if (status === "parsed") {
+    return entry.hasParsedArtifacts;
+  }
+  return entry.hasWikiSummary;
+}
+
+function metadataText(entry: LocalPaperEntry): string {
+  return [
+    entry.paperKey,
+    entry.title,
+    entry.source,
+    entry.canonicalId,
+    entry.articleUrl,
+    entry.status,
+    entry.recordedAt
+  ].filter(Boolean).join(" ");
+}
+
+export async function listLocalPapers(options: ListLocalPapersOptions): Promise<ListLocalPapersResult> {
+  const workspaceDir = path.resolve(options.workspaceDir);
+  const entries = new Map<string, LocalPaperEntry>();
+  await collectRecords(workspaceDir, entries);
+  await collectParses(workspaceDir, entries);
+  await collectWikiSummaries(workspaceDir, entries);
+
+  const status = options.status ?? "all";
+  const query = options.query?.trim().toLowerCase();
+  const maxResults = Math.max(1, Math.trunc(options.maxResults ?? DEFAULT_LOCAL_PAPER_RESULTS));
+  const filtered = Array.from(entries.values())
+    .filter((entry) => matchesStatus(entry, status))
+    .filter((entry) => !query || metadataText(entry).toLowerCase().includes(query))
+    .sort((left, right) =>
+      (right.recordedAt ?? "").localeCompare(left.recordedAt ?? "") ||
+      left.paperKey.localeCompare(right.paperKey)
+    );
+
+  return {
+    total: filtered.length,
+    count: Math.min(filtered.length, maxResults),
+    results: filtered.slice(0, maxResults)
+  };
+}
+
+function countOccurrences(text: string, query: string): number {
+  const lowerText = text.toLowerCase();
+  const lowerQuery = query.toLowerCase();
+  if (!lowerQuery) {
+    return 0;
+  }
+  let count = 0;
+  let index = lowerText.indexOf(lowerQuery);
+  while (index >= 0) {
+    count += 1;
+    index = lowerText.indexOf(lowerQuery, index + lowerQuery.length);
+  }
+  return count;
+}
+
+async function readSearchableText(workspaceDir: string, relativePath: string | undefined): Promise<string | undefined> {
+  if (!relativePath) {
+    return undefined;
+  }
+  const filePath = path.resolve(workspaceDir, relativePath);
+  try {
+    const file = await readFile(filePath, { encoding: "utf8", flag: "r" });
+    return file.length > MAX_TEXT_SEARCH_BYTES ? file.slice(0, MAX_TEXT_SEARCH_BYTES) : file;
+  } catch {
+    return undefined;
+  }
+}
+
+export async function searchLocalPapers(options: SearchLocalPapersOptions): Promise<SearchLocalPapersResult> {
+  const query = options.query.trim();
+  if (!query) {
+    throw new Error("query is required.");
+  }
+
+  const listed = await listLocalPapers({
+    workspaceDir: options.workspaceDir,
+    status: "all",
+    maxResults: Number.MAX_SAFE_INTEGER
+  });
+  const maxResults = Math.max(1, Math.trunc(options.maxResults ?? DEFAULT_LOCAL_PAPER_RESULTS));
+  const results: LocalPaperSearchResult[] = [];
+
+  for (const paper of listed.results) {
+    let score = 0;
+    const matches: LocalPaperSearchMatch[] = [];
+    const metadata = metadataText(paper);
+    const metadataCount = countOccurrences(metadata, query);
+    if (metadataCount > 0) {
+      score += metadataCount * 8;
+      matches.push({
+        field: "metadata",
+        snippet: createSnippet(metadata, query)
+      });
+    }
+
+    const recordText = await readSearchableText(options.workspaceDir, paper.recordPath);
+    const recordCount = recordText ? countOccurrences(recordText, query) : 0;
+    if (recordText && recordCount > 0) {
+      score += recordCount * 4;
+      matches.push({
+        field: "record",
+        path: paper.recordPath,
+        snippet: createSnippet(recordText, query)
+      });
+    }
+
+    const wikiText = await readSearchableText(options.workspaceDir, paper.wikiSummaryPath);
+    const wikiCount = wikiText ? countOccurrences(wikiText, query) : 0;
+    if (wikiText && wikiCount > 0) {
+      score += wikiCount * 10;
+      matches.push({
+        field: "wiki_summary",
+        path: paper.wikiSummaryPath,
+        snippet: createSnippet(wikiText, query)
+      });
+    }
+
+    for (const parse of paper.parses) {
+      const markdownText = await readSearchableText(options.workspaceDir, parse.markdownPath);
+      const markdownCount = markdownText ? countOccurrences(markdownText, query) : 0;
+      if (!markdownText || markdownCount === 0) {
+        continue;
+      }
+      score += markdownCount * 2;
+      matches.push({
+        field: "parsed_markdown",
+        path: parse.markdownPath,
+        engine: parse.engine,
+        snippet: createSnippet(markdownText, query)
+      });
+    }
+
+    if (matches.length > 0) {
+      results.push({ paper, score, matches });
+    }
+  }
+
+  const sorted = results
+    .sort((left, right) =>
+      right.score - left.score ||
+      (right.paper.recordedAt ?? "").localeCompare(left.paper.recordedAt ?? "") ||
+      left.paper.paperKey.localeCompare(right.paper.paperKey)
+    )
+    .slice(0, maxResults);
+
+  return {
+    query,
+    count: sorted.length,
+    results: sorted
+  };
+}
