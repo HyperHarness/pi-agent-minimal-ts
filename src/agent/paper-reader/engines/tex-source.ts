@@ -1,9 +1,11 @@
 import { execFile } from "node:child_process";
-import { access, mkdtemp, readFile, readdir, rm } from "node:fs/promises";
+import { existsSync } from "node:fs";
+import { access, copyFile, mkdir, mkdtemp, readFile, readdir, rm } from "node:fs/promises";
 import os from "node:os";
 import path from "node:path";
 import { promisify } from "node:util";
 import { resolvePaperLibraryPaths } from "../../knowledge-base.js";
+import { getParseDir } from "../paper-reader-store.js";
 import type {
   PaperElement,
   PaperElementType,
@@ -24,6 +26,17 @@ export interface TexSourceParseOptions {
 
 const DEFAULT_TIMEOUT_MS = 180_000;
 const execFileAsync = promisify(execFile);
+const IMAGE_ASSET_EXTENSIONS = new Set([
+  ".png",
+  ".jpg",
+  ".jpeg",
+  ".gif",
+  ".webp",
+  ".svg",
+  ".pdf",
+  ".eps",
+  ".ps"
+]);
 
 function arxivIdFromPaperKey(paperKey: string): string | undefined {
   const match = paperKey.match(/^arxiv-(.+)$/);
@@ -179,6 +192,12 @@ function decodeHtmlEntities(value: string): string {
   });
 }
 
+function getHtmlAttribute(tag: string, name: string): string | undefined {
+  const pattern = new RegExp(`\\b${name}\\s*=\\s*(?:"([^"]*)"|'([^']*)'|([^\\s>]+))`, "i");
+  const match = tag.match(pattern);
+  return match?.[1] ?? match?.[2] ?? match?.[3];
+}
+
 function sanitizeLatexmlMarkdown(markdown: string): string {
   const normalized = markdown.replace(/\r\n/g, "\n");
   const firstHeadingIndex = normalized.search(/^#\s+/m);
@@ -186,13 +205,129 @@ function sanitizeLatexmlMarkdown(markdown: string): string {
   return decodeHtmlEntities(
     body
       .replace(/<span\b[^>]*class="[^"]*\bltx_ERROR\b[^"]*"[^>]*>[\s\S]*?<\/span>/gi, "")
-      .replace(/<img\b[^>]*\balt="([^"]*)"[^>]*>/gi, (_match, alt: string) => alt ? `![${alt}]()` : "")
+      .replace(/<img\b[^>]*>/gi, (match: string) => {
+        const alt = getHtmlAttribute(match, "alt") ?? "";
+        const src = getHtmlAttribute(match, "src") ?? "";
+        return alt || src ? `![${alt}](${src})` : "";
+      })
       .replace(/<br\s*\/?>/gi, "\n")
       .replace(/<\/?[a-z][^>]*>/gi, "")
+      .replace(/Generated on [^\n]* by LaTeXML!\[Mascot Sammy]\(data:image\/png;base64,[^)]+\)/gi, "")
       .replace(/^[ \t]+$/gm, "")
       .replace(/\n{3,}/g, "\n\n")
       .trim()
   );
+}
+
+function isExternalAssetReference(value: string): boolean {
+  return /^(?:[a-z][a-z0-9+.-]*:|#|$)/i.test(value.trim());
+}
+
+function stripAssetReferenceDecorations(value: string): string {
+  return value
+    .trim()
+    .replace(/^<|>$/g, "")
+    .split("#", 1)[0]
+    ?.split("?", 1)[0]
+    ?.trim() ?? "";
+}
+
+function decodeAssetReference(value: string): string {
+  try {
+    return decodeURIComponent(value);
+  } catch {
+    return value;
+  }
+}
+
+function sanitizeAssetFilename(value: string): string {
+  const parsed = path.parse(value);
+  const base = (parsed.name || "asset")
+    .replace(/[<>:"/\\|?*\u0000-\u001F]+/g, "-")
+    .replace(/\s+/g, "-")
+    .replace(/-+/g, "-")
+    .replace(/^[-. ]+|[-. ]+$/g, "")
+    || "asset";
+  const ext = parsed.ext.replace(/[<>:"/\\|?*\u0000-\u001F\s]+/g, "").toLowerCase();
+  return `${base}${ext}`;
+}
+
+function isImageAssetPath(filePath: string): boolean {
+  return IMAGE_ASSET_EXTENSIONS.has(path.extname(filePath).toLowerCase());
+}
+
+async function listImageAssets(sourceDir: string): Promise<string[]> {
+  const entries = await readdir(sourceDir, { recursive: true, withFileTypes: true });
+  return entries
+    .filter((entry) => entry.isFile())
+    .map((entry) => path.join(entry.parentPath, entry.name))
+    .filter(isImageAssetPath)
+    .sort();
+}
+
+function resolveMarkdownAssetReference(assetRoots: string[], reference: string): string | undefined {
+  const stripped = stripAssetReferenceDecorations(reference);
+  if (!stripped || isExternalAssetReference(stripped)) {
+    return undefined;
+  }
+  const decoded = decodeAssetReference(stripped);
+  for (const assetRoot of assetRoots) {
+    const resolved = path.resolve(assetRoot, decoded);
+    const relative = path.relative(assetRoot, resolved);
+    if (!relative.startsWith("..") && !path.isAbsolute(relative) && isImageAssetPath(resolved) && existsSync(resolved)) {
+      return resolved;
+    }
+  }
+  return undefined;
+}
+
+async function rewriteMarkdownImageAssets(input: {
+  workspaceDir: string;
+  paperKey: string;
+  sourceDir: string;
+  generatedAssetDir: string;
+  markdown: string;
+}): Promise<string> {
+  const allAssets = await listImageAssets(input.sourceDir);
+  const assetRoots = [input.sourceDir, input.generatedAssetDir];
+  const referencedAssets = new Set<string>();
+  input.markdown.replace(/!\[([^\]]*)]\(([^)]*)\)(?:\{[^}\n]*})?/g, (_match, _alt: string, reference: string) => {
+    const resolved = resolveMarkdownAssetReference(assetRoots, reference);
+    if (resolved) {
+      referencedAssets.add(resolved);
+    }
+    return "";
+  });
+
+  const assetsToCopy = Array.from(new Set([...referencedAssets, ...allAssets])).sort();
+  const parseDir = getParseDir(input.workspaceDir, input.paperKey, "tex-source");
+  const assetsDir = path.join(parseDir, "assets");
+  await rm(assetsDir, { recursive: true, force: true });
+  if (assetsToCopy.length === 0) {
+    return input.markdown;
+  }
+
+  await mkdir(assetsDir, { recursive: true });
+  const usedNames = new Set<string>();
+  const copiedBySource = new Map<string, string>();
+  for (const sourcePath of assetsToCopy) {
+    const parsed = path.parse(sanitizeAssetFilename(path.basename(sourcePath)));
+    let filename = `${parsed.name}${parsed.ext}`;
+    let index = 2;
+    while (usedNames.has(filename)) {
+      filename = `${parsed.name}-${index}${parsed.ext}`;
+      index += 1;
+    }
+    usedNames.add(filename);
+    await copyFile(sourcePath, path.join(assetsDir, filename));
+    copiedBySource.set(sourcePath, `assets/${filename}`);
+  }
+
+  return input.markdown.replace(/!\[([^\]]*)]\(([^)]*)\)(?:\{[^}\n]*})?/g, (match: string, alt: string, reference: string) => {
+    const resolved = resolveMarkdownAssetReference(assetRoots, reference);
+    const rewritten = resolved ? copiedBySource.get(resolved) : undefined;
+    return rewritten ? `![${alt}](${rewritten})` : match;
+  });
 }
 
 function stripMarkdownSyntax(value: string): string {
@@ -299,12 +434,18 @@ export async function parseWithTexSource(
       latexmlBin,
       timeoutMs
     });
-    const markdown = sanitizeLatexmlMarkdown(await convertHtmlToMarkdown({
-      htmlPath,
-      outputPath: markdownPath,
-      pandocBin,
-      timeoutMs
-    }));
+    const markdown = await rewriteMarkdownImageAssets({
+      workspaceDir: options.workspaceDir,
+      paperKey: options.paperKey,
+      sourceDir: path.dirname(texPath),
+      generatedAssetDir: outputDir,
+      markdown: sanitizeLatexmlMarkdown(await convertHtmlToMarkdown({
+        htmlPath,
+        outputPath: markdownPath,
+        pandocBin,
+        timeoutMs
+      }))
+    });
     if (!markdown) {
       throw new PaperReaderError("parse_failed", "pandoc did not produce markdown from LaTeXML HTML.");
     }

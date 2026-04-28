@@ -1,6 +1,10 @@
 import { createHash } from "node:crypto";
+import { Buffer } from "node:buffer";
+import { mkdir, rm, writeFile } from "node:fs/promises";
+import path from "node:path";
 import { createPaperChunks } from "../chunks.js";
 import {
+  getParseDir,
   readCachedParse,
   readPaperSourceByKey,
   writeParseArtifacts
@@ -91,7 +95,261 @@ function hashWebpageExtraction(extraction: PaperWebPageExtraction): string {
   hash.update(extraction.url);
   hash.update("\0");
   hash.update(extraction.markdown);
+  for (const asset of extraction.assets ?? []) {
+    hash.update("\0asset\0");
+    hash.update(asset.url);
+    hash.update("\0");
+    hash.update(asset.originalUrl ?? "");
+    hash.update("\0");
+    hash.update(asset.filename ?? "");
+    hash.update("\0");
+    hash.update(asset.mimeType ?? "");
+    hash.update("\0");
+    hash.update(asset.dataBase64);
+  }
   return hash.digest("hex");
+}
+
+function extensionFromMimeType(mimeType: string | undefined): string {
+  const normalized = mimeType?.split(";", 1)[0]?.trim().toLowerCase();
+  if (normalized === "image/jpeg") {
+    return ".jpg";
+  }
+  if (normalized === "image/png") {
+    return ".png";
+  }
+  if (normalized === "image/gif") {
+    return ".gif";
+  }
+  if (normalized === "image/webp") {
+    return ".webp";
+  }
+  if (normalized === "image/svg+xml") {
+    return ".svg";
+  }
+  if (normalized === "application/pdf") {
+    return ".pdf";
+  }
+  return "";
+}
+
+function filenameFromAssetUrl(value: string): string {
+  try {
+    const parsed = new URL(value);
+    return decodeURIComponent(path.posix.basename(parsed.pathname));
+  } catch {
+    const withoutQuery = value.split(/[?#]/, 1)[0] ?? "";
+    return path.basename(withoutQuery);
+  }
+}
+
+function sanitizeAssetFilename(value: string): string {
+  return value
+    .replace(/[\u0000-\u001f<>:"/\\|?*]+/g, "-")
+    .replace(/\s+/g, " ")
+    .trim()
+    .replace(/^[. ]+|[. ]+$/g, "");
+}
+
+function isUsableAssetFilename(value: string): boolean {
+  return (
+    value.length > 0 &&
+    value.length <= 120 &&
+    !value.toLowerCase().includes("base64")
+  );
+}
+
+function uniqueAssetFilename(input: {
+  preferred?: string;
+  url: string;
+  mimeType?: string;
+  index: number;
+  used: Set<string>;
+}): string {
+  const fallback = `asset-${String(input.index + 1).padStart(3, "0")}${extensionFromMimeType(input.mimeType)}`;
+  const preferred = sanitizeAssetFilename(input.preferred ?? "");
+  const fromUrl = sanitizeAssetFilename(filenameFromAssetUrl(input.url));
+  const sanitized = isUsableAssetFilename(preferred)
+    ? preferred
+    : isUsableAssetFilename(fromUrl)
+      ? fromUrl
+      : fallback;
+  const ext = path.extname(sanitized) || extensionFromMimeType(input.mimeType);
+  const stem = sanitizeAssetFilename(path.basename(sanitized, path.extname(sanitized))) || `asset-${input.index + 1}`;
+  let candidate = `${stem}${ext}`;
+  let suffix = 2;
+  while (input.used.has(candidate.toLowerCase())) {
+    candidate = `${stem}-${suffix}${ext}`;
+    suffix += 1;
+  }
+  input.used.add(candidate.toLowerCase());
+  return candidate;
+}
+
+function escapeRegExp(value: string): string {
+  return value.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
+}
+
+function rewriteMarkdownImageLinks(
+  markdown: string,
+  replacements: Map<string, string>
+): string {
+  if (replacements.size === 0) {
+    return markdown;
+  }
+
+  return markdown.replace(
+    /!\[([^\]]*)]\(([^)\n]+)\)(\{[^}\n]*})?/g,
+    (match, alt: string, target: string) => {
+      const trimmedTarget = target.trim().replace(/^<|>$/g, "");
+      const replacement = replacements.get(trimmedTarget);
+      return replacement ? `![${alt}](${replacement})` : match;
+    }
+  );
+}
+
+function natureImageStemFromArticleUrl(url: string): string | undefined {
+  try {
+    const parsed = new URL(url);
+    if (!/(^|\.)nature\.com$/i.test(parsed.hostname)) {
+      return undefined;
+    }
+    const match = parsed.pathname.match(/\/articles\/s(\d+)-(\d{3})-0*(\d+)-[a-z0-9]+/i);
+    if (!match?.[1] || !match[2] || !match[3]) {
+      return undefined;
+    }
+    return `${match[1]}_${2000 + Number(match[2])}_${Number(match[3])}`;
+  } catch {
+    return undefined;
+  }
+}
+
+function assetBelongsToArticle(input: {
+  extractionUrl: string;
+  assetUrl: string;
+  filename: string;
+}): boolean {
+  const natureStem = natureImageStemFromArticleUrl(input.extractionUrl);
+  if (!natureStem) {
+    return true;
+  }
+
+  const candidates = [input.assetUrl, input.filename].join(" ");
+  if (/media\.springernature\.com|MediaObjects/i.test(candidates)) {
+    return candidates.includes(natureStem);
+  }
+
+  return true;
+}
+
+function figureNumberFromAssetFilename(filename: string): string | undefined {
+  const match = filename.match(/(?:^|[_-])Fig(?:ure)?[_-]?(\d+)(?:[_-]|\.|$)/i);
+  return match?.[1] ? String(Number(match[1])) : undefined;
+}
+
+function insertMissingFigureAssetLinks(markdown: string, assets: Array<{ filename: string }>): string {
+  if (/!\[[^\]]*]\(assets\//.test(markdown)) {
+    return markdown;
+  }
+
+  const figureAssets = new Map<string, string>();
+  for (const asset of assets) {
+    const figureNumber = figureNumberFromAssetFilename(asset.filename);
+    if (figureNumber && !figureAssets.has(figureNumber)) {
+      figureAssets.set(figureNumber, `assets/${asset.filename}`);
+    }
+  }
+  if (figureAssets.size === 0) {
+    return markdown;
+  }
+
+  const lines = markdown.split("\n");
+  const rewritten: string[] = [];
+  for (const line of lines) {
+    const captionMatch = line.match(/^(?:Figure:\s*)?Fig\.\s*(\d+)\b/i);
+    if (captionMatch?.[1]) {
+      const relativePath = figureAssets.get(String(Number(captionMatch[1])));
+      if (relativePath && rewritten[rewritten.length - 1] !== `![Fig. ${captionMatch[1]}](${relativePath})`) {
+        if (rewritten.length > 0 && rewritten[rewritten.length - 1] !== "") {
+          rewritten.push("");
+        }
+        rewritten.push(`![Fig. ${captionMatch[1]}](${relativePath})`);
+        rewritten.push("");
+      }
+    }
+    rewritten.push(line);
+  }
+
+  return rewritten.join("\n");
+}
+
+async function materializeWebpageAssets(input: {
+  workspaceDir: string;
+  paperKey: string;
+  extraction: PaperWebPageExtraction;
+}): Promise<PaperWebPageExtraction> {
+  const assets = input.extraction.assets?.filter((asset) => asset.dataBase64.trim()) ?? [];
+  if (assets.length === 0) {
+    return input.extraction;
+  }
+
+  const assetsDir = path.join(getParseDir(input.workspaceDir, input.paperKey, "webpage"), "assets");
+  await rm(assetsDir, { recursive: true, force: true });
+  await mkdir(assetsDir, { recursive: true });
+
+  const used = new Set<string>();
+  const replacements = new Map<string, string>();
+  const materializedAssets = [];
+
+  for (let index = 0; index < assets.length; index += 1) {
+    const asset = assets[index]!;
+    const filename = uniqueAssetFilename({
+      preferred: asset.filename,
+      url: asset.url,
+      mimeType: asset.mimeType,
+      index,
+      used
+    });
+    const relativePath = `assets/${filename}`;
+    if (!assetBelongsToArticle({
+      extractionUrl: input.extraction.url,
+      assetUrl: asset.url,
+      filename
+    })) {
+      continue;
+    }
+    const buffer = Buffer.from(asset.dataBase64, "base64");
+    await writeFile(path.join(assetsDir, filename), buffer);
+
+    replacements.set(asset.url, relativePath);
+    if (asset.originalUrl) {
+      replacements.set(asset.originalUrl, relativePath);
+      try {
+        replacements.set(new URL(asset.originalUrl, input.extraction.url).toString(), relativePath);
+      } catch {
+        // Keep the original link replacement only.
+      }
+    }
+
+    materializedAssets.push({
+      ...asset,
+      filename
+    });
+  }
+
+  let markdown = input.extraction.markdown;
+  markdown = rewriteMarkdownImageLinks(markdown, replacements);
+
+  for (const [target, replacement] of replacements.entries()) {
+    markdown = markdown.replace(new RegExp(escapeRegExp(target), "g"), replacement);
+  }
+  markdown = insertMissingFigureAssetLinks(markdown, materializedAssets);
+
+  return {
+    ...input.extraction,
+    markdown,
+    assets: materializedAssets
+  };
 }
 
 function sectionIdFromTitle(title: string, index: number): string {
@@ -294,7 +552,12 @@ export async function savePaperWebPageParse(
     ...(options.paperKey ? { paperKey: options.paperKey } : {}),
     extraction: options.extraction
   });
-  const sourceSha256 = hashWebpageExtraction(options.extraction);
+  const extraction = await materializeWebpageAssets({
+    workspaceDir: options.workspaceDir,
+    paperKey,
+    extraction: options.extraction
+  });
+  const sourceSha256 = hashWebpageExtraction(extraction);
   const cached = options.force === true
     ? null
     : await readCachedParse({
@@ -319,24 +582,24 @@ export async function savePaperWebPageParse(
   const document = buildWebpageDocument({
     paperKey,
     sourceSha256,
-    extraction: options.extraction
+    extraction
   });
   const source = await buildSource({
     workspaceDir: options.workspaceDir,
     paperKey,
-    extraction: options.extraction,
+    extraction,
     sourceSha256
   });
   const quality = applyWebpageAccessQualityWarning({
     quality: evaluateParseQuality(document),
-    extraction: options.extraction
+    extraction
   });
   const chunks = createPaperChunks(document);
   const artifacts = await writeParseArtifacts({
     workspaceDir: options.workspaceDir,
     source,
     document,
-    markdown: options.extraction.markdown,
+    markdown: extraction.markdown,
     quality,
     chunks
   });

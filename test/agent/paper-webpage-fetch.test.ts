@@ -1,6 +1,6 @@
 import test from "node:test";
 import assert from "node:assert/strict";
-import { chmod, mkdtemp, readFile, rm, writeFile } from "node:fs/promises";
+import { chmod, mkdtemp, readFile, readdir, rm, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import path from "node:path";
 import {
@@ -533,6 +533,150 @@ test("savePaperWebPageParse writes webpage artifacts under wiki sources", async 
       extraction
     });
     assert.equal(cached.status, "already_parsed");
+  } finally {
+    await rm(workspace, { recursive: true, force: true });
+  }
+});
+
+test("savePaperWebPageParse writes extension-captured webpage images as local assets", async () => {
+  const workspace = await mkdtemp(path.join(tmpdir(), "pi-paper-webpage-assets-"));
+  try {
+    const extraction = parsePaperWebPageHtml({
+      url: "https://www.nature.com/articles/s41567-022-01591-2",
+      html: `
+        <html>
+          <head><meta name="citation_title" content="Nature Physics article"></head>
+          <body>
+            <main data-track-component="article body">
+              <h1>Nature Physics article</h1>
+              <section><h2>Results</h2><p>Figure text.</p></section>
+              <figure>
+                <img src="/cms/asset/figure-1.png" alt="Figure 1">
+                <figcaption>Fig. 1 | Device schematic.</figcaption>
+              </figure>
+            </main>
+          </body>
+        </html>
+      `
+    });
+
+    const result = await savePaperWebPageParse({
+      workspaceDir: workspace,
+      extraction: {
+        ...extraction,
+        markdown: [
+          "# Nature Physics article",
+          "",
+          "## Results",
+          "",
+          "Figure text.",
+          "",
+          "![Figure 1](https://www.nature.com/cms/asset/figure-1.png)",
+          "![Inline icon](data:image/svg+xml;base64,PHN2Zz48L3N2Zz4=)",
+          "",
+          "Fig. 1 | Device schematic."
+        ].join("\n"),
+        assets: [
+          {
+            url: "https://www.nature.com/cms/asset/figure-1.png",
+            originalUrl: "/cms/asset/figure-1.png",
+            filename: "figure-1.png",
+            mimeType: "image/png",
+            dataBase64: Buffer.from("png-bytes").toString("base64"),
+            alt: "Figure 1"
+          },
+          {
+            url: "data:image/svg+xml;base64,PHN2Zz48L3N2Zz4=",
+            originalUrl: "data:image/svg+xml;base64,PHN2Zz48L3N2Zz4=",
+            filename: "svg+xml;base64,PHN2Zz48L3N2Zz4=.svg",
+            mimeType: "image/svg+xml",
+            dataBase64: "PHN2Zz48L3N2Zz4=",
+            alt: "Inline icon"
+          }
+        ]
+      }
+    });
+
+    assert.equal(result.status, "parsed");
+    const markdown = await readFile(result.artifacts.markdownPath, "utf8");
+    assert.match(markdown, /!\[Figure 1]\(assets\/figure-1\.png\)/);
+    assert.match(markdown, /!\[Inline icon]\(assets\/asset-002\.svg\)/);
+    const assetPath = path.join(
+      workspace,
+      "knowledge-base",
+      "wiki",
+      "sources",
+      "nature-s41567-022-01591-2",
+      "parses",
+      "webpage",
+      "assets",
+      "figure-1.png"
+    );
+    assert.equal(await readFile(assetPath, "utf8"), "png-bytes");
+    const dataAssetPath = path.join(path.dirname(assetPath), "asset-002.svg");
+    assert.equal(await readFile(dataAssetPath, "utf8"), "<svg></svg>");
+  } finally {
+    await rm(workspace, { recursive: true, force: true });
+  }
+});
+
+test("savePaperWebPageParse inserts Nature figure asset links when Pandoc keeps only captions", async () => {
+  const workspace = await mkdtemp(path.join(tmpdir(), "pi-paper-webpage-nature-assets-"));
+  try {
+    const extraction = parsePaperWebPageHtml({
+      url: "https://www.nature.com/articles/s41567-022-01591-2",
+      html: `
+        <html>
+          <head><meta name="citation_title" content="Nature Physics article"></head>
+          <body>
+            <main data-track-component="article body">
+              <h1>Nature Physics article</h1>
+              <p>Article body.</p>
+              <p>Figure: Fig. 1: Characterization of the device.</p>
+            </main>
+          </body>
+        </html>
+      `
+    });
+
+    const result = await savePaperWebPageParse({
+      workspaceDir: workspace,
+      extraction: {
+        ...extraction,
+        markdown: [
+          "# Nature Physics article",
+          "",
+          "Article body.",
+          "",
+          "Figure: Fig. 1: Characterization of the device."
+        ].join("\n"),
+        assets: [
+          {
+            url: "https://media.springernature.com/w700/springer-static/image/art%3A10.1038%2Fs41567-022-01591-2/MediaObjects/41567_2022_1591_Fig1_HTML.png",
+            filename: "41567_2022_1591_Fig1_HTML.png",
+            mimeType: "image/png",
+            dataBase64: Buffer.from("main-figure").toString("base64")
+          },
+          {
+            url: "https://media.springernature.com/w215h120/springer-static/image/art%3A10.1038%2Fs41586-022-04500-y/MediaObjects/41586_2022_4500_Fig1_HTML.png",
+            filename: "41586_2022_4500_Fig1_HTML.png",
+            mimeType: "image/png",
+            dataBase64: Buffer.from("related-figure").toString("base64")
+          }
+        ]
+      }
+    });
+
+    const markdown = await readFile(result.artifacts.markdownPath, "utf8");
+    assert.match(markdown, /!\[Fig\. 1]\(assets\/41567_2022_1591_Fig1_HTML\.png\)/);
+    assert.doesNotMatch(markdown, /41586_2022_4500_Fig1_HTML/);
+
+    const assetDir = path.join(path.dirname(result.artifacts.markdownPath), "assets");
+    assert.deepEqual(await readdir(assetDir), ["41567_2022_1591_Fig1_HTML.png"]);
+    assert.equal(
+      await readFile(path.join(assetDir, "41567_2022_1591_Fig1_HTML.png"), "utf8"),
+      "main-figure"
+    );
   } finally {
     await rm(workspace, { recursive: true, force: true });
   }

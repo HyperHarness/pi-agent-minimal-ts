@@ -35,7 +35,17 @@ test("parseExtensionHostMessage accepts register_webpage_snapshot messages", () 
     finalUrl: "https://www.science.org/doi/10.1126/science.adz8659?loaded=1",
     source: "science",
     title: "Science Paper",
-    html: "<html><head><title>Science Paper</title></head><body><main><h1>Science Paper</h1><p>Abstract text.</p></main></body></html>"
+    html: "<html><head><title>Science Paper</title></head><body><main><h1>Science Paper</h1><p>Abstract text.</p></main></body></html>",
+    webpageAssets: [
+      {
+        url: "https://www.science.org/cms/asset/figure-1.png",
+        originalUrl: "/cms/asset/figure-1.png",
+        filename: "figure-1.png",
+        mimeType: "image/png",
+        dataBase64: "cG5n",
+        alt: "Figure 1"
+      }
+    ]
   });
 
   assert.deepEqual(message, {
@@ -45,7 +55,17 @@ test("parseExtensionHostMessage accepts register_webpage_snapshot messages", () 
     finalUrl: "https://www.science.org/doi/10.1126/science.adz8659?loaded=1",
     source: "science",
     title: "Science Paper",
-    html: "<html><head><title>Science Paper</title></head><body><main><h1>Science Paper</h1><p>Abstract text.</p></main></body></html>"
+    html: "<html><head><title>Science Paper</title></head><body><main><h1>Science Paper</h1><p>Abstract text.</p></main></body></html>",
+    webpageAssets: [
+      {
+        url: "https://www.science.org/cms/asset/figure-1.png",
+        originalUrl: "/cms/asset/figure-1.png",
+        filename: "figure-1.png",
+        mimeType: "image/png",
+        dataBase64: "cG5n",
+        alt: "Figure 1"
+      }
+    ]
   });
 });
 

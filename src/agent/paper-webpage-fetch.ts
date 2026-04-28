@@ -46,10 +46,20 @@ export interface PaperWebPageAccessStatus {
   message?: string;
 }
 
+export interface PaperWebPageAsset {
+  url: string;
+  dataBase64: string;
+  originalUrl?: string;
+  filename?: string;
+  mimeType?: string;
+  alt?: string;
+}
+
 export interface PaperWebPageExtraction {
   url: string;
   title?: string;
   markdown: string;
+  assets?: PaperWebPageAsset[];
   metadata: PaperWebPageMetadata;
   access: PaperWebPageAccessStatus;
   stats: {

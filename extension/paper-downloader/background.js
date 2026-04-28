@@ -4,6 +4,9 @@ const EXTENSION_INSTANCE_ID = "chrome-main";
 const STORAGE_KEY = "piAgentPaperDownloaderState";
 const QUICK_POLL_INTERVAL_MS = 2000;
 const QUICK_POLL_ACTIVE_MS = 5 * 60 * 1000;
+const MAX_WEBPAGE_ASSET_COUNT = 40;
+const MAX_WEBPAGE_ASSET_BYTES = 4 * 1024 * 1024;
+const MAX_WEBPAGE_ASSET_TOTAL_BYTES = 24 * 1024 * 1024;
 
 const jobsById = new Map();
 const jobsByTabId = new Map();
@@ -80,6 +83,162 @@ async function sendNativeMessage(message) {
       message: error instanceof Error ? error.message : "Native host message failed."
     };
   }
+}
+
+function arrayBufferToBase64(buffer) {
+  const bytes = new Uint8Array(buffer);
+  if (typeof btoa !== "function" && typeof Buffer !== "undefined") {
+    return Buffer.from(bytes).toString("base64");
+  }
+  var binary = "";
+  for (var index = 0; index < bytes.length; index += 0x8000) {
+    var chunk = bytes.subarray(index, index + 0x8000);
+    binary += String.fromCharCode.apply(null, Array.prototype.slice.call(chunk));
+  }
+  return btoa(binary);
+}
+
+function stringToBase64(value) {
+  if (typeof btoa !== "function" && typeof Buffer !== "undefined") {
+    return Buffer.from(value, "binary").toString("base64");
+  }
+  return btoa(value);
+}
+
+function dataUrlToAsset(candidate) {
+  var match = String(candidate.url || "").match(/^data:([^;,]+)?(;base64)?,([\s\S]*)$/i);
+  if (!match) {
+    return null;
+  }
+
+  var mimeType = match[1] || "application/octet-stream";
+  if (!/^image\//i.test(mimeType) && mimeType.toLowerCase() !== "application/pdf") {
+    return null;
+  }
+
+  var dataBase64 = match[2]
+    ? match[3]
+    : stringToBase64(decodeURIComponent(match[3] || ""));
+  var approxBytes = Math.floor(dataBase64.length * 0.75);
+  if (approxBytes > MAX_WEBPAGE_ASSET_BYTES) {
+    return null;
+  }
+
+  return {
+    url: candidate.url,
+    ...(candidate.originalUrl ? { originalUrl: candidate.originalUrl } : {}),
+    filename: defaultWebpageAssetFilename({}, mimeType),
+    mimeType,
+    dataBase64,
+    ...(candidate.alt ? { alt: candidate.alt } : {})
+  };
+}
+
+function isSupportedWebpageAssetContentType(contentType) {
+  var mediaType = String(contentType || "").split(";", 1)[0].trim().toLowerCase();
+  return mediaType.indexOf("image/") === 0 || mediaType === "application/pdf";
+}
+
+function defaultWebpageAssetFilename(candidate, contentType) {
+  var explicit = sanitizeFilenamePart(candidate.filename || "");
+  if (
+    explicit &&
+    explicit !== "paper" &&
+    explicit.length <= 120 &&
+    explicit.toLowerCase().indexOf("base64") === -1
+  ) {
+    return explicit;
+  }
+
+  var basename = sanitizeFilenamePart(basenameFromPathOrUrl(candidate.url));
+  if (
+    basename &&
+    basename !== "paper" &&
+    basename.length <= 120 &&
+    basename.toLowerCase().indexOf("base64") === -1
+  ) {
+    return basename;
+  }
+
+  var mediaType = String(contentType || "").split(";", 1)[0].trim().toLowerCase();
+  var ext = ".bin";
+  if (mediaType === "image/jpeg") {
+    ext = ".jpg";
+  } else if (mediaType === "image/png") {
+    ext = ".png";
+  } else if (mediaType === "image/gif") {
+    ext = ".gif";
+  } else if (mediaType === "image/webp") {
+    ext = ".webp";
+  } else if (mediaType === "image/svg+xml") {
+    ext = ".svg";
+  } else if (mediaType === "application/pdf") {
+    ext = ".pdf";
+  }
+  return "asset" + ext;
+}
+
+async function fetchWebpageAssets(candidates) {
+  if (!Array.isArray(candidates) || candidates.length === 0) {
+    return [];
+  }
+
+  var assets = [];
+  var totalBytes = 0;
+  var seen = {};
+  for (var index = 0; index < candidates.length && assets.length < MAX_WEBPAGE_ASSET_COUNT; index += 1) {
+    var candidate = candidates[index] || {};
+    if (!candidate.url || seen[candidate.url]) {
+      continue;
+    }
+    seen[candidate.url] = true;
+
+    try {
+      if (String(candidate.url).indexOf("data:") === 0) {
+        var dataAsset = dataUrlToAsset(candidate);
+        if (!dataAsset) {
+          continue;
+        }
+        var dataBytes = Math.floor(dataAsset.dataBase64.length * 0.75);
+        if (totalBytes + dataBytes > MAX_WEBPAGE_ASSET_TOTAL_BYTES) {
+          break;
+        }
+        totalBytes += dataBytes;
+        assets.push(dataAsset);
+        continue;
+      }
+
+      var parsedUrl = new URL(candidate.url);
+      if (parsedUrl.protocol !== "http:" && parsedUrl.protocol !== "https:") {
+        continue;
+      }
+
+      var response = await fetch(candidate.url, { credentials: "include" });
+      if (!response.ok || !isSupportedWebpageAssetContentType(response.headers.get("content-type"))) {
+        continue;
+      }
+      var buffer = await response.arrayBuffer();
+      if (buffer.byteLength > MAX_WEBPAGE_ASSET_BYTES) {
+        continue;
+      }
+      if (totalBytes + buffer.byteLength > MAX_WEBPAGE_ASSET_TOTAL_BYTES) {
+        break;
+      }
+      totalBytes += buffer.byteLength;
+      assets.push({
+        url: candidate.url,
+        ...(candidate.originalUrl ? { originalUrl: candidate.originalUrl } : {}),
+        filename: defaultWebpageAssetFilename(candidate, response.headers.get("content-type")),
+        mimeType: response.headers.get("content-type") || undefined,
+        dataBase64: arrayBufferToBase64(buffer),
+        ...(candidate.alt ? { alt: candidate.alt } : {})
+      });
+    } catch (error) {
+      console.warn("Pi Agent webpage asset fetch failed", candidate.url, error);
+    }
+  }
+
+  return assets;
 }
 
 async function reportJobStatus(job, status, message) {
@@ -325,6 +484,7 @@ async function handlePaperPageClassified(message, sender) {
           return;
         }
       } else {
+        const webpageAssets = await fetchWebpageAssets(message.webpageAssets);
         const response = await sendNativeMessage({
           type: "register_webpage_snapshot",
           jobId: job.jobId,
@@ -332,7 +492,8 @@ async function handlePaperPageClassified(message, sender) {
           source: job.source,
           html: message.html,
           ...(message.finalUrl ? { finalUrl: message.finalUrl } : {}),
-          ...(message.title ? { title: message.title } : job.title ? { title: job.title } : {})
+          ...(message.title ? { title: message.title } : job.title ? { title: job.title } : {}),
+          ...(webpageAssets.length > 0 ? { webpageAssets } : {})
         });
 
         if (response && response.type === "webpage_registered") {

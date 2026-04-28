@@ -24,6 +24,15 @@ export interface ExtensionPaperJobPayload {
   purpose?: ExtensionJobPurpose;
 }
 
+export interface ExtensionWebpageAsset {
+  url: string;
+  dataBase64: string;
+  originalUrl?: string;
+  filename?: string;
+  mimeType?: string;
+  alt?: string;
+}
+
 export type ExtensionHostMessage =
   | {
       type: "poll_jobs";
@@ -46,6 +55,7 @@ export type ExtensionHostMessage =
       html: string;
       finalUrl?: string;
       title?: string;
+      webpageAssets?: ExtensionWebpageAsset[];
     }
   | {
       type: "job_status";
@@ -221,6 +231,30 @@ function parseExtensionPaperJobPayload(value: unknown): ExtensionPaperJobPayload
   };
 }
 
+function parseExtensionWebpageAsset(value: unknown): ExtensionWebpageAsset {
+  const record = parseRecord(value, "webpage asset");
+  return {
+    url: parseRequiredString(record, "url"),
+    dataBase64: parseRequiredString(record, "dataBase64"),
+    ...parseOptionalFields(record, ["originalUrl", "filename", "mimeType", "alt"])
+  };
+}
+
+function parseOptionalExtensionWebpageAssetsField(
+  record: Record<string, unknown>,
+  fieldName: string
+): Record<string, ExtensionWebpageAsset[]> {
+  const value = record[fieldName];
+  if (value === undefined) {
+    return {};
+  }
+  if (!Array.isArray(value)) {
+    throw new Error(`${fieldName} must be an array when provided.`);
+  }
+
+  return { [fieldName]: value.map(parseExtensionWebpageAsset) };
+}
+
 function parseOptionalFields(
   record: Record<string, unknown>,
   fieldNames: string[]
@@ -281,7 +315,8 @@ export function parseExtensionHostMessage(value: unknown): ExtensionHostMessage 
       articleUrl: parseRequiredString(record, "articleUrl"),
       source: parsePaperSource(record, "source"),
       html: parseRequiredString(record, "html"),
-      ...parseOptionalFields(record, ["title", "finalUrl"])
+      ...parseOptionalFields(record, ["title", "finalUrl"]),
+      ...parseOptionalExtensionWebpageAssetsField(record, "webpageAssets")
     };
   }
 

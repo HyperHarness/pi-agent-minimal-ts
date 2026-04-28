@@ -149,7 +149,10 @@ async function registerWebpageSnapshot(options: {
     });
     const saved = await savePaperWebPageParse({
       workspaceDir: options.workspaceDir,
-      extraction,
+      extraction: {
+        ...extraction,
+        ...(options.message.webpageAssets ? { assets: options.message.webpageAssets } : {})
+      },
       force: true
     });
     const webpageRecord = await resolveRecordForExtensionMessage({

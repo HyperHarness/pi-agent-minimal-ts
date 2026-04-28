@@ -36,26 +36,93 @@
     return normalizedHostname === "journals.aps.org" || normalizedHostname === "aps.org";
   }
 
+  function selectArticleSnapshotElement(currentDocument) {
+    if (!currentDocument || !currentDocument.documentElement) {
+      return null;
+    }
+
+    if (isApsHost(currentDocument.location && currentDocument.location.hostname)) {
+      return currentDocument.body;
+    }
+
+    return (
+      currentDocument.querySelector("main[data-track-component*='article body' i]") ||
+      currentDocument.querySelector("main[class*='article' i]") ||
+      currentDocument.querySelector("article") ||
+      currentDocument.querySelector("main") ||
+      currentDocument.body
+    );
+  }
+
   function collectArticleSnapshotHtml(currentDocument) {
     if (!currentDocument || !currentDocument.documentElement) {
       return "";
     }
 
-    var candidate = null;
-    if (isApsHost(currentDocument.location && currentDocument.location.hostname)) {
-      candidate = currentDocument.body;
-    } else {
-      candidate =
-        currentDocument.querySelector("main[data-track-component*='article body' i]") ||
-        currentDocument.querySelector("main[class*='article' i]") ||
-        currentDocument.querySelector("article") ||
-        currentDocument.querySelector("main") ||
-        currentDocument.body;
-    }
-
+    var candidate = selectArticleSnapshotElement(currentDocument);
     var headHtml = currentDocument.head ? currentDocument.head.innerHTML : "";
     var bodyHtml = candidate ? candidate.outerHTML : currentDocument.documentElement.outerHTML;
     return "<!doctype html><html><head>" + headHtml + "</head><body>" + bodyHtml + "</body></html>";
+  }
+
+  function firstSrcsetUrl(value) {
+    var candidate = String(value || "").split(",", 1)[0] || "";
+    return candidate.trim().split(/\s+/, 1)[0] || "";
+  }
+
+  function filenameFromUrl(value) {
+    try {
+      var parsed = new URL(value);
+      var parts = decodeURIComponent(parsed.pathname).split("/");
+      return parts[parts.length - 1] || undefined;
+    } catch (error) {
+      return undefined;
+    }
+  }
+
+  function collectArticleImageCandidates(currentDocument) {
+    var candidateRoot = selectArticleSnapshotElement(currentDocument);
+    if (!candidateRoot || typeof candidateRoot.querySelectorAll !== "function") {
+      return [];
+    }
+
+    var images = Array.prototype.slice.call(candidateRoot.querySelectorAll("img"));
+    var seen = {};
+    var results = [];
+    for (var index = 0; index < images.length && results.length < 40; index += 1) {
+      var image = images[index];
+      var originalUrl =
+        image.getAttribute("src") ||
+        image.getAttribute("data-src") ||
+        image.getAttribute("data-original") ||
+        image.getAttribute("data-lazy-src") ||
+        firstSrcsetUrl(image.getAttribute("srcset"));
+      var fetchUrl = image.currentSrc || originalUrl;
+      if (!fetchUrl) {
+        continue;
+      }
+      if (String(fetchUrl).indexOf("data:") === 0) {
+        continue;
+      }
+
+      try {
+        var absoluteUrl = new URL(fetchUrl, currentDocument.baseURI || root.location.href).toString();
+        if (seen[absoluteUrl]) {
+          continue;
+        }
+        seen[absoluteUrl] = true;
+        results.push({
+          url: absoluteUrl,
+          originalUrl: originalUrl || fetchUrl,
+          filename: filenameFromUrl(absoluteUrl),
+          alt: image.getAttribute("alt") || undefined
+        });
+      } catch (error) {
+        // Ignore malformed image URLs.
+      }
+    }
+
+    return results;
   }
 
   function isScienceHost(hostname) {
@@ -209,6 +276,9 @@
         title: root.document.title,
         html: classification.status === "page_classified"
           ? collectArticleSnapshotHtml(root.document)
+          : undefined,
+        webpageAssets: classification.status === "page_classified"
+          ? collectArticleImageCandidates(root.document)
           : undefined
       }
     };

@@ -326,7 +326,11 @@ test("runner sends pdfUrl even when article body contains generic login navigati
     type: "paper_page_classified",
     status: "page_classified",
     message: undefined,
-    pdfUrl: "https://www.nature.com/articles/s41586-019-1666-5.pdf"
+    pdfUrl: "https://www.nature.com/articles/s41586-019-1666-5.pdf",
+    finalUrl: "https://www.nature.com/articles/s41586-019-1666-5",
+    title: "Nature article",
+    html: "",
+    webpageAssets: []
   });
 });
 
@@ -422,7 +426,7 @@ test("manifest declares required MV3 extension shell fields", async () => {
 
   assert.equal(manifest.manifest_version, 3);
   assert.equal(manifest.name, "Pi Agent Paper Downloader");
-  assert.equal(manifest.version, "0.1.8");
+  assert.equal(manifest.version, "0.1.14");
 
   for (const permission of [
     "activeTab",
@@ -439,6 +443,7 @@ test("manifest declares required MV3 extension shell fields", async () => {
     "https://arxiv.org/*",
     "https://www.nature.com/*",
     "https://nature.com/*",
+    "https://media.springernature.com/*",
     "https://www.science.org/*",
     "https://science.org/*",
     "https://journals.aps.org/*",
@@ -510,6 +515,103 @@ test("background automatic download registration payload includes pdfUrl and clo
     jobs: {},
     downloads: {}
   });
+});
+
+test("background fetches webpage image assets with browser credentials before native registration", async () => {
+  const previousFetch = globalThis.fetch;
+  const fetchCalls = [];
+  globalThis.fetch = async (url, init) => {
+    fetchCalls.push({ url, init });
+    return new Response(Buffer.from("image-bytes"), {
+      status: 200,
+      headers: { "content-type": "image/png" }
+    });
+  };
+
+  try {
+    const job = {
+      jobId: "job-webpage-assets",
+      articleUrl: "https://www.nature.com/articles/s41567-022-01591-2",
+      source: "nature",
+      title: "Nature webpage",
+      purpose: "webpage"
+    };
+    const fakeChrome = createFakeChrome({
+      jobs: [job],
+      nativeHandler(message) {
+        if (message.type === "poll_jobs") {
+          return { type: "jobs", jobs: [job] };
+        }
+        if (message.type === "register_webpage_snapshot") {
+          return {
+            type: "webpage_registered",
+            jobId: message.jobId,
+            articleUrl: message.articleUrl,
+            paperKey: "nature-s41567-022-01591-2",
+            markdownPath: "/tmp/document.md",
+            parsePath: "/tmp/parse.json",
+            qualityPath: "/tmp/quality.json",
+            chunksPath: "/tmp/chunks.jsonl"
+          };
+        }
+        return { type: "status_ack", jobId: message.jobId, status: message.status };
+      }
+    });
+
+    await importBackground(fakeChrome);
+    fakeChrome.events.onMessage.emit(
+      {
+        type: "paper_page_classified",
+        status: "page_classified",
+        html: "<html><body><article><h1>Paper</h1><img src=\"/assets/fig1.png\"></article></body></html>",
+        webpageAssets: [
+          {
+            url: "https://www.nature.com/assets/fig1.png",
+            originalUrl: "/assets/fig1.png",
+            filename: "fig1.png",
+            alt: "Figure 1"
+          },
+          {
+            url: "data:image/svg+xml;base64,PHN2Zz48L3N2Zz4=",
+            originalUrl: "data:image/svg+xml;base64,PHN2Zz48L3N2Zz4=",
+            filename: "svg+xml;base64,PHN2Zz48L3N2Zz4=.svg",
+            alt: "Inline icon"
+          }
+        ]
+      },
+      { tab: { id: 100 } }
+    );
+    await flushAsyncWork();
+
+    assert.deepEqual(fetchCalls, [
+      {
+        url: "https://www.nature.com/assets/fig1.png",
+        init: { credentials: "include" }
+      }
+    ]);
+    const registerMessage = messagesOf(fakeChrome, "register_webpage_snapshot")[0];
+    assert.equal(registerMessage.webpageAssets.length, 2);
+    assert.deepEqual(registerMessage.webpageAssets[0], {
+      url: "https://www.nature.com/assets/fig1.png",
+      originalUrl: "/assets/fig1.png",
+      filename: "fig1.png",
+      mimeType: "image/png",
+      dataBase64: Buffer.from("image-bytes").toString("base64"),
+      alt: "Figure 1"
+    });
+    assert.deepEqual(registerMessage.webpageAssets[1], {
+      url: "data:image/svg+xml;base64,PHN2Zz48L3N2Zz4=",
+      originalUrl: "data:image/svg+xml;base64,PHN2Zz48L3N2Zz4=",
+      filename: "asset.svg",
+      mimeType: "image/svg+xml",
+      dataBase64: "PHN2Zz48L3N2Zz4=",
+      alt: "Inline icon"
+    });
+    assert.equal(statusMessagesOf(fakeChrome, "webpage_snapshot_ready").length, 1);
+    assert.deepEqual(fakeChrome.removedTabs, [100]);
+  } finally {
+    globalThis.fetch = previousFetch;
+  }
 });
 
 test("background uses downloads API with a default filename for publisher PDF downloads", async () => {

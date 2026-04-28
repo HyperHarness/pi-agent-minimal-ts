@@ -296,6 +296,7 @@ test("parsePaper tex-source uses LaTeXML HTML followed by pandoc markdown", asyn
       sources: [{ usage: "toplevel", filename: "main.tex" }]
     })}\n`, "utf8");
     await writeFile(path.join(sourceDir, "main.tex"), "\\title{TeX Source Paper}\\begin{document}Body\\end{document}\n", "utf8");
+    await writeFile(path.join(sourceDir, "figure.png"), "fake image bytes", "utf8");
     const callsPath = path.join(workspace, "calls.log");
     const latexmlBin = await writeExecutableScript(workspace, "fake-latexmlc", `#!/usr/bin/env node
 const fs = require("node:fs");
@@ -308,7 +309,7 @@ fs.writeFileSync(dest, "<html><body><h1>TeX Source Paper</h1><h2>Introduction</h
 const fs = require("node:fs");
 fs.appendFileSync(${JSON.stringify(callsPath)}, "pandoc " + process.argv.slice(2).join(" ") + "\\n");
 const output = process.argv[process.argv.indexOf("--output") + 1];
-fs.writeFileSync(output, "# TeX Source Paper\\n\\n## Introduction\\n\\nConverted from LaTeXML HTML.\\n");
+fs.writeFileSync(output, "# TeX Source Paper\\n\\n## Introduction\\n\\n![Diagram](figure.png)\\n\\nFigure 1: Converted from LaTeXML HTML.\\n");
 `);
 
     const result = await parsePaper({
@@ -328,7 +329,13 @@ fs.writeFileSync(output, "# TeX Source Paper\\n\\n## Introduction\\n\\nConverted
       "TeX Source Paper",
       "Introduction"
     ]);
-    assert.match(await readFile(result.artifacts.markdownPath, "utf8"), /Converted from LaTeXML HTML/);
+    const markdown = await readFile(result.artifacts.markdownPath, "utf8");
+    assert.match(markdown, /!\[Diagram]\(assets\/figure\.png\)/);
+    assert.match(markdown, /Converted from LaTeXML HTML/);
+    assert.equal(
+      await readFile(path.join(path.dirname(result.artifacts.markdownPath), "assets", "figure.png"), "utf8"),
+      "fake image bytes"
+    );
     const calls = await readFile(callsPath, "utf8");
     assert.match(calls, /latexmlc --dest .*document\.html .*main\.tex/);
     assert.match(calls, /pandoc --from html --to gfm --wrap=none --output .*document\.md .*document\.html/);
