@@ -26,7 +26,13 @@ import { cleanupTools, createTools, getToolsWorkspaceDir } from "./agent/tools.j
 type LlmMessage = UserMessage | AssistantMessage | ToolResultMessage;
 type AgentMessageEventHandler = (event: AgentEvent) => Promise<void> | void;
 
-const DEFAULT_SYSTEM_PROMPT = "You are a helpful assistant. Use tools when they are useful.";
+export const DEFAULT_SYSTEM_PROMPT = [
+  "You are a helpful assistant. Use tools when they are useful.",
+  "For scientific, technical, paper, physics, quantum, method, experiment, or literature-comparison questions, first retrieve local wiki evidence with answer_paper_wiki_question before answering.",
+  "When calling answer_paper_wiki_question, use concise English search terms when that will better match paper titles, abstracts, and source summaries.",
+  "Ground claims in the retrieved wiki evidence and cite paper keys or source paths for substantive conclusions.",
+  "If the local wiki has no supporting evidence, say that the current wiki does not contain enough evidence instead of presenting unsupported claims as wiki-grounded."
+].join(" ");
 const contextWorkspaceDirs = new WeakMap<AgentContext, string>();
 
 export interface CliArgs {

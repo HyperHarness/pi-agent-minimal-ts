@@ -271,6 +271,19 @@ const searchPaperWikiParameters = Type.Object({
   maxResults: Type.Optional(Type.Integer({ description: "Maximum matching source summaries to return.", minimum: 1 }))
 });
 
+const answerPaperWikiQuestionParameters = Type.Object({
+  query: Type.String({
+    description:
+      "Scientific or paper-related question or concise English keyword query to ground against local paper wiki source summaries."
+  }),
+  maxResults: Type.Optional(
+    Type.Integer({
+      description: "Maximum wiki source summaries or fallback local matches to return. Defaults to 8.",
+      minimum: 1
+    })
+  )
+});
+
 const listLocalPapersParameters = Type.Object({
   query: Type.Optional(Type.String({ description: "Optional metadata query to filter local papers." })),
   status: Type.Optional(
@@ -350,6 +363,7 @@ type WritePaperWikiSourceParameters = Static<typeof writePaperWikiSourceParamete
 type GeneratePaperWikiSummaryParameters = Static<typeof generatePaperWikiSummaryParameters>;
 type PaperWikiRelationsParameters = Static<typeof paperWikiRelationsParameters>;
 type SearchPaperWikiParameters = Static<typeof searchPaperWikiParameters>;
+type AnswerPaperWikiQuestionParameters = Static<typeof answerPaperWikiQuestionParameters>;
 type ListLocalPapersParameters = Static<typeof listLocalPapersParameters>;
 type SearchLocalPapersParameters = Static<typeof searchLocalPapersParameters>;
 type WikiHealthParameters = Static<typeof wikiHealthParameters>;
@@ -487,6 +501,29 @@ type SearchPaperWikiTool = AgentTool<
   typeof searchPaperWikiParameters,
   Awaited<ReturnType<typeof searchPaperWiki>>
 >;
+type AnswerPaperWikiQuestionDetails = {
+  query: string;
+  status: "has_wiki_evidence" | "no_wiki_evidence_but_local_matches" | "no_local_evidence";
+  answerPolicy: string[];
+  evidence: Array<{
+    citation: string;
+    paperKey: string;
+    title: string;
+    path: string;
+    snippet: string;
+  }>;
+  fallbackMatches: Array<{
+    paperKey: string;
+    title?: string;
+    path?: string;
+    field: string;
+    snippet: string;
+  }>;
+};
+type AnswerPaperWikiQuestionTool = AgentTool<
+  typeof answerPaperWikiQuestionParameters,
+  AnswerPaperWikiQuestionDetails
+>;
 type ListLocalPapersTool = AgentTool<
   typeof listLocalPapersParameters,
   Awaited<ReturnType<typeof listLocalPapers>>
@@ -507,6 +544,7 @@ type WikiHealthFixTool = AgentTool<
 const MAX_SEARCH_RESULT_PREVIEWS = 5;
 const MAX_SEARCH_PREVIEW_TEXT_LENGTH = 220;
 const MAX_WIKI_HEALTH_FIX_RESULT_PREVIEWS = 80;
+const DEFAULT_WIKI_QUESTION_RESULTS = 8;
 
 function compactPreviewText(value: string | undefined, maxLength = MAX_SEARCH_PREVIEW_TEXT_LENGTH): string | undefined {
   const compacted = value?.replace(/\s+/g, " ").trim();
@@ -558,6 +596,69 @@ function compactWikiHealthFixContent(result: Awaited<ReturnType<typeof fixWikiHe
     results: previewResults,
     omittedResults: Math.max(0, orderedResults.length - previewResults.length)
   });
+}
+
+async function buildPaperWikiQuestionEvidence(input: {
+  workspaceDir: string;
+  query: string;
+  maxResults?: number;
+  searchPaperWikiImpl: typeof searchPaperWiki;
+  searchLocalPapersImpl: typeof searchLocalPapers;
+}): Promise<AnswerPaperWikiQuestionDetails> {
+  const maxResults = Math.max(1, Math.trunc(input.maxResults ?? DEFAULT_WIKI_QUESTION_RESULTS));
+  const wikiResult = await input.searchPaperWikiImpl({
+    workspaceDir: input.workspaceDir,
+    query: input.query,
+    maxResults
+  });
+  const evidence = wikiResult.results.map((result) => ({
+    citation: `${result.paperKey} (${result.path})`,
+    paperKey: result.paperKey,
+    title: result.title,
+    path: result.path,
+    snippet: result.snippet
+  }));
+
+  if (evidence.length > 0) {
+    return {
+      query: wikiResult.query,
+      status: "has_wiki_evidence",
+      answerPolicy: [
+        "Answer from the evidence list only for wiki-grounded claims.",
+        "Cite paperKey or path next to substantive claims.",
+        "Separate any unsupported background knowledge from wiki-grounded conclusions."
+      ],
+      evidence,
+      fallbackMatches: []
+    };
+  }
+
+  const localResult = await input.searchLocalPapersImpl({
+    workspaceDir: input.workspaceDir,
+    query: input.query,
+    maxResults
+  });
+  const fallbackMatches = localResult.results.flatMap((result) =>
+    result.matches.slice(0, 2).map((match) => ({
+      paperKey: result.paper.paperKey,
+      ...(result.paper.title ? { title: result.paper.title } : {}),
+      ...(match.path ? { path: match.path } : {}),
+      field: match.field,
+      snippet: match.snippet
+    }))
+  ).slice(0, maxResults);
+
+  return {
+    query: localResult.query,
+    status: fallbackMatches.length > 0 ? "no_wiki_evidence_but_local_matches" : "no_local_evidence",
+    answerPolicy: [
+      "Do not present the answer as wiki-grounded because no source summary matched.",
+      "Tell the user the local wiki lacks enough source-summary evidence.",
+      "Use fallback matches only to suggest papers that may need summary generation or wiki repair."
+    ],
+    evidence: [],
+    fallbackMatches
+  };
 }
 
 function summarizeWebSearchResults(results: WebSearchResult[]): SearchResultPreview[] {
@@ -1664,6 +1765,28 @@ export function createTools(workspaceDir: string, dependencies: ToolDependencies
     }
   };
 
+  const answerPaperWikiQuestionTool: AnswerPaperWikiQuestionTool = {
+    name: "answer_paper_wiki_question",
+    label: "Answer Paper Wiki Question",
+    description:
+      "Builds a citeable evidence package from local paper wiki source summaries for scientific questions. Use concise English search terms when useful, and call this before answering professional paper, physics, quantum, method, experiment, or literature-comparison questions.",
+    parameters: answerPaperWikiQuestionParameters,
+    execute: async (_toolCallId: string, args: AnswerPaperWikiQuestionParameters) => {
+      const result = await buildPaperWikiQuestionEvidence({
+        workspaceDir: resolvedWorkspaceDir,
+        query: args.query,
+        ...(args.maxResults !== undefined ? { maxResults: args.maxResults } : {}),
+        searchPaperWikiImpl,
+        searchLocalPapersImpl
+      });
+
+      return {
+        content: [{ type: "text", text: JSON.stringify(result) }],
+        details: result
+      };
+    }
+  };
+
   const listLocalPapersTool: ListLocalPapersTool = {
     name: "list_local_papers",
     label: "List Local Papers",
@@ -1767,6 +1890,7 @@ export function createTools(workspaceDir: string, dependencies: ToolDependencies
     inspectPaperTool,
     readPaperSectionTool,
     searchPaperTextTool,
+    answerPaperWikiQuestionTool,
     searchLocalPapersTool,
     wikiHealthTool,
     wikiHealthFixTool

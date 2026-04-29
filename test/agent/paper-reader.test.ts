@@ -220,6 +220,54 @@ test("writePaperWikiSource saves an LLM source summary and searchPaperWiki finds
   }
 });
 
+test("searchPaperWiki expands Chinese domain questions into weighted paper evidence", async () => {
+  const workspace = await createWorkspace();
+  const sourcesDir = path.join(workspace, "knowledge-base", "wiki", "sources");
+
+  try {
+    await mkdir(sourcesDir, { recursive: true });
+    await writeFile(path.join(sourcesDir, "arxiv-2507.09690.md"), `---
+type: "paper-source-summary"
+paper_key: "arxiv-2507.09690"
+title: "Small Quantum Low Density Parity Check Codes for Near-Term Experiments"
+tags:
+  - "quantum-LDPC-codes"
+  - "superconducting-qubits"
+  - "flip-chip"
+---
+
+# Small Quantum Low Density Parity Check Codes for Near-Term Experiments
+
+This paper proposes small quantum LDPC codes for near-term experiments.
+It discusses a superconducting flip-chip architecture, non-local connectivity,
+long-range couplers, crosstalk, leakage, and measurement overhead as hardware challenges.
+`, "utf8");
+    await writeFile(path.join(sourcesDir, "aps-superconducting-control.md"), `---
+type: "paper-source-summary"
+paper_key: "aps-superconducting-control"
+title: "Control of Superconducting Qubits"
+tags:
+  - "superconducting-qubits"
+---
+
+# Control of Superconducting Qubits
+
+This paper studies microwave control of superconducting qubits.
+`, "utf8");
+
+    const search = await searchPaperWiki({
+      workspaceDir: workspace,
+      query: "请总结一下qLDPC码在超导量子芯片上实现的难点",
+      maxResults: 2
+    });
+
+    assert.equal(search.results[0]?.paperKey, "arxiv-2507.09690");
+    assert.match(search.results[0]?.snippet ?? "", /quantum LDPC|superconducting|long-range/i);
+  } finally {
+    await rm(workspace, { recursive: true, force: true });
+  }
+});
+
 test("parsePaper invalidates the cache when PDF bytes change", async () => {
   const workspace = await createWorkspace();
   try {

@@ -25,6 +25,12 @@ import type {
 } from "./types.js";
 
 const DEFAULT_WIKI_SEARCH_RESULTS = 8;
+const MAX_TERM_OCCURRENCES = 6;
+
+interface SearchTerm {
+  value: string;
+  weight: number;
+}
 
 function sortEnginesByPreference(engines: ConcretePaperParseEngine[]): ConcretePaperParseEngine[] {
   const priority: Record<ConcretePaperParseEngine, number> = {
@@ -121,6 +127,160 @@ function createSnippet(text: string, query: string): string {
   const start = Math.max(0, index - 100);
   const end = Math.min(compact.length, index + query.length + 160);
   return `${start > 0 ? "... " : ""}${compact.slice(start, end)}${end < compact.length ? " ..." : ""}`;
+}
+
+function normalizeSearchText(value: string): string {
+  return value
+    .toLowerCase()
+    .replace(/[\u2010-\u2015]/g, "-")
+    .replace(/[_/]+/g, " ")
+    .replace(/-/g, " ")
+    .replace(/[^\p{L}\p{N}\u4e00-\u9fff]+/gu, " ")
+    .replace(/\s+/g, " ")
+    .trim();
+}
+
+function addSearchTerm(terms: Map<string, SearchTerm>, value: string, weight: number): void {
+  const normalized = normalizeSearchText(value);
+  if (!normalized || normalized.length < 2) {
+    return;
+  }
+  const previous = terms.get(normalized);
+  if (!previous || previous.weight < weight) {
+    terms.set(normalized, { value: normalized, weight });
+  }
+}
+
+function addSearchTerms(terms: Map<string, SearchTerm>, values: string[], weight: number): void {
+  for (const value of values) {
+    addSearchTerm(terms, value, weight);
+  }
+}
+
+function buildWikiSearchTerms(query: string): SearchTerm[] {
+  const lowerQuery = query.toLowerCase();
+  const normalizedQuery = normalizeSearchText(query);
+  const terms = new Map<string, SearchTerm>();
+  addSearchTerm(terms, normalizedQuery, 8);
+
+  for (const token of normalizedQuery.match(/[a-z0-9]{3,}/g) ?? []) {
+    addSearchTerm(terms, token, token.length >= 5 ? 3 : 2);
+  }
+
+  if (/\bqldpc\b/i.test(lowerQuery)) {
+    addSearchTerms(terms, [
+      "qldpc",
+      "qldpc codes",
+      "quantum ldpc",
+      "quantum ldpc codes",
+      "quantum low density parity check",
+      "quantum low-density parity-check",
+      "low density parity check",
+      "low-density parity-check",
+      "ldpc"
+    ], 10);
+  }
+  if (/\bldpc\b/i.test(lowerQuery) || /低密度|校验/.test(query)) {
+    addSearchTerms(terms, [
+      "ldpc",
+      "ldpc codes",
+      "low density parity check",
+      "low-density parity-check"
+    ], 7);
+  }
+  if (/超导|superconduct/i.test(query)) {
+    addSearchTerms(terms, [
+      "superconducting",
+      "superconducting qubits",
+      "superconducting circuits",
+      "superconducting chip",
+      "flip chip",
+      "flip-chip"
+    ], 7);
+  }
+  if (/芯片|chip/i.test(query)) {
+    addSearchTerms(terms, [
+      "chip",
+      "layout",
+      "architecture",
+      "flip chip",
+      "flip-chip"
+    ], 4);
+  }
+  if (/实现|实验|难点|挑战|瓶颈|困难|implement|experiment|challenge/i.test(query)) {
+    addSearchTerms(terms, [
+      "implementation",
+      "implement",
+      "near term experiments",
+      "hardware challenges",
+      "non local connectivity",
+      "non-local connectivity",
+      "long range couplers",
+      "long-range couplers",
+      "couplers",
+      "crosstalk",
+      "leakage",
+      "measurement overhead",
+      "error",
+      "limitations",
+      "open questions"
+    ], 5);
+  }
+
+  return [...terms.values()].sort((left, right) => right.weight - left.weight || right.value.length - left.value.length);
+}
+
+function countOccurrences(text: string, term: string): number {
+  let count = 0;
+  let index = text.indexOf(term);
+  while (index >= 0 && count < MAX_TERM_OCCURRENCES) {
+    count += 1;
+    index = text.indexOf(term, index + term.length);
+  }
+  return count;
+}
+
+function extractFrontmatter(markdown: string): string {
+  return markdown.match(/^---\n([\s\S]*?)\n---\n/)?.[1] ?? "";
+}
+
+function scoreWikiSource(markdown: string, title: string, paperKey: string, query: string, terms: SearchTerm[]): number {
+  const normalizedQuery = normalizeSearchText(query);
+  const normalizedTitle = normalizeSearchText(title);
+  const normalizedFrontmatter = normalizeSearchText(extractFrontmatter(markdown));
+  const normalizedBody = normalizeSearchText(markdown.replace(/^---\n[\s\S]*?\n---\n/, ""));
+  const normalizedPaperKey = normalizeSearchText(paperKey);
+  let score = 0;
+
+  if (normalizedQuery && normalizedBody.includes(normalizedQuery)) {
+    score += 80;
+  }
+  if (normalizedQuery && normalizedFrontmatter.includes(normalizedQuery)) {
+    score += 120;
+  }
+
+  for (const term of terms) {
+    const titleMatches = countOccurrences(normalizedTitle, term.value);
+    const frontmatterMatches = countOccurrences(normalizedFrontmatter, term.value);
+    const bodyMatches = countOccurrences(normalizedBody, term.value);
+    const keyMatches = countOccurrences(normalizedPaperKey, term.value);
+    score += titleMatches * term.weight * 10;
+    score += frontmatterMatches * term.weight * 6;
+    score += bodyMatches * term.weight * 2;
+    score += keyMatches * term.weight * 8;
+  }
+
+  return score;
+}
+
+function createBestSnippet(text: string, query: string, terms: SearchTerm[]): string {
+  const exactSnippet = createSnippet(text, query);
+  const compact = text.replace(/^---\n[\s\S]*?\n---\n/, "").replace(/\s+/g, " ").trim();
+  if (compact.toLowerCase().includes(query.toLowerCase())) {
+    return exactSnippet;
+  }
+  const firstMatchingTerm = terms.find((term) => compact.toLowerCase().includes(term.value));
+  return firstMatchingTerm ? createSnippet(text, firstMatchingTerm.value) : exactSnippet;
 }
 
 async function rewriteWikiIndex(workspaceDir: string): Promise<void> {
@@ -228,27 +388,30 @@ export async function searchPaperWiki(options: PaperWikiSearchOptions): Promise<
   await ensurePaperWikiScaffold(options.workspaceDir);
   const maxResults = Math.max(1, Math.trunc(options.maxResults ?? DEFAULT_WIKI_SEARCH_RESULTS));
   const sourceFiles = await listPaperWikiSourceFiles(options.workspaceDir);
-  const lowerQuery = query.toLowerCase();
+  const searchTerms = buildWikiSearchTerms(query);
   const matches = [];
   for (const filePath of sourceFiles) {
     const markdown = await readFile(filePath, "utf8");
-    if (!markdown.toLowerCase().includes(lowerQuery)) {
+    const paperKey = path.basename(filePath, ".md");
+    const title = extractTitle(markdown, paperKey);
+    const score = scoreWikiSource(markdown, title, paperKey, query, searchTerms);
+    if (score <= 0) {
       continue;
     }
-    const paperKey = path.basename(filePath, ".md");
     matches.push({
       paperKey,
-      title: extractTitle(markdown, paperKey),
+      title,
       path: relativeToWorkspace(options.workspaceDir, filePath),
-      snippet: createSnippet(markdown, query)
+      snippet: createBestSnippet(markdown, query, searchTerms),
+      score
     });
-    if (matches.length >= maxResults) {
-      break;
-    }
   }
 
   return {
     query,
     results: matches
+      .sort((left, right) => right.score - left.score || left.paperKey.localeCompare(right.paperKey))
+      .slice(0, maxResults)
+      .map(({ score: _score, ...result }) => result)
   };
 }

@@ -171,7 +171,7 @@ knowledge-base/
     state/
 ```
 
-Use `download_paper` first to close the download loop and generate the preferred Markdown source under `wiki/sources/<paper-key>/parses/<engine>/document.md`. After reading and grounding the summary against the parsed text, use `write_paper_wiki_source` to save the final LLM-authored source page as `wiki/sources/<paper-key>.md`. Full mode also exposes `generate_paper_wiki_summary`, which builds a bounded evidence package from parsed Markdown, includes local related-paper candidates by default, and sends it to a clean-context summary worker before optionally writing the source page. `paper_wiki_relations` suggests related local papers and can write confirmed `related_papers` links into a source summary. Use `search_paper_wiki` for knowledge retrieval over those source summaries.
+Use `download_paper` first to close the download loop and generate the preferred Markdown source under `wiki/sources/<paper-key>/parses/<engine>/document.md`. After reading and grounding the summary against the parsed text, use `write_paper_wiki_source` to save the final LLM-authored source page as `wiki/sources/<paper-key>.md`. Full mode also exposes `generate_paper_wiki_summary`, which builds a bounded evidence package from parsed Markdown, includes local related-paper candidates by default, and sends it to a clean-context summary worker before optionally writing the source page. `paper_wiki_relations` suggests related local papers and can write confirmed `related_papers` links into a source summary. Use `answer_paper_wiki_question` for professional paper or topic Q&A; it returns citeable source-summary evidence and explicitly reports when the local wiki has no supporting source summaries. Use `search_paper_wiki` in full mode for direct retrieval over those source summaries.
 
 ## Search And Fetch Configuration
 
@@ -272,6 +272,7 @@ The default chat agent exposes a compact paper-focused tool set:
 - `inspect_paper`: inspects parsed paper artifacts, parse quality, and section previews without returning the full paper body
 - `read_paper_section`: reads bounded text from a parsed paper by section id or page range, with source element metadata
 - `search_paper_text`: searches inside a parsed paper and returns snippets with page, section, and element metadata
+- `answer_paper_wiki_question`: builds a citeable evidence package from local paper wiki source summaries for scientific Q&A, or reports that the wiki lacks supporting source-summary evidence
 - `search_local_papers`: searches local paper records, parsed Markdown, and wiki summaries
 - `wiki_health`: reports knowledge-base health across records, downloads, authorization state, parse quality, missing summaries, and missing artifacts
 - `wiki_health_fix`: attempts health repairs such as retrying downloads, parsing downloaded records, and generating missing summaries through a clean-context summary worker when configured; reports issues that still need login or queued browser work

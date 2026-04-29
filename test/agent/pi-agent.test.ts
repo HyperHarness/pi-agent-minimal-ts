@@ -14,7 +14,7 @@ import {
 import type { AgentContext, AgentEvent } from "@mariozechner/pi-agent-core";
 import * as piAgent from "../../src/pi-agent.js";
 import { cleanupTools } from "../../src/agent/tools.js";
-import { runAgentTurn } from "../../src/pi-agent.js";
+import { DEFAULT_SYSTEM_PROMPT, runAgentTurn } from "../../src/pi-agent.js";
 
 type AgentMessage = AgentContext["messages"][number];
 type ToolExecutionStartEvent = Extract<AgentEvent, { type: "tool_execution_start" }>;
@@ -63,6 +63,12 @@ function findMessageIndex(
 ): number {
   return messages.findIndex((message, index) => predicate(message, index));
 }
+
+test("default system prompt requires wiki evidence for scientific questions", () => {
+  assert.match(DEFAULT_SYSTEM_PROMPT, /answer_paper_wiki_question/);
+  assert.match(DEFAULT_SYSTEM_PROMPT, /local wiki/i);
+  assert.match(DEFAULT_SYSTEM_PROMPT, /cite/i);
+});
 
 test("runAgentTurn executes a tool call and appends the resulting messages", async () => {
   const registration = registerFauxProvider();

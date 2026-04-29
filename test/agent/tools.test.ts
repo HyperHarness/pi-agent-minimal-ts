@@ -205,6 +205,14 @@ type SearchPaperWikiTool = {
   ) => Promise<ToolResult>;
 };
 
+type AnswerPaperWikiQuestionTool = {
+  execute: (
+    toolCallId: string,
+    args: { query: string; maxResults?: number },
+    signal: undefined,
+  ) => Promise<ToolResult>;
+};
+
 type ListLocalPapersTool = {
   execute: (
     toolCallId: string,
@@ -499,6 +507,20 @@ function getSearchPaperWikiTool(
   return tool as SearchPaperWikiTool;
 }
 
+function getAnswerPaperWikiQuestionTool(
+  workspace: string,
+  dependencies?: Parameters<typeof createTools>[1],
+): AnswerPaperWikiQuestionTool {
+  const tools = createTools(workspace, dependencies) as ReadonlyArray<{
+    name: string;
+    execute?: AnswerPaperWikiQuestionTool["execute"];
+  }>;
+  const tool = tools.find((candidate) => candidate.name === "answer_paper_wiki_question");
+  assert.ok(tool);
+  assert.equal(typeof tool.execute, "function");
+  return tool as AnswerPaperWikiQuestionTool;
+}
+
 function getListLocalPapersTool(
   workspace: string,
   dependencies?: Parameters<typeof createTools>[1],
@@ -658,6 +680,7 @@ test("createTools exposes the minimal default tool set", async () => {
       "inspect_paper",
       "read_paper_section",
       "search_paper_text",
+      "answer_paper_wiki_question",
       "search_local_papers",
       "wiki_health",
       "wiki_health_fix",
@@ -700,6 +723,7 @@ test("createTools full profile exposes every built-in tool", async () => {
       "inspect_paper",
       "read_paper_section",
       "search_paper_text",
+      "answer_paper_wiki_question",
       "search_local_papers",
       "wiki_health",
       "wiki_health_fix",
@@ -2216,6 +2240,106 @@ test("search_paper_wiki delegates to the injected wiki search dependency and ret
     }, undefined);
 
     assert.equal((result.details as { results?: unknown[] }).results?.length, 1);
+  } finally {
+    await rm(workspace, { recursive: true, force: true });
+  }
+});
+
+test("answer_paper_wiki_question builds a citeable wiki evidence package", async () => {
+  const workspace = await mkdtemp(path.join(tmpdir(), "pi-agent-tools-"));
+  const capturedCalls: unknown[] = [];
+
+  try {
+    const tool = getAnswerPaperWikiQuestionTool(workspace, {
+      searchPaperWiki: async (options) => {
+        capturedCalls.push(options);
+        return {
+          query: options.query,
+          results: [
+            {
+              paperKey: "arxiv-2406.06015",
+              title: "Paper title",
+              path: "knowledge-base/wiki/sources/arxiv-2406.06015.md",
+              snippet: "query match from the source summary",
+            },
+          ],
+        };
+      },
+    });
+
+    const result = await tool.execute("answer-wiki-call", {
+      query: "What does the paper show?",
+      maxResults: 2,
+    }, undefined);
+    const details = result.details as {
+      status?: string;
+      evidence?: Array<{ citation?: string; path?: string }>;
+      fallbackMatches?: unknown[];
+    };
+
+    assert.deepEqual(capturedCalls, [{
+      workspaceDir: workspace,
+      query: "What does the paper show?",
+      maxResults: 2,
+    }]);
+    assert.equal(details.status, "has_wiki_evidence");
+    assert.equal(details.evidence?.[0]?.citation, "arxiv-2406.06015 (knowledge-base/wiki/sources/arxiv-2406.06015.md)");
+    assert.equal(details.evidence?.[0]?.path, "knowledge-base/wiki/sources/arxiv-2406.06015.md");
+    assert.deepEqual(details.fallbackMatches, []);
+  } finally {
+    await rm(workspace, { recursive: true, force: true });
+  }
+});
+
+test("answer_paper_wiki_question reports local fallback matches as non-wiki evidence", async () => {
+  const workspace = await mkdtemp(path.join(tmpdir(), "pi-agent-tools-"));
+
+  try {
+    const tool = getAnswerPaperWikiQuestionTool(workspace, {
+      searchPaperWiki: async (options) => ({
+        query: options.query,
+        results: [],
+      }),
+      searchLocalPapers: async (options) => ({
+        query: options.query,
+        count: 1,
+        results: [
+          {
+            paper: {
+              paperKey: "aps-target",
+              title: "APS target",
+              hasPdf: true,
+              hasParsedArtifacts: true,
+              hasWikiSummary: false,
+              parses: [],
+            },
+            score: 2,
+            matches: [
+              {
+                field: "parsed_markdown",
+                path: "knowledge-base/wiki/sources/aps-target/parses/opendataloader-local/document.md",
+                engine: "opendataloader-local",
+                snippet: "raw parsed match",
+              },
+            ],
+          },
+        ],
+      }),
+    });
+
+    const result = await tool.execute("answer-wiki-call", {
+      query: "What does the paper show?",
+    }, undefined);
+    const details = result.details as {
+      status?: string;
+      evidence?: unknown[];
+      fallbackMatches?: Array<{ paperKey?: string; path?: string; field?: string }>;
+    };
+
+    assert.equal(details.status, "no_wiki_evidence_but_local_matches");
+    assert.deepEqual(details.evidence, []);
+    assert.equal(details.fallbackMatches?.[0]?.paperKey, "aps-target");
+    assert.equal(details.fallbackMatches?.[0]?.field, "parsed_markdown");
   } finally {
     await rm(workspace, { recursive: true, force: true });
   }
