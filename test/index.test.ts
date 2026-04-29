@@ -35,6 +35,8 @@ test("public entrypoint re-exports the reusable library APIs", () => {
   assert.equal(typeof publicApi.evaluateParseQuality, "function");
   assert.equal(typeof publicApi.writePaperWikiSource, "function");
   assert.equal(typeof publicApi.searchPaperWiki, "function");
+  assert.equal(typeof publicApi.generatePaperWikiSummary, "function");
+  assert.equal(typeof publicApi.paperWikiRelations, "function");
   assert.equal(typeof publicApi.ensurePaperWikiScaffold, "function");
 });
 

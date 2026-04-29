@@ -33,6 +33,7 @@ import {
   generatePaperWikiSummary,
   type PaperSummaryWorker
 } from "./paper-summary.js";
+import { paperWikiRelations } from "./paper-relations.js";
 import {
   createPaperExtensionJob,
   type PaperExtensionBridge
@@ -222,11 +223,45 @@ const generatePaperWikiSummaryParameters = Type.Object({
       minimum: 1000
     })
   ),
+  includeRelatedCandidates: Type.Optional(
+    Type.Boolean({
+      description:
+        "Include local related-paper candidates in the clean summary worker evidence. Defaults to true."
+    })
+  ),
+  maxRelatedCandidates: Type.Optional(
+    Type.Integer({
+      description: "Maximum related-paper candidates to include when includeRelatedCandidates is true. Defaults to 8.",
+      minimum: 1
+    })
+  ),
   force: Type.Optional(
     Type.Boolean({
       description:
         "Generate despite non-good parse quality or low worker confidence. Defaults to false."
     })
+  )
+});
+
+const paperWikiRelationsParameters = Type.Object({
+  paperKey: Type.String({ description: "Paper key whose wiki relationships should be suggested or updated." }),
+  maxCandidates: Type.Optional(
+    Type.Integer({ description: "Maximum relation candidates to return. Defaults to 8.", minimum: 1 })
+  ),
+  maxTextChars: Type.Optional(
+    Type.Integer({ description: "Maximum characters to read from each paper when scoring relation candidates.", minimum: 1000 })
+  ),
+  relatedPaperKeys: Type.Optional(
+    Type.Array(Type.String({
+      description:
+        "Optional confirmed related paper keys to write into the existing wiki source summary. Omit to only suggest candidates."
+    }))
+  ),
+  mode: Type.Optional(
+    Type.Union([
+      Type.Literal("append"),
+      Type.Literal("replace")
+    ], { description: "How to write relatedPaperKeys when provided. Defaults to append." })
   )
 });
 
@@ -312,6 +347,7 @@ type ReadPaperSectionParameters = Static<typeof readPaperSectionParameters>;
 type SearchPaperTextParameters = Static<typeof searchPaperTextParameters>;
 type WritePaperWikiSourceParameters = Static<typeof writePaperWikiSourceParameters>;
 type GeneratePaperWikiSummaryParameters = Static<typeof generatePaperWikiSummaryParameters>;
+type PaperWikiRelationsParameters = Static<typeof paperWikiRelationsParameters>;
 type SearchPaperWikiParameters = Static<typeof searchPaperWikiParameters>;
 type ListLocalPapersParameters = Static<typeof listLocalPapersParameters>;
 type SearchLocalPapersParameters = Static<typeof searchLocalPapersParameters>;
@@ -441,6 +477,10 @@ type WritePaperWikiSourceTool = AgentTool<
 type GeneratePaperWikiSummaryTool = AgentTool<
   typeof generatePaperWikiSummaryParameters,
   Awaited<ReturnType<typeof generatePaperWikiSummary>>
+>;
+type PaperWikiRelationsTool = AgentTool<
+  typeof paperWikiRelationsParameters,
+  Awaited<ReturnType<typeof paperWikiRelations>>
 >;
 type SearchPaperWikiTool = AgentTool<
   typeof searchPaperWikiParameters,
@@ -705,6 +745,7 @@ export interface ToolDependencies {
   searchPaperText?: typeof searchPaperText;
   writePaperWikiSource?: typeof writePaperWikiSource;
   generatePaperWikiSummary?: typeof generatePaperWikiSummary;
+  paperWikiRelations?: typeof paperWikiRelations;
   paperSummaryWorker?: PaperSummaryWorker;
   searchPaperWiki?: typeof searchPaperWiki;
   listLocalPapers?: typeof listLocalPapers;
@@ -756,6 +797,7 @@ export function createTools(workspaceDir: string, dependencies: ToolDependencies
       }));
   const writePaperWikiSourceImpl = dependencies.writePaperWikiSource ?? writePaperWikiSource;
   const generatePaperWikiSummaryImpl = dependencies.generatePaperWikiSummary ?? generatePaperWikiSummary;
+  const paperWikiRelationsImpl = dependencies.paperWikiRelations ?? paperWikiRelations;
   const searchPaperWikiImpl = dependencies.searchPaperWiki ?? searchPaperWiki;
   const listLocalPapersImpl = dependencies.listLocalPapers ?? listLocalPapers;
   const searchLocalPapersImpl = dependencies.searchLocalPapers ?? searchLocalPapers;
@@ -1502,8 +1544,36 @@ export function createTools(workspaceDir: string, dependencies: ToolDependencies
         ...(args.engine ? { engine: args.engine } : {}),
         ...(args.mode ? { mode: args.mode } : {}),
         ...(args.maxEvidenceChars !== undefined ? { maxEvidenceChars: args.maxEvidenceChars } : {}),
+        ...(args.includeRelatedCandidates !== undefined
+          ? { includeRelatedCandidates: args.includeRelatedCandidates }
+          : {}),
+        ...(args.maxRelatedCandidates !== undefined ? { maxRelatedCandidates: args.maxRelatedCandidates } : {}),
         ...(args.force !== undefined ? { force: args.force } : {}),
         ...(dependencies.paperSummaryWorker ? { summaryWorker: dependencies.paperSummaryWorker } : {})
+      });
+
+      return {
+        content: [{ type: "text", text: JSON.stringify(result) }],
+        details: result
+      };
+    }
+  };
+
+  const paperWikiRelationsTool: PaperWikiRelationsTool = {
+    name: "paper_wiki_relations",
+    label: "Paper Wiki Relations",
+    description:
+      "Suggests locally related papers for a wiki source and can write confirmed related_papers links into the existing source summary.",
+    parameters: paperWikiRelationsParameters,
+    executionMode: "sequential",
+    execute: async (_toolCallId: string, args: PaperWikiRelationsParameters) => {
+      const result = await paperWikiRelationsImpl({
+        workspaceDir: resolvedWorkspaceDir,
+        paperKey: args.paperKey,
+        ...(args.maxCandidates !== undefined ? { maxCandidates: args.maxCandidates } : {}),
+        ...(args.maxTextChars !== undefined ? { maxTextChars: args.maxTextChars } : {}),
+        ...(args.relatedPaperKeys !== undefined ? { relatedPaperKeys: args.relatedPaperKeys } : {}),
+        ...(args.mode ? { mode: args.mode } : {})
       });
 
       return {
@@ -1643,6 +1713,7 @@ export function createTools(workspaceDir: string, dependencies: ToolDependencies
     tools.push(
       writePaperWikiSourceTool,
       generatePaperWikiSummaryTool,
+      paperWikiRelationsTool,
       searchPaperWikiTool,
       listLocalPapersTool,
       fetchPaperWebpageTool,

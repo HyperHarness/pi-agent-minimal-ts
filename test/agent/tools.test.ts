@@ -174,7 +174,23 @@ type GeneratePaperWikiSummaryTool = {
       engine?: "opendataloader-local" | "opendataloader-hybrid" | "docling" | "tex-source" | "plain-text-baseline" | "webpage";
       mode?: "draft" | "write";
       maxEvidenceChars?: number;
+      includeRelatedCandidates?: boolean;
+      maxRelatedCandidates?: number;
       force?: boolean;
+    },
+    signal: undefined,
+  ) => Promise<ToolResult>;
+};
+
+type PaperWikiRelationsTool = {
+  execute: (
+    toolCallId: string,
+    args: {
+      paperKey: string;
+      maxCandidates?: number;
+      maxTextChars?: number;
+      relatedPaperKeys?: string[];
+      mode?: "append" | "replace";
     },
     signal: undefined,
   ) => Promise<ToolResult>;
@@ -454,6 +470,20 @@ function getGeneratePaperWikiSummaryTool(
   return tool as GeneratePaperWikiSummaryTool;
 }
 
+function getPaperWikiRelationsTool(
+  workspace: string,
+  dependencies?: Parameters<typeof createTools>[1],
+): PaperWikiRelationsTool {
+  const tools = createTools(workspace, { ...dependencies, toolProfile: "full" }) as ReadonlyArray<{
+    name: string;
+    execute?: PaperWikiRelationsTool["execute"];
+  }>;
+  const tool = tools.find((candidate) => candidate.name === "paper_wiki_relations");
+  assert.ok(tool);
+  assert.equal(typeof tool.execute, "function");
+  return tool as PaperWikiRelationsTool;
+}
+
 function getSearchPaperWikiTool(
   workspace: string,
   dependencies?: Parameters<typeof createTools>[1],
@@ -674,6 +704,7 @@ test("createTools full profile exposes every built-in tool", async () => {
       "wiki_health_fix",
       "write_paper_wiki_source",
       "generate_paper_wiki_summary",
+      "paper_wiki_relations",
       "search_paper_wiki",
       "list_local_papers",
       "fetch_paper_webpage",
@@ -2035,6 +2066,66 @@ test("generate_paper_wiki_summary delegates to the injected summary dependency a
       },
     ]);
     assert.equal((result.details as { status?: string }).status, "drafted");
+  } finally {
+    await rm(workspace, { recursive: true, force: true });
+  }
+});
+
+test("paper_wiki_relations delegates to the injected relation dependency and returns details", async () => {
+  const workspace = await mkdtemp(path.join(tmpdir(), "pi-agent-tools-"));
+  const capturedCalls: Array<{
+    workspaceDir: string;
+    paperKey: string;
+    maxCandidates?: number;
+    relatedPaperKeys?: string[];
+    mode?: string;
+  }> = [];
+
+  try {
+    const tool = getPaperWikiRelationsTool(workspace, {
+      paperWikiRelations: async (options) => {
+        capturedCalls.push(options);
+        return {
+          paperKey: options.paperKey,
+          candidates: [
+            {
+              paperKey: "aps-related",
+              title: "Related paper",
+              score: 12,
+              sharedTerms: ["superconducting"],
+              reasons: ["Shared title terms: superconducting."],
+              hasWikiSummary: true,
+              parseEngines: ["webpage"],
+            },
+          ],
+          update: options.relatedPaperKeys ? {
+            paperKey: options.paperKey,
+            sourcePath: "knowledge-base/wiki/sources/aps-target.md",
+            previousRelatedPaperKeys: [],
+            relatedPaperKeys: options.relatedPaperKeys,
+            mode: options.mode ?? "append",
+          } : undefined,
+        };
+      },
+    });
+
+    const result = await tool.execute("relations-call", {
+      paperKey: "aps-target",
+      maxCandidates: 4,
+      relatedPaperKeys: ["aps-related"],
+      mode: "replace",
+    }, undefined);
+
+    assert.deepEqual(capturedCalls, [
+      {
+        workspaceDir: workspace,
+        paperKey: "aps-target",
+        maxCandidates: 4,
+        relatedPaperKeys: ["aps-related"],
+        mode: "replace",
+      },
+    ]);
+    assert.equal((result.details as { update?: { relatedPaperKeys?: string[] } }).update?.relatedPaperKeys?.[0], "aps-related");
   } finally {
     await rm(workspace, { recursive: true, force: true });
   }

@@ -341,6 +341,7 @@ function createPaperSummaryWorker(model: Model<Api>): PaperSummaryWorker {
         "Return only a JSON object with these fields: title, summaryMarkdown, tags, keyFindings, limitations, openQuestions, relatedPaperKeys, confidence, groundingWarnings.",
         "summaryMarkdown should be concise Markdown suitable for a retrieval source page, normally 3 to 6 paragraphs.",
         "keyFindings, limitations, openQuestions, tags, relatedPaperKeys, and groundingWarnings must be arrays of strings.",
+        "If relatedCandidates are supplied, choose relatedPaperKeys only from those candidate paperKey values when there is a real conceptual or methodological connection.",
         "confidence must be high, medium, or low.",
         JSON.stringify({
           paperKey: input.evidence.paperKey,
@@ -350,6 +351,7 @@ function createPaperSummaryWorker(model: Model<Api>): PaperSummaryWorker {
           quality: input.evidence.quality,
           sections: input.evidence.sections,
           paths: input.evidence.paths,
+          relatedCandidates: input.evidence.relatedCandidates,
           totalMarkdownChars: input.evidence.totalMarkdownChars,
           truncated: input.evidence.truncated,
           markdown: input.evidence.markdown

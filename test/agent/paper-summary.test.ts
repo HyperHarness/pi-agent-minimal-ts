@@ -125,3 +125,53 @@ test("generatePaperWikiSummary reports a missing worker without writing content"
     await rm(workspace, { recursive: true, force: true });
   }
 });
+
+test("generatePaperWikiSummary can include related-paper candidates in worker evidence", async () => {
+  const workspace = await createWorkspace();
+  const receivedRelatedKeys: string[][] = [];
+
+  try {
+    const targetPdfPath = await writePdf(
+      workspace,
+      "arxiv-2601.01004.pdf",
+      "Remote superconducting qubits use Bell self-testing for device-independent certification."
+    );
+    const relatedPdfPath = await writePdf(
+      workspace,
+      "arxiv-2601.01005.pdf",
+      "Superconducting qubit networks use Bell correlations for distributed quantum processors."
+    );
+    const target = await parsePaper({
+      workspaceDir: workspace,
+      path: targetPdfPath,
+      engine: "plain-text-baseline"
+    });
+    await parsePaper({
+      workspaceDir: workspace,
+      path: relatedPdfPath,
+      engine: "plain-text-baseline"
+    });
+
+    const result = await generatePaperWikiSummary({
+      workspaceDir: workspace,
+      paperKey: target.paperKey,
+      force: true,
+      includeRelatedCandidates: true,
+      maxRelatedCandidates: 3,
+      summaryWorker: async ({ evidence }) => {
+        receivedRelatedKeys.push((evidence.relatedCandidates ?? []).map((candidate) => candidate.paperKey));
+        return {
+          summaryMarkdown: "A grounded summary with related-paper candidates.",
+          relatedPaperKeys: [evidence.relatedCandidates?.[0]?.paperKey ?? ""],
+          confidence: "high"
+        };
+      }
+    });
+
+    assert.equal(result.status, "drafted");
+    assert.ok(receivedRelatedKeys[0]?.includes("arxiv-2601.01005"));
+    assert.deepEqual(result.draft?.relatedPaperKeys, ["arxiv-2601.01005"]);
+  } finally {
+    await rm(workspace, { recursive: true, force: true });
+  }
+});

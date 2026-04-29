@@ -14,6 +14,10 @@ import type {
 import { PaperReaderError } from "./paper-reader/types.js";
 import { writePaperWikiSource } from "./paper-wiki/paper-wiki.js";
 import type { PaperWikiSourceResult } from "./paper-wiki/types.js";
+import {
+  findPaperWikiRelations,
+  type PaperWikiRelationCandidate
+} from "./paper-relations.js";
 
 const DEFAULT_MAX_EVIDENCE_CHARS = 60000;
 const MAX_SECTION_OUTLINE_ITEMS = 80;
@@ -41,6 +45,7 @@ export interface PaperSummaryEvidence {
   markdown: string;
   totalMarkdownChars: number;
   truncated: boolean;
+  relatedCandidates?: PaperWikiRelationCandidate[];
 }
 
 export interface PaperSummaryEvidencePreview extends Omit<PaperSummaryEvidence, "markdown"> {
@@ -72,6 +77,8 @@ export interface BuildPaperSummaryEvidenceOptions {
   paperKey: string;
   engine?: ConcretePaperParseEngine;
   maxEvidenceChars?: number;
+  includeRelatedCandidates?: boolean;
+  maxRelatedCandidates?: number;
 }
 
 export interface GeneratePaperWikiSummaryOptions extends BuildPaperSummaryEvidenceOptions {
@@ -207,6 +214,13 @@ export async function buildPaperSummaryEvidence(
   const markdown = await readFile(artifacts.markdownPath, "utf8");
   const maxEvidenceChars = normalizeMaxEvidenceChars(options.maxEvidenceChars);
   const quality = await readQualityReport(artifacts.qualityPath);
+  const relatedCandidates = options.includeRelatedCandidates
+    ? (await findPaperWikiRelations({
+      workspaceDir,
+      paperKey: options.paperKey,
+      ...(options.maxRelatedCandidates !== undefined ? { maxCandidates: options.maxRelatedCandidates } : {})
+    })).candidates
+    : undefined;
 
   return {
     paperKey: options.paperKey,
@@ -232,7 +246,8 @@ export async function buildPaperSummaryEvidence(
       })),
     markdown: markdown.slice(0, maxEvidenceChars),
     totalMarkdownChars: markdown.length,
-    truncated: markdown.length > maxEvidenceChars
+    truncated: markdown.length > maxEvidenceChars,
+    ...(relatedCandidates ? { relatedCandidates } : {})
   };
 }
 
@@ -240,7 +255,10 @@ export async function generatePaperWikiSummary(
   options: GeneratePaperWikiSummaryOptions
 ): Promise<GeneratePaperWikiSummaryResult> {
   const mode = options.mode ?? "draft";
-  const evidence = await buildPaperSummaryEvidence(options);
+  const evidence = await buildPaperSummaryEvidence({
+    ...options,
+    includeRelatedCandidates: options.includeRelatedCandidates ?? true
+  });
   const evidencePreview = previewEvidence(evidence);
   if (!options.force && evidence.quality && evidence.quality.status !== "good") {
     return {
