@@ -127,16 +127,27 @@ export interface GeneratePaperWikiSummaryResult {
   source?: PaperWikiSourceResult;
 }
 
+const SUMMARY_ENGINE_PRIORITY: Record<ConcretePaperParseEngine, number> = {
+  "webpage": 0,
+  "tex-source": 1,
+  "opendataloader-hybrid": 2,
+  "opendataloader-local": 3,
+  "docling": 4,
+  "plain-text-baseline": 5
+};
+
 function sortEnginesByPreference(engines: ConcretePaperParseEngine[]): ConcretePaperParseEngine[] {
-  const priority: Record<ConcretePaperParseEngine, number> = {
-    "webpage": 0,
-    "tex-source": 1,
-    "opendataloader-hybrid": 2,
-    "opendataloader-local": 3,
-    "docling": 4,
-    "plain-text-baseline": 5
-  };
-  return engines.slice().sort((left, right) => priority[left] - priority[right]);
+  return engines.slice().sort((left, right) => SUMMARY_ENGINE_PRIORITY[left] - SUMMARY_ENGINE_PRIORITY[right]);
+}
+
+async function parseQualityIsUsableForSummary(input: {
+  workspaceDir: string;
+  paperKey: string;
+  engine: ConcretePaperParseEngine;
+}): Promise<boolean> {
+  const artifacts = await resolvePaperParseArtifactPaths(input);
+  const quality = await readQualityReport(artifacts.qualityPath);
+  return quality === undefined || quality.status === "good";
 }
 
 async function resolveSummaryEngine(input: {
@@ -153,12 +164,22 @@ async function resolveSummaryEngine(input: {
     return input.engine;
   }
 
-  const engine = sortEnginesByPreference(
+  const engines = sortEnginesByPreference(
     await listPaperParseEngines({
       workspaceDir: input.workspaceDir,
       paperKey: input.paperKey
     })
-  )[0];
+  );
+  const engine = (await Promise.all(
+    engines.map(async (candidate) => ({
+      engine: candidate,
+      usable: await parseQualityIsUsableForSummary({
+        workspaceDir: input.workspaceDir,
+        paperKey: input.paperKey,
+        engine: candidate
+      })
+    }))
+  )).find((candidate) => candidate.usable)?.engine ?? engines[0];
   if (!engine) {
     throw new PaperReaderError("paper_not_found", `No parsed paper found for ${input.paperKey}.`);
   }

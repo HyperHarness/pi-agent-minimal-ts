@@ -106,7 +106,7 @@ test("checkWikiHealth reports records that need download, authorization, parsing
     assert.equal(result.summary.needs_authorization, 1);
     assert.equal(result.summary.needs_download, 1);
     assert.equal(result.summary.low_quality, 1);
-    assert.equal(result.summary.summary_missing, 1);
+    assert.equal(result.summary.summary_missing, 0);
     assert.equal(result.summary.missing_artifact, 1);
     assert.ok(result.issues.some((issue) => issue.kind === "needs_authorization" && issue.paperKey === "nature-s41586-024-00001-y"));
     assert.ok(result.issues.some((issue) => issue.kind === "missing_artifact" && issue.paperKey === "arxiv-2401.00001"));

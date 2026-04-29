@@ -342,7 +342,7 @@ export async function checkWikiHealth(options: WikiHealthOptions): Promise<WikiH
       }
     }
 
-    if (!usesPreprintFallback && !isPublisherPending && !needsAuthorization && entry.hasParsedArtifacts && !entry.hasWikiSummary) {
+    if (!usesPreprintFallback && !isPublisherPending && !needsAuthorization && hasUsableParsedReading && !entry.hasWikiSummary) {
       issues.push(baseIssue(entry, "summary_missing", "low", "Parsed paper has no wiki source summary."));
     }
 

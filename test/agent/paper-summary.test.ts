@@ -22,6 +22,16 @@ async function writePdf(workspace: string, filename: string, text: string): Prom
   return pdfPath;
 }
 
+async function writeText(filePath: string, value: string): Promise<void> {
+  await mkdir(path.dirname(filePath), { recursive: true });
+  await writeFile(filePath, value, "utf8");
+}
+
+async function writeJson(filePath: string, value: unknown): Promise<void> {
+  await mkdir(path.dirname(filePath), { recursive: true });
+  await writeFile(filePath, `${JSON.stringify(value, null, 2)}\n`, "utf8");
+}
+
 test("buildPaperSummaryEvidence returns bounded parsed markdown for a clean summary worker", async () => {
   const workspace = await createWorkspace();
 
@@ -183,6 +193,76 @@ test("generatePaperWikiSummary can include related-paper candidates in worker ev
     assert.equal(result.status, "drafted");
     assert.ok(receivedRelatedKeys[0]?.includes("arxiv-2601.01005"));
     assert.deepEqual(result.draft?.relatedPaperKeys, ["arxiv-2601.01005"]);
+  } finally {
+    await rm(workspace, { recursive: true, force: true });
+  }
+});
+
+test("generatePaperWikiSummary prefers a good parse over a low-quality webpage parse", async () => {
+  const workspace = await createWorkspace();
+  const paperKey = "aps-10.1103-example-summary";
+  const sourceRoot = path.join(workspace, "knowledge-base", "wiki", "sources", paperKey);
+  const webpageDir = path.join(sourceRoot, "parses", "webpage");
+  const localDir = path.join(sourceRoot, "parses", "opendataloader-local");
+  const receivedEngines: string[] = [];
+
+  try {
+    await writeJson(path.join(sourceRoot, "source.json"), {
+      paperKey,
+      source: "aps",
+      canonicalId: "10.1103/example-summary",
+      articleUrl: "https://journals.aps.org/prl/abstract/10.1103/example-summary"
+    });
+    await writeText(path.join(webpageDir, "document.md"), "# Abstract\n\nAccess-limited publisher preview.");
+    await writeJson(path.join(webpageDir, "parse.json"), {
+      paperKey,
+      engine: "webpage",
+      sections: []
+    });
+    await writeJson(path.join(webpageDir, "quality.json"), {
+      status: "needs_hybrid",
+      score: 0.45,
+      pages: 1,
+      totalTextLength: 2000,
+      emptyPageCount: 0,
+      headingCount: 1,
+      tableCount: 0,
+      figureOrCaptionCount: 0,
+      warnings: ["Publisher access wall detected. Prefer PDF parsing."]
+    });
+    await writeText(path.join(localDir, "document.md"), "# Paper\n\nFull PDF-derived article body suitable for summary.");
+    await writeJson(path.join(localDir, "parse.json"), {
+      paperKey,
+      engine: "opendataloader-local",
+      sections: []
+    });
+    await writeJson(path.join(localDir, "quality.json"), {
+      status: "good",
+      score: 1,
+      pages: 4,
+      totalTextLength: 20000,
+      emptyPageCount: 0,
+      headingCount: 4,
+      tableCount: 0,
+      figureOrCaptionCount: 1,
+      warnings: []
+    });
+
+    const result = await generatePaperWikiSummary({
+      workspaceDir: workspace,
+      paperKey,
+      summaryWorker: async ({ evidence }) => {
+        receivedEngines.push(evidence.engine);
+        return {
+          summaryMarkdown: "A grounded summary from the good parse.",
+          confidence: "high"
+        };
+      }
+    });
+
+    assert.equal(result.status, "drafted");
+    assert.equal(result.engine, "opendataloader-local");
+    assert.deepEqual(receivedEngines, ["opendataloader-local"]);
   } finally {
     await rm(workspace, { recursive: true, force: true });
   }
