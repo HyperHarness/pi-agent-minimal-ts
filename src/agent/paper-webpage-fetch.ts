@@ -1,4 +1,5 @@
 import { execFile } from "node:child_process";
+import { Buffer } from "node:buffer";
 import { mkdtemp, readFile, rm, writeFile } from "node:fs/promises";
 import os from "node:os";
 import path from "node:path";
@@ -29,6 +30,8 @@ export interface PaperWebPageMetadata {
   doi?: string;
   journal?: string;
   publicationDate?: string;
+  comments?: string;
+  expectedFigureCount?: number;
   authors: string[];
   referenceLinks?: PaperWebPageReferenceLink[];
   referenceSummary?: string;
@@ -92,6 +95,8 @@ export interface PaperWebPageHtmlDiagnostic {
 
 const DEFAULT_USER_AGENT = "pi-agent-minimal-ts/1.0";
 const DEFAULT_PANDOC_TIMEOUT_MS = 60_000;
+const MAX_DIRECT_IMAGE_ASSETS = 200;
+const MAX_DIRECT_IMAGE_BYTES = 25 * 1024 * 1024;
 const execFileAsync = promisify(execFile);
 
 const BLOCK_TAGS_TO_REMOVE = [
@@ -235,6 +240,269 @@ function decodeHtmlEntities(text: string): string {
     .replace(/&quot;/gi, '"')
     .replace(/&apos;/gi, "'")
     .replace(/&#39;/gi, "'");
+}
+
+function extractTagAttribute(tag: string, name: string): string | undefined {
+  const pattern = new RegExp("\\s" + name + "\\s*=\\s*(\"([^\"]*)\"|'([^']*)'|([^\\s\"'=<>`]+))", "i");
+  const match = tag.match(pattern);
+  const value = match?.[2] ?? match?.[3] ?? match?.[4];
+  return value ? decodeHtmlEntities(value.trim()) : undefined;
+}
+
+function preferredSrcFromSrcset(srcset: string | undefined): string | undefined {
+  if (!srcset) {
+    return undefined;
+  }
+  const candidates = srcset
+    .split(",")
+    .map((entry) => {
+      const [url, descriptor] = entry.trim().split(/\s+/, 2);
+      const width = descriptor?.endsWith("w")
+        ? Number(descriptor.slice(0, -1))
+        : descriptor?.endsWith("x")
+          ? Number(descriptor.slice(0, -1)) * 1000
+          : 0;
+      return { url, width: Number.isFinite(width) ? width : 0 };
+    })
+    .filter((candidate): candidate is { url: string; width: number } => Boolean(candidate.url));
+  candidates.sort((left, right) => right.width - left.width);
+  return candidates[0]?.url;
+}
+
+function filenameFromUrlLike(value: string): string | undefined {
+  try {
+    const parsed = new URL(value, "https://example.invalid/");
+    const filename = path.posix.basename(parsed.pathname);
+    return filename ? decodeURIComponent(filename) : undefined;
+  } catch {
+    const filename = value.split(/[?#]/, 1)[0]?.split("/").pop();
+    return filename ? decodeURIComponent(filename) : undefined;
+  }
+}
+
+function collectImageAssetCandidates(html: string, baseUrl: string): Array<{
+  url: string;
+  originalUrl: string;
+  filename?: string;
+  alt?: string;
+}> {
+  const candidates: Array<{
+    url: string;
+    originalUrl: string;
+    filename?: string;
+    alt?: string;
+  }> = [];
+  const seen = new Set<string>();
+
+  for (const match of html.matchAll(/<img\b[^>]*>/gi)) {
+    const tag = match[0];
+    const originalUrl =
+      extractTagAttribute(tag, "src") ??
+      extractTagAttribute(tag, "data-src") ??
+      preferredSrcFromSrcset(extractTagAttribute(tag, "srcset")) ??
+      preferredSrcFromSrcset(extractTagAttribute(tag, "data-srcset"));
+    if (!originalUrl) {
+      continue;
+    }
+    let resolvedUrl: string;
+    try {
+      if (originalUrl.startsWith("data:")) {
+        resolvedUrl = originalUrl;
+      } else {
+        const parsedBase = new URL(baseUrl);
+        const arxivHtmlMatch = parsedBase.pathname.match(/^\/html\/([^/]+)\/$/i);
+        if (
+          arxivHtmlMatch?.[1] &&
+          new RegExp(`^${arxivHtmlMatch[1].replace(/[.*+?^${}()|[\]\\]/g, "\\$&")}v\\d+/`).test(originalUrl)
+        ) {
+          resolvedUrl = new URL(`/html/${originalUrl}`, parsedBase).toString();
+        } else {
+          resolvedUrl = new URL(originalUrl, baseUrl).toString();
+        }
+      }
+    } catch {
+      continue;
+    }
+    if (seen.has(resolvedUrl)) {
+      continue;
+    }
+    seen.add(resolvedUrl);
+    candidates.push({
+      url: resolvedUrl,
+      originalUrl,
+      ...(filenameFromUrlLike(originalUrl) ? { filename: filenameFromUrlLike(originalUrl) } : {}),
+      ...(extractTagAttribute(tag, "alt") ? { alt: extractTagAttribute(tag, "alt") } : {})
+    });
+    if (candidates.length >= MAX_DIRECT_IMAGE_ASSETS) {
+      break;
+    }
+  }
+
+  return candidates;
+}
+
+function resolveArticleAssetBaseUrl(url: URL): string {
+  if (/(^|\.)arxiv\.org$/i.test(url.hostname) && /^\/html\/[^/]+$/i.test(url.pathname)) {
+    const withSlash = new URL(url.toString());
+    withSlash.pathname = `${withSlash.pathname}/`;
+    return withSlash.toString();
+  }
+  return url.toString();
+}
+
+function parseArxivIdFromUrl(url: string): string | undefined {
+  try {
+    const parsed = new URL(url);
+    if (!/(^|\.)arxiv\.org$/i.test(parsed.hostname)) {
+      return undefined;
+    }
+    const match = parsed.pathname.match(/^\/(?:abs|html|pdf)\/([^/?#]+?)(?:\.pdf)?\/?$/i);
+    return match?.[1]?.replace(/v\d+$/i, "");
+  } catch {
+    return undefined;
+  }
+}
+
+function parseExpectedFigureCountFromComments(comments: string): number | undefined {
+  const match = comments.match(/\b(\d+)\s+fig(?:ure)?s?\b/i);
+  if (!match?.[1]) {
+    return undefined;
+  }
+  const count = Number(match[1]);
+  return Number.isInteger(count) && count >= 0 ? count : undefined;
+}
+
+function stripHtmlToText(html: string): string {
+  return decodeHtmlEntities(html.replace(/<[^>]+>/g, " "));
+}
+
+function extractArxivComments(absHtml: string): string | undefined {
+  const match = absHtml.match(/<td\b[^>]*class=["'][^"']*\bcomments\b[^"']*["'][^>]*>\s*([\s\S]*?)<\/td>/i);
+  const value = match?.[1]
+    ? compactLine(stripHtmlToText(match[1]))
+    : undefined;
+  return value || undefined;
+}
+
+async function fetchArxivAbsMetadata(input: {
+  articleUrl: string;
+  fetchImpl: (input: RequestInfo | URL, init?: RequestInit) => Promise<Response>;
+  signal: AbortSignal;
+  userAgent: string;
+}): Promise<Pick<PaperWebPageMetadata, "comments" | "expectedFigureCount">> {
+  const arxivId = parseArxivIdFromUrl(input.articleUrl);
+  if (!arxivId) {
+    return {};
+  }
+
+  try {
+    const response = await input.fetchImpl(`https://arxiv.org/abs/${arxivId}`, {
+      headers: new Headers({
+        "user-agent": input.userAgent
+      }),
+      signal: input.signal
+    });
+    if (!response.ok) {
+      return {};
+    }
+    const contentType = response.headers.get("content-type")?.toLowerCase() ?? "";
+    if (!contentType.includes("text/html")) {
+      return {};
+    }
+    const comments = extractArxivComments(await response.text());
+    const expectedFigureCount = comments
+      ? parseExpectedFigureCountFromComments(comments)
+      : undefined;
+    return {
+      ...(comments ? { comments } : {}),
+      ...(expectedFigureCount !== undefined ? { expectedFigureCount } : {})
+    };
+  } catch {
+    return {};
+  }
+}
+
+function parseDataImageAsset(candidate: {
+  url: string;
+  originalUrl: string;
+  filename?: string;
+  alt?: string;
+}): PaperWebPageAsset | undefined {
+  const match = candidate.url.match(/^data:([^;,]+)?(;base64)?,([\s\S]*)$/i);
+  if (!match?.[3]) {
+    return undefined;
+  }
+  const mimeType = match[1] || "image/png";
+  const data = match[2]
+    ? match[3]
+    : Buffer.from(decodeURIComponent(match[3]), "utf8").toString("base64");
+  return {
+    url: candidate.url,
+    originalUrl: candidate.originalUrl,
+    dataBase64: data,
+    mimeType,
+    ...(candidate.filename ? { filename: candidate.filename } : {}),
+    ...(candidate.alt ? { alt: candidate.alt } : {})
+  };
+}
+
+function isImageContentType(contentType: string): boolean {
+  const mediaType = contentType.split(";", 1)[0]?.trim().toLowerCase();
+  return Boolean(mediaType?.startsWith("image/") || mediaType === "application/pdf");
+}
+
+async function fetchImageAssets(input: {
+  candidates: Array<{
+    url: string;
+    originalUrl: string;
+    filename?: string;
+    alt?: string;
+  }>;
+  fetchImpl: (input: RequestInfo | URL, init?: RequestInit) => Promise<Response>;
+  signal: AbortSignal;
+  userAgent: string;
+}): Promise<PaperWebPageAsset[]> {
+  const assets: PaperWebPageAsset[] = [];
+  for (const candidate of input.candidates) {
+    if (candidate.url.startsWith("data:")) {
+      const asset = parseDataImageAsset(candidate);
+      if (asset) {
+        assets.push(asset);
+      }
+      continue;
+    }
+
+    try {
+      const response = await input.fetchImpl(candidate.url, {
+        headers: new Headers({
+          "user-agent": input.userAgent
+        }),
+        signal: input.signal
+      });
+      if (!response.ok) {
+        continue;
+      }
+      const contentType = response.headers.get("content-type") ?? "";
+      if (!isImageContentType(contentType)) {
+        continue;
+      }
+      const bytes = Buffer.from(await response.arrayBuffer());
+      if (bytes.byteLength === 0 || bytes.byteLength > MAX_DIRECT_IMAGE_BYTES) {
+        continue;
+      }
+      assets.push({
+        url: candidate.url,
+        originalUrl: candidate.originalUrl,
+        dataBase64: bytes.toString("base64"),
+        mimeType: contentType,
+        ...(candidate.filename ? { filename: candidate.filename } : {}),
+        ...(candidate.alt ? { alt: candidate.alt } : {})
+      });
+    } catch {
+      continue;
+    }
+  }
+  return assets;
 }
 
 function stripComments(html: string): string {
@@ -869,11 +1137,12 @@ export async function fetchPaperWebPage(
   const fetchImpl = options.fetchImpl ?? globalThis.fetch.bind(globalThis);
   const endpoint = normalizeUrl(options.url);
   const timeout = withRequestTimeout(resolveFetchTimeoutMs(env));
+  const userAgent = normalizeUserAgent(env);
 
   try {
     const response = await fetchImpl(endpoint, {
       headers: new Headers({
-        "user-agent": normalizeUserAgent(env)
+        "user-agent": userAgent
       }),
       signal: timeout.signal
     });
@@ -888,11 +1157,40 @@ export async function fetchPaperWebPage(
       throw new Error("Expected text/html content-type.");
     }
 
-    return parsePaperWebPageHtmlWithPandoc({
-      url: endpoint.toString(),
-      html: await response.text(),
+    const html = await response.text();
+    const finalUrl = response.url || endpoint.toString();
+    const extraction = await parsePaperWebPageHtmlWithPandoc({
+      url: finalUrl,
+      html,
       env
     });
+    const arxivMetadata = await fetchArxivAbsMetadata({
+      articleUrl: finalUrl,
+      fetchImpl,
+      signal: timeout.signal,
+      userAgent
+    });
+    const extractionWithMetadata = Object.keys(arxivMetadata).length > 0
+      ? {
+          ...extraction,
+          metadata: {
+            ...extraction.metadata,
+            ...arxivMetadata
+          }
+        }
+      : extraction;
+    const selected = selectArticleHtml(stripComments(html));
+    const cleanedBlocks = removeKnownNoiseBlocks(selected.html);
+    const assets = await fetchImageAssets({
+      candidates: collectImageAssetCandidates(cleanedBlocks.html, resolveArticleAssetBaseUrl(new URL(finalUrl))),
+      fetchImpl,
+      signal: timeout.signal,
+      userAgent
+    });
+
+    return assets.length > 0
+      ? { ...extractionWithMetadata, assets }
+      : extractionWithMetadata;
   } finally {
     timeout.dispose();
   }

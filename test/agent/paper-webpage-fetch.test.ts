@@ -158,6 +158,145 @@ test("fetchPaperWebPage rejects non-html responses", async () => {
   );
 });
 
+test("fetchPaperWebPage downloads direct HTML image assets", async () => {
+  const workspace = await mkdtemp(path.join(tmpdir(), "pi-paper-webpage-direct-assets-"));
+  const requestedUrls: string[] = [];
+  try {
+    const extraction = await fetchPaperWebPage({
+      url: "https://arxiv.org/html/2601.00425",
+      fetchImpl: async (input) => {
+        const url = input.toString();
+        requestedUrls.push(url);
+        if (url === "https://arxiv.org/html/2601.00425") {
+          return createHtmlResponse(
+            200,
+            `
+              <html>
+                <head><meta name="citation_title" content="arXiv image article"></head>
+                <body>
+                  <article>
+                    <h1>arXiv image article</h1>
+                    <p>${"Article body. ".repeat(200)}</p>
+                    <figure>
+                      <img src="x1.png" alt="Figure 1">
+                      <figcaption>Figure 1: Local figure.</figcaption>
+                    </figure>
+                  </article>
+                </body>
+              </html>
+            `
+          );
+        }
+        if (url === "https://arxiv.org/html/2601.00425/x1.png") {
+          return new Response(Buffer.from("png-bytes"), {
+            status: 200,
+            headers: { "content-type": "image/png" }
+          });
+        }
+        if (url === "https://arxiv.org/abs/2601.00425") {
+          return createHtmlResponse(
+            200,
+            `
+              <html>
+                <body>
+                  <table>
+                    <tr>
+                      <td class="tablecell label">Comments:</td>
+                      <td class="tablecell comments">12 pages, 1 figure</td>
+                    </tr>
+                  </table>
+                </body>
+              </html>
+            `
+          );
+        }
+        return new Response("missing", { status: 404 });
+      }
+    });
+
+    assert.equal(extraction.assets?.length, 1);
+    assert.equal(extraction.assets?.[0]?.filename, "x1.png");
+    assert.equal(extraction.metadata.comments, "12 pages, 1 figure");
+    assert.equal(extraction.metadata.expectedFigureCount, 1);
+    assert.ok(requestedUrls.includes("https://arxiv.org/html/2601.00425/x1.png"));
+
+    const result = await savePaperWebPageParse({
+      workspaceDir: workspace,
+      extraction,
+      paperKey: "arxiv-2601.00425"
+    });
+    const markdown = await readFile(result.artifacts.markdownPath, "utf8");
+    assert.match(markdown, /assets\/x1\.png/);
+    const assetPath = path.join(
+      workspace,
+      "knowledge-base",
+      "wiki",
+      "sources",
+      "arxiv-2601.00425",
+      "parses",
+      "webpage",
+      "assets",
+      "x1.png"
+    );
+    assert.equal(await readFile(assetPath, "utf8"), "png-bytes");
+  } finally {
+    await rm(workspace, { recursive: true, force: true });
+  }
+});
+
+test("savePaperWebPageParse warns when arXiv comments report missing figures", async () => {
+  const workspace = await mkdtemp(path.join(tmpdir(), "pi-paper-webpage-arxiv-figure-warning-"));
+  try {
+    const extraction = parsePaperWebPageHtml({
+      url: "https://arxiv.org/html/2507.09690",
+      html: `
+        <html>
+          <head><meta name="citation_title" content="arXiv figure check"></head>
+          <body>
+            <article>
+              <h1>arXiv figure check</h1>
+              <h2>Introduction</h2>
+              <p>${"Article body. ".repeat(200)}</p>
+              <p>Figure 1: First figure.</p>
+            </article>
+          </body>
+        </html>
+      `
+    });
+
+    const result = await savePaperWebPageParse({
+      workspaceDir: workspace,
+      paperKey: "arxiv-2507.09690",
+      extraction: {
+        ...extraction,
+        metadata: {
+          ...extraction.metadata,
+          comments: "16 pages, 8 figures",
+          expectedFigureCount: 8
+        },
+        assets: [
+          {
+            url: "https://arxiv.org/html/2507.09690/x1.png",
+            filename: "x1.png",
+            mimeType: "image/png",
+            dataBase64: Buffer.from("png-bytes").toString("base64")
+          }
+        ]
+      }
+    });
+
+    assert.equal(result.quality.status, "needs_hybrid");
+    assert.ok(result.quality.score < 0.7);
+    assert.ok(
+      result.quality.warnings.some((warning) =>
+        warning.includes("arXiv comments report 8 figures")
+      )
+    );
+  } finally {
+    await rm(workspace, { recursive: true, force: true });
+  }
+});
+
 test("Science webpage parsing removes access chrome and flags abstract-only pages", async () => {
   const workspace = await mkdtemp(path.join(tmpdir(), "pi-paper-science-webpage-"));
   try {

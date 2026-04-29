@@ -247,6 +247,65 @@ function figureNumberFromAssetFilename(filename: string): string | undefined {
   return match?.[1] ? String(Number(match[1])) : undefined;
 }
 
+function isArxivExtractionUrl(url: string): boolean {
+  try {
+    return /(^|\.)arxiv\.org$/i.test(new URL(url).hostname);
+  } catch {
+    return false;
+  }
+}
+
+function isLikelyOrderedFigureAsset(filename: string, allowGenericImage: boolean): boolean {
+  return (
+    /^x\d+\.(?:png|jpe?g|gif|webp|svg|pdf)$/i.test(filename) ||
+    /^fig(?:ure)?[_-]?\d+/i.test(filename) ||
+    (allowGenericImage && /\.(?:png|jpe?g|gif|webp|svg|pdf)$/i.test(filename))
+  );
+}
+
+function insertOrderedFigureAssetLinks(input: {
+  markdown: string;
+  extractionUrl: string;
+  assets: Array<{ filename: string }>;
+}): string {
+  const { markdown } = input;
+  if (/!\[[^\]]*]\(assets\//.test(markdown)) {
+    return markdown;
+  }
+
+  const allowGenericImage = isArxivExtractionUrl(input.extractionUrl);
+  const figureAssets = input.assets
+    .filter((asset) => isLikelyOrderedFigureAsset(asset.filename, allowGenericImage))
+    .map((asset) => `assets/${asset.filename}`);
+  if (figureAssets.length === 0) {
+    return markdown;
+  }
+
+  const lines = markdown.split("\n");
+  const rewritten: string[] = [];
+  let nextAssetIndex = 0;
+  for (const line of lines) {
+    if (
+      /^(?:Figure:\s*)?(?:Fig(?:ure)?\.?\s*)?\d+\b/i.test(line) ||
+      /^Figure:\s*Figure\s+\d+\b/i.test(line)
+    ) {
+      if (nextAssetIndex >= figureAssets.length) {
+        rewritten.push(line);
+        continue;
+      }
+      if (rewritten.length > 0 && rewritten[rewritten.length - 1] !== "") {
+        rewritten.push("");
+      }
+      rewritten.push(`![Refer to caption](${figureAssets[nextAssetIndex]})`);
+      rewritten.push("");
+      nextAssetIndex += 1;
+    }
+    rewritten.push(line);
+  }
+
+  return rewritten.join("\n");
+}
+
 function insertMissingFigureAssetLinks(markdown: string, assets: Array<{ filename: string }>): string {
   if (/!\[[^\]]*]\(assets\//.test(markdown)) {
     return markdown;
@@ -344,6 +403,11 @@ async function materializeWebpageAssets(input: {
     markdown = markdown.replace(new RegExp(escapeRegExp(target), "g"), replacement);
   }
   markdown = insertMissingFigureAssetLinks(markdown, materializedAssets);
+  markdown = insertOrderedFigureAssetLinks({
+    markdown,
+    extractionUrl: input.extraction.url,
+    assets: materializedAssets
+  });
 
   return {
     ...input.extraction,
@@ -521,6 +585,42 @@ function applyWebpageAccessQualityWarning(input: {
   };
 }
 
+function applyArxivFigureCompletenessQualityWarning(input: {
+  quality: PaperParseQualityReport;
+  extraction: PaperWebPageExtraction;
+}): PaperParseQualityReport {
+  const expectedFigureCount = input.extraction.metadata.expectedFigureCount;
+  if (expectedFigureCount === undefined || expectedFigureCount <= 0) {
+    return input.quality;
+  }
+  try {
+    if (!/(^|\.)arxiv\.org$/i.test(new URL(input.extraction.url).hostname)) {
+      return input.quality;
+    }
+  } catch {
+    return input.quality;
+  }
+
+  const actualFigureCount = input.extraction.assets?.length ?? 0;
+  if (actualFigureCount >= expectedFigureCount) {
+    return input.quality;
+  }
+
+  const warning =
+    `arXiv comments report ${expectedFigureCount} figure${expectedFigureCount === 1 ? "" : "s"}, ` +
+    `but only ${actualFigureCount} webpage image asset${actualFigureCount === 1 ? "" : "s"} were downloaded.`;
+  const score = Math.min(input.quality.score, actualFigureCount === 0 ? 0.55 : 0.65);
+
+  return {
+    ...input.quality,
+    status: score >= 0.7 ? "good" : score >= 0.4 ? "needs_hybrid" : "poor",
+    score,
+    warnings: input.quality.warnings.includes(warning)
+      ? input.quality.warnings
+      : [warning, ...input.quality.warnings]
+  };
+}
+
 async function buildSource(input: {
   workspaceDir: string;
   paperKey: string;
@@ -590,8 +690,11 @@ export async function savePaperWebPageParse(
     extraction,
     sourceSha256
   });
-  const quality = applyWebpageAccessQualityWarning({
-    quality: evaluateParseQuality(document),
+  const quality = applyArxivFigureCompletenessQualityWarning({
+    quality: applyWebpageAccessQualityWarning({
+      quality: evaluateParseQuality(document),
+      extraction
+    }),
     extraction
   });
   const chunks = createPaperChunks(document);
