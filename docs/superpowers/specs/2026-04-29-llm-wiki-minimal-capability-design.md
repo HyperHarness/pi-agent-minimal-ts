@@ -47,6 +47,17 @@ This is intentionally separate from `wiki_health`, which remains responsible for
 
 `build_wiki_page` can use source and page evidence in draft mode. Write mode still requires at least one source summary citation so persisted pages stay grounded in atomic evidence.
 
+### Bootstrap
+
+When a topic page does not exist yet, retrieval cannot rely on page-first search. The bootstrap path uses source summaries as the temporary page layer:
+
+1. Generate deterministic seed queries from the topic and question.
+2. Search source summaries and any existing pages with each seed query.
+3. Expand matched source summaries through `tags` and `related_papers`.
+4. Search parsed/local papers as fallback only when source summaries are insufficient.
+5. Report parsed papers that match the topic but still need source summaries.
+6. Optionally generate those missing source summaries, then refresh the source-summary search before page synthesis.
+
 ## Deferred
 
 - vector or hybrid retrieval

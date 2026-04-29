@@ -30,8 +30,13 @@ import {
   writePaperWikiPage,
   writePaperWikiSource
 } from "./paper-wiki/paper-wiki.js";
+import {
+  bootstrapPaperWikiPageEvidence,
+  type BootstrapPaperWikiPageEvidenceDependencies
+} from "./paper-wiki/bootstrap.js";
 import { lintPaperWiki } from "./paper-wiki/lint.js";
 import type {
+  PaperWikiPageBootstrapResult,
   PaperWikiPageWorker,
   PaperWikiPageWorkerOutput
 } from "./paper-wiki/types.js";
@@ -316,6 +321,28 @@ const answerResearchQuestionParameters = Type.Object({
   )
 });
 
+const bootstrapWikiPageEvidenceParameters = Type.Object({
+  topic: Type.String({ description: "Topic or concept for the future synthesis wiki page." }),
+  question: Type.Optional(
+    Type.String({ description: "Optional user question that should drive seed queries and source selection." })
+  ),
+  maxSeedQueries: Type.Optional(
+    Type.Integer({ description: "Maximum deterministic seed queries to generate. Defaults to 4.", minimum: 1 })
+  ),
+  maxSources: Type.Optional(
+    Type.Integer({ description: "Maximum source-summary evidence items to return. Defaults to 12.", minimum: 1 })
+  ),
+  includeParsedFallback: Type.Optional(
+    Type.Boolean({ description: "Search parsed/local papers when source summaries are insufficient. Defaults to true." })
+  ),
+  autoSummarizeMissing: Type.Optional(
+    Type.Boolean({ description: "Generate missing source summaries for parsed fallback papers when a summary worker is configured. Defaults to true." })
+  ),
+  maxSummariesToGenerate: Type.Optional(
+    Type.Integer({ description: "Maximum missing summaries to generate during bootstrap. Defaults to 3.", minimum: 0 })
+  )
+});
+
 const buildWikiPageParameters = Type.Object({
   topic: Type.String({ description: "Topic or concept for the synthesis wiki page." }),
   question: Type.Optional(
@@ -429,6 +456,7 @@ type SearchPaperWikiParameters = Static<typeof searchPaperWikiParameters>;
 type WikiLintParameters = Static<typeof wikiLintParameters>;
 type AnswerPaperWikiQuestionParameters = Static<typeof answerPaperWikiQuestionParameters>;
 type AnswerResearchQuestionParameters = Static<typeof answerResearchQuestionParameters>;
+type BootstrapWikiPageEvidenceParameters = Static<typeof bootstrapWikiPageEvidenceParameters>;
 type BuildWikiPageParameters = Static<typeof buildWikiPageParameters>;
 type ListLocalPapersParameters = Static<typeof listLocalPapersParameters>;
 type SearchLocalPapersParameters = Static<typeof searchLocalPapersParameters>;
@@ -648,11 +676,19 @@ type AnswerResearchQuestionTool = AgentTool<
   typeof answerResearchQuestionParameters,
   AnswerResearchQuestionDetails
 >;
+type BootstrapWikiPageEvidenceDetails = PaperWikiPageBootstrapResult & {
+  summariesWritten: ResearchWrittenSummary[];
+};
+type BootstrapWikiPageEvidenceTool = AgentTool<
+  typeof bootstrapWikiPageEvidenceParameters,
+  BootstrapWikiPageEvidenceDetails
+>;
 type BuildWikiPageDetails = {
   topic: string;
   question?: string;
   mode: "draft" | "write";
-  research: AnswerResearchQuestionDetails;
+  bootstrap?: BootstrapWikiPageEvidenceDetails;
+  research?: AnswerResearchQuestionDetails;
   status: "drafted" | "written" | "needs_evidence" | "needs_worker" | "skipped";
   message: string;
   draft?: PaperWikiPageWorkerOutput;
@@ -665,6 +701,8 @@ type BuildWikiPageDetails = {
     title: string;
     path: string;
     snippet: string;
+    query?: string;
+    origin?: "seed_search" | "related_expansion" | "local_fallback";
   }>;
 };
 type ResearchWorkflowProgressStage =
@@ -1091,6 +1129,7 @@ export interface ToolDependencies {
   writePaperWikiPage?: typeof writePaperWikiPage;
   generatePaperWikiSummary?: typeof generatePaperWikiSummary;
   paperWikiRelations?: typeof paperWikiRelations;
+  bootstrapPaperWikiPageEvidence?: typeof bootstrapPaperWikiPageEvidence;
   lintPaperWiki?: typeof lintPaperWiki;
   paperSummaryWorker?: PaperSummaryWorker;
   paperWikiPageWorker?: PaperWikiPageWorker;
@@ -1133,7 +1172,17 @@ function compactBuildWikiPageResult(result: BuildWikiPageDetails): Record<string
     mode: result.mode,
     status: result.status,
     message: result.message,
-    researchStatus: result.research.status,
+    ...(result.bootstrap ? {
+      bootstrapStatus: result.bootstrap.status,
+      seedQueries: result.bootstrap.seedQueries,
+      missingSummaries: result.bootstrap.missingSummaries.map((item) => ({
+        paperKey: item.paperKey,
+        title: item.title,
+        reason: item.reason
+      })),
+      summariesWritten: result.bootstrap.summariesWritten
+    } : {}),
+    ...(result.research ? { researchStatus: result.research.status } : {}),
     ...(result.page ? { page: result.page } : {}),
     ...(result.draft && result.mode === "draft" ? { draft: result.draft } : {}),
     ...(result.draft && result.mode !== "draft"
@@ -1153,8 +1202,11 @@ function compactBuildWikiPageResult(result: BuildWikiPageDetails): Record<string
       title: item.title,
       path: item.path
     })),
-    blocked: result.research.blocked,
-    externalCandidates: result.research.externalCandidates
+    blocked: [
+      ...(result.bootstrap?.blocked ?? []),
+      ...(result.research?.blocked ?? [])
+    ],
+    externalCandidates: result.research?.externalCandidates ?? []
   };
 }
 
@@ -1190,6 +1242,7 @@ export function createTools(workspaceDir: string, dependencies: ToolDependencies
   const writePaperWikiPageImpl = dependencies.writePaperWikiPage ?? writePaperWikiPage;
   const generatePaperWikiSummaryImpl = dependencies.generatePaperWikiSummary ?? generatePaperWikiSummary;
   const paperWikiRelationsImpl = dependencies.paperWikiRelations ?? paperWikiRelations;
+  const bootstrapPaperWikiPageEvidenceImpl = dependencies.bootstrapPaperWikiPageEvidence ?? bootstrapPaperWikiPageEvidence;
   const lintPaperWikiImpl = dependencies.lintPaperWiki ?? lintPaperWiki;
   const searchPaperWikiImpl = dependencies.searchPaperWiki ?? searchPaperWiki;
   const listLocalPapersImpl = dependencies.listLocalPapers ?? listLocalPapers;
@@ -1201,6 +1254,76 @@ export function createTools(workspaceDir: string, dependencies: ToolDependencies
     resolveDefaultPaperBrowserSessionFactory({ workspaceDir: resolvedWorkspaceDir });
   let browserSessionPromise: Promise<PaperBrowserSession> | undefined;
   let paperManagerServerClose: (() => Promise<void>) | undefined;
+
+  const runBootstrapWikiPageEvidence = async (
+    args: BootstrapWikiPageEvidenceParameters,
+    onUpdate?: AgentToolUpdateCallback<any>
+  ): Promise<BootstrapWikiPageEvidenceDetails> => {
+    const bootstrapDeps: BootstrapPaperWikiPageEvidenceDependencies = {
+      searchPaperWikiImpl,
+      searchLocalPapersImpl
+    };
+    const buildBootstrapOptions = () => ({
+      workspaceDir: resolvedWorkspaceDir,
+      topic: args.topic,
+      ...(args.question ? { question: args.question } : {}),
+      ...(args.maxSeedQueries !== undefined ? { maxSeedQueries: args.maxSeedQueries } : {}),
+      ...(args.maxSources !== undefined ? { maxSources: args.maxSources } : {}),
+      ...(args.includeParsedFallback !== undefined ? { includeParsedFallback: args.includeParsedFallback } : {})
+    });
+    let bootstrap = await bootstrapPaperWikiPageEvidenceImpl(buildBootstrapOptions(), bootstrapDeps);
+    const summariesWritten: ResearchWrittenSummary[] = [];
+    const autoSummarizeMissing = args.autoSummarizeMissing ?? true;
+    const maxSummariesToGenerate = Math.max(0, Math.trunc(args.maxSummariesToGenerate ?? 3));
+
+    if (autoSummarizeMissing && maxSummariesToGenerate > 0 && bootstrap.missingSummaries.length > 0) {
+      if (!dependencies.paperSummaryWorker) {
+        bootstrap = {
+          ...bootstrap,
+          blocked: [
+            ...bootstrap.blocked,
+            {
+              stage: "parsed_fallback",
+              reason: "Summary worker is not configured; cannot automatically promote parsed fallback papers into source summaries."
+            }
+          ]
+        };
+      } else {
+        const selected = bootstrap.missingSummaries.slice(0, maxSummariesToGenerate);
+        for (const [index, missing] of selected.entries()) {
+          const summary = await generatePaperWikiSummaryImpl({
+            workspaceDir: resolvedWorkspaceDir,
+            paperKey: missing.paperKey,
+            mode: "write",
+            summaryWorker: dependencies.paperSummaryWorker,
+            onProgress: (summaryProgress) => emitToolProgress(onUpdate, {
+              stage: "summary_progress",
+              query: args.question ?? args.topic,
+              paperKey: missing.paperKey,
+              index: index + 1,
+              total: selected.length,
+              message: `Bootstrap summary ${index + 1}/${selected.length}: ${summaryProgress.message}`,
+              summaryProgress
+            })
+          });
+          summariesWritten.push({
+            paperKey: missing.paperKey,
+            status: summary.status,
+            ...(summary.source?.sourcePath ? { sourcePath: summary.source.sourcePath } : {}),
+            message: summary.message
+          });
+        }
+        if (summariesWritten.some((summary) => summary.status === "written")) {
+          bootstrap = await bootstrapPaperWikiPageEvidenceImpl(buildBootstrapOptions(), bootstrapDeps);
+        }
+      }
+    }
+
+    return {
+      ...bootstrap,
+      summariesWritten
+    };
+  };
 
   const getBrowserSession = async (): Promise<PaperBrowserSession> => {
     if (browserSessionPromise === undefined) {
@@ -2341,6 +2464,27 @@ export function createTools(workspaceDir: string, dependencies: ToolDependencies
     }
   };
 
+  const bootstrapWikiPageEvidenceTool: BootstrapWikiPageEvidenceTool = {
+    name: "bootstrap_wiki_page_evidence",
+    label: "Bootstrap Wiki Page Evidence",
+    description:
+      "Builds an evidence set for a new synthesis page when no page exists yet: multi-query source-summary search, related source expansion, parsed fallback matches, and optional missing-summary generation.",
+    parameters: bootstrapWikiPageEvidenceParameters,
+    executionMode: "sequential",
+    execute: async (
+      _toolCallId: string,
+      args: BootstrapWikiPageEvidenceParameters,
+      _signal: AbortSignal | undefined,
+      onUpdate: AgentToolUpdateCallback<any> | undefined
+    ) => {
+      const result = await runBootstrapWikiPageEvidence(args, onUpdate);
+      return {
+        content: [{ type: "text", text: JSON.stringify(result) }],
+        details: result
+      };
+    }
+  };
+
   const buildWikiPageTool: BuildWikiPageTool = {
     name: "build_wiki_page",
     label: "Build Wiki Page",
@@ -2356,29 +2500,45 @@ export function createTools(workspaceDir: string, dependencies: ToolDependencies
     ) => {
       const mode = args.mode ?? "write";
       const query = args.question ?? args.topic;
-      const researchResult = await answerResearchQuestionTool.execute("research-for-wiki-page", {
-        query,
-        ...(args.maxLocalResults !== undefined ? { maxLocalResults: args.maxLocalResults } : {}),
-        ...(args.maxExternalCandidates !== undefined ? { maxExternalCandidates: args.maxExternalCandidates } : {}),
-        ...(args.maxDownloads !== undefined ? { maxDownloads: args.maxDownloads } : {}),
-        ...(args.autoDownload !== undefined ? { autoDownload: args.autoDownload } : {}),
-        ...(args.autoSummarize !== undefined ? { autoSummarize: args.autoSummarize } : {})
-      }, undefined, onUpdate);
-      const research = researchResult.details as AnswerResearchQuestionDetails;
-      const evidence = research.refreshedEvidence?.evidence ?? research.localEvidence.evidence;
-      const sourceEvidence = evidence.filter((item): item is AnswerPaperWikiQuestionDetails["evidence"][number] & { paperKey: string } =>
+      const bootstrap = await runBootstrapWikiPageEvidence({
+        topic: args.topic,
+        ...(args.question ? { question: args.question } : {}),
+        ...(args.maxLocalResults !== undefined ? { maxSources: args.maxLocalResults } : {}),
+        autoSummarizeMissing: args.autoSummarize ?? true
+      }, onUpdate);
+      let research: AnswerResearchQuestionDetails | undefined;
+      let evidence: BuildWikiPageDetails["evidence"] = [...bootstrap.sourceEvidence, ...bootstrap.pageContext];
+      let sourceEvidence: Array<BuildWikiPageDetails["evidence"][number] & { paperKey: string }> =
+        bootstrap.sourceEvidence.filter((item): item is PaperWikiPageBootstrapResult["sourceEvidence"][number] & { paperKey: string } =>
         item.kind === "source" && typeof item.paperKey === "string" && item.paperKey.length > 0
       );
+
+      if (sourceEvidence.length === 0) {
+        const researchResult = await answerResearchQuestionTool.execute("research-for-wiki-page", {
+          query,
+          ...(args.maxLocalResults !== undefined ? { maxLocalResults: args.maxLocalResults } : {}),
+          ...(args.maxExternalCandidates !== undefined ? { maxExternalCandidates: args.maxExternalCandidates } : {}),
+          ...(args.maxDownloads !== undefined ? { maxDownloads: args.maxDownloads } : {}),
+          ...(args.autoDownload !== undefined ? { autoDownload: args.autoDownload } : {}),
+          ...(args.autoSummarize !== undefined ? { autoSummarize: args.autoSummarize } : {})
+        }, undefined, onUpdate);
+        research = researchResult.details as AnswerResearchQuestionDetails;
+        evidence = research.refreshedEvidence?.evidence ?? research.localEvidence.evidence;
+        sourceEvidence = evidence.filter((item): item is BuildWikiPageDetails["evidence"][number] & { paperKey: string } =>
+          item.kind === "source" && typeof item.paperKey === "string" && item.paperKey.length > 0
+        );
+      }
 
       if (evidence.length === 0) {
         const result: BuildWikiPageDetails = {
           topic: args.topic,
           ...(args.question ? { question: args.question } : {}),
           mode,
-          research,
+          bootstrap,
+          ...(research ? { research } : {}),
           status: "needs_evidence",
           message:
-            "Cannot build a wiki page because no citeable local wiki evidence is available after the research workflow.",
+            "Cannot build a wiki page because no citeable local wiki evidence is available after bootstrap and research workflows.",
           evidence: []
         };
         return {
@@ -2392,7 +2552,8 @@ export function createTools(workspaceDir: string, dependencies: ToolDependencies
           topic: args.topic,
           ...(args.question ? { question: args.question } : {}),
           mode,
-          research,
+          bootstrap,
+          ...(research ? { research } : {}),
           status: "needs_evidence",
           message:
             "Cannot write a wiki page because the available local evidence came from synthesis pages only; regenerate from citeable source summaries or run in draft mode.",
@@ -2409,7 +2570,8 @@ export function createTools(workspaceDir: string, dependencies: ToolDependencies
           topic: args.topic,
           ...(args.question ? { question: args.question } : {}),
           mode,
-          research,
+          bootstrap,
+          ...(research ? { research } : {}),
           status: "needs_worker",
           message: "Wiki page worker is not configured; cannot synthesize a topic page automatically.",
           evidence
@@ -2440,7 +2602,8 @@ export function createTools(workspaceDir: string, dependencies: ToolDependencies
           topic: args.topic,
           ...(args.question ? { question: args.question } : {}),
           mode,
-          research,
+          bootstrap,
+          ...(research ? { research } : {}),
           status: "drafted",
           message: "Built a wiki page draft without writing it.",
           draft,
@@ -2476,7 +2639,8 @@ export function createTools(workspaceDir: string, dependencies: ToolDependencies
         topic: args.topic,
         ...(args.question ? { question: args.question } : {}),
         mode,
-        research,
+        bootstrap,
+        ...(research ? { research } : {}),
         status: "written",
         message: `Wrote wiki page ${page.pagePath}.`,
         draft,
@@ -2595,6 +2759,7 @@ export function createTools(workspaceDir: string, dependencies: ToolDependencies
     searchPaperTextTool,
     answerPaperWikiQuestionTool,
     answerResearchQuestionTool,
+    bootstrapWikiPageEvidenceTool,
     buildWikiPageTool,
     searchLocalPapersTool,
     wikiHealthTool,

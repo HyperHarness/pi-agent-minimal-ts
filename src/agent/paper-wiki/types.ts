@@ -41,6 +41,61 @@ export interface PaperWikiSearchResult {
   }>;
 }
 
+export interface PaperWikiPageBootstrapEvidence {
+  kind: "source" | "page";
+  key: string;
+  title: string;
+  path: string;
+  snippet: string;
+  query?: string;
+  origin: "seed_search" | "related_expansion" | "local_fallback";
+  paperKey?: string;
+  pageKey?: string;
+  tags?: string[];
+  relatedPaperKeys?: string[];
+}
+
+export interface PaperWikiPageBootstrapParsedFallback {
+  paperKey: string;
+  title?: string;
+  field: string;
+  path?: string;
+  snippet: string;
+}
+
+export interface PaperWikiPageBootstrapMissingSummary {
+  paperKey: string;
+  title?: string;
+  reason: string;
+  matches: PaperWikiPageBootstrapParsedFallback[];
+}
+
+export interface PaperWikiPageBootstrapOptions {
+  workspaceDir: string;
+  topic: string;
+  question?: string;
+  maxSeedQueries?: number;
+  maxSources?: number;
+  includeParsedFallback?: boolean;
+}
+
+export interface PaperWikiPageBootstrapResult {
+  status: "ready" | "needs_summary" | "insufficient_evidence";
+  topic: string;
+  question?: string;
+  recommendedPageKey: string;
+  seedQueries: string[];
+  sourceEvidence: PaperWikiPageBootstrapEvidence[];
+  pageContext: PaperWikiPageBootstrapEvidence[];
+  expandedSources: PaperWikiPageBootstrapEvidence[];
+  parsedFallbackMatches: PaperWikiPageBootstrapParsedFallback[];
+  missingSummaries: PaperWikiPageBootstrapMissingSummary[];
+  blocked: Array<{
+    stage: "seed_search" | "related_expansion" | "parsed_fallback";
+    reason: string;
+  }>;
+}
+
 export interface PaperWikiPageSourceCitation {
   paperKey: string;
   title?: string;

@@ -15,6 +15,7 @@ import {
   writePaperWikiPage,
   writePaperWikiSource
 } from "../../src/agent/paper-wiki/paper-wiki.js";
+import { bootstrapPaperWikiPageEvidence } from "../../src/agent/paper-wiki/bootstrap.js";
 import { lintPaperWiki } from "../../src/agent/paper-wiki/lint.js";
 import { PaperReaderError } from "../../src/agent/paper-reader/types.js";
 import { parsePaperWebPageHtml } from "../../src/agent/paper-webpage-fetch.js";
@@ -393,6 +394,82 @@ More evidence about qLDPC.
     assert.ok(lint.issues.some((issue) => issue.kind === "missing_source_citation"));
     assert.ok(lint.issues.some((issue) => issue.kind === "broken_wiki_link"));
     assert.ok(lint.issues.some((issue) => issue.kind === "concept_gap" && issue.concept === "qldpc"));
+  } finally {
+    await rm(workspace, { recursive: true, force: true });
+  }
+});
+
+test("bootstrapPaperWikiPageEvidence searches sources, expands related papers, and reports missing summaries", async () => {
+  const workspace = await createWorkspace();
+  try {
+    const sourcesDir = path.join(workspace, "knowledge-base", "wiki", "sources");
+    await mkdir(sourcesDir, { recursive: true });
+    await writeFile(path.join(sourcesDir, "arxiv-seed.md"), `---
+type: "paper-source-summary"
+paper_key: "arxiv-seed"
+title: "Seed qLDPC Paper"
+tags:
+  - "qldpc"
+  - "superconducting-qubits"
+related_papers:
+  - "arxiv-related"
+---
+
+# Seed qLDPC Paper
+
+This source summary discusses qLDPC implementation on superconducting chips.
+`, "utf8");
+    await writeFile(path.join(sourcesDir, "arxiv-related.md"), `---
+type: "paper-source-summary"
+paper_key: "arxiv-related"
+title: "Auxiliary Constraints"
+tags:
+  - "ancilla"
+---
+
+# Auxiliary Constraints
+
+This source summary discusses auxiliary constraints.
+`, "utf8");
+
+    const result = await bootstrapPaperWikiPageEvidence({
+      workspaceDir: workspace,
+      topic: "qLDPC on superconducting chips",
+      question: "请总结一下qLDPC码在超导量子芯片上实现的难点",
+      maxSources: 4
+    }, {
+      searchLocalPapersImpl: async () => ({
+        query: "fallback",
+        count: 1,
+        results: [
+          {
+            paper: {
+              paperKey: "arxiv-missing-summary",
+              title: "Parsed Missing Summary",
+              hasPdf: true,
+              hasParsedArtifacts: true,
+              hasWikiSummary: false,
+              parses: [],
+            },
+            score: 2,
+            matches: [
+              {
+                field: "parsed_markdown",
+                path: "knowledge-base/wiki/sources/arxiv-missing-summary/parses/tex-source/document.md",
+                engine: "tex-source",
+                snippet: "qLDPC parsed fallback evidence",
+              },
+            ],
+          },
+        ],
+      }),
+    });
+
+    assert.equal(result.status, "ready");
+    assert.ok(result.seedQueries.some((query) => /qLDPC superconducting/i.test(query)));
+    assert.equal(result.sourceEvidence[0]?.paperKey, "arxiv-seed");
+    assert.ok(result.expandedSources.some((item) => item.paperKey === "arxiv-related"));
+    assert.ok(result.missingSummaries.some((item) => item.paperKey === "arxiv-missing-summary"));
   } finally {
     await rm(workspace, { recursive: true, force: true });
   }

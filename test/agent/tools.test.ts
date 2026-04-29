@@ -236,6 +236,23 @@ type AnswerResearchQuestionTool = {
   ) => Promise<ToolResult>;
 };
 
+type BootstrapWikiPageEvidenceTool = {
+  execute: (
+    toolCallId: string,
+    args: {
+      topic: string;
+      question?: string;
+      maxSeedQueries?: number;
+      maxSources?: number;
+      includeParsedFallback?: boolean;
+      autoSummarizeMissing?: boolean;
+      maxSummariesToGenerate?: number;
+    },
+    signal: undefined,
+    onUpdate?: (partialResult: ToolResult) => void,
+  ) => Promise<ToolResult>;
+};
+
 type BuildWikiPageTool = {
   execute: (
     toolCallId: string,
@@ -604,6 +621,20 @@ function getBuildWikiPageTool(
   return tool as BuildWikiPageTool;
 }
 
+function getBootstrapWikiPageEvidenceTool(
+  workspace: string,
+  dependencies?: Parameters<typeof createTools>[1],
+): BootstrapWikiPageEvidenceTool {
+  const tools = createTools(workspace, dependencies) as ReadonlyArray<{
+    name: string;
+    execute?: BootstrapWikiPageEvidenceTool["execute"];
+  }>;
+  const tool = tools.find((candidate) => candidate.name === "bootstrap_wiki_page_evidence");
+  assert.ok(tool);
+  assert.equal(typeof tool.execute, "function");
+  return tool as BootstrapWikiPageEvidenceTool;
+}
+
 function getListLocalPapersTool(
   workspace: string,
   dependencies?: Parameters<typeof createTools>[1],
@@ -765,6 +796,7 @@ test("createTools exposes the minimal default tool set", async () => {
       "search_paper_text",
       "answer_paper_wiki_question",
       "answer_research_question",
+      "bootstrap_wiki_page_evidence",
       "build_wiki_page",
       "search_local_papers",
       "wiki_health",
@@ -811,6 +843,7 @@ test("createTools full profile exposes every built-in tool", async () => {
       "search_paper_text",
       "answer_paper_wiki_question",
       "answer_research_question",
+      "bootstrap_wiki_page_evidence",
       "build_wiki_page",
       "search_local_papers",
       "wiki_health",
@@ -2653,6 +2686,114 @@ test("answer_research_question can download, parse, summarize, and refresh wiki 
     assert.equal(details.downloaded?.[0]?.readingStatus, "parsed");
     assert.equal(details.summariesWritten?.[0]?.status, "written");
     assert.equal(details.refreshedEvidence?.evidence?.length, 1);
+  } finally {
+    await rm(workspace, { recursive: true, force: true });
+  }
+});
+
+test("bootstrap_wiki_page_evidence generates missing source summaries and refreshes evidence", async () => {
+  const workspace = await mkdtemp(path.join(tmpdir(), "pi-agent-tools-"));
+  let bootstrapCalls = 0;
+  const generatedSummaries: string[] = [];
+
+  try {
+    const tool = getBootstrapWikiPageEvidenceTool(workspace, {
+      bootstrapPaperWikiPageEvidence: async (options) => {
+        bootstrapCalls += 1;
+        return {
+          status: bootstrapCalls > 1 ? "ready" : "needs_summary",
+          topic: options.topic,
+          ...(options.question ? { question: options.question } : {}),
+          recommendedPageKey: "qldpc-superconducting-chips",
+          seedQueries: ["qLDPC superconducting chip implementation challenges"],
+          sourceEvidence: bootstrapCalls > 1
+            ? [
+                {
+                  kind: "source",
+                  key: "arxiv-2507.09690",
+                  paperKey: "arxiv-2507.09690",
+                  title: "Small Quantum LDPC Codes",
+                  path: "knowledge-base/wiki/sources/arxiv-2507.09690.md",
+                  snippet: "source summary evidence",
+                  origin: "seed_search",
+                },
+              ]
+            : [],
+          pageContext: [],
+          expandedSources: [],
+          parsedFallbackMatches: [
+            {
+              paperKey: "arxiv-2507.09690",
+              title: "Small Quantum LDPC Codes",
+              field: "parsed_markdown",
+              path: "knowledge-base/wiki/sources/arxiv-2507.09690/parses/tex-source/document.md",
+              snippet: "parsed qLDPC evidence",
+            },
+          ],
+          missingSummaries: bootstrapCalls > 1
+            ? []
+            : [
+                {
+                  paperKey: "arxiv-2507.09690",
+                  title: "Small Quantum LDPC Codes",
+                  reason: "Parsed paper matched the topic but has no wiki source summary.",
+                  matches: [],
+                },
+              ],
+          blocked: [],
+        };
+      },
+      generatePaperWikiSummary: async (options) => {
+        generatedSummaries.push(options.paperKey);
+        return {
+          status: "written",
+          paperKey: options.paperKey,
+          engine: "tex-source",
+          message: "Wrote wiki source summary.",
+          evidence: {
+            paperKey: options.paperKey,
+            engine: "tex-source",
+            pdfSha256: "sha",
+            paths: {
+              parseMarkdown: "document.md",
+              parseJson: "parse.json",
+              qualityJson: "quality.json",
+            },
+            sections: [],
+            totalMarkdownChars: 7,
+            truncated: false,
+            markdownPreview: "preview",
+          },
+          source: {
+            paperKey: options.paperKey,
+            title: "Small Quantum LDPC Codes",
+            sourcePath: "knowledge-base/wiki/sources/arxiv-2507.09690.md",
+            indexPath: "knowledge-base/wiki/index.md",
+            logPath: "knowledge-base/wiki/log.md",
+            schemaPath: "knowledge-base/wiki/schema.md",
+          },
+        };
+      },
+      paperSummaryWorker: async () => ({
+        summaryMarkdown: "summary",
+        confidence: "high",
+      }),
+    });
+
+    const result = await tool.execute("bootstrap-call", {
+      topic: "qLDPC on superconducting chips",
+      question: "请总结一下qLDPC码在超导量子芯片上实现的难点",
+    }, undefined);
+    const details = result.details as {
+      status?: string;
+      sourceEvidence?: unknown[];
+      summariesWritten?: Array<{ paperKey?: string; status?: string }>;
+    };
+
+    assert.equal(details.status, "ready");
+    assert.deepEqual(generatedSummaries, ["arxiv-2507.09690"]);
+    assert.equal(details.summariesWritten?.[0]?.status, "written");
+    assert.equal(details.sourceEvidence?.length, 1);
   } finally {
     await rm(workspace, { recursive: true, force: true });
   }

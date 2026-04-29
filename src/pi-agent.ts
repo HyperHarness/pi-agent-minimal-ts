@@ -33,7 +33,7 @@ type AgentMessageEventHandler = (event: AgentEvent) => Promise<void> | void;
 export const DEFAULT_SYSTEM_PROMPT = [
   "You are a helpful assistant. Use tools when they are useful.",
   "For scientific, technical, paper, physics, quantum, method, experiment, or literature-comparison questions, first run answer_research_question so local wiki evidence is checked before any external search or download.",
-  "When the user asks to organize, build, maintain, or update a durable knowledge framework or topic page, use build_wiki_page.",
+  "When the user asks to organize, build, maintain, or update a durable knowledge framework or topic page, use build_wiki_page; it will bootstrap source-summary evidence when no page exists yet.",
   "When the user asks to check the structure of the wiki itself, use wiki_lint for page/link/index/concept health and wiki_health for paper download/parse/summary health.",
   "Use answer_paper_wiki_question only for explicitly local-wiki-only questions or quick evidence checks.",
   "When calling paper wiki or research tools, use concise English search terms when that will better match paper titles, abstracts, and source summaries.",

@@ -17,7 +17,9 @@ The current paper wiki already implements the core storage layout from the LLM w
 - [x] Preserve compatibility with existing source-summary search callers.
 - [x] Add `wiki_lint` for stale index entries, broken links, missing citations, orphan pages, and repeated concept tags without pages.
 - [x] Keep `wiki_health` focused on paper acquisition/parse/summary health.
+- [x] Add `bootstrap_wiki_page_evidence` for the no-page-yet stage: multi-query source-summary search, related source expansion, parsed fallback, and optional missing-summary generation.
 - [x] Ensure `build_wiki_page` can draft from page evidence but writes only when source-summary citations are available.
+- [x] Make `build_wiki_page` use bootstrap evidence before falling back to external research acquisition.
 - [x] Update the default tool profile so the agent can lint the wiki during normal chat.
 - [x] Add focused tests for page search, wiki lint, and tool exposure.
 
