@@ -75,6 +75,110 @@ test("listLocalPapers merges download records with parsed artifacts", async () =
   }
 });
 
+test("listLocalPapers merges slash canonical IDs using the record filename key", async () => {
+  const workspace = await createWorkspace();
+  try {
+    const pdfPath = path.join(workspace, "knowledge-base", "raw", "pdfs", "aps-10.1103-PhysRevLett.125.120504.pdf");
+    await writeText(pdfPath, "%PDF-1.4\nexample\n%%EOF\n");
+    await writeJson(path.join(workspace, "knowledge-base", "records", "aps-10.1103-PhysRevLett.125.120504.json"), {
+      source: "aps",
+      articleUrl: "https://journals.aps.org/prl/abstract/10.1103/PhysRevLett.125.120504",
+      recordedAt: "2026-04-28T00:00:00.000Z",
+      handlingMethod: "browser_session",
+      status: "downloaded",
+      canonicalId: "10.1103/PhysRevLett.125.120504",
+      pdfUrl: "https://journals.aps.org/prl/pdf/10.1103/PhysRevLett.125.120504",
+      downloadPath: pdfPath
+    });
+    const paperDir = path.join(workspace, "knowledge-base", "wiki", "sources", "aps-10.1103-PhysRevLett.125.120504");
+    await writeJson(path.join(paperDir, "source.json"), {
+      paperKey: "aps-10.1103-PhysRevLett.125.120504",
+      title: "Demonstrating a Continuous Set of Two-Qubit Gates",
+      articleUrl: "https://journals.aps.org/prl/abstract/10.1103/PhysRevLett.125.120504",
+      source: "aps",
+      canonicalId: "10.1103/PhysRevLett.125.120504",
+      pdfPath
+    });
+    await writeText(path.join(paperDir, "parses", "opendataloader-local", "document.md"), "Full PDF text");
+    await writeJson(path.join(paperDir, "parses", "opendataloader-local", "quality.json"), {
+      status: "good",
+      score: 1,
+      totalTextLength: 12000,
+      warnings: []
+    });
+
+    const result = await listLocalPapers({ workspaceDir: workspace, status: "all" });
+
+    assert.equal(result.total, 1);
+    assert.equal(result.results[0]?.paperKey, "aps-10.1103-PhysRevLett.125.120504");
+    assert.equal(result.results[0]?.canonicalId, "10.1103/PhysRevLett.125.120504");
+    assert.equal(result.results[0]?.hasPdf, true);
+    assert.equal(result.results[0]?.hasParsedArtifacts, true);
+  } finally {
+    await rm(workspace, { recursive: true, force: true });
+  }
+});
+
+test("listLocalPapers canonicalizes accepted APS webpage artifact directories", async () => {
+  const workspace = await createWorkspace();
+  try {
+    await writeJson(path.join(workspace, "knowledge-base", "records", "aps-10.1103-k3d5-v43c.json"), {
+      source: "aps",
+      articleUrl: "https://journals.aps.org/prapplied/accepted/10.1103/k3d5-v43c",
+      recordedAt: "2026-04-28T00:00:00.000Z",
+      handlingMethod: "arxiv_preprint_fallback",
+      status: "preprint_fallback",
+      canonicalId: "10.1103/k3d5-v43c",
+      title: "Superconducting qubits in the millions: The potential and limitations of modularity",
+      preprint: {
+        source: "arxiv",
+        canonicalId: "2406.06015",
+        articleUrl: "https://arxiv.org/abs/2406.06015",
+        pdfUrl: "https://arxiv.org/pdf/2406.06015.pdf",
+        recordPath: path.join(workspace, "knowledge-base", "records", "arxiv-2406.06015.json"),
+        downloadPath: path.join(workspace, "knowledge-base", "raw", "pdfs", "arxiv-2406.06015.pdf"),
+        status: "downloaded"
+      },
+      failure: {
+        code: "publisher_version_not_available",
+        message: "Using matching arXiv preprint until the publisher PDF is available."
+      }
+    });
+
+    const legacyPaperDir = path.join(
+      workspace,
+      "knowledge-base",
+      "wiki",
+      "sources",
+      "journals.aps.org-prapplied-accepted-10.1103-k3d5-v43c"
+    );
+    await writeJson(path.join(legacyPaperDir, "source.json"), {
+      paperKey: "journals.aps.org-prapplied-accepted-10.1103-k3d5-v43c",
+      title: "Superconducting qubits in the millions: The potential and limitations of modularity",
+      articleUrl: "https://journals.aps.org/prapplied/accepted/10.1103/k3d5-v43c",
+      source: "aps",
+      canonicalId: "10.1103/k3d5-v43c"
+    });
+    await writeText(path.join(legacyPaperDir, "parses", "webpage", "document.md"), "Accepted paper abstract.");
+    await writeJson(path.join(legacyPaperDir, "parses", "webpage", "quality.json"), {
+      status: "poor",
+      score: 0.2,
+      totalTextLength: 24,
+      warnings: ["Accepted-paper page has no formal PDF yet."]
+    });
+
+    const result = await listLocalPapers({ workspaceDir: workspace, status: "all" });
+
+    assert.equal(result.total, 1);
+    assert.equal(result.results[0]?.paperKey, "aps-10.1103-k3d5-v43c");
+    assert.equal(result.results[0]?.status, "preprint_fallback");
+    assert.equal(result.results[0]?.hasParsedArtifacts, true);
+    assert.equal(result.results[0]?.parses[0]?.engine, "webpage");
+  } finally {
+    await rm(workspace, { recursive: true, force: true });
+  }
+});
+
 test("searchLocalPapers searches metadata, wiki summaries, and parsed markdown", async () => {
   const workspace = await createWorkspace();
   try {

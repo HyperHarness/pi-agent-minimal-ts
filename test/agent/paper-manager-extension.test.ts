@@ -69,6 +69,147 @@ test("downloadPaper routes supported publisher URLs through the extension bridge
   }
 });
 
+test("downloadPaper resolves APS accepted papers through exact-title arXiv fallback", async () => {
+  const workspaceDir = await mkdtemp(path.join(os.tmpdir(), "paper-manager-extension-"));
+  const articleUrl = "https://journals.aps.org/prapplied/accepted/10.1103/k3d5-v43c";
+  const title = "Superconducting qubits in the millions: The potential and limitations of modularity";
+  const arxivId = "2601.01234";
+  const searchedTitles: string[] = [];
+  const fetchedUrls: string[] = [];
+  const submittedJobs: unknown[] = [];
+
+  try {
+    const result = await downloadPaper({
+      workspaceDir,
+      url: articleUrl,
+      title,
+      extensionBridge: {
+        async submitJob(job) {
+          submittedJobs.push(job);
+          throw new Error("Accepted papers should not be queued before arXiv fallback is tried.");
+        }
+      },
+      searchArxivImpl: async (options) => {
+        searchedTitles.push(options.query);
+        return [
+          {
+            id: arxivId,
+            title,
+            authors: ["A. Author"],
+            summary: "Preprint summary",
+            absUrl: `https://arxiv.org/abs/${arxivId}`,
+            pdfUrl: `https://arxiv.org/pdf/${arxivId}.pdf`
+          }
+        ];
+      },
+      fetchImpl: async (input) => {
+        fetchedUrls.push(String(input));
+        return new Response("%PDF-accepted-arxiv", {
+          status: 200,
+          headers: { "content-type": "application/pdf" }
+        });
+      }
+    });
+
+    assert.deepEqual(submittedJobs, []);
+    assert.deepEqual(searchedTitles, [title]);
+    assert.deepEqual(fetchedUrls, [`https://arxiv.org/pdf/${arxivId}.pdf`]);
+    assert.equal(result.status, "downloaded");
+    assert.equal(result.source, "arxiv");
+    assert.equal(result.canonicalId, arxivId);
+    assert.equal(result.publisherFallback?.source, "aps");
+    assert.equal(result.publisherFallback?.canonicalId, "10.1103/k3d5-v43c");
+    assert.equal(result.publisherFallback?.articleUrl, articleUrl);
+
+    const arxivRecord = JSON.parse(await readFile(result.recordPath, "utf8")) as Record<string, unknown>;
+    assert.equal(arxivRecord.source, "arxiv");
+    assert.equal(arxivRecord.status, "downloaded");
+
+    const apsRecordPath = resolvePaperRecordPath({
+      workspaceDir,
+      source: "aps",
+      canonicalId: "10.1103/k3d5-v43c",
+      articleUrl
+    });
+    const apsRecord = JSON.parse(await readFile(apsRecordPath, "utf8")) as {
+      source?: string;
+      status?: string;
+      handlingMethod?: string;
+      title?: string;
+      preprint?: { source?: string; canonicalId?: string; recordPath?: string; downloadPath?: string };
+      failure?: { code?: string; message?: string };
+    };
+    assert.equal(apsRecord.source, "aps");
+    assert.equal(apsRecord.status, "preprint_fallback");
+    assert.equal(apsRecord.handlingMethod, "arxiv_preprint_fallback");
+    assert.equal(apsRecord.title, title);
+    assert.equal(apsRecord.preprint?.source, "arxiv");
+    assert.equal(apsRecord.preprint?.canonicalId, arxivId);
+    assert.equal(apsRecord.preprint?.recordPath, result.recordPath);
+    assert.equal(apsRecord.preprint?.downloadPath, result.path);
+    assert.equal(apsRecord.failure?.code, "publisher_version_not_available");
+  } finally {
+    await rm(workspaceDir, { recursive: true, force: true });
+  }
+});
+
+test("downloadPaper records APS accepted papers as pending when no exact arXiv fallback exists", async () => {
+  const workspaceDir = await mkdtemp(path.join(os.tmpdir(), "paper-manager-extension-"));
+  const articleUrl = "https://journals.aps.org/prapplied/accepted/10.1103/rp4w-3n7l";
+  const title = "Design and application of N[3]CZ: A controlled-Z gate between next-nearest-neighbor superconducting qubits";
+  const submittedJobs: unknown[] = [];
+
+  try {
+    const result = await downloadPaper({
+      workspaceDir,
+      url: articleUrl,
+      title,
+      extensionBridge: {
+        async submitJob(job) {
+          submittedJobs.push(job);
+          throw new Error("Accepted papers without arXiv fallback should not be queued.");
+        }
+      },
+      searchArxivImpl: async () => [
+        {
+          id: "2401.00001",
+          title: "Different paper title",
+          authors: ["A. Author"],
+          summary: "Preprint summary",
+          absUrl: "https://arxiv.org/abs/2401.00001",
+          pdfUrl: "https://arxiv.org/pdf/2401.00001.pdf"
+        }
+      ],
+      fetchImpl: async () => {
+        throw new Error("PDF download should not run without an exact arXiv title match.");
+      }
+    });
+
+    assert.deepEqual(submittedJobs, []);
+    assert.equal(result.status, "publisher_pending");
+    assert.equal(result.source, "aps");
+    assert.equal(result.canonicalId, "10.1103/rp4w-3n7l");
+    assert.equal(result.articleUrl, articleUrl);
+    assert.equal(result.title, title);
+    assert.equal(result.failure.code, "publisher_version_not_available");
+
+    const record = JSON.parse(await readFile(result.recordPath, "utf8")) as {
+      source?: string;
+      status?: string;
+      handlingMethod?: string;
+      title?: string;
+      failure?: { code?: string; message?: string };
+    };
+    assert.equal(record.source, "aps");
+    assert.equal(record.status, "publisher_pending");
+    assert.equal(record.handlingMethod, "accepted_paper");
+    assert.equal(record.title, title);
+    assert.equal(record.failure?.code, "publisher_version_not_available");
+  } finally {
+    await rm(workspaceDir, { recursive: true, force: true });
+  }
+});
+
 test("downloadPaper returns extension_unavailable without launching fallback when no bridge is configured", async () => {
   const workspaceDir = await mkdtemp(path.join(os.tmpdir(), "paper-manager-extension-"));
   const articleUrl = "https://www.science.org/doi/10.1126/science.adz8659";

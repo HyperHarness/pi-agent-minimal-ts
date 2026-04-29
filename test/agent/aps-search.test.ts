@@ -86,7 +86,7 @@ test("searchApsPapers queries Crossref for APS DOI-prefix papers and returns new
       {
         title: "A routed superconducting quantum processor paper",
         primarySource: "aps",
-        articleUrl: "https://journals.aps.org/prapplied/abstract/10.1103/k3d5-v43c",
+        articleUrl: "https://journals.aps.org/doi/10.1103/k3d5-v43c",
         canonicalId: "10.1103/k3d5-v43c"
       },
       {

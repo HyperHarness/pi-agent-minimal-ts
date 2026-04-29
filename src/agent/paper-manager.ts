@@ -56,6 +56,7 @@ import type {
   PaperSearchResult,
   PaperSearchSource,
   PaperSource,
+  PublisherPreprintFallbackResult,
   SupportedPaperSource
 } from "./paper-types.js";
 
@@ -174,6 +175,16 @@ type ClassifiedPaperUrl =
       action: "open_url_only";
     };
 
+type ArxivDownloadedPaperResult = PaperDownloadResult & {
+  status: "downloaded" | "already_downloaded";
+  source: "arxiv";
+  canonicalId: string;
+  articleUrl: string;
+  finalPdfUrl: string;
+  path: string;
+  recordPath: string;
+};
+
 type SearchCandidate = {
   title: string;
   titleKey: string;
@@ -206,6 +217,15 @@ function normalizeTitle(title: string): string {
     .trim();
 
   return normalized || title.trim().toLowerCase();
+}
+
+function decodeHtmlEntities(text: string): string {
+  return text
+    .replace(/&lt;/g, "<")
+    .replace(/&gt;/g, ">")
+    .replace(/&amp;/g, "&")
+    .replace(/&quot;/g, '"')
+    .replace(/&#39;/g, "'");
 }
 
 function formatTitle(title: string): string {
@@ -375,6 +395,56 @@ function classifySupportedSource(url: URL): Extract<
   }
 
   return null;
+}
+
+function isApsAcceptedPaperUrl(articleUrl: string): boolean {
+  try {
+    const url = new URL(articleUrl);
+    return url.hostname === "journals.aps.org" && /^\/[^/]+\/accepted\/10\.1103\/.+/i.test(url.pathname);
+  } catch {
+    return false;
+  }
+}
+
+function extractHtmlTitle(html: string): string | undefined {
+  const metaTitle = html.match(/<meta\b[^>]*(?:property|name)=["'](?:og:title|citation_title)["'][^>]*content=["']([^"']+)["'][^>]*>/i)?.[1] ??
+    html.match(/<meta\b[^>]*content=["']([^"']+)["'][^>]*(?:property|name)=["'](?:og:title|citation_title)["'][^>]*>/i)?.[1];
+  const rawTitle = metaTitle ?? html.match(/<title[^>]*>([\s\S]*?)<\/title>/i)?.[1];
+  if (!rawTitle) {
+    return undefined;
+  }
+
+  const title = decodeHtmlEntities(rawTitle)
+    .replace(/\s+/g, " ")
+    .replace(/^Physical Review [^-]+ - Accepted Paper:\s*/i, "")
+    .replace(/\s*\|\s*APS\s*$/i, "")
+    .trim();
+  return title || undefined;
+}
+
+async function resolveApsAcceptedPaperTitle(options: {
+  articleUrl: string;
+  title?: string;
+  fetchImpl?: typeof fetch;
+}): Promise<string | undefined> {
+  const providedTitle = options.title?.trim();
+  if (providedTitle) {
+    return providedTitle;
+  }
+
+  try {
+    const response = await (options.fetchImpl ?? fetch)(options.articleUrl);
+    if (!response.ok) {
+      return undefined;
+    }
+    const html = await response.text();
+    if (!/accepted paper/i.test(html)) {
+      return undefined;
+    }
+    return extractHtmlTitle(html);
+  } catch {
+    return undefined;
+  }
 }
 
 function classifyWebSearchResult(
@@ -1114,6 +1184,137 @@ async function tryDownloadArxivPreprintByTitle(options: {
   }
 }
 
+function createPublisherPreprintFallbackFailure(arxivId: string): PaperFailure {
+  return {
+    code: "publisher_version_not_available",
+    message:
+      `Publisher page is an accepted paper without a formal PDF yet; using matching arXiv preprint ${arxivId}.`
+  };
+}
+
+function createPublisherPendingFailure(): PaperFailure {
+  return {
+    code: "publisher_version_not_available",
+    message:
+      "Publisher page is an accepted paper without a formal PDF yet, and no exact-title arXiv preprint was found."
+  };
+}
+
+async function writePublisherPendingRecord(options: {
+  workspaceDir: string;
+  classification: Extract<ClassifiedPaperUrl, { source: SupportedPaperSource }>;
+  title?: string;
+}): Promise<PaperDownloadResult> {
+  const canonicalId = resolveFallbackCanonicalId({
+    articleUrl: options.classification.articleUrl,
+    canonicalId: options.classification.canonicalId
+  });
+  const failure = createPublisherPendingFailure();
+  const recordPath = await writePaperRecord({
+    workspaceDir: options.workspaceDir,
+    record: {
+      source: options.classification.source,
+      articleUrl: options.classification.articleUrl,
+      recordedAt: new Date().toISOString(),
+      handlingMethod: "accepted_paper",
+      status: "publisher_pending",
+      canonicalId,
+      ...(options.title ? { title: options.title } : {}),
+      failure
+    }
+  });
+
+  return {
+    status: "publisher_pending",
+    source: options.classification.source,
+    canonicalId,
+    articleUrl: options.classification.articleUrl,
+    recordPath,
+    failure,
+    ...(options.title ? { title: options.title } : {})
+  };
+}
+
+async function writePublisherPreprintFallbackRecord(options: {
+  workspaceDir: string;
+  classification: Extract<ClassifiedPaperUrl, { source: SupportedPaperSource }>;
+  title?: string;
+  arxivResult: ArxivDownloadedPaperResult;
+}): Promise<PublisherPreprintFallbackResult> {
+  const canonicalId = resolveFallbackCanonicalId({
+    articleUrl: options.classification.articleUrl,
+    canonicalId: options.classification.canonicalId
+  });
+  const reason =
+    `Publisher page is an accepted paper without a formal PDF yet; using matching arXiv preprint ${options.arxivResult.canonicalId}.`;
+  const recordPath = await writePaperRecord({
+    workspaceDir: options.workspaceDir,
+    record: {
+      source: options.classification.source,
+      articleUrl: options.classification.articleUrl,
+      recordedAt: new Date().toISOString(),
+      handlingMethod: "arxiv_preprint_fallback",
+      status: "preprint_fallback",
+      canonicalId,
+      ...(options.title ? { title: options.title } : {}),
+      preprint: {
+        source: "arxiv",
+        canonicalId: options.arxivResult.canonicalId,
+        articleUrl: options.arxivResult.articleUrl,
+        pdfUrl: options.arxivResult.finalPdfUrl,
+        recordPath: options.arxivResult.recordPath,
+        downloadPath: options.arxivResult.path,
+        status: options.arxivResult.status
+      },
+      failure: createPublisherPreprintFallbackFailure(options.arxivResult.canonicalId)
+    }
+  });
+
+  return {
+    source: options.classification.source,
+    canonicalId,
+    articleUrl: options.classification.articleUrl,
+    recordPath,
+    reason,
+    ...(options.title ? { title: options.title } : {})
+  };
+}
+
+async function tryDownloadArxivPreprintForPublisherFallback(options: {
+  workspaceDir: string;
+  classification: Extract<ClassifiedPaperUrl, { source: SupportedPaperSource }>;
+  title?: string;
+  fetchImpl?: typeof fetch;
+  searchArxivImpl?: typeof searchArxiv;
+}): Promise<PaperDownloadResult | null> {
+  const arxivResult = await tryDownloadArxivPreprintByTitle({
+    workspaceDir: options.workspaceDir,
+    title: options.title,
+    fetchImpl: options.fetchImpl,
+    searchArxivImpl: options.searchArxivImpl
+  });
+  if (
+    !arxivResult ||
+    arxivResult.source !== "arxiv" ||
+    (arxivResult.status !== "downloaded" && arxivResult.status !== "already_downloaded")
+  ) {
+    return null;
+  }
+
+  const arxivDownloadedResult = arxivResult as ArxivDownloadedPaperResult;
+  const publisherFallback = await writePublisherPreprintFallbackRecord({
+    workspaceDir: options.workspaceDir,
+    classification: options.classification,
+    title: options.title,
+    arxivResult: arxivDownloadedResult
+  });
+
+  return {
+    ...arxivDownloadedResult,
+    publisherFallback
+  };
+}
+
 async function withBrowserSession<T>(
   browserSessionFactory: () => Promise<PaperBrowserSession>,
   action: (browserSession: PaperBrowserSession) => Promise<T>
@@ -1250,6 +1451,29 @@ export async function downloadPaper(options: DownloadPaperOptions): Promise<Pape
       classification,
       failure: options.forceManualOpen,
       openPublisherForLoginImpl
+    });
+  }
+
+  if (classification.source === "aps" && isApsAcceptedPaperUrl(classification.articleUrl)) {
+    const acceptedPaperTitle = await resolveApsAcceptedPaperTitle({
+      articleUrl: classification.articleUrl,
+      title: options.title,
+      fetchImpl: options.fetchImpl
+    });
+    const arxivFallback = await tryDownloadArxivPreprintForPublisherFallback({
+      workspaceDir: options.workspaceDir,
+      classification,
+      title: acceptedPaperTitle,
+      fetchImpl: options.fetchImpl,
+      searchArxivImpl: options.searchArxivImpl
+    });
+    if (arxivFallback) {
+      return arxivFallback;
+    }
+    return writePublisherPendingRecord({
+      workspaceDir: options.workspaceDir,
+      classification,
+      title: acceptedPaperTitle
     });
   }
 

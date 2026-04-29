@@ -278,6 +278,46 @@ function buildInitialDownloadManifest(input: {
     };
   }
 
+  if (input.record.status === "preprint_fallback") {
+    const message =
+      `Publisher version is not available yet; using arXiv preprint ${input.record.preprint.canonicalId}.`;
+    return {
+      updatedAt,
+      download: {
+        status: "preprint_fallback",
+        updatedAt,
+        method: input.record.handlingMethod,
+        pdfPath: toWorkspacePath({ workspaceDir: input.workspaceDir, filePath: input.record.preprint.downloadPath }),
+        pdfUrl: input.record.preprint.pdfUrl,
+        message,
+        failure: input.record.failure
+      },
+      reading: {
+        status: "not_ready",
+        updatedAt,
+        reason: message
+      }
+    };
+  }
+
+  if (input.record.status === "publisher_pending") {
+    return {
+      updatedAt,
+      download: {
+        status: "publisher_pending",
+        updatedAt,
+        method: input.record.handlingMethod,
+        message: input.record.failure.message,
+        failure: input.record.failure
+      },
+      reading: {
+        status: "not_ready",
+        updatedAt,
+        reason: input.record.failure.message
+      }
+    };
+  }
+
   return {
     updatedAt,
     download: {

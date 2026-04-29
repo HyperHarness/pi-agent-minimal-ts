@@ -30,6 +30,10 @@ import {
   writePaperWikiSource
 } from "./paper-wiki/paper-wiki.js";
 import {
+  generatePaperWikiSummary,
+  type PaperSummaryWorker
+} from "./paper-summary.js";
+import {
   createPaperExtensionJob,
   type PaperExtensionBridge
 } from "./paper-extension-bridge.js";
@@ -49,7 +53,7 @@ import {
   listLocalPapers,
   searchLocalPapers
 } from "./local-paper-library.js";
-import { checkWikiHealth } from "./wiki-health.js";
+import { checkWikiHealth, fixWikiHealth } from "./wiki-health.js";
 import {
   readPaperRecord,
   readPaperRecordByPath,
@@ -203,6 +207,29 @@ const writePaperWikiSourceParameters = Type.Object({
   relatedPaperKeys: Type.Optional(Type.Array(Type.String({ description: "Related parsed paper key." })))
 });
 
+const generatePaperWikiSummaryParameters = Type.Object({
+  paperKey: Type.String({ description: "Parsed paper key, for example arxiv-2406.06015." }),
+  engine: paperReaderEngineParameter,
+  mode: Type.Optional(
+    Type.Union([
+      Type.Literal("draft"),
+      Type.Literal("write")
+    ], { description: "Generate a draft only or write the wiki source summary. Defaults to draft." })
+  ),
+  maxEvidenceChars: Type.Optional(
+    Type.Integer({
+      description: "Maximum parsed Markdown characters to send to the clean summary worker. Defaults to 60000.",
+      minimum: 1000
+    })
+  ),
+  force: Type.Optional(
+    Type.Boolean({
+      description:
+        "Generate despite non-good parse quality or low worker confidence. Defaults to false."
+    })
+  )
+});
+
 const searchPaperWikiParameters = Type.Object({
   query: Type.String({ description: "Text query to search inside LLM-authored paper source summaries." }),
   maxResults: Type.Optional(Type.Integer({ description: "Maximum matching source summaries to return.", minimum: 1 }))
@@ -241,6 +268,35 @@ const wikiHealthParameters = Type.Object({
   )
 });
 
+const wikiHealthIssueKindParameters = Type.Union([
+  Type.Literal("needs_download"),
+  Type.Literal("needs_authorization"),
+  Type.Literal("queued"),
+  Type.Literal("parse_missing"),
+  Type.Literal("parse_failed"),
+  Type.Literal("low_quality"),
+  Type.Literal("summary_missing"),
+  Type.Literal("missing_artifact")
+]);
+
+const wikiHealthFixParameters = Type.Object({
+  maxItems: Type.Optional(Type.Integer({ description: "Maximum health issues to consider.", minimum: 1 })),
+  lowQualityScoreThreshold: Type.Optional(
+    Type.Number({
+      description:
+        "Parse quality score below which parsed papers are considered low quality. Defaults to 0.7.",
+      minimum: 0,
+      maximum: 1
+    })
+  ),
+  issueKinds: Type.Optional(Type.Array(wikiHealthIssueKindParameters, {
+    description: "Optional issue kinds to repair or explain. Defaults to all reported issue kinds."
+  })),
+  dryRun: Type.Optional(Type.Boolean({
+    description: "Report intended repairs without changing records or retrying downloads."
+  }))
+});
+
 type GetTimeParameters = Static<typeof getTimeParameters>;
 type ReadFileParameters = Static<typeof readFileParameters>;
 type WebSearchParameters = Static<typeof webSearchParameters>;
@@ -255,10 +311,12 @@ type InspectPaperParameters = Static<typeof inspectPaperParameters>;
 type ReadPaperSectionParameters = Static<typeof readPaperSectionParameters>;
 type SearchPaperTextParameters = Static<typeof searchPaperTextParameters>;
 type WritePaperWikiSourceParameters = Static<typeof writePaperWikiSourceParameters>;
+type GeneratePaperWikiSummaryParameters = Static<typeof generatePaperWikiSummaryParameters>;
 type SearchPaperWikiParameters = Static<typeof searchPaperWikiParameters>;
 type ListLocalPapersParameters = Static<typeof listLocalPapersParameters>;
 type SearchLocalPapersParameters = Static<typeof searchLocalPapersParameters>;
 type WikiHealthParameters = Static<typeof wikiHealthParameters>;
+type WikiHealthFixParameters = Static<typeof wikiHealthFixParameters>;
 
 function assertPathInsideDirectory(rootDir: string, candidatePath: string): void {
   const relativePath = path.relative(rootDir, candidatePath);
@@ -380,6 +438,10 @@ type WritePaperWikiSourceTool = AgentTool<
   typeof writePaperWikiSourceParameters,
   Awaited<ReturnType<typeof writePaperWikiSource>>
 >;
+type GeneratePaperWikiSummaryTool = AgentTool<
+  typeof generatePaperWikiSummaryParameters,
+  Awaited<ReturnType<typeof generatePaperWikiSummary>>
+>;
 type SearchPaperWikiTool = AgentTool<
   typeof searchPaperWikiParameters,
   Awaited<ReturnType<typeof searchPaperWiki>>
@@ -395,6 +457,10 @@ type SearchLocalPapersTool = AgentTool<
 type WikiHealthTool = AgentTool<
   typeof wikiHealthParameters,
   Awaited<ReturnType<typeof checkWikiHealth>>
+>;
+type WikiHealthFixTool = AgentTool<
+  typeof wikiHealthFixParameters,
+  Awaited<ReturnType<typeof fixWikiHealth>>
 >;
 
 const MAX_SEARCH_RESULT_PREVIEWS = 5;
@@ -638,10 +704,13 @@ export interface ToolDependencies {
   readPaperSection?: typeof readPaperSection;
   searchPaperText?: typeof searchPaperText;
   writePaperWikiSource?: typeof writePaperWikiSource;
+  generatePaperWikiSummary?: typeof generatePaperWikiSummary;
+  paperSummaryWorker?: PaperSummaryWorker;
   searchPaperWiki?: typeof searchPaperWiki;
   listLocalPapers?: typeof listLocalPapers;
   searchLocalPapers?: typeof searchLocalPapers;
   checkWikiHealth?: typeof checkWikiHealth;
+  fixWikiHealth?: typeof fixWikiHealth;
   openPaperPageForLogin?: OpenPaperPageForLoginDependency;
   browserSessionFactory?: ReturnType<typeof resolveDefaultPaperBrowserSessionFactory>;
   paperBrowserManagerClient?: PaperBrowserManagerClient;
@@ -686,10 +755,12 @@ export function createTools(workspaceDir: string, dependencies: ToolDependencies
         searchApsPapersImpl
       }));
   const writePaperWikiSourceImpl = dependencies.writePaperWikiSource ?? writePaperWikiSource;
+  const generatePaperWikiSummaryImpl = dependencies.generatePaperWikiSummary ?? generatePaperWikiSummary;
   const searchPaperWikiImpl = dependencies.searchPaperWiki ?? searchPaperWiki;
   const listLocalPapersImpl = dependencies.listLocalPapers ?? listLocalPapers;
   const searchLocalPapersImpl = dependencies.searchLocalPapers ?? searchLocalPapers;
   const checkWikiHealthImpl = dependencies.checkWikiHealth ?? checkWikiHealth;
+  const fixWikiHealthImpl = dependencies.fixWikiHealth ?? fixWikiHealth;
   const browserSessionFactoryImpl =
     dependencies.browserSessionFactory ??
     resolveDefaultPaperBrowserSessionFactory({ workspaceDir: resolvedWorkspaceDir });
@@ -1417,6 +1488,31 @@ export function createTools(workspaceDir: string, dependencies: ToolDependencies
     }
   };
 
+  const generatePaperWikiSummaryTool: GeneratePaperWikiSummaryTool = {
+    name: "generate_paper_wiki_summary",
+    label: "Generate Paper Wiki Summary",
+    description:
+      "Builds a bounded evidence package from parsed paper Markdown, sends it to a clean-context summary worker, and optionally writes the grounded wiki source summary.",
+    parameters: generatePaperWikiSummaryParameters,
+    executionMode: "sequential",
+    execute: async (_toolCallId: string, args: GeneratePaperWikiSummaryParameters) => {
+      const result = await generatePaperWikiSummaryImpl({
+        workspaceDir: resolvedWorkspaceDir,
+        paperKey: args.paperKey,
+        ...(args.engine ? { engine: args.engine } : {}),
+        ...(args.mode ? { mode: args.mode } : {}),
+        ...(args.maxEvidenceChars !== undefined ? { maxEvidenceChars: args.maxEvidenceChars } : {}),
+        ...(args.force !== undefined ? { force: args.force } : {}),
+        ...(dependencies.paperSummaryWorker ? { summaryWorker: dependencies.paperSummaryWorker } : {})
+      });
+
+      return {
+        content: [{ type: "text", text: JSON.stringify(result) }],
+        details: result
+      };
+    }
+  };
+
   const searchPaperWikiTool: SearchPaperWikiTool = {
     name: "search_paper_wiki",
     label: "Search Paper Wiki",
@@ -1500,6 +1596,32 @@ export function createTools(workspaceDir: string, dependencies: ToolDependencies
     }
   };
 
+  const wikiHealthFixTool: WikiHealthFixTool = {
+    name: "wiki_health_fix",
+    label: "Wiki Health Fix",
+    description:
+      "Attempts wiki health repairs, such as retrying downloads, parsing downloaded papers, and generating missing summaries through a clean-context summary worker; reports why unresolved issues need user action.",
+    parameters: wikiHealthFixParameters,
+    execute: async (_toolCallId: string, args: WikiHealthFixParameters) => {
+      const result = await fixWikiHealthImpl({
+        workspaceDir: resolvedWorkspaceDir,
+        ...(args.maxItems !== undefined ? { maxItems: args.maxItems } : {}),
+        ...(args.lowQualityScoreThreshold !== undefined
+          ? { lowQualityScoreThreshold: args.lowQualityScoreThreshold }
+          : {}),
+        ...(args.issueKinds !== undefined ? { issueKinds: args.issueKinds } : {}),
+        ...(args.dryRun !== undefined ? { dryRun: args.dryRun } : {}),
+        ...(dependencies.paperSummaryWorker ? { paperSummaryWorker: dependencies.paperSummaryWorker } : {}),
+        generatePaperWikiSummaryImpl
+      });
+
+      return {
+        content: [{ type: "text", text: JSON.stringify(result) }],
+        details: result
+      };
+    }
+  };
+
   const tools = [
     webSearchTool,
     fetchUrlTool,
@@ -1509,7 +1631,8 @@ export function createTools(workspaceDir: string, dependencies: ToolDependencies
     readPaperSectionTool,
     searchPaperTextTool,
     searchLocalPapersTool,
-    wikiHealthTool
+    wikiHealthTool,
+    wikiHealthFixTool
   ] as unknown as AgentTools;
 
   if (dependencies.toolProfile === "full") {
@@ -1519,6 +1642,7 @@ export function createTools(workspaceDir: string, dependencies: ToolDependencies
     );
     tools.push(
       writePaperWikiSourceTool,
+      generatePaperWikiSummaryTool,
       searchPaperWikiTool,
       listLocalPapersTool,
       fetchPaperWebpageTool,

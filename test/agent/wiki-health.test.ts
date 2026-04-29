@@ -1,9 +1,10 @@
 import test from "node:test";
 import assert from "node:assert/strict";
-import { mkdir, mkdtemp, rm, writeFile } from "node:fs/promises";
+import { mkdir, mkdtemp, readFile, rm, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import path from "node:path";
-import { checkWikiHealth } from "../../src/agent/wiki-health.js";
+import { checkWikiHealth, fixWikiHealth } from "../../src/agent/wiki-health.js";
+import type { PaperParseResult } from "../../src/agent/paper-reader/types.js";
 
 async function createWorkspace(): Promise<string> {
   return mkdtemp(path.join(tmpdir(), "pi-wiki-health-"));
@@ -103,7 +104,7 @@ test("checkWikiHealth reports records that need download, authorization, parsing
 
     assert.equal(result.totalPapers, 3);
     assert.equal(result.summary.needs_authorization, 1);
-    assert.equal(result.summary.needs_download, 2);
+    assert.equal(result.summary.needs_download, 1);
     assert.equal(result.summary.low_quality, 1);
     assert.equal(result.summary.summary_missing, 1);
     assert.equal(result.summary.missing_artifact, 1);
@@ -139,6 +140,483 @@ test("checkWikiHealth resolves WSL UNC artifact paths before reporting missing f
     assert.equal(result.summary.needs_download, 0);
     assert.equal(result.summary.missing_artifact, 0);
     assert.equal(result.summary.parse_missing, 1);
+  } finally {
+    await rm(workspace, { recursive: true, force: true });
+  }
+});
+
+test("checkWikiHealth does not report an old low-quality parse when a good parse is available", async () => {
+  const workspace = await createWorkspace();
+
+  try {
+    const paperDir = path.join(workspace, "knowledge-base", "wiki", "sources", "arxiv-2401.00007");
+    await writeJson(path.join(paperDir, "source.json"), {
+      paperKey: "arxiv-2401.00007",
+      source: "arxiv",
+      canonicalId: "2401.00007",
+      articleUrl: "https://arxiv.org/abs/2401.00007"
+    });
+    await writeText(path.join(paperDir, "parses", "webpage", "document.md"), "Short abstract.");
+    await writeJson(path.join(paperDir, "parses", "webpage", "quality.json"), {
+      status: "poor",
+      score: 0.2,
+      pages: 1,
+      totalTextLength: 20,
+      emptyPageCount: 0,
+      headingCount: 0,
+      tableCount: 0,
+      figureOrCaptionCount: 0,
+      warnings: ["Extracted text is short."]
+    });
+    await writeText(path.join(paperDir, "parses", "opendataloader-local", "document.md"), "Full PDF text.");
+    await writeJson(path.join(paperDir, "parses", "opendataloader-local", "quality.json"), {
+      status: "good",
+      score: 1,
+      pages: 5,
+      totalTextLength: 12000,
+      emptyPageCount: 0,
+      headingCount: 8,
+      tableCount: 0,
+      figureOrCaptionCount: 1,
+      warnings: []
+    });
+
+    const result = await checkWikiHealth({ workspaceDir: workspace });
+
+    assert.equal(result.summary.low_quality, 0);
+  } finally {
+    await rm(workspace, { recursive: true, force: true });
+  }
+});
+
+test("checkWikiHealth treats publisher accepted-paper arXiv fallback records as non-actionable", async () => {
+  const workspace = await createWorkspace();
+
+  try {
+    const arxivPdfPath = path.join(workspace, "knowledge-base", "raw", "pdfs", "arxiv-2601.01234.pdf");
+    const arxivRecordPath = path.join(workspace, "knowledge-base", "records", "arxiv-2601.01234.json");
+    await writeText(arxivPdfPath, "%PDF-1.4\nexample\n%%EOF\n");
+    await writeJson(arxivRecordPath, {
+      source: "arxiv",
+      articleUrl: "https://arxiv.org/abs/2601.01234",
+      recordedAt: "2026-04-28T04:00:00.000Z",
+      handlingMethod: "direct_http",
+      status: "downloaded",
+      canonicalId: "2601.01234",
+      pdfUrl: "https://arxiv.org/pdf/2601.01234.pdf",
+      downloadPath: arxivPdfPath
+    });
+    await writeJson(path.join(workspace, "knowledge-base", "records", "aps-10.1103-k3d5-v43c.json"), {
+      source: "aps",
+      articleUrl: "https://journals.aps.org/prapplied/accepted/10.1103/k3d5-v43c",
+      recordedAt: "2026-04-28T04:01:00.000Z",
+      handlingMethod: "arxiv_preprint_fallback",
+      status: "preprint_fallback",
+      canonicalId: "10.1103/k3d5-v43c",
+      title: "Superconducting qubits in the millions: The potential and limitations of modularity",
+      preprint: {
+        source: "arxiv",
+        canonicalId: "2601.01234",
+        articleUrl: "https://arxiv.org/abs/2601.01234",
+        pdfUrl: "https://arxiv.org/pdf/2601.01234.pdf",
+        recordPath: arxivRecordPath,
+        downloadPath: arxivPdfPath,
+        status: "downloaded"
+      },
+      failure: {
+        code: "publisher_version_not_available",
+        message: "Publisher page is an accepted paper without a formal PDF yet; using matching arXiv preprint 2601.01234."
+      }
+    });
+    const legacyPaperDir = path.join(
+      workspace,
+      "knowledge-base",
+      "wiki",
+      "sources",
+      "journals.aps.org-prapplied-accepted-10.1103-k3d5-v43c"
+    );
+    await writeJson(path.join(legacyPaperDir, "source.json"), {
+      paperKey: "journals.aps.org-prapplied-accepted-10.1103-k3d5-v43c",
+      title: "Superconducting qubits in the millions: The potential and limitations of modularity",
+      articleUrl: "https://journals.aps.org/prapplied/accepted/10.1103/k3d5-v43c",
+      source: "aps",
+      canonicalId: "10.1103/k3d5-v43c"
+    });
+    await writeText(path.join(legacyPaperDir, "parses", "webpage", "document.md"), "Accepted paper abstract.");
+    await writeJson(path.join(legacyPaperDir, "parses", "webpage", "quality.json"), {
+      status: "poor",
+      score: 0.2,
+      pages: 1,
+      totalTextLength: 24,
+      emptyPageCount: 0,
+      headingCount: 0,
+      tableCount: 0,
+      figureOrCaptionCount: 0,
+      warnings: ["Accepted-paper page has no formal PDF yet."]
+    });
+
+    const result = await checkWikiHealth({ workspaceDir: workspace });
+
+    assert.equal(result.summary.needs_download, 0);
+    assert.equal(result.summary.low_quality, 0);
+    assert.equal(result.summary.summary_missing, 0);
+    assert.ok(!result.issues.some((issue) => issue.paperKey === "aps-10.1103-k3d5-v43c"));
+    assert.ok(!result.issues.some((issue) => issue.paperKey === "journals.aps.org-prapplied-accepted-10.1103-k3d5-v43c"));
+  } finally {
+    await rm(workspace, { recursive: true, force: true });
+  }
+});
+
+test("checkWikiHealth treats accepted publisher-pending records as non-actionable", async () => {
+  const workspace = await createWorkspace();
+
+  try {
+    await writeJson(path.join(workspace, "knowledge-base", "records", "aps-10.1103-rp4w-3n7l.json"), {
+      source: "aps",
+      articleUrl: "https://journals.aps.org/prapplied/accepted/10.1103/rp4w-3n7l",
+      recordedAt: "2026-04-28T04:01:00.000Z",
+      handlingMethod: "accepted_paper",
+      status: "publisher_pending",
+      canonicalId: "10.1103/rp4w-3n7l",
+      title: "Design and application of N[3]CZ: A controlled-Z gate between next-nearest-neighbor superconducting qubits",
+      failure: {
+        code: "publisher_version_not_available",
+        message: "Publisher page is an accepted paper without a formal PDF yet, and no exact-title arXiv preprint was found."
+      }
+    });
+    const legacyPaperDir = path.join(
+      workspace,
+      "knowledge-base",
+      "wiki",
+      "sources",
+      "journals.aps.org-prapplied-accepted-10.1103-rp4w-3n7l"
+    );
+    await writeJson(path.join(legacyPaperDir, "source.json"), {
+      paperKey: "journals.aps.org-prapplied-accepted-10.1103-rp4w-3n7l",
+      title: "Design and application of N[3]CZ: A controlled-Z gate between next-nearest-neighbor superconducting qubits",
+      articleUrl: "https://journals.aps.org/prapplied/accepted/10.1103/rp4w-3n7l",
+      source: "aps",
+      canonicalId: "10.1103/rp4w-3n7l"
+    });
+    await writeText(path.join(legacyPaperDir, "parses", "webpage", "document.md"), "Accepted paper abstract.");
+    await writeJson(path.join(legacyPaperDir, "parses", "webpage", "quality.json"), {
+      status: "needs_hybrid",
+      score: 0.55,
+      pages: 1,
+      totalTextLength: 3500,
+      emptyPageCount: 0,
+      headingCount: 2,
+      tableCount: 0,
+      figureOrCaptionCount: 1,
+      warnings: ["Accepted-paper page has no formal PDF yet."]
+    });
+
+    const result = await checkWikiHealth({ workspaceDir: workspace });
+
+    assert.equal(result.summary.needs_download, 0);
+    assert.equal(result.summary.low_quality, 0);
+    assert.equal(result.summary.summary_missing, 0);
+    assert.ok(!result.issues.some((issue) => issue.paperKey === "aps-10.1103-rp4w-3n7l"));
+    assert.ok(!result.issues.some((issue) => issue.paperKey === "journals.aps.org-prapplied-accepted-10.1103-rp4w-3n7l"));
+  } finally {
+    await rm(workspace, { recursive: true, force: true });
+  }
+});
+
+test("checkWikiHealth treats a good webpage parse as usable even when PDF authorization failed", async () => {
+  const workspace = await createWorkspace();
+
+  try {
+    await writeJson(path.join(workspace, "knowledge-base", "records", "nature-s41567-022-01591-2.json"), {
+      source: "nature",
+      articleUrl: "https://www.nature.com/articles/s41567-022-01591-2",
+      openedUrl: "https://www.nature.com/articles/s41567-022-01591-2",
+      recordedAt: "2026-04-29T06:12:09.364Z",
+      handlingMethod: "browser_session",
+      status: "manual_fallback_opened",
+      canonicalId: "s41567-022-01591-2",
+      failure: {
+        code: "manual_login_required",
+        message: "PDF download requires login."
+      }
+    });
+    const parsedDir = path.join(
+      workspace,
+      "knowledge-base",
+      "wiki",
+      "sources",
+      "nature-s41567-022-01591-2",
+      "parses",
+      "webpage"
+    );
+    await writeJson(path.join(workspace, "knowledge-base", "wiki", "sources", "nature-s41567-022-01591-2", "source.json"), {
+      paperKey: "nature-s41567-022-01591-2",
+      source: "nature",
+      canonicalId: "s41567-022-01591-2",
+      articleUrl: "https://www.nature.com/articles/s41567-022-01591-2"
+    });
+    await writeText(path.join(parsedDir, "document.md"), "# Title\n\n## Abstract\n\nFull abstract.\n\n## Main\n\nFull article body.");
+    await writeJson(path.join(parsedDir, "quality.json"), {
+      status: "good",
+      score: 0.85,
+      pages: 1,
+      totalTextLength: 12000,
+      emptyPageCount: 0,
+      headingCount: 2,
+      tableCount: 0,
+      figureOrCaptionCount: 1,
+      warnings: []
+    });
+
+    const result = await checkWikiHealth({ workspaceDir: workspace });
+
+    assert.equal(result.summary.needs_authorization, 0);
+    assert.equal(result.summary.needs_download, 0);
+    assert.equal(result.summary.low_quality, 0);
+    assert.equal(result.summary.summary_missing, 1);
+  } finally {
+    await rm(workspace, { recursive: true, force: true });
+  }
+});
+
+test("fixWikiHealth parses missing downloaded records and updates the record manifest", async () => {
+  const workspace = await createWorkspace();
+
+  try {
+    const pdfPath = path.join(workspace, "knowledge-base", "raw", "pdfs", "arxiv-2401.00004.pdf");
+    const recordPath = path.join(workspace, "knowledge-base", "records", "arxiv-2401.00004.json");
+    await writeText(pdfPath, "%PDF-1.4\nexample\n%%EOF\n");
+    await writeJson(recordPath, {
+      source: "arxiv",
+      articleUrl: "https://arxiv.org/abs/2401.00004",
+      recordedAt: "2026-04-28T04:00:00.000Z",
+      handlingMethod: "direct_http",
+      status: "downloaded",
+      canonicalId: "2401.00004",
+      pdfUrl: "https://arxiv.org/pdf/2401.00004.pdf",
+      downloadPath: pdfPath
+    });
+
+    const artifactRoot = path.join(
+      workspace,
+      "knowledge-base",
+      "wiki",
+      "sources",
+      "arxiv-2401.00004",
+      "parses",
+      "plain-text-baseline"
+    );
+    const chunksPath = path.join(
+      workspace,
+      "knowledge-base",
+      "wiki",
+      "sources",
+      "arxiv-2401.00004",
+      "chunks",
+      "plain-text-baseline.jsonl"
+    );
+    const parseResult: PaperParseResult = {
+      status: "parsed",
+      paperKey: "arxiv-2401.00004",
+      engine: "plain-text-baseline",
+      pdfSha256: "sha-test",
+      artifacts: {
+        sourcePath: path.join(workspace, "knowledge-base", "wiki", "sources", "arxiv-2401.00004", "source.json"),
+        parsePath: path.join(artifactRoot, "parse.json"),
+        markdownPath: path.join(artifactRoot, "document.md"),
+        qualityPath: path.join(artifactRoot, "quality.json"),
+        chunksPath
+      },
+      quality: {
+        status: "good",
+        score: 0.95,
+        pages: 1,
+        totalTextLength: 1200,
+        emptyPageCount: 0,
+        headingCount: 2,
+        tableCount: 0,
+        figureOrCaptionCount: 0,
+        warnings: []
+      },
+      sections: [
+        {
+          id: "abstract",
+          title: "Abstract",
+          level: 1,
+          pageFrom: 1,
+          pageTo: 1
+        }
+      ]
+    };
+
+    const result = await fixWikiHealth({
+      workspaceDir: workspace,
+      issueKinds: ["parse_missing"],
+      parsePaperImpl: async (options) => {
+        assert.equal(options.recordPath, "knowledge-base/records/arxiv-2401.00004.json");
+        assert.equal(options.force, undefined);
+        return parseResult;
+      }
+    });
+
+    assert.equal(result.attempted, 1);
+    assert.equal(result.fixed, 1);
+    assert.equal(result.results[0]?.action, "parse");
+
+    const updatedRecord = JSON.parse(await readFile(recordPath, "utf8")) as {
+      reading?: { status?: string; preferredSource?: string; paperKey?: string };
+      parse?: { status?: string; engine?: string; markdownPath?: string };
+    };
+    assert.equal(updatedRecord.reading?.status, "ready");
+    assert.equal(updatedRecord.reading?.preferredSource, "pdf_parse");
+    assert.equal(updatedRecord.reading?.paperKey, "arxiv-2401.00004");
+    assert.equal(updatedRecord.parse?.status, "parsed");
+    assert.equal(updatedRecord.parse?.engine, "plain-text-baseline");
+    assert.equal(
+      updatedRecord.parse?.markdownPath,
+      "knowledge-base/wiki/sources/arxiv-2401.00004/parses/plain-text-baseline/document.md"
+    );
+  } finally {
+    await rm(workspace, { recursive: true, force: true });
+  }
+});
+
+test("fixWikiHealth skips user-authored or user-authorized repairs with explicit reasons", async () => {
+  const workspace = await createWorkspace();
+
+  try {
+    await writeJson(path.join(workspace, "knowledge-base", "records", "nature-s41586-024-00005-y.json"), {
+      source: "nature",
+      articleUrl: "https://www.nature.com/articles/s41586-024-00005-y",
+      openedUrl: "https://www.nature.com/articles/s41586-024-00005-y",
+      recordedAt: "2026-04-28T05:00:00.000Z",
+      handlingMethod: "browser_session",
+      status: "manual_fallback_opened",
+      canonicalId: "s41586-024-00005-y",
+      failure: {
+        code: "manual_login_required",
+        message: "Manual login required."
+      }
+    });
+
+    const parsedDir = path.join(
+      workspace,
+      "knowledge-base",
+      "wiki",
+      "sources",
+      "arxiv-2401.00006",
+      "parses",
+      "plain-text-baseline"
+    );
+    await writeJson(path.join(workspace, "knowledge-base", "wiki", "sources", "arxiv-2401.00006", "source.json"), {
+      paperKey: "arxiv-2401.00006",
+      source: "arxiv",
+      canonicalId: "2401.00006",
+      articleUrl: "https://arxiv.org/abs/2401.00006"
+    });
+    await writeText(path.join(parsedDir, "document.md"), "A complete parsed paper body.");
+    await writeJson(path.join(parsedDir, "parse.json"), {
+      paperKey: "arxiv-2401.00006",
+      engine: "plain-text-baseline"
+    });
+    await writeJson(path.join(parsedDir, "quality.json"), {
+      status: "good",
+      score: 0.95,
+      pages: 1,
+      totalTextLength: 1200,
+      emptyPageCount: 0,
+      headingCount: 2,
+      tableCount: 0,
+      figureOrCaptionCount: 0,
+      warnings: []
+    });
+    await writeText(
+      path.join(workspace, "knowledge-base", "wiki", "sources", "arxiv-2401.00006", "chunks", "plain-text-baseline.jsonl"),
+      "{\"id\":\"chunk-1\"}\n"
+    );
+
+    const result = await fixWikiHealth({
+      workspaceDir: workspace,
+      issueKinds: ["needs_authorization", "summary_missing"]
+    });
+
+    assert.equal(result.fixed, 0);
+    assert.equal(result.skipped, 2);
+    assert.ok(result.results.some((item) =>
+      item.issue.kind === "needs_authorization" &&
+      /login|authorization/i.test(item.message)
+    ));
+    assert.ok(result.results.some((item) =>
+      item.issue.kind === "summary_missing" &&
+      /Summary worker is not configured/i.test(item.message)
+    ));
+  } finally {
+    await rm(workspace, { recursive: true, force: true });
+  }
+});
+
+test("fixWikiHealth generates missing summaries when a summary worker is available", async () => {
+  const workspace = await createWorkspace();
+  const generated: string[] = [];
+
+  try {
+    const parsedDir = path.join(
+      workspace,
+      "knowledge-base",
+      "wiki",
+      "sources",
+      "arxiv-2401.00007",
+      "parses",
+      "plain-text-baseline"
+    );
+    await writeJson(path.join(workspace, "knowledge-base", "wiki", "sources", "arxiv-2401.00007", "source.json"), {
+      paperKey: "arxiv-2401.00007",
+      source: "arxiv",
+      canonicalId: "2401.00007",
+      articleUrl: "https://arxiv.org/abs/2401.00007"
+    });
+    await writeText(path.join(parsedDir, "document.md"), "# Paper\n\nThis parsed paper discusses clean-context summaries.");
+    await writeJson(path.join(parsedDir, "parse.json"), {
+      paperKey: "arxiv-2401.00007",
+      engine: "plain-text-baseline",
+      pdfSha256: "sha-summary",
+      createdAt: "2026-04-29T00:00:00.000Z",
+      pages: 1,
+      elements: [],
+      sections: []
+    });
+    await writeJson(path.join(parsedDir, "quality.json"), {
+      status: "good",
+      score: 0.95,
+      pages: 1,
+      totalTextLength: 1200,
+      emptyPageCount: 0,
+      headingCount: 1,
+      tableCount: 0,
+      figureOrCaptionCount: 0,
+      warnings: []
+    });
+    await writeText(
+      path.join(workspace, "knowledge-base", "wiki", "sources", "arxiv-2401.00007", "chunks", "plain-text-baseline.jsonl"),
+      "{\"id\":\"chunk-1\"}\n"
+    );
+
+    const result = await fixWikiHealth({
+      workspaceDir: workspace,
+      issueKinds: ["summary_missing"],
+      paperSummaryWorker: async ({ evidence }) => {
+        generated.push(evidence.paperKey);
+        return {
+          summaryMarkdown: "A grounded summary produced from a clean summary worker.",
+          confidence: "high"
+        };
+      }
+    });
+
+    assert.equal(generated[0], "arxiv-2401.00007");
+    assert.equal(result.fixed, 1);
+    assert.equal(result.results[0]?.action, "summary");
+    assert.equal(result.results[0]?.status, "fixed");
   } finally {
     await rm(workspace, { recursive: true, force: true });
   }

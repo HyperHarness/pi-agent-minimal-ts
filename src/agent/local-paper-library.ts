@@ -2,8 +2,9 @@ import { access, readdir, readFile } from "node:fs/promises";
 import type { Dirent } from "node:fs";
 import path from "node:path";
 import { resolvePaperLibraryPaths } from "./knowledge-base.js";
+import { resolvePublisherCanonicalIdFromArticleUrl } from "./paper-download.js";
 import type { ConcretePaperParseEngine, PaperParseQualityReport, PaperReaderSource } from "./paper-reader/types.js";
-import type { PaperRecord, PaperSource } from "./paper-types.js";
+import type { PaperRecord, PaperSource, SupportedPaperSource } from "./paper-types.js";
 
 export type LocalPaperListStatus = "all" | "downloaded" | "parsed" | "summarized";
 
@@ -108,10 +109,34 @@ function createSnippet(text: string, query: string, maxLength = 320): string {
 }
 
 function recordPaperKey(record: PaperRecord, recordPath: string): string {
-  if (record.source === "external") {
-    return path.basename(recordPath, ".json");
+  return path.basename(recordPath, ".json");
+}
+
+function sanitizePaperKey(value: string): string {
+  return value
+    .trim()
+    .replace(/\.[Jj][Ss][Oo][Nn]$/, "")
+    .replace(/[<>:"/\\|?*\u0000-\u001F]+/g, "-")
+    .replace(/\s+/g, "-")
+    .replace(/-+/g, "-")
+    .replace(/^[-. ]+|[-. ]+$/g, "");
+}
+
+function sourceIsSupportedPublisher(source: PaperReaderSource): source is PaperReaderSource & { source: SupportedPaperSource } {
+  return source.source === "science" || source.source === "nature" || source.source === "aps";
+}
+
+function paperKeyFromSourceDirectory(sourceDirName: string, source: PaperReaderSource | undefined): string {
+  if (!source || !source.articleUrl || !sourceIsSupportedPublisher(source)) {
+    return sourceDirName;
   }
-  return `${record.source}-${record.canonicalId}`;
+
+  const canonicalId = resolvePublisherCanonicalIdFromArticleUrl({
+    publisher: source.source,
+    articleUrl: source.articleUrl
+  });
+  const canonicalKey = canonicalId ? sanitizePaperKey(`${source.source}-${canonicalId}`) : "";
+  return canonicalKey || sourceDirName;
 }
 
 function readOptionalString(value: unknown): string | undefined {
@@ -228,10 +253,10 @@ async function collectParses(workspaceDir: string, entries: Map<string, LocalPap
     if (!sourceDir.isDirectory()) {
       continue;
     }
-    const paperKey = sourceDir.name;
     const paperDir = path.join(paths.sourceArtifactsRoot, sourceDir.name);
-    const entry = entries.get(paperKey) ?? createEmptyEntry(paperKey);
     const source = await readJsonFile<PaperReaderSource>(path.join(paperDir, "source.json"));
+    const paperKey = paperKeyFromSourceDirectory(sourceDir.name, source);
+    const entry = entries.get(paperKey) ?? createEmptyEntry(paperKey);
     if (source) {
       applySource(entry, source, workspaceDir);
     }
@@ -265,7 +290,7 @@ async function collectParses(workspaceDir: string, entries: Map<string, LocalPap
         warnings: quality?.warnings ?? []
       });
     }
-    entry.parses = parses.sort((left, right) => left.engine.localeCompare(right.engine));
+    entry.parses = [...entry.parses, ...parses].sort((left, right) => left.engine.localeCompare(right.engine));
     entry.hasParsedArtifacts = entry.parses.length > 0;
     entry.hasPdf = entry.hasPdf || await pathExists(resolveKnownPdfPath(workspaceDir, entry.pdfPath));
     entries.set(paperKey, entry);

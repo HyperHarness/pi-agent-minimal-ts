@@ -56,7 +56,7 @@ function extractApsDoi(urlString: string): string | null {
     return decodePublisherPathSegment(directDoiMatch[1]).replace(/\.pdf$/i, "");
   }
 
-  const journalMatch = path.match(/^\/[^/]+\/(?:abstract|pdf)\/(.+)$/i);
+  const journalMatch = path.match(/^\/[^/]+\/(?:abstract|pdf|accepted)\/(.+)$/i);
   return journalMatch?.[1] ? decodePublisherPathSegment(journalMatch[1]).replace(/\.pdf$/i, "") : null;
 }
 

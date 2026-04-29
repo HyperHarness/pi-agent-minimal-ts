@@ -18,6 +18,8 @@ export type PaperRecordArtifactStatus =
   | "failed"
   | "manual_login_required"
   | "manual_fallback_opened"
+  | "preprint_fallback"
+  | "publisher_pending"
   | "external_opened";
 
 export type PaperRecordReadingStatus = "not_ready" | "ready" | "queued" | "failed";
@@ -70,6 +72,16 @@ export interface PaperRecordManifest {
   parse?: PaperRecordArtifactManifest;
   webpage?: PaperRecordArtifactManifest;
   reading?: PaperRecordReadingManifest;
+}
+
+export interface PaperRecordPreprintFallback {
+  source: "arxiv";
+  canonicalId: string;
+  articleUrl: string;
+  pdfUrl: string;
+  recordPath: string;
+  downloadPath: string;
+  status: "downloaded" | "already_downloaded";
 }
 
 export type PaperSearchSource =
@@ -142,6 +154,35 @@ type DownloadedPublisherPaperRecord = {
   failure?: never;
 };
 
+type PublisherPreprintFallbackPaperRecord = {
+  source: SupportedPaperSource;
+  articleUrl: string;
+  recordedAt: string;
+  handlingMethod: "arxiv_preprint_fallback";
+  status: "preprint_fallback";
+  canonicalId: string;
+  title?: string;
+  preprint: PaperRecordPreprintFallback;
+  failure: PaperFailure;
+  openedUrl?: never;
+  pdfUrl?: never;
+  downloadPath?: never;
+};
+
+type PublisherPendingPaperRecord = {
+  source: SupportedPaperSource;
+  articleUrl: string;
+  recordedAt: string;
+  handlingMethod: "accepted_paper";
+  status: "publisher_pending";
+  canonicalId: string;
+  title?: string;
+  failure: PaperFailure;
+  openedUrl?: never;
+  pdfUrl?: never;
+  downloadPath?: never;
+};
+
 type ManualFallbackPaperRecord = {
   source: SupportedPaperSource;
   articleUrl: string;
@@ -187,9 +228,20 @@ export type PaperRecord = PaperRecordManifest & (
   | DownloadedArxivPaperRecord
   | DownloadedPublisherPaperRecord
   | DownloadedExternalPaperRecord
+  | PublisherPreprintFallbackPaperRecord
+  | PublisherPendingPaperRecord
   | ManualFallbackPaperRecord
   | ExternalOpenedPaperRecord
 );
+
+export interface PublisherPreprintFallbackResult {
+  source: SupportedPaperSource;
+  canonicalId: string;
+  articleUrl: string;
+  recordPath: string;
+  reason: string;
+  title?: string;
+}
 
 export interface DownloadedPaperResult {
   status: "downloaded";
@@ -199,6 +251,7 @@ export interface DownloadedPaperResult {
   finalPdfUrl: string;
   path: string;
   recordPath: string;
+  publisherFallback?: PublisherPreprintFallbackResult;
 }
 
 export interface DownloadedExternalPaperResult {
@@ -221,6 +274,7 @@ type AlreadyDownloadedManagedPaperResult = {
   path: string;
   recordPath: string;
   recordedAt: string;
+  publisherFallback?: PublisherPreprintFallbackResult;
 };
 
 type AlreadyDownloadedExternalPaperResult = {
@@ -268,6 +322,16 @@ export interface ExtensionUnavailablePaperResult {
   failure: PaperFailure;
 }
 
+export interface PublisherPendingPaperResult {
+  status: "publisher_pending";
+  source: SupportedPaperSource;
+  canonicalId: string;
+  articleUrl: string;
+  recordPath: string;
+  failure: PaperFailure;
+  title?: string;
+}
+
 export interface ExtensionPaperJobResult {
   status:
     | "extension_job_queued"
@@ -297,4 +361,5 @@ export type PaperDownloadResult =
   | ManualFallbackPaperResult
   | ExternalOpenedPaperResult
   | ExtensionUnavailablePaperResult
+  | PublisherPendingPaperResult
   | ExtensionPaperJobResult;

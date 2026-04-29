@@ -166,6 +166,20 @@ type WritePaperWikiSourceTool = {
   ) => Promise<ToolResult>;
 };
 
+type GeneratePaperWikiSummaryTool = {
+  execute: (
+    toolCallId: string,
+    args: {
+      paperKey: string;
+      engine?: "opendataloader-local" | "opendataloader-hybrid" | "docling" | "tex-source" | "plain-text-baseline" | "webpage";
+      mode?: "draft" | "write";
+      maxEvidenceChars?: number;
+      force?: boolean;
+    },
+    signal: undefined,
+  ) => Promise<ToolResult>;
+};
+
 type SearchPaperWikiTool = {
   execute: (
     toolCallId: string,
@@ -194,6 +208,28 @@ type WikiHealthTool = {
   execute: (
     toolCallId: string,
     args: { maxItems?: number; lowQualityScoreThreshold?: number },
+    signal: undefined,
+  ) => Promise<ToolResult>;
+};
+
+type WikiHealthFixTool = {
+  execute: (
+    toolCallId: string,
+    args: {
+      maxItems?: number;
+      lowQualityScoreThreshold?: number;
+      issueKinds?: Array<
+        | "needs_download"
+        | "needs_authorization"
+        | "queued"
+        | "parse_missing"
+        | "parse_failed"
+        | "low_quality"
+        | "summary_missing"
+        | "missing_artifact"
+      >;
+      dryRun?: boolean;
+    },
     signal: undefined,
   ) => Promise<ToolResult>;
 };
@@ -404,6 +440,20 @@ function getWritePaperWikiSourceTool(
   return tool as WritePaperWikiSourceTool;
 }
 
+function getGeneratePaperWikiSummaryTool(
+  workspace: string,
+  dependencies?: Parameters<typeof createTools>[1],
+): GeneratePaperWikiSummaryTool {
+  const tools = createTools(workspace, { ...dependencies, toolProfile: "full" }) as ReadonlyArray<{
+    name: string;
+    execute?: GeneratePaperWikiSummaryTool["execute"];
+  }>;
+  const tool = tools.find((candidate) => candidate.name === "generate_paper_wiki_summary");
+  assert.ok(tool);
+  assert.equal(typeof tool.execute, "function");
+  return tool as GeneratePaperWikiSummaryTool;
+}
+
 function getSearchPaperWikiTool(
   workspace: string,
   dependencies?: Parameters<typeof createTools>[1],
@@ -458,6 +508,20 @@ function getWikiHealthTool(
   assert.ok(tool);
   assert.equal(typeof tool.execute, "function");
   return tool as WikiHealthTool;
+}
+
+function getWikiHealthFixTool(
+  workspace: string,
+  dependencies?: Parameters<typeof createTools>[1],
+): WikiHealthFixTool {
+  const tools = createTools(workspace, dependencies) as ReadonlyArray<{
+    name: string;
+    execute?: WikiHealthFixTool["execute"];
+  }>;
+  const tool = tools.find((candidate) => candidate.name === "wiki_health_fix");
+  assert.ok(tool);
+  assert.equal(typeof tool.execute, "function");
+  return tool as WikiHealthFixTool;
 }
 
 async function createDirectoryLink(targetDir: string, linkDir: string): Promise<void> {
@@ -565,6 +629,7 @@ test("createTools exposes the minimal default tool set", async () => {
       "search_paper_text",
       "search_local_papers",
       "wiki_health",
+      "wiki_health_fix",
     ]);
 
     const webSearchTool = tools.find((tool) => tool.name === "web_search");
@@ -606,7 +671,9 @@ test("createTools full profile exposes every built-in tool", async () => {
       "search_paper_text",
       "search_local_papers",
       "wiki_health",
+      "wiki_health_fix",
       "write_paper_wiki_source",
+      "generate_paper_wiki_summary",
       "search_paper_wiki",
       "list_local_papers",
       "fetch_paper_webpage",
@@ -1911,6 +1978,68 @@ test("write_paper_wiki_source delegates to the injected wiki dependency and retu
   }
 });
 
+test("generate_paper_wiki_summary delegates to the injected summary dependency and returns details", async () => {
+  const workspace = await mkdtemp(path.join(tmpdir(), "pi-agent-tools-"));
+  const capturedCalls: Array<{
+    workspaceDir: string;
+    paperKey: string;
+    mode?: string;
+    maxEvidenceChars?: number;
+  }> = [];
+
+  try {
+    const tool = getGeneratePaperWikiSummaryTool(workspace, {
+      generatePaperWikiSummary: async (options) => {
+        capturedCalls.push(options);
+        return {
+          status: "drafted" as const,
+          paperKey: options.paperKey,
+          engine: options.engine ?? "webpage",
+          title: "Paper title",
+          message: "Generated a draft.",
+          evidence: {
+            paperKey: options.paperKey,
+            title: "Paper title",
+            engine: options.engine ?? "webpage",
+            pdfSha256: "sha",
+            paths: {
+              parseMarkdown: "document.md",
+              parseJson: "parse.json",
+              qualityJson: "quality.json",
+            },
+            sections: [],
+            totalMarkdownChars: 10,
+            truncated: false,
+            markdownPreview: "preview",
+          },
+          draft: {
+            summaryMarkdown: "Grounded draft.",
+            confidence: "high",
+          },
+        };
+      },
+    });
+
+    const result = await tool.execute("generate-summary-call", {
+      paperKey: "aps-10.1103-nv7d-k3wr",
+      mode: "draft",
+      maxEvidenceChars: 4096,
+    }, undefined);
+
+    assert.deepEqual(capturedCalls, [
+      {
+        workspaceDir: workspace,
+        paperKey: "aps-10.1103-nv7d-k3wr",
+        mode: "draft",
+        maxEvidenceChars: 4096,
+      },
+    ]);
+    assert.equal((result.details as { status?: string }).status, "drafted");
+  } finally {
+    await rm(workspace, { recursive: true, force: true });
+  }
+});
+
 test("search_paper_wiki delegates to the injected wiki search dependency and returns details", async () => {
   const workspace = await mkdtemp(path.join(tmpdir(), "pi-agent-tools-"));
   try {
@@ -2047,6 +2176,77 @@ test("wiki_health delegates to the injected health checker dependency", async ()
     assert.equal(
       JSON.parse(result.content?.[0]?.text ?? "{}").summary.needs_authorization,
       1,
+    );
+  } finally {
+    await rm(workspace, { recursive: true, force: true });
+  }
+});
+
+test("wiki_health_fix delegates to the injected health fixer dependency", async () => {
+  const workspace = await mkdtemp(path.join(tmpdir(), "pi-agent-tools-"));
+  try {
+    const tool = getWikiHealthFixTool(workspace, {
+      fixWikiHealth: async (options) => ({
+        checked: {
+          totalPapers: 1,
+          issueCount: 1,
+          summary: {
+            needs_download: 0,
+            needs_authorization: 0,
+            queued: 0,
+            parse_missing: 1,
+            parse_failed: 0,
+            low_quality: 0,
+            summary_missing: 0,
+            missing_artifact: 0,
+          },
+          issues: [
+            {
+              kind: "parse_missing",
+              severity: "medium",
+              paperKey: "arxiv-2401.00001",
+              reason: `dry:${options.dryRun === true}; kinds:${options.issueKinds?.join(",") ?? "all"}; max:${options.maxItems ?? 0}`,
+            },
+          ],
+          actions: ["1: Parse downloaded papers that do not yet have reading artifacts."],
+        },
+        attempted: 1,
+        fixed: options.dryRun === true ? 0 : 1,
+        queued: 0,
+        skipped: options.dryRun === true ? 1 : 0,
+        failed: 0,
+        results: [
+          {
+            issue: {
+              kind: "parse_missing",
+              severity: "medium",
+              paperKey: "arxiv-2401.00001",
+              reason: "Downloaded paper has no parsed reading artifacts.",
+            },
+            status: options.dryRun === true ? "skipped" : "fixed",
+            action: "parse",
+            message: `dry:${options.dryRun === true}; threshold:${options.lowQualityScoreThreshold ?? 0}`,
+          },
+        ],
+      }),
+    });
+
+    const result = await tool.execute("wiki-health-fix-call", {
+      maxItems: 3,
+      lowQualityScoreThreshold: 0.6,
+      issueKinds: ["parse_missing"],
+      dryRun: true,
+    }, undefined);
+
+    assert.equal((result.details as { attempted?: number }).attempted, 1);
+    assert.equal((result.details as { skipped?: number }).skipped, 1);
+    assert.equal(
+      JSON.parse(result.content?.[0]?.text ?? "{}").results[0].message,
+      "dry:true; threshold:0.6",
+    );
+    assert.equal(
+      (result.details as { checked?: { issues?: Array<{ reason?: string }> } }).checked?.issues?.[0]?.reason,
+      "dry:true; kinds:parse_missing; max:3",
     );
   } finally {
     await rm(workspace, { recursive: true, force: true });

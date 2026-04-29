@@ -17,6 +17,10 @@ import { agentLoop, type AgentContext, type AgentEvent, type AgentMessage } from
 import { resolveInitialModel } from "./agent/model-resolver.js";
 import { configureEnvProxy } from "./agent/env-proxy.js";
 import { createQueuedPaperExtensionBridge } from "./agent/paper-extension-bridge.js";
+import type {
+  PaperSummaryWorker,
+  PaperSummaryWorkerOutput
+} from "./agent/paper-summary.js";
 import { cleanupTools, createTools, getToolsWorkspaceDir } from "./agent/tools.js";
 
 type LlmMessage = UserMessage | AssistantMessage | ToolResultMessage;
@@ -278,9 +282,113 @@ function isFailedTurn(messages: AgentMessage[]): boolean {
   );
 }
 
-function createRuntimeTools(workspaceDir: string) {
+function extractJsonObject(text: string): unknown {
+  const trimmed = text.trim();
+  const fenced = trimmed.match(/^```(?:json)?\s*([\s\S]*?)\s*```$/i)?.[1]?.trim();
+  const candidate = fenced ?? trimmed;
+  try {
+    return JSON.parse(candidate);
+  } catch {
+    const start = candidate.indexOf("{");
+    const end = candidate.lastIndexOf("}");
+    if (start >= 0 && end > start) {
+      return JSON.parse(candidate.slice(start, end + 1));
+    }
+    throw new Error("Summary worker did not return a JSON object.");
+  }
+}
+
+function parsePaperSummaryWorkerOutput(value: unknown): PaperSummaryWorkerOutput {
+  if (!isRecord(value)) {
+    throw new Error("Summary worker did not return a JSON object.");
+  }
+  const summaryMarkdown = value.summaryMarkdown;
+  if (typeof summaryMarkdown !== "string" || !summaryMarkdown.trim()) {
+    throw new Error("Summary worker JSON must include summaryMarkdown.");
+  }
+
+  const readString = (key: string): string | undefined =>
+    typeof value[key] === "string" ? value[key] : undefined;
+  const readStringList = (key: string): string[] | undefined => {
+    const candidate = value[key];
+    return Array.isArray(candidate)
+      ? candidate.filter((item): item is string => typeof item === "string")
+      : undefined;
+  };
+  const confidence = readString("confidence");
+
+  return {
+    summaryMarkdown,
+    ...(readString("title") ? { title: readString("title") } : {}),
+    ...(readStringList("tags") ? { tags: readStringList("tags") } : {}),
+    ...(readStringList("keyFindings") ? { keyFindings: readStringList("keyFindings") } : {}),
+    ...(readStringList("limitations") ? { limitations: readStringList("limitations") } : {}),
+    ...(readStringList("openQuestions") ? { openQuestions: readStringList("openQuestions") } : {}),
+    ...(readStringList("relatedPaperKeys") ? { relatedPaperKeys: readStringList("relatedPaperKeys") } : {}),
+    ...(confidence === "high" || confidence === "medium" || confidence === "low" ? { confidence } : {}),
+    ...(readStringList("groundingWarnings") ? { groundingWarnings: readStringList("groundingWarnings") } : {})
+  };
+}
+
+function createPaperSummaryWorker(model: Model<Api>): PaperSummaryWorker {
+  return async (input) => {
+    const prompt: UserMessage = {
+      role: "user",
+      timestamp: Date.now(),
+      content: [
+        "Create a grounded paper wiki source summary from the evidence JSON below.",
+        "Use only the supplied evidence. Do not invent claims, metrics, or citations.",
+        "Return only a JSON object with these fields: title, summaryMarkdown, tags, keyFindings, limitations, openQuestions, relatedPaperKeys, confidence, groundingWarnings.",
+        "summaryMarkdown should be concise Markdown suitable for a retrieval source page, normally 3 to 6 paragraphs.",
+        "keyFindings, limitations, openQuestions, tags, relatedPaperKeys, and groundingWarnings must be arrays of strings.",
+        "confidence must be high, medium, or low.",
+        JSON.stringify({
+          paperKey: input.evidence.paperKey,
+          title: input.evidence.title,
+          engine: input.evidence.engine,
+          articleUrl: input.evidence.articleUrl,
+          quality: input.evidence.quality,
+          sections: input.evidence.sections,
+          paths: input.evidence.paths,
+          totalMarkdownChars: input.evidence.totalMarkdownChars,
+          truncated: input.evidence.truncated,
+          markdown: input.evidence.markdown
+        })
+      ].join("\n\n")
+    };
+    const context: AgentContext = {
+      systemPrompt:
+        "You are a careful scientific summarization subagent. You write grounded summaries from supplied paper text only.",
+      messages: [],
+      tools: []
+    };
+    const stream = agentLoop(
+      [prompt],
+      context,
+      {
+        model,
+        convertToLlm: convertAgentMessagesToLlm,
+        getApiKey: (provider) => getEnvApiKey(provider),
+        toolExecution: "sequential"
+      }
+    );
+    const resultPromise = stream.result();
+    for await (const _event of stream) {
+      // Drain the stream; the summary worker intentionally does not emit UI events.
+    }
+    const messages = await resultPromise;
+    const assistant = messages
+      .filter((message): message is AssistantMessage => message.role === "assistant")
+      .at(-1);
+    const text = assistant ? getAssistantText(assistant) : "";
+    return parsePaperSummaryWorkerOutput(extractJsonObject(text));
+  };
+}
+
+function createRuntimeTools(workspaceDir: string, model: Model<Api>) {
   return createTools(workspaceDir, {
-    extensionBridge: createQueuedPaperExtensionBridge({ workspaceDir })
+    extensionBridge: createQueuedPaperExtensionBridge({ workspaceDir }),
+    paperSummaryWorker: createPaperSummaryWorker(model)
   });
 }
 
@@ -351,10 +459,10 @@ export async function runAgentTurn(options: RunAgentTurnOptions): Promise<RunAge
   let tools = existingTools;
 
   if (existingTools.length === 0) {
-    tools = createRuntimeTools(workspaceDir);
+    tools = createRuntimeTools(workspaceDir, options.model);
   } else if (previousWorkspaceDir !== undefined && previousWorkspaceDir !== workspaceDir) {
     await cleanupTools(existingTools);
-    tools = createRuntimeTools(workspaceDir);
+    tools = createRuntimeTools(workspaceDir, options.model);
   }
 
   const stream = agentLoop(

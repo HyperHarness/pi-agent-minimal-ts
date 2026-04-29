@@ -181,6 +181,10 @@ function toApsArticleUrl(input: {
 }): string {
   const doiPath = encodeApsDoiPath(input.doi);
   const journalSlug = getApsJournalSlug(input.containerTitle);
+  const doiSuffix = input.doi.replace(/^10\.1103\//i, "");
+  if (!/^PhysRev[A-Za-z]+?\.\d+\.\d+$/i.test(doiSuffix)) {
+    return `https://journals.aps.org/doi/${doiPath}`;
+  }
   return journalSlug
     ? `https://journals.aps.org/${journalSlug}/abstract/${doiPath}`
     : `https://journals.aps.org/doi/${doiPath}`;
