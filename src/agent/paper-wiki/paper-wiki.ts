@@ -262,12 +262,12 @@ function extractFrontmatter(markdown: string): string {
   return markdown.match(/^---\n([\s\S]*?)\n---\n/)?.[1] ?? "";
 }
 
-function scoreWikiSource(markdown: string, title: string, paperKey: string, query: string, terms: SearchTerm[]): number {
+function scoreWikiDocument(markdown: string, title: string, key: string, query: string, terms: SearchTerm[]): number {
   const normalizedQuery = normalizeSearchText(query);
   const normalizedTitle = normalizeSearchText(title);
   const normalizedFrontmatter = normalizeSearchText(extractFrontmatter(markdown));
   const normalizedBody = normalizeSearchText(markdown.replace(/^---\n[\s\S]*?\n---\n/, ""));
-  const normalizedPaperKey = normalizeSearchText(paperKey);
+  const normalizedKey = normalizeSearchText(key);
   let score = 0;
 
   if (normalizedQuery && normalizedBody.includes(normalizedQuery)) {
@@ -281,7 +281,7 @@ function scoreWikiSource(markdown: string, title: string, paperKey: string, quer
     const titleMatches = countOccurrences(normalizedTitle, term.value);
     const frontmatterMatches = countOccurrences(normalizedFrontmatter, term.value);
     const bodyMatches = countOccurrences(normalizedBody, term.value);
-    const keyMatches = countOccurrences(normalizedPaperKey, term.value);
+    const keyMatches = countOccurrences(normalizedKey, term.value);
     score += titleMatches * term.weight * 10;
     score += frontmatterMatches * term.weight * 6;
     score += bodyMatches * term.weight * 2;
@@ -473,19 +473,51 @@ export async function searchPaperWiki(options: PaperWikiSearchOptions): Promise<
 
   await ensurePaperWikiScaffold(options.workspaceDir);
   const maxResults = Math.max(1, Math.trunc(options.maxResults ?? DEFAULT_WIKI_SEARCH_RESULTS));
-  const sourceFiles = await listPaperWikiSourceFiles(options.workspaceDir);
+  const [sourceFiles, pageFiles] = await Promise.all([
+    listPaperWikiSourceFiles(options.workspaceDir),
+    listPaperWikiPageFiles(options.workspaceDir)
+  ]);
   const searchTerms = buildWikiSearchTerms(query);
-  const matches = [];
+  const matches: Array<{
+    kind: "source" | "page";
+    key: string;
+    paperKey?: string;
+    pageKey?: string;
+    title: string;
+    path: string;
+    snippet: string;
+    score: number;
+  }> = [];
   for (const filePath of sourceFiles) {
     const markdown = await readFile(filePath, "utf8");
     const paperKey = path.basename(filePath, ".md");
     const title = extractTitle(markdown, paperKey);
-    const score = scoreWikiSource(markdown, title, paperKey, query, searchTerms);
+    const score = scoreWikiDocument(markdown, title, paperKey, query, searchTerms);
     if (score <= 0) {
       continue;
     }
     matches.push({
+      kind: "source",
+      key: paperKey,
       paperKey,
+      title,
+      path: relativeToWorkspace(options.workspaceDir, filePath),
+      snippet: createBestSnippet(markdown, query, searchTerms),
+      score
+    });
+  }
+  for (const filePath of pageFiles) {
+    const markdown = await readFile(filePath, "utf8");
+    const pageKey = path.basename(filePath, ".md");
+    const title = extractTitle(markdown, pageKey);
+    const score = scoreWikiDocument(markdown, title, pageKey, query, searchTerms);
+    if (score <= 0) {
+      continue;
+    }
+    matches.push({
+      kind: "page",
+      key: pageKey,
+      pageKey,
       title,
       path: relativeToWorkspace(options.workspaceDir, filePath),
       snippet: createBestSnippet(markdown, query, searchTerms),
@@ -496,7 +528,7 @@ export async function searchPaperWiki(options: PaperWikiSearchOptions): Promise<
   return {
     query,
     results: matches
-      .sort((left, right) => right.score - left.score || left.paperKey.localeCompare(right.paperKey))
+      .sort((left, right) => right.score - left.score || left.kind.localeCompare(right.kind) || left.key.localeCompare(right.key))
       .slice(0, maxResults)
       .map(({ score: _score, ...result }) => result)
   };

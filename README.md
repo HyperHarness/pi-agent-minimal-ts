@@ -171,7 +171,7 @@ knowledge-base/
     state/
 ```
 
-Use `download_paper` first to close the download loop and generate the preferred Markdown source under `wiki/sources/<paper-key>/parses/<engine>/document.md`. After reading and grounding the summary against the parsed text, use `write_paper_wiki_source` to save the final LLM-authored source page as `wiki/sources/<paper-key>.md`. Full mode also exposes `generate_paper_wiki_summary`, which builds a bounded evidence package from parsed Markdown, includes local related-paper candidates by default, and sends it to a clean-context summary worker before optionally writing the source page. `paper_wiki_relations` suggests related local papers and can write confirmed `related_papers` links into a source summary. Use `answer_research_question` for professional paper or topic Q&A; it checks local wiki evidence first, then searches/downloads/parses/summarizes external papers only when the local wiki is insufficient. Use `build_wiki_page` when a question should become durable knowledge: it runs the same evidence-first retrieval path, asks a clean-context page worker to synthesize the supplied source summaries, then writes `wiki/pages/<page-key>.md` with citations back to source summaries. Use `answer_paper_wiki_question` for local-wiki-only evidence checks, and `search_paper_wiki` in full mode for direct retrieval over source summaries.
+Use `download_paper` first to close the download loop and generate the preferred Markdown source under `wiki/sources/<paper-key>/parses/<engine>/document.md`. After reading and grounding the summary against the parsed text, use `write_paper_wiki_source` to save the final LLM-authored source page as `wiki/sources/<paper-key>.md`. Full mode also exposes `generate_paper_wiki_summary`, which builds a bounded evidence package from parsed Markdown, includes local related-paper candidates by default, and sends it to a clean-context summary worker before optionally writing the source page. `paper_wiki_relations` suggests related local papers and can write confirmed `related_papers` links into a source summary. Use `answer_research_question` for professional paper or topic Q&A; it checks local wiki evidence first, then searches/downloads/parses/summarizes external papers only when the local wiki is insufficient. Use `build_wiki_page` when a question should become durable knowledge: it runs the same evidence-first retrieval path, asks a clean-context page worker to synthesize the supplied wiki evidence, then writes `wiki/pages/<page-key>.md` with citations back to source summaries. Use `answer_paper_wiki_question` for local-wiki-only evidence checks, and `search_paper_wiki` in full mode for direct retrieval over both source summaries and synthesis pages. Use `wiki_lint` to check the markdown wiki structure: stale `index.md` entries, broken wiki links, missing source citations, orphan synthesis pages, and repeated source tags that should become durable topic pages.
 
 ## Search And Fetch Configuration
 
@@ -272,11 +272,12 @@ The default chat agent exposes a compact paper-focused tool set:
 - `inspect_paper`: inspects parsed paper artifacts, parse quality, and section previews without returning the full paper body
 - `read_paper_section`: reads bounded text from a parsed paper by section id or page range, with source element metadata
 - `search_paper_text`: searches inside a parsed paper and returns snippets with page, section, and element metadata
-- `answer_paper_wiki_question`: builds a citeable evidence package from local paper wiki source summaries for scientific Q&A, or reports that the wiki lacks supporting source-summary evidence
+- `answer_paper_wiki_question`: builds a citeable evidence package from local paper wiki source summaries and synthesis pages for scientific Q&A, or reports that the wiki lacks supporting wiki evidence
 - `answer_research_question`: answers research-style questions through an evidence-first workflow: local wiki retrieval, local fallback inspection, external paper search, bounded download/parse/summary ingestion, then refreshed wiki evidence
 - `build_wiki_page`: turns evidence-first research results into a durable topic synthesis page under `knowledge-base/wiki/pages/`
 - `search_local_papers`: searches local paper records, parsed Markdown, and wiki summaries
 - `wiki_health`: reports knowledge-base health across records, downloads, authorization state, parse quality, missing summaries, and missing artifacts
+- `wiki_lint`: reports markdown wiki structure issues across `index.md`, source summaries, and synthesis pages
 - `wiki_health_fix`: attempts health repairs such as retrying downloads, parsing downloaded records, and generating missing summaries through a clean-context summary worker when configured; reports issues that still need login or queued browser work
 
 Development and diagnostics can use `createTools(workspaceDir, { toolProfile: "full" })` to expose the complete tool set. Full mode adds `get_time`, `read_file`, `write_paper_wiki_source`, `generate_paper_wiki_summary`, `paper_wiki_relations`, `search_paper_wiki`, `list_local_papers`, `fetch_paper_webpage`, `parse_paper`, `register_manual_paper_download`, and `open_paper_page_for_login`.
@@ -296,6 +297,7 @@ Example prompts:
 - `Download this paper with download_paper: https://www.science.org/doi/10.1126/science.adz8659`
 - `Search papers about the latest superconducting quantum computing results, then download the best open result with download_paper.`
 - `Run wiki_health and tell me which papers need login, parsing, or summaries.`
+- `Run wiki_lint and tell me which wiki pages or concepts need maintenance.`
 - `Run wiki_health_fix in dry-run mode, then repair parse_missing and needs_download issues.`
 - `Build a wiki page about qLDPC implementation challenges on superconducting chips.`
 - Full mode: `Register the manually downloaded PDF for https://example.com/paper with register_manual_paper_download using downloads/inbox/paper.pdf.`

@@ -30,6 +30,7 @@ import {
   writePaperWikiPage,
   writePaperWikiSource
 } from "./paper-wiki/paper-wiki.js";
+import { lintPaperWiki } from "./paper-wiki/lint.js";
 import type {
   PaperWikiPageWorker,
   PaperWikiPageWorkerOutput
@@ -272,8 +273,12 @@ const paperWikiRelationsParameters = Type.Object({
 });
 
 const searchPaperWikiParameters = Type.Object({
-  query: Type.String({ description: "Text query to search inside LLM-authored paper source summaries." }),
-  maxResults: Type.Optional(Type.Integer({ description: "Maximum matching source summaries to return.", minimum: 1 }))
+  query: Type.String({ description: "Text query to search inside LLM-authored paper source summaries and synthesis pages." }),
+  maxResults: Type.Optional(Type.Integer({ description: "Maximum matching wiki items to return.", minimum: 1 }))
+});
+
+const wikiLintParameters = Type.Object({
+  maxItems: Type.Optional(Type.Integer({ description: "Maximum wiki structure issues to return.", minimum: 1 }))
 });
 
 const answerPaperWikiQuestionParameters = Type.Object({
@@ -421,6 +426,7 @@ type WritePaperWikiSourceParameters = Static<typeof writePaperWikiSourceParamete
 type GeneratePaperWikiSummaryParameters = Static<typeof generatePaperWikiSummaryParameters>;
 type PaperWikiRelationsParameters = Static<typeof paperWikiRelationsParameters>;
 type SearchPaperWikiParameters = Static<typeof searchPaperWikiParameters>;
+type WikiLintParameters = Static<typeof wikiLintParameters>;
 type AnswerPaperWikiQuestionParameters = Static<typeof answerPaperWikiQuestionParameters>;
 type AnswerResearchQuestionParameters = Static<typeof answerResearchQuestionParameters>;
 type BuildWikiPageParameters = Static<typeof buildWikiPageParameters>;
@@ -561,13 +567,20 @@ type SearchPaperWikiTool = AgentTool<
   typeof searchPaperWikiParameters,
   Awaited<ReturnType<typeof searchPaperWiki>>
 >;
+type WikiLintTool = AgentTool<
+  typeof wikiLintParameters,
+  Awaited<ReturnType<typeof lintPaperWiki>>
+>;
 type AnswerPaperWikiQuestionDetails = {
   query: string;
   status: "has_wiki_evidence" | "no_wiki_evidence_but_local_matches" | "no_local_evidence";
   answerPolicy: string[];
   evidence: Array<{
+    kind: "source" | "page";
     citation: string;
-    paperKey: string;
+    key: string;
+    paperKey?: string;
+    pageKey?: string;
     title: string;
     path: string;
     snippet: string;
@@ -645,7 +658,10 @@ type BuildWikiPageDetails = {
   draft?: PaperWikiPageWorkerOutput;
   page?: Awaited<ReturnType<typeof writePaperWikiPage>>;
   evidence: Array<{
-    paperKey: string;
+    kind: "source" | "page";
+    key: string;
+    paperKey?: string;
+    pageKey?: string;
     title: string;
     path: string;
     snippet: string;
@@ -769,13 +785,20 @@ async function buildPaperWikiQuestionEvidence(input: {
     query: input.query,
     maxResults
   });
-  const evidence = wikiResult.results.map((result) => ({
-    citation: `${result.paperKey} (${result.path})`,
-    paperKey: result.paperKey,
-    title: result.title,
-    path: result.path,
-    snippet: result.snippet
-  }));
+  const evidence = wikiResult.results.map((result) => {
+    const kind = result.kind ?? (result.pageKey ? "page" : "source");
+    const key = result.key ?? result.paperKey ?? result.pageKey ?? result.path;
+    return {
+      kind,
+      citation: `${key} (${result.path})`,
+      key,
+      ...(result.paperKey ? { paperKey: result.paperKey } : {}),
+      ...(result.pageKey ? { pageKey: result.pageKey } : {}),
+      title: result.title,
+      path: result.path,
+      snippet: result.snippet
+    };
+  });
 
   if (evidence.length > 0) {
     return {
@@ -783,7 +806,7 @@ async function buildPaperWikiQuestionEvidence(input: {
       status: "has_wiki_evidence",
       answerPolicy: [
         "Answer from the evidence list only for wiki-grounded claims.",
-        "Cite paperKey or path next to substantive claims.",
+        "Cite paperKey, pageKey, or path next to substantive claims.",
         "Separate any unsupported background knowledge from wiki-grounded conclusions."
       ],
       evidence,
@@ -1068,6 +1091,7 @@ export interface ToolDependencies {
   writePaperWikiPage?: typeof writePaperWikiPage;
   generatePaperWikiSummary?: typeof generatePaperWikiSummary;
   paperWikiRelations?: typeof paperWikiRelations;
+  lintPaperWiki?: typeof lintPaperWiki;
   paperSummaryWorker?: PaperSummaryWorker;
   paperWikiPageWorker?: PaperWikiPageWorker;
   searchPaperWiki?: typeof searchPaperWiki;
@@ -1122,7 +1146,10 @@ function compactBuildWikiPageResult(result: BuildWikiPageDetails): Record<string
         }
       : {}),
     evidence: result.evidence.map((item) => ({
-      paperKey: item.paperKey,
+      kind: item.kind,
+      key: item.key,
+      ...(item.paperKey ? { paperKey: item.paperKey } : {}),
+      ...(item.pageKey ? { pageKey: item.pageKey } : {}),
       title: item.title,
       path: item.path
     })),
@@ -1163,6 +1190,7 @@ export function createTools(workspaceDir: string, dependencies: ToolDependencies
   const writePaperWikiPageImpl = dependencies.writePaperWikiPage ?? writePaperWikiPage;
   const generatePaperWikiSummaryImpl = dependencies.generatePaperWikiSummary ?? generatePaperWikiSummary;
   const paperWikiRelationsImpl = dependencies.paperWikiRelations ?? paperWikiRelations;
+  const lintPaperWikiImpl = dependencies.lintPaperWiki ?? lintPaperWiki;
   const searchPaperWikiImpl = dependencies.searchPaperWiki ?? searchPaperWiki;
   const listLocalPapersImpl = dependencies.listLocalPapers ?? listLocalPapers;
   const searchLocalPapersImpl = dependencies.searchLocalPapers ?? searchLocalPapers;
@@ -1958,7 +1986,7 @@ export function createTools(workspaceDir: string, dependencies: ToolDependencies
     name: "search_paper_wiki",
     label: "Search Paper Wiki",
     description:
-      "Searches LLM-authored paper source summaries under knowledge-base/wiki/sources/. Use this for knowledge retrieval after paper summaries have been written.",
+      "Searches LLM-authored paper source summaries and synthesis pages under knowledge-base/wiki/. Use this for knowledge retrieval after paper summaries or wiki pages have been written.",
     parameters: searchPaperWikiParameters,
     execute: async (_toolCallId: string, args: SearchPaperWikiParameters) => {
       const result = await searchPaperWikiImpl({
@@ -1974,11 +2002,30 @@ export function createTools(workspaceDir: string, dependencies: ToolDependencies
     }
   };
 
+  const wikiLintTool: WikiLintTool = {
+    name: "wiki_lint",
+    label: "Wiki Lint",
+    description:
+      "Checks the LLM wiki structure for stale index entries, broken wiki links, missing source citations, orphan synthesis pages, and repeated concepts that should become pages.",
+    parameters: wikiLintParameters,
+    execute: async (_toolCallId: string, args: WikiLintParameters) => {
+      const result = await lintPaperWikiImpl({
+        workspaceDir: resolvedWorkspaceDir,
+        ...(args.maxItems !== undefined ? { maxItems: args.maxItems } : {})
+      });
+
+      return {
+        content: [{ type: "text", text: JSON.stringify(result) }],
+        details: result
+      };
+    }
+  };
+
   const answerPaperWikiQuestionTool: AnswerPaperWikiQuestionTool = {
     name: "answer_paper_wiki_question",
     label: "Answer Paper Wiki Question",
     description:
-      "Builds a citeable evidence package from local paper wiki source summaries for scientific questions. Use concise English search terms when useful, and call this before answering professional paper, physics, quantum, method, experiment, or literature-comparison questions.",
+      "Builds a citeable evidence package from local paper wiki source summaries and synthesis pages for scientific questions. Use concise English search terms when useful, and call this before answering professional paper, physics, quantum, method, experiment, or literature-comparison questions.",
     parameters: answerPaperWikiQuestionParameters,
     execute: async (_toolCallId: string, args: AnswerPaperWikiQuestionParameters) => {
       const result = await buildPaperWikiQuestionEvidence({
@@ -2319,6 +2366,9 @@ export function createTools(workspaceDir: string, dependencies: ToolDependencies
       }, undefined, onUpdate);
       const research = researchResult.details as AnswerResearchQuestionDetails;
       const evidence = research.refreshedEvidence?.evidence ?? research.localEvidence.evidence;
+      const sourceEvidence = evidence.filter((item): item is AnswerPaperWikiQuestionDetails["evidence"][number] & { paperKey: string } =>
+        item.kind === "source" && typeof item.paperKey === "string" && item.paperKey.length > 0
+      );
 
       if (evidence.length === 0) {
         const result: BuildWikiPageDetails = {
@@ -2330,6 +2380,23 @@ export function createTools(workspaceDir: string, dependencies: ToolDependencies
           message:
             "Cannot build a wiki page because no citeable local wiki evidence is available after the research workflow.",
           evidence: []
+        };
+        return {
+          content: [{ type: "text", text: JSON.stringify(compactBuildWikiPageResult(result)) }],
+          details: result
+        };
+      }
+
+      if (mode !== "draft" && sourceEvidence.length === 0) {
+        const result: BuildWikiPageDetails = {
+          topic: args.topic,
+          ...(args.question ? { question: args.question } : {}),
+          mode,
+          research,
+          status: "needs_evidence",
+          message:
+            "Cannot write a wiki page because the available local evidence came from synthesis pages only; regenerate from citeable source summaries or run in draft mode.",
+          evidence
         };
         return {
           content: [{ type: "text", text: JSON.stringify(compactBuildWikiPageResult(result)) }],
@@ -2399,7 +2466,7 @@ export function createTools(workspaceDir: string, dependencies: ToolDependencies
         ...(draft.tags ? { tags: draft.tags } : {}),
         ...(draft.openQuestions ? { openQuestions: draft.openQuestions } : {}),
         ...(draft.relatedPageKeys ? { relatedPageKeys: draft.relatedPageKeys } : {}),
-        sourceCitations: evidence.map((item) => ({
+        sourceCitations: sourceEvidence.map((item) => ({
           paperKey: item.paperKey,
           title: item.title,
           path: item.path
@@ -2531,6 +2598,7 @@ export function createTools(workspaceDir: string, dependencies: ToolDependencies
     buildWikiPageTool,
     searchLocalPapersTool,
     wikiHealthTool,
+    wikiLintTool,
     wikiHealthFixTool
   ] as unknown as AgentTools;
 

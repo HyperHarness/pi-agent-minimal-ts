@@ -26,10 +26,15 @@ export interface PaperWikiSearchOptions {
   maxResults?: number;
 }
 
+export type PaperWikiSearchResultKind = "source" | "page";
+
 export interface PaperWikiSearchResult {
   query: string;
   results: Array<{
-    paperKey: string;
+    kind?: PaperWikiSearchResultKind;
+    key?: string;
+    paperKey?: string;
+    pageKey?: string;
     title: string;
     path: string;
     snippet: string;
@@ -68,7 +73,10 @@ export interface PaperWikiPageWorkerInput {
   topic: string;
   question?: string;
   evidence: Array<{
-    paperKey: string;
+    kind?: "source" | "page";
+    key?: string;
+    paperKey?: string;
+    pageKey?: string;
     title: string;
     path: string;
     snippet: string;

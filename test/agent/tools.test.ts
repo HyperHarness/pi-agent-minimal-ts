@@ -205,6 +205,14 @@ type SearchPaperWikiTool = {
   ) => Promise<ToolResult>;
 };
 
+type WikiLintTool = {
+  execute: (
+    toolCallId: string,
+    args: { maxItems?: number },
+    signal: undefined,
+  ) => Promise<ToolResult>;
+};
+
 type AnswerPaperWikiQuestionTool = {
   execute: (
     toolCallId: string,
@@ -540,6 +548,20 @@ function getSearchPaperWikiTool(
   return tool as SearchPaperWikiTool;
 }
 
+function getWikiLintTool(
+  workspace: string,
+  dependencies?: Parameters<typeof createTools>[1],
+): WikiLintTool {
+  const tools = createTools(workspace, dependencies) as ReadonlyArray<{
+    name: string;
+    execute?: WikiLintTool["execute"];
+  }>;
+  const tool = tools.find((candidate) => candidate.name === "wiki_lint");
+  assert.ok(tool);
+  assert.equal(typeof tool.execute, "function");
+  return tool as WikiLintTool;
+}
+
 function getAnswerPaperWikiQuestionTool(
   workspace: string,
   dependencies?: Parameters<typeof createTools>[1],
@@ -746,6 +768,7 @@ test("createTools exposes the minimal default tool set", async () => {
       "build_wiki_page",
       "search_local_papers",
       "wiki_health",
+      "wiki_lint",
       "wiki_health_fix",
     ]);
 
@@ -791,6 +814,7 @@ test("createTools full profile exposes every built-in tool", async () => {
       "build_wiki_page",
       "search_local_papers",
       "wiki_health",
+      "wiki_lint",
       "wiki_health_fix",
       "write_paper_wiki_source",
       "generate_paper_wiki_summary",
@@ -2305,6 +2329,53 @@ test("search_paper_wiki delegates to the injected wiki search dependency and ret
     }, undefined);
 
     assert.equal((result.details as { results?: unknown[] }).results?.length, 1);
+  } finally {
+    await rm(workspace, { recursive: true, force: true });
+  }
+});
+
+test("wiki_lint delegates to the injected wiki lint dependency and returns details", async () => {
+  const workspace = await mkdtemp(path.join(tmpdir(), "pi-agent-tools-"));
+  const capturedCalls: unknown[] = [];
+
+  try {
+    const tool = getWikiLintTool(workspace, {
+      lintPaperWiki: async (options) => {
+        capturedCalls.push(options);
+        return {
+          pageCount: 1,
+          sourceCount: 2,
+          issueCount: 1,
+          summary: {
+            stale_index: 0,
+            broken_wiki_link: 0,
+            missing_source_citation: 0,
+            orphan_page: 0,
+            concept_gap: 1,
+          },
+          issues: [
+            {
+              kind: "concept_gap",
+              severity: "low",
+              concept: "qldpc",
+              count: 2,
+              reason: "Repeated source tag has no durable synthesis page.",
+            },
+          ],
+          actions: ["1: Promote repeated source tags into durable topic pages with build_wiki_page."],
+        };
+      },
+    });
+
+    const result = await tool.execute("wiki-lint-call", {
+      maxItems: 5,
+    }, undefined);
+
+    assert.deepEqual(capturedCalls, [{
+      workspaceDir: workspace,
+      maxItems: 5,
+    }]);
+    assert.equal((result.details as { issueCount?: number }).issueCount, 1);
   } finally {
     await rm(workspace, { recursive: true, force: true });
   }

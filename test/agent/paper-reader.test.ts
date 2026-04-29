@@ -15,6 +15,7 @@ import {
   writePaperWikiPage,
   writePaperWikiSource
 } from "../../src/agent/paper-wiki/paper-wiki.js";
+import { lintPaperWiki } from "../../src/agent/paper-wiki/lint.js";
 import { PaperReaderError } from "../../src/agent/paper-reader/types.js";
 import { parsePaperWebPageHtml } from "../../src/agent/paper-webpage-fetch.js";
 import { savePaperWebPageParse } from "../../src/agent/paper-reader/engines/webpage.js";
@@ -298,6 +299,100 @@ test("writePaperWikiPage saves a synthesis page and updates the wiki index", asy
     const index = await readFile(path.join(workspace, page.indexPath), "utf8");
     assert.match(index, /## Pages/);
     assert.match(index, /qldpc-superconducting-chips/);
+  } finally {
+    await rm(workspace, { recursive: true, force: true });
+  }
+});
+
+test("searchPaperWiki searches synthesis pages as durable wiki evidence", async () => {
+  const workspace = await createWorkspace();
+  try {
+    await writePaperWikiPage({
+      workspaceDir: workspace,
+      topic: "qLDPC on superconducting chips",
+      pageKey: "qldpc-superconducting-chips",
+      title: "qLDPC on Superconducting Chips",
+      pageMarkdown: "## Overview\n\nSuperconducting qLDPC implementation depends on non-local connectivity [arxiv-2507.09690].",
+      tags: ["qldpc", "superconducting-qubits"],
+      sourceCitations: [
+        {
+          paperKey: "arxiv-2507.09690",
+          title: "Small Quantum LDPC Codes",
+          path: "knowledge-base/wiki/sources/arxiv-2507.09690.md"
+        }
+      ]
+    });
+
+    const search = await searchPaperWiki({
+      workspaceDir: workspace,
+      query: "superconducting qLDPC implementation",
+      maxResults: 3
+    });
+
+    assert.equal(search.results[0]?.kind, "page");
+    assert.equal(search.results[0]?.pageKey, "qldpc-superconducting-chips");
+    assert.match(search.results[0]?.snippet ?? "", /Superconducting qLDPC implementation/);
+  } finally {
+    await rm(workspace, { recursive: true, force: true });
+  }
+});
+
+test("lintPaperWiki reports structural wiki gaps", async () => {
+  const workspace = await createWorkspace();
+  try {
+    const sourcesDir = path.join(workspace, "knowledge-base", "wiki", "sources");
+    await mkdir(sourcesDir, { recursive: true });
+    await writeFile(path.join(sourcesDir, "source-a.md"), `---
+type: "paper-source-summary"
+paper_key: "source-a"
+title: "Source A"
+tags:
+  - "qldpc"
+---
+
+# Source A
+
+Evidence about qLDPC.
+`, "utf8");
+    await writeFile(path.join(sourcesDir, "source-b.md"), `---
+type: "paper-source-summary"
+paper_key: "source-b"
+title: "Source B"
+tags:
+  - "qldpc"
+---
+
+# Source B
+
+More evidence about qLDPC.
+`, "utf8");
+    const page = await writePaperWikiPage({
+      workspaceDir: workspace,
+      topic: "Broken page",
+      pageKey: "broken-page",
+      title: "Broken Page",
+      pageMarkdown: "This page links to [missing](knowledge-base/wiki/pages/missing.md).",
+      sourceCitations: [
+        {
+          paperKey: "missing-source",
+          title: "Missing Source",
+          path: "knowledge-base/wiki/sources/missing-source.md"
+        }
+      ]
+    });
+    await writeFile(path.join(workspace, "knowledge-base", "wiki", "index.md"), "# Paper LLM Wiki Index\n", "utf8");
+
+    const lint = await lintPaperWiki({
+      workspaceDir: workspace,
+      maxItems: 10
+    });
+
+    assert.equal(lint.pageCount, 1);
+    assert.equal(lint.sourceCount, 2);
+    assert.ok(lint.issues.some((issue) => issue.kind === "stale_index" && issue.path === page.pagePath));
+    assert.ok(lint.issues.some((issue) => issue.kind === "missing_source_citation"));
+    assert.ok(lint.issues.some((issue) => issue.kind === "broken_wiki_link"));
+    assert.ok(lint.issues.some((issue) => issue.kind === "concept_gap" && issue.concept === "qldpc"));
   } finally {
     await rm(workspace, { recursive: true, force: true });
   }
