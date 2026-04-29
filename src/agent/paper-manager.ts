@@ -1253,15 +1253,6 @@ export async function downloadPaper(options: DownloadPaperOptions): Promise<Pape
     });
   }
 
-  const directPublisherDownload = await tryDownloadDirectSupportedPublisherPaper({
-    workspaceDir: options.workspaceDir,
-    classification,
-    fetchImpl: options.fetchImpl
-  });
-  if (directPublisherDownload) {
-    return directPublisherDownload;
-  }
-
   const priorNonPdfArtifact = await findPriorNonPdfPublisherArtifact({
     workspaceDir: options.workspaceDir,
     source: classification.source,
@@ -1351,6 +1342,15 @@ export async function downloadPaper(options: DownloadPaperOptions): Promise<Pape
       source: classification.source,
       articleUrl: classification.articleUrl
     });
+  }
+
+  const directPublisherDownload = await tryDownloadDirectSupportedPublisherPaper({
+    workspaceDir: options.workspaceDir,
+    classification,
+    fetchImpl: options.fetchImpl
+  });
+  if (directPublisherDownload) {
+    return directPublisherDownload;
   }
 
   const browserSessionFactory =

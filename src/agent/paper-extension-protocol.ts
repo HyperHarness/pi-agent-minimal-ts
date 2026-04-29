@@ -33,6 +33,14 @@ export interface ExtensionWebpageAsset {
   alt?: string;
 }
 
+export interface ExtensionWebpageQuality {
+  status: string;
+  score: number;
+  pages: number;
+  totalTextLength: number;
+  warnings: string[];
+}
+
 export type ExtensionHostMessage =
   | {
       type: "poll_jobs";
@@ -89,6 +97,7 @@ export type ExtensionHostResponse =
       parsePath: string;
       qualityPath: string;
       chunksPath: string;
+      quality?: ExtensionWebpageQuality;
       title?: string;
     }
   | {
@@ -137,6 +146,15 @@ function parseRequiredString(record: Record<string, unknown>, fieldName: string)
   const value = record[fieldName];
   if (typeof value !== "string" || value.trim() === "") {
     throw new Error(`${fieldName} must be a non-empty string.`);
+  }
+
+  return value;
+}
+
+function parseRequiredNumber(record: Record<string, unknown>, fieldName: string): number {
+  const value = record[fieldName];
+  if (typeof value !== "number" || !Number.isFinite(value)) {
+    throw new Error(`${fieldName} must be a finite number.`);
   }
 
   return value;
@@ -286,6 +304,30 @@ function parseOptionalJobPurposeField(
   return value === undefined ? {} : { [fieldName]: value };
 }
 
+function parseWebpageQuality(value: unknown): ExtensionWebpageQuality {
+  const record = parseRecord(value, "quality");
+  const warnings = record.warnings;
+  if (!Array.isArray(warnings) || warnings.some((warning) => typeof warning !== "string")) {
+    throw new Error("warnings must be an array of strings.");
+  }
+
+  return {
+    status: parseRequiredString(record, "status"),
+    score: parseRequiredNumber(record, "score"),
+    pages: parseRequiredNumber(record, "pages"),
+    totalTextLength: parseRequiredNumber(record, "totalTextLength"),
+    warnings
+  };
+}
+
+function parseOptionalWebpageQualityField(
+  record: Record<string, unknown>,
+  fieldName: string
+): Record<string, ExtensionWebpageQuality> {
+  const value = record[fieldName];
+  return value === undefined ? {} : { [fieldName]: parseWebpageQuality(value) };
+}
+
 export function parseExtensionHostMessage(value: unknown): ExtensionHostMessage {
   const record = parseRecord(value, "extension host message");
   const type = parseRequiredString(record, "type");
@@ -380,6 +422,7 @@ export function parseExtensionHostResponse(value: unknown): ExtensionHostRespons
       parsePath: parseRequiredString(record, "parsePath"),
       qualityPath: parseRequiredString(record, "qualityPath"),
       chunksPath: parseRequiredString(record, "chunksPath"),
+      ...parseOptionalWebpageQualityField(record, "quality"),
       ...parseOptionalFields(record, ["title"])
     };
   }

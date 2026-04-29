@@ -118,7 +118,7 @@ test("download_paper uses injected extension bridge for publisher URLs", async (
         strategy: "webpage",
         jobId: (submittedJobs[0] as { jobId: string }).jobId,
         message:
-          "Browser extension will capture the publisher webpage markdown and download the PDF. The download is complete only after markdown artifacts are saved.",
+          "Browser extension will first capture and parse the publisher webpage. PDF download starts only if the webpage markdown quality is good; otherwise the job waits for user login or access verification.",
       },
     });
   } finally {

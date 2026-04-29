@@ -551,7 +551,14 @@ test("background fetches webpage image assets with browser credentials before na
             markdownPath: "/tmp/document.md",
             parsePath: "/tmp/parse.json",
             qualityPath: "/tmp/quality.json",
-            chunksPath: "/tmp/chunks.jsonl"
+            chunksPath: "/tmp/chunks.jsonl",
+            quality: {
+              status: "good",
+              score: 1,
+              pages: 1,
+              totalTextLength: 1500,
+              warnings: []
+            }
           };
         }
         return { type: "status_ack", jobId: message.jobId, status: message.status };
@@ -612,6 +619,132 @@ test("background fetches webpage image assets with browser credentials before na
   } finally {
     globalThis.fetch = previousFetch;
   }
+});
+
+test("background gates publisher PDF downloads on complete webpage snapshot quality", async () => {
+  const job = {
+    jobId: "job-download-and-webpage-poor",
+    articleUrl: "https://www.nature.com/articles/s41586-019-1666-5",
+    source: "nature",
+    title: "Nature paper",
+    purpose: "download_and_webpage"
+  };
+  const fakeChrome = createFakeChrome({
+    jobs: [job],
+    nativeHandler(message) {
+      if (message.type === "poll_jobs") {
+        return { type: "jobs", jobs: [job] };
+      }
+      if (message.type === "register_webpage_snapshot") {
+        return {
+          type: "webpage_registered",
+          jobId: message.jobId,
+          articleUrl: message.articleUrl,
+          paperKey: "nature-s41586-019-1666-5",
+          markdownPath: "/tmp/document.md",
+          parsePath: "/tmp/parse.json",
+          qualityPath: "/tmp/quality.json",
+          chunksPath: "/tmp/chunks.jsonl",
+          quality: {
+            status: "needs_hybrid",
+            score: 0.45,
+            pages: 1,
+            totalTextLength: 180,
+            warnings: ["Detected access-limited article text."]
+          }
+        };
+      }
+      return { type: "status_ack", jobId: message.jobId, status: message.status };
+    }
+  });
+
+  await importBackground(fakeChrome);
+  fakeChrome.events.onMessage.emit(
+    {
+      type: "paper_page_classified",
+      status: "page_classified",
+      html: "<html><body><main><h1>Access the full article</h1></main></body></html>",
+      pdfUrl: "https://www.nature.com/articles/s41586-019-1666-5.pdf"
+    },
+    { tab: { id: 100 } }
+  );
+  await flushAsyncWork();
+
+  assert.deepEqual(fakeChrome.downloadedRequests, []);
+  assert.equal(messagesOf(fakeChrome, "register_download").length, 0);
+  const verificationStatuses = statusMessagesOf(fakeChrome, "awaiting_user_verification");
+  assert.equal(verificationStatuses.length, 1);
+  assert.match(verificationStatuses[0].message, /does not look complete enough/);
+});
+
+test("background starts publisher PDF download after good webpage snapshot quality", async () => {
+  const job = {
+    jobId: "job-download-and-webpage-good",
+    articleUrl: "https://www.nature.com/articles/s41586-019-1666-5",
+    source: "nature",
+    title: "Nature paper",
+    purpose: "download_and_webpage"
+  };
+  const pdfUrl = "https://www.nature.com/articles/s41586-019-1666-5.pdf";
+  const fakeChrome = createFakeChrome({
+    jobs: [job],
+    downloadItems: {
+      501: {
+        id: 501,
+        filename: "C:\\Downloads\\paper.pdf",
+        url: pdfUrl,
+        mime: "application/pdf"
+      }
+    },
+    nativeHandler(message) {
+      if (message.type === "poll_jobs") {
+        return { type: "jobs", jobs: [job] };
+      }
+      if (message.type === "register_webpage_snapshot") {
+        return {
+          type: "webpage_registered",
+          jobId: message.jobId,
+          articleUrl: message.articleUrl,
+          paperKey: "nature-s41586-019-1666-5",
+          markdownPath: "/tmp/document.md",
+          parsePath: "/tmp/parse.json",
+          qualityPath: "/tmp/quality.json",
+          chunksPath: "/tmp/chunks.jsonl",
+          quality: {
+            status: "good",
+            score: 1,
+            pages: 1,
+            totalTextLength: 2500,
+            warnings: []
+          }
+        };
+      }
+      return { type: "status_ack", jobId: message.jobId, status: message.status };
+    }
+  });
+
+  await importBackground(fakeChrome);
+  fakeChrome.events.onMessage.emit(
+    {
+      type: "paper_page_classified",
+      status: "page_classified",
+      html: "<html><body><article><h1>Paper</h1><p>Full paper content.</p></article></body></html>",
+      pdfUrl
+    },
+    { tab: { id: 100 } }
+  );
+  await flushAsyncWork();
+
+  assert.deepEqual(fakeChrome.downloadedRequests, [
+    {
+      url: pdfUrl,
+      filename: "pi-agent-papers/nature-s41586-019-1666-5.pdf",
+      conflictAction: "uniquify",
+      saveAs: false
+    }
+  ]);
+  assert.equal(statusMessagesOf(fakeChrome, "webpage_snapshot_ready").length, 1);
+  assert.equal(statusMessagesOf(fakeChrome, "automatic_download_started").length, 1);
 });
 
 test("background uses downloads API with a default filename for publisher PDF downloads", async () => {

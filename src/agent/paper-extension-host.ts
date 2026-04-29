@@ -205,6 +205,7 @@ async function registerWebpageSnapshot(options: {
       parsePath: saved.artifacts.parsePath,
       qualityPath: saved.artifacts.qualityPath,
       chunksPath: saved.artifacts.chunksPath,
+      quality: saved.quality,
       ...(extraction.title ? { title: extraction.title } : {})
     };
   } catch (error) {

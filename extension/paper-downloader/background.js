@@ -134,6 +134,35 @@ function dataUrlToAsset(candidate) {
   };
 }
 
+function formatWebpageQuality(quality) {
+  if (!quality || typeof quality !== "object") {
+    return "no quality report";
+  }
+
+  var status = typeof quality.status === "string" ? quality.status : "unknown";
+  var score = typeof quality.score === "number" ? quality.score : "unknown";
+  var warnings = Array.isArray(quality.warnings)
+    ? quality.warnings.filter((warning) => typeof warning === "string" && warning.trim())
+    : [];
+  return warnings.length > 0
+    ? status + " (score " + score + "): " + warnings.slice(0, 3).join("; ")
+    : status + " (score " + score + ")";
+}
+
+function isCompleteWebpageSnapshot(response) {
+  if (!response || response.type !== "webpage_registered") {
+    return false;
+  }
+
+  var quality = response.quality;
+  return Boolean(
+    quality &&
+    quality.status === "good" &&
+    typeof quality.score === "number" &&
+    quality.score >= 0.7
+  );
+}
+
 function isSupportedWebpageAssetContentType(contentType) {
   var mediaType = String(contentType || "").split(";", 1)[0].trim().toLowerCase();
   return mediaType.indexOf("image/") === 0 || mediaType === "application/pdf";
@@ -480,7 +509,7 @@ async function handlePaperPageClassified(message, sender) {
           "awaiting_user_verification",
           "The page loaded, but no article HTML snapshot was available."
         );
-        if (job.purpose === "webpage") {
+        if (job.purpose === "webpage" || job.purpose === "download_and_webpage") {
           return;
         }
       } else {
@@ -497,6 +526,15 @@ async function handlePaperPageClassified(message, sender) {
         });
 
         if (response && response.type === "webpage_registered") {
+          if (job.purpose === "download_and_webpage" && !isCompleteWebpageSnapshot(response)) {
+            await reportJobStatus(
+              job,
+              "awaiting_user_verification",
+              "The webpage snapshot was captured but does not look complete enough to start PDF download. Log in or verify article access, refresh the page, then retry. Quality: " +
+                formatWebpageQuality(response.quality)
+            );
+            return;
+          }
           await reportJobStatus(
             job,
             "webpage_snapshot_ready",
@@ -519,7 +557,7 @@ async function handlePaperPageClassified(message, sender) {
               ? response.message
               : "The webpage snapshot could not be registered by the native host."
           );
-          if (job.purpose === "webpage") {
+          if (job.purpose === "webpage" || job.purpose === "download_and_webpage") {
             return;
           }
         }

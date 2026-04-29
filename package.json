@@ -1,6 +1,6 @@
 {
   "name": "pi-agent-minimal-ts",
-  "version": "1.0.9",
+  "version": "1.0.10",
   "private": false,
   "type": "module",
   "main": "./dist/src/index.js",

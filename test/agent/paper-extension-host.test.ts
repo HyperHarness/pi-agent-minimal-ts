@@ -595,6 +595,9 @@ test("handleExtensionHostMessage registers webpage snapshots as parsed wiki arti
     assert.match(response.parsePath, /knowledge-base\/wiki\/sources\/science-10\.1126-science\.adz8659\/parses\/webpage\/parse\.json$/);
     assert.match(response.qualityPath, /knowledge-base\/wiki\/sources\/science-10\.1126-science\.adz8659\/parses\/webpage\/quality\.json$/);
     assert.match(response.chunksPath, /knowledge-base\/wiki\/sources\/science-10\.1126-science\.adz8659\/chunks\/webpage\.jsonl$/);
+    assert.ok(response.quality);
+    assert.equal(response.quality.status, "poor");
+    assert.ok(response.quality.score < 0.7);
 
     const markdown = await readFile(response.markdownPath, "utf8");
     assert.match(markdown, /Browser extension captured this Science article/);

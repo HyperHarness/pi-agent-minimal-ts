@@ -196,6 +196,13 @@ test("parseExtensionHostResponse accepts webpage_registered responses", () => {
     parsePath: "knowledge-base/wiki/sources/science-10.1126-science.adz8659/parses/webpage/parse.json",
     qualityPath: "knowledge-base/wiki/sources/science-10.1126-science.adz8659/parses/webpage/quality.json",
     chunksPath: "knowledge-base/wiki/sources/science-10.1126-science.adz8659/chunks/webpage.jsonl",
+    quality: {
+      status: "good",
+      score: 1,
+      pages: 1,
+      totalTextLength: 1234,
+      warnings: []
+    },
     title: "Science Paper"
   });
 
@@ -208,6 +215,13 @@ test("parseExtensionHostResponse accepts webpage_registered responses", () => {
     parsePath: "knowledge-base/wiki/sources/science-10.1126-science.adz8659/parses/webpage/parse.json",
     qualityPath: "knowledge-base/wiki/sources/science-10.1126-science.adz8659/parses/webpage/quality.json",
     chunksPath: "knowledge-base/wiki/sources/science-10.1126-science.adz8659/chunks/webpage.jsonl",
+    quality: {
+      status: "good",
+      score: 1,
+      pages: 1,
+      totalTextLength: 1234,
+      warnings: []
+    },
     title: "Science Paper"
   });
 });

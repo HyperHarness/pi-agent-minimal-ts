@@ -761,7 +761,7 @@ test("downloadPaper returns existing APS downloads for equivalent PDF URLs witho
   }
 });
 
-test("downloadPaper downloads open APS abstract PDFs directly before using the extension bridge", async () => {
+test("downloadPaper only downloads open APS abstract PDFs directly in explicit fallback mode", async () => {
   const workspaceDir = await mkdtemp(path.join(os.tmpdir(), "paper-manager-"));
   const articleUrl = "https://journals.aps.org/prapplied/abstract/10.1103/4ssz-6ctb";
   const pdfUrl = "https://journals.aps.org/prapplied/pdf/10.1103/4ssz-6ctb";
@@ -781,11 +781,7 @@ test("downloadPaper downloads open APS abstract PDFs directly before using the e
           }
         });
       },
-      extensionBridge: {
-        async submitJob() {
-          throw new Error("extension bridge should not run for direct APS PDF downloads");
-        }
-      },
+      usePlaywrightFallback: true,
       downloadPublisherPaperImpl: async () => {
         throw new Error("browser fallback should not run for direct APS PDF downloads");
       }
@@ -832,7 +828,7 @@ test("downloadPaper downloads open APS abstract PDFs directly before using the e
   }
 });
 
-test("downloadPaper falls back to the extension bridge when direct APS PDF fetch is not a PDF", async () => {
+test("downloadPaper queues extension bridge before attempting direct APS PDF fetch", async () => {
   const workspaceDir = await mkdtemp(path.join(os.tmpdir(), "paper-manager-"));
   const articleUrl = "https://journals.aps.org/prapplied/abstract/10.1103/4ssz-6ctb";
   const fetchCalls: string[] = [];
@@ -868,9 +864,7 @@ test("downloadPaper falls back to the extension bridge when direct APS PDF fetch
       }
     });
 
-    assert.deepEqual(fetchCalls, [
-      "https://journals.aps.org/prapplied/pdf/10.1103/4ssz-6ctb"
-    ]);
+    assert.deepEqual(fetchCalls, []);
     assert.deepEqual(submittedJobs, [
       {
         jobId: "paper-aps-6004bdc34f5d",
@@ -895,7 +889,6 @@ test("downloadPaper tries an exact-title arXiv preprint when a publisher URL can
   const workspaceDir = await mkdtemp(path.join(os.tmpdir(), "paper-manager-"));
   const articleUrl = "https://journals.aps.org/prxquantum/abstract/10.1103/example";
   const title = "Superconducting qubits in the millions: The potential and limitations of modularity";
-  const apsPdfUrl = "https://journals.aps.org/prxquantum/pdf/10.1103/example";
   const arxivPdfUrl = "https://arxiv.org/pdf/2406.06015.pdf";
   const pdfBytes = Buffer.from("%PDF-1.7\narxiv preprint\n", "utf8");
   const fetchCalls: string[] = [];
@@ -950,7 +943,7 @@ test("downloadPaper tries an exact-title arXiv preprint when a publisher URL can
       articleUrl: "https://arxiv.org/abs/2406.06015"
     });
 
-    assert.deepEqual(fetchCalls, [apsPdfUrl, arxivPdfUrl]);
+    assert.deepEqual(fetchCalls, [arxivPdfUrl]);
     assert.deepEqual(searchCalls, [{ query: title, maxResults: 5 }]);
     assert.deepEqual(result, {
       status: "downloaded",
@@ -1012,7 +1005,6 @@ test("downloadPaper uses arXiv fallback after a prior extension non-PDF failure"
   const workspaceDir = await mkdtemp(path.join(os.tmpdir(), "paper-manager-"));
   const articleUrl = "https://journals.aps.org/prxquantum/abstract/10.1103/k3d5-v43c";
   const title = "Superconducting qubits in the millions: The potential and limitations of modularity";
-  const apsPdfUrl = "https://journals.aps.org/prxquantum/pdf/10.1103/k3d5-v43c";
   const arxivPdfUrl = "https://arxiv.org/pdf/2406.06015.pdf";
   const pdfBytes = Buffer.from("%PDF-1.7\narxiv preprint\n", "utf8");
   const submittedJobs: unknown[] = [];
@@ -1083,7 +1075,7 @@ test("downloadPaper uses arXiv fallback after a prior extension non-PDF failure"
     });
 
     assert.deepEqual(submittedJobs, []);
-    assert.deepEqual(fetchCalls, [apsPdfUrl, arxivPdfUrl]);
+    assert.deepEqual(fetchCalls, [arxivPdfUrl]);
     assert.equal(result.status, "downloaded");
     assert.equal(result.source, "arxiv");
     assert.equal(result.path, expectedPdfPath);
@@ -1096,7 +1088,6 @@ test("downloadPaper uses arXiv fallback when a prior publisher artifact is HTML"
   const workspaceDir = await mkdtemp(path.join(os.tmpdir(), "paper-manager-"));
   const articleUrl = "https://journals.aps.org/prxquantum/abstract/10.1103/k3d5-v43c";
   const title = "Superconducting qubits in the millions: The potential and limitations of modularity";
-  const apsPdfUrl = "https://journals.aps.org/prxquantum/pdf/10.1103/k3d5-v43c";
   const arxivPdfUrl = "https://arxiv.org/pdf/2406.06015.pdf";
   const pdfBytes = Buffer.from("%PDF-1.7\narxiv preprint\n", "utf8");
   const htmlArtifactPath = resolvePaperPdfPath({
@@ -1124,7 +1115,7 @@ test("downloadPaper uses arXiv fallback when a prior publisher artifact is HTML"
           });
         }
 
-        assert.equal(String(input), apsPdfUrl);
+        assert.equal(String(input), arxivPdfUrl);
         return new Response("<html>publisher unavailable</html>", {
           status: 200,
           headers: {
