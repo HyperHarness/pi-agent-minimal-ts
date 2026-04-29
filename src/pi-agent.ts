@@ -1,4 +1,5 @@
 import { createInterface } from "node:readline/promises";
+import { readdir } from "node:fs/promises";
 import path from "node:path";
 import { pathToFileURL } from "node:url";
 import process from "node:process";
@@ -26,6 +27,7 @@ import type {
   PaperWikiPageWorkerOutput
 } from "./agent/paper-wiki/types.js";
 import { cleanupTools, createTools, getToolsWorkspaceDir } from "./agent/tools.js";
+import { readPaperDownloadJobEvents, summarizePaperDownloadJobs } from "./agent/paper-download-jobs.js";
 
 type LlmMessage = UserMessage | AssistantMessage | ToolResultMessage;
 type AgentMessageEventHandler = (event: AgentEvent) => Promise<void> | void;
@@ -68,6 +70,16 @@ export interface RunAgentTurnResult {
 export interface SessionPromptResult {
   action: "stop" | "continue";
   newMessages: AgentMessage[];
+}
+
+export interface AgentChatSessionStats {
+  workspaceDir: string;
+  initialWikiPagePaths: Set<string>;
+  downloadedPapers: Set<string>;
+  queuedDownloadJobs: Set<string>;
+  completedQueuedDownloadJobs: Set<string>;
+  createdWikiPages: Set<string>;
+  modifiedWikiPages: Set<string>;
 }
 
 function isLlmMessage(message: AgentMessage): message is LlmMessage {
@@ -203,6 +215,161 @@ function normalizeBaseUrl(baseUrl: string | undefined): string | undefined {
 
 function normalizeWorkspaceDir(workspaceDir: string): string {
   return path.resolve(workspaceDir);
+}
+
+function normalizeRelativePath(value: string): string {
+  return value.split(path.sep).join("/");
+}
+
+async function readInitialWikiPagePaths(workspaceDir: string): Promise<Set<string>> {
+  const pagesDir = path.join(workspaceDir, "knowledge-base", "wiki", "pages");
+
+  try {
+    const entries = await readdir(pagesDir, { withFileTypes: true });
+    return new Set(
+      entries
+        .filter((entry) => entry.isFile() && entry.name.endsWith(".md"))
+        .map((entry) => normalizeRelativePath(path.join("knowledge-base", "wiki", "pages", entry.name)))
+    );
+  } catch {
+    return new Set();
+  }
+}
+
+export async function createAgentChatSessionStats(workspaceDir: string): Promise<AgentChatSessionStats> {
+  const resolvedWorkspaceDir = normalizeWorkspaceDir(workspaceDir);
+  return {
+    workspaceDir: resolvedWorkspaceDir,
+    initialWikiPagePaths: await readInitialWikiPagePaths(resolvedWorkspaceDir),
+    downloadedPapers: new Set(),
+    queuedDownloadJobs: new Set(),
+    completedQueuedDownloadJobs: new Set(),
+    createdWikiPages: new Set(),
+    modifiedWikiPages: new Set()
+  };
+}
+
+function getStringField(record: Record<string, unknown>, key: string): string | undefined {
+  const value = record[key];
+  return typeof value === "string" && value.trim() ? value : undefined;
+}
+
+function getPaperIdentity(record: Record<string, unknown>): string | undefined {
+  return (
+    getStringField(record, "paperKey") ??
+    getStringField(record, "canonicalId") ??
+    getStringField(record, "articleUrl") ??
+    getStringField(record, "recordPath") ??
+    getStringField(record, "path") ??
+    getStringField(record, "title")
+  );
+}
+
+function recordPaperDownloadStats(stats: AgentChatSessionStats, details: unknown): void {
+  if (!isRecord(details)) {
+    return;
+  }
+
+  const status = getStringField(details, "status");
+  const jobId = getStringField(details, "jobId");
+  if (status === "downloaded") {
+    const identity = getPaperIdentity(details);
+    if (identity) {
+      stats.downloadedPapers.add(identity);
+    }
+    if (jobId) {
+      stats.completedQueuedDownloadJobs.add(jobId);
+    }
+  } else if (status === "extension_job_queued") {
+    if (jobId) {
+      stats.queuedDownloadJobs.add(jobId);
+    }
+  }
+
+  const downloaded = details.downloaded;
+  if (Array.isArray(downloaded)) {
+    for (const item of downloaded) {
+      recordPaperDownloadStats(stats, item);
+    }
+  }
+}
+
+function recordWikiPageStats(stats: AgentChatSessionStats, details: unknown): void {
+  if (!isRecord(details)) {
+    return;
+  }
+
+  const page = isRecord(details.page) ? details.page : undefined;
+  const pagePath = page ? getStringField(page, "pagePath") : undefined;
+  if (!pagePath) {
+    return;
+  }
+
+  const normalizedPagePath = normalizeRelativePath(pagePath);
+  if (stats.initialWikiPagePaths.has(normalizedPagePath)) {
+    stats.modifiedWikiPages.add(normalizedPagePath);
+    return;
+  }
+
+  stats.createdWikiPages.add(normalizedPagePath);
+}
+
+export function recordAgentChatSessionStats(stats: AgentChatSessionStats, event: AgentEvent): void {
+  if (event.type !== "tool_execution_end" || event.isError) {
+    return;
+  }
+
+  if (
+    event.toolName === "download_paper" ||
+    event.toolName === "answer_research_question"
+  ) {
+    recordPaperDownloadStats(stats, event.result.details);
+  }
+
+  if (event.toolName === "build_wiki_page") {
+    recordWikiPageStats(stats, event.result.details);
+  }
+}
+
+export function getPendingDownloadQueueCount(stats: AgentChatSessionStats): number {
+  let pending = 0;
+  for (const jobId of stats.queuedDownloadJobs) {
+    if (!stats.completedQueuedDownloadJobs.has(jobId)) {
+      pending += 1;
+    }
+  }
+  return pending;
+}
+
+export async function refreshAgentChatSessionDownloadQueue(stats: AgentChatSessionStats): Promise<void> {
+  if (stats.queuedDownloadJobs.size === 0) {
+    return;
+  }
+
+  const summaries = summarizePaperDownloadJobs(
+    await readPaperDownloadJobEvents({ workspaceDir: stats.workspaceDir })
+  );
+  for (const summary of summaries) {
+    if (!stats.queuedDownloadJobs.has(summary.jobId) || summary.status !== "downloaded") {
+      continue;
+    }
+
+    stats.completedQueuedDownloadJobs.add(summary.jobId);
+    const identity = summary.paperKey ?? summary.articleUrl ?? summary.recordPath ?? summary.downloadPath;
+    if (identity) {
+      stats.downloadedPapers.add(identity);
+    }
+  }
+}
+
+export function formatAgentChatSessionStats(stats: AgentChatSessionStats): string {
+  return [
+    "session> stats",
+    `- 本次聊天下载论文: ${stats.downloadedPapers.size}`,
+    `- 下载队列未完成: ${getPendingDownloadQueueCount(stats)}`,
+    `- 新建 wiki page: ${stats.createdWikiPages.size}`,
+    `- 改动 wiki page: ${stats.modifiedWikiPages.size}`
+  ].join("\n") + "\n";
 }
 
 export function parseCliArgs(argv: string[]): CliArgs {
@@ -655,6 +822,8 @@ export async function main(argv = process.argv.slice(2)): Promise<void> {
     messages: [],
     tools: []
   };
+  const sessionStats = await createAgentChatSessionStats(process.cwd());
+  const replEventHandler = createReplEventHandler(process.stdout);
   const repl = createInterface({
     input: process.stdin,
     output: process.stdout
@@ -665,7 +834,10 @@ export async function main(argv = process.argv.slice(2)): Promise<void> {
       workspaceDir: process.cwd(),
       context,
       prompt,
-      onEvent: createReplEventHandler(process.stdout)
+      onEvent: async (event) => {
+        recordAgentChatSessionStats(sessionStats, event);
+        await replEventHandler(event);
+      }
     });
   };
 
@@ -692,6 +864,8 @@ export async function main(argv = process.argv.slice(2)): Promise<void> {
     }
   } finally {
     repl.close();
+    await refreshAgentChatSessionDownloadQueue(sessionStats);
+    process.stdout.write(formatAgentChatSessionStats(sessionStats));
     await cleanupTools(context.tools);
     contextWorkspaceDirs.delete(context);
   }

@@ -1,6 +1,6 @@
 import test from "node:test";
 import assert from "node:assert/strict";
-import { mkdtemp, rm } from "node:fs/promises";
+import { mkdir, mkdtemp, rm, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import path from "node:path";
 import type { Api, AssistantMessage, Model, ToolResultMessage, UserMessage } from "@mariozechner/pi-ai";
@@ -663,6 +663,124 @@ test("consumePromptLines reuses one session across multiple stdin lines", async 
   });
 
   assert.deepEqual(processedPrompts, ["hello", "exit"]);
+});
+
+test("agent chat session stats summarize downloads, queues, and wiki page writes", async () => {
+  const workspace = await mkdtemp(path.join(tmpdir(), "pi-agent-session-stats-"));
+  const pagesDir = path.join(workspace, "knowledge-base", "wiki", "pages");
+  await mkdir(pagesDir, { recursive: true });
+  await writeFile(path.join(pagesDir, "existing-page.md"), "# Existing\n", "utf8");
+
+  try {
+    const createStats = (
+      piAgent as {
+        createAgentChatSessionStats?: (workspaceDir: string) => Promise<piAgent.AgentChatSessionStats>;
+      }
+    ).createAgentChatSessionStats;
+    const recordStats = (
+      piAgent as {
+        recordAgentChatSessionStats?: (stats: piAgent.AgentChatSessionStats, event: AgentEvent) => void;
+      }
+    ).recordAgentChatSessionStats;
+    const formatStats = (
+      piAgent as {
+        formatAgentChatSessionStats?: (stats: piAgent.AgentChatSessionStats) => string;
+      }
+    ).formatAgentChatSessionStats;
+    const refreshQueue = (
+      piAgent as {
+        refreshAgentChatSessionDownloadQueue?: (stats: piAgent.AgentChatSessionStats) => Promise<void>;
+      }
+    ).refreshAgentChatSessionDownloadQueue;
+    assert.equal(typeof createStats, "function");
+    assert.equal(typeof recordStats, "function");
+    assert.equal(typeof formatStats, "function");
+    assert.equal(typeof refreshQueue, "function");
+
+    const stats = await createStats!(workspace);
+    const recordToolEnd = (toolName: string, details: unknown) => {
+      recordStats!(stats, {
+        type: "tool_execution_end",
+        toolName,
+        toolCallId: `${toolName}-call`,
+        isError: false,
+        result: {
+          content: [{ type: "text", text: JSON.stringify(details) }],
+          details
+        }
+      } as AgentEvent);
+    };
+
+    recordToolEnd("download_paper", {
+      status: "downloaded",
+      canonicalId: "2401.01234",
+      articleUrl: "https://arxiv.org/abs/2401.01234"
+    });
+    recordToolEnd("download_paper", {
+      status: "extension_job_queued",
+      jobId: "queued-1",
+      articleUrl: "https://www.science.org/doi/10.1126/science.adz8659"
+    });
+    recordToolEnd("answer_research_question", {
+      downloaded: [
+        {
+          status: "downloaded",
+          paperKey: "arxiv-2601.00425"
+        },
+        {
+          status: "extension_job_queued",
+          jobId: "queued-2",
+          articleUrl: "https://www.nature.com/articles/example"
+        }
+      ]
+    });
+    recordToolEnd("download_paper", {
+      status: "downloaded",
+      jobId: "queued-1",
+      articleUrl: "https://www.science.org/doi/10.1126/science.adz8659"
+    });
+    recordToolEnd("build_wiki_page", {
+      status: "written",
+      page: {
+        pagePath: "knowledge-base/wiki/pages/existing-page.md"
+      }
+    });
+    recordToolEnd("build_wiki_page", {
+      status: "written",
+      page: {
+        pagePath: "knowledge-base/wiki/pages/new-page.md"
+      }
+    });
+
+    await mkdir(path.join(workspace, ".browser-profile"), { recursive: true });
+    await writeFile(
+      path.join(workspace, ".browser-profile", "paper-download-jobs.jsonl"),
+      [
+        JSON.stringify({
+          jobId: "queued-2",
+          recordedAt: "2026-04-30T00:00:00.000Z",
+          status: "downloaded",
+          articleUrl: "https://www.nature.com/articles/example",
+          paperKey: "nature-example"
+        })
+      ].join("\n"),
+      "utf8"
+    );
+    await refreshQueue!(stats);
+
+    assert.equal(stats.downloadedPapers.size, 4);
+    assert.equal(piAgent.getPendingDownloadQueueCount(stats), 0);
+    assert.deepEqual([...stats.modifiedWikiPages], ["knowledge-base/wiki/pages/existing-page.md"]);
+    assert.deepEqual([...stats.createdWikiPages], ["knowledge-base/wiki/pages/new-page.md"]);
+
+    const output = formatStats!(stats);
+    assert.match(output, /本次聊天下载论文: 4/);
+    assert.match(output, /下载队列未完成: 0/);
+    assert.match(output, /新建 wiki page: 1/);
+    assert.match(output, /改动 wiki page: 1/);
+  } finally {
+    await rm(workspace, { recursive: true, force: true });
+  }
 });
 
 test("createReplEventHandler prints assistant error messages", () => {
