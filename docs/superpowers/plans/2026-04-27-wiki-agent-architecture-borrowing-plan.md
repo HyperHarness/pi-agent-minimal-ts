@@ -17,7 +17,6 @@ knowledge-base/
     pages/
     manifests/
     assets/
-    schema.md
     index.md
     log.md
 ```

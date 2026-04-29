@@ -34,10 +34,6 @@ export function getPaperWikiStateDir(workspaceDir: string): string {
   return resolvePaperLibraryPaths(workspaceDir).stateRoot;
 }
 
-export function getPaperWikiSchemaPath(workspaceDir: string): string {
-  return resolvePaperLibraryPaths(workspaceDir).schemaPath;
-}
-
 export function getPaperWikiIndexPath(workspaceDir: string): string {
   return resolvePaperLibraryPaths(workspaceDir).indexPath;
 }
@@ -72,39 +68,20 @@ export function relativeToWorkspace(workspaceDir: string, filePath: string): str
   return path.relative(workspaceDir, filePath).split(path.sep).join("/");
 }
 
-const SCHEMA_MARKDOWN = `# Paper LLM Wiki Schema
-
-This directory is maintained by the agent as a compact scientific-paper wiki.
-
-## Layers
-
-- Raw PDFs live in \`../raw/pdfs/\` and are immutable acquisition artifacts.
-- Parsed PDF output lives in \`sources/<paper-key>/\` and is derived evidence for that source.
-- LLM-authored retrieval summaries live in \`sources/<paper-key>.md\`.
-- Higher-level synthesis pages live in \`pages/\` and must cite source summaries.
-- Source manifests can live in \`manifests/\` for migration and audit tooling.
-
-## Conventions
-
-- Keep source pages grounded in parsed paper text and cite page numbers when possible.
-- Keep synthesis pages grounded in source summaries and cite paper keys inline.
-- Prefer short, searchable claims over long copied passages.
-- Preserve provenance in frontmatter: paper key, PDF hash, parser engine, raw PDF path, and parse paths.
-- Update \`index.md\` on every source write and append chronological events to \`log.md\`.
-`;
-
 const INITIAL_INDEX = `# Paper LLM Wiki Index
 
-## Pages
+## Knowledge Entries
 
-No synthesis pages yet.
+No knowledge entries yet.
 
-## Sources
+## Source Layer
 
-No source summaries yet.
+Source summaries are citeable evidence under [sources/](sources/). Promote repeated concepts into durable pages with \`build_wiki_page\`.
 `;
 
 const INITIAL_LOG = `# Paper LLM Wiki Log
+
+This log tracks durable synthesis-page operations under \`pages/\`. Paper downloads are tracked in \`../records/\`; source-summary evidence under \`sources/\` is not logged here.
 `;
 
 export async function ensurePaperWikiScaffold(workspaceDir: string): Promise<void> {
@@ -118,7 +95,6 @@ export async function ensurePaperWikiScaffold(workspaceDir: string): Promise<voi
   ]);
 
   await Promise.all([
-    writeIfMissing(getPaperWikiSchemaPath(workspaceDir), SCHEMA_MARKDOWN),
     writeIfMissing(getPaperWikiIndexPath(workspaceDir), INITIAL_INDEX),
     writeIfMissing(getPaperWikiLogPath(workspaceDir), INITIAL_LOG)
   ]);

@@ -13,7 +13,6 @@ export interface PaperLibraryPaths {
   assetsRoot: string;
   manifestsRoot: string;
   stateRoot: string;
-  schemaPath: string;
   indexPath: string;
   logPath: string;
 }
@@ -46,7 +45,6 @@ export function resolvePaperLibraryPaths(workspaceDir: string): PaperLibraryPath
     assetsRoot: path.join(wikiRoot, "assets"),
     manifestsRoot: path.join(wikiRoot, "manifests"),
     stateRoot: path.join(wikiRoot, "state"),
-    schemaPath: path.join(wikiRoot, "schema.md"),
     indexPath: path.join(wikiRoot, "index.md"),
     logPath: path.join(wikiRoot, "log.md")
   };

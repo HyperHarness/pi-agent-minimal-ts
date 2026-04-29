@@ -160,9 +160,8 @@ knowledge-base/
   raw/pdfs/                    # original PDFs for new downloads
   records/                     # download records
   wiki/
-    schema.md                  # conventions for future agent sessions
-    index.md                   # content-oriented catalog
-    log.md                     # chronological audit log
+    index.md                   # knowledge-entry catalog over pages/
+    log.md                     # knowledge-page operation log
     sources/<paper-key>.md     # LLM-authored retrieval source summary
     sources/<paper-key>/       # parsed PDF markdown, JSON, quality, chunks
     pages/                     # durable cross-paper topic synthesis pages

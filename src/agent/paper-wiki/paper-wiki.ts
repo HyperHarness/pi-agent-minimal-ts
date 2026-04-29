@@ -10,10 +10,10 @@ import type { ConcretePaperParseEngine } from "../paper-reader/types.js";
 import { PaperReaderError } from "../paper-reader/types.js";
 import {
   ensurePaperWikiScaffold,
+  getPaperWikiDir,
   getPaperWikiIndexPath,
   getPaperWikiLogPath,
   getPaperWikiPagePath,
-  getPaperWikiSchemaPath,
   getPaperWikiSourcePath,
   listPaperWikiPageFiles,
   listPaperWikiSourceFiles,
@@ -303,32 +303,27 @@ function createBestSnippet(text: string, query: string, terms: SearchTerm[]): st
 
 async function rewriteWikiIndex(workspaceDir: string): Promise<void> {
   const sourceFiles = await listPaperWikiSourceFiles(workspaceDir);
-  const sourceRows = await Promise.all(sourceFiles.map(async (filePath) => {
-    const markdown = await readFile(filePath, "utf8");
-    const paperKey = path.basename(filePath, ".md");
-    const title = extractTitle(markdown, paperKey);
-    const relativePath = relativeToWorkspace(workspaceDir, filePath);
-    return `- [${title}](${relativePath}) - \`${paperKey}\``;
-  }));
   const pageFiles = await listPaperWikiPageFiles(workspaceDir);
   const pageRows = await Promise.all(pageFiles.map(async (filePath) => {
     const markdown = await readFile(filePath, "utf8");
     const pageKey = path.basename(filePath, ".md");
     const title = extractTitle(markdown, pageKey);
-    const relativePath = relativeToWorkspace(workspaceDir, filePath);
+    const relativePath = path.relative(getPaperWikiDir(workspaceDir), filePath).split(path.sep).join("/");
     return `- [${title}](${relativePath}) - \`${pageKey}\``;
   }));
 
   const content = [
     "# Paper LLM Wiki Index",
     "",
-    "## Pages",
+    "## Knowledge Entries",
     "",
-    pageRows.length > 0 ? pageRows.join("\n") : "No synthesis pages yet.",
+    pageRows.length > 0 ? pageRows.join("\n") : "No knowledge entries yet.",
     "",
-    "## Sources",
+    "## Source Layer",
     "",
-    sourceRows.length > 0 ? sourceRows.join("\n") : "No source summaries yet.",
+    `- Source summaries: ${sourceFiles.length}`,
+    "- Evidence directory: [sources/](sources/)",
+    "- Promote repeated concepts into durable pages with `build_wiki_page`.",
     ""
   ].join("\n");
   await writeFile(getPaperWikiIndexPath(workspaceDir), content, "utf8");
@@ -393,19 +388,13 @@ ${sectionList("Open Questions", input.openQuestions)}
 
   await writeFile(sourcePath, markdown.trimEnd() + "\n", "utf8");
   await rewriteWikiIndex(input.workspaceDir);
-  await appendFile(
-    getPaperWikiLogPath(input.workspaceDir),
-    `\n## [${now.slice(0, 10)}] source | ${title}\n\n- paperKey: \`${input.paperKey}\`\n- path: \`${relativeToWorkspace(input.workspaceDir, sourcePath)}\`\n`,
-    "utf8"
-  );
 
   return {
     paperKey: input.paperKey,
     title,
     sourcePath: relativeToWorkspace(input.workspaceDir, sourcePath),
     indexPath: relativeToWorkspace(input.workspaceDir, getPaperWikiIndexPath(input.workspaceDir)),
-    logPath: relativeToWorkspace(input.workspaceDir, getPaperWikiLogPath(input.workspaceDir)),
-    schemaPath: relativeToWorkspace(input.workspaceDir, getPaperWikiSchemaPath(input.workspaceDir))
+    logPath: relativeToWorkspace(input.workspaceDir, getPaperWikiLogPath(input.workspaceDir))
   };
 }
 
@@ -460,7 +449,6 @@ ${input.sourceCitations.map((source) =>
     pagePath: relativeToWorkspace(input.workspaceDir, pagePath),
     indexPath: relativeToWorkspace(input.workspaceDir, getPaperWikiIndexPath(input.workspaceDir)),
     logPath: relativeToWorkspace(input.workspaceDir, getPaperWikiLogPath(input.workspaceDir)),
-    schemaPath: relativeToWorkspace(input.workspaceDir, getPaperWikiSchemaPath(input.workspaceDir)),
     sourceCount: input.sourceCitations.length
   };
 }

@@ -17,7 +17,6 @@ export interface PaperWikiSourceResult {
   sourcePath: string;
   indexPath: string;
   logPath: string;
-  schemaPath: string;
 }
 
 export interface PaperWikiSearchOptions {
@@ -120,7 +119,6 @@ export interface PaperWikiPageResult {
   pagePath: string;
   indexPath: string;
   logPath: string;
-  schemaPath: string;
   sourceCount: number;
 }
 

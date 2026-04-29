@@ -141,7 +141,7 @@ function summarizeActions(issues: PaperWikiLintIssue[]): string[] {
     counts.set(issue.kind, (counts.get(issue.kind) ?? 0) + 1);
   }
   return [
-    ["stale_index", "Rebuild index.md so every page and source is discoverable."],
+    ["stale_index", "Rebuild index.md so every synthesis page is discoverable."],
     ["broken_wiki_link", "Fix or regenerate markdown links that point to missing wiki files."],
     ["missing_source_citation", "Repair synthesis page source citations or regenerate the page from source summaries."],
     ["orphan_page", "Add related_pages or links from another page so synthesis pages form a navigable graph."],
@@ -168,14 +168,15 @@ export async function lintPaperWiki(options: PaperWikiLintOptions): Promise<Pape
   const indexPath = getPaperWikiIndexPath(workspaceDir);
   const indexMarkdown = await readFile(indexPath, "utf8").catch(() => "");
 
-  for (const filePath of [...sourceFiles, ...pageFiles]) {
-    const relativePath = relativeToWorkspace(workspaceDir, filePath);
-    if (!indexMarkdown.includes(relativePath)) {
+  for (const filePath of pageFiles) {
+    const workspaceRelativePath = relativeToWorkspace(workspaceDir, filePath);
+    const wikiRelativePath = path.relative(path.dirname(indexPath), filePath).split(path.sep).join("/");
+    if (!indexMarkdown.includes(workspaceRelativePath) && !indexMarkdown.includes(wikiRelativePath)) {
       issues.push({
         kind: "stale_index",
         severity: "medium",
-        path: relativePath,
-        reason: "Wiki index does not list this page or source summary."
+        path: workspaceRelativePath,
+        reason: "Wiki index does not list this synthesis page."
       });
     }
   }

@@ -209,6 +209,13 @@ test("writePaperWikiSource saves an LLM source summary and searchPaperWiki finds
     const markdown = await readFile(path.join(workspace, source.sourcePath), "utf8");
     assert.match(markdown, /type: "paper-source-summary"/);
     assert.match(markdown, /parse_markdown: "knowledge-base\/wiki\/sources\/arxiv-2601\.00003\/parses\/plain-text-baseline\/document\.md"/);
+    const log = await readFile(path.join(workspace, source.logPath), "utf8");
+    assert.doesNotMatch(log, /source \|/);
+    assert.doesNotMatch(log, /arxiv-2601\.00003/);
+    const index = await readFile(path.join(workspace, source.indexPath), "utf8");
+    assert.match(index, /## Knowledge Entries/);
+    assert.match(index, /Source summaries: 1/);
+    assert.doesNotMatch(index, /programmable neutral atom arrays/);
 
     const search = await searchPaperWiki({
       workspaceDir: workspace,
@@ -298,8 +305,12 @@ test("writePaperWikiPage saves a synthesis page and updates the wiki index", asy
     assert.match(markdown, /arxiv-2507\.09690/);
 
     const index = await readFile(path.join(workspace, page.indexPath), "utf8");
-    assert.match(index, /## Pages/);
+    assert.match(index, /## Knowledge Entries/);
+    assert.match(index, /\[qLDPC on Superconducting Chips\]\(pages\/qldpc-superconducting-chips\.md\)/);
     assert.match(index, /qldpc-superconducting-chips/);
+    const log = await readFile(path.join(workspace, page.logPath), "utf8");
+    assert.match(log, /page \| qLDPC on Superconducting Chips/);
+    assert.match(log, /knowledge-base\/wiki\/pages\/qldpc-superconducting-chips\.md/);
   } finally {
     await rm(workspace, { recursive: true, force: true });
   }

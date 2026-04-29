@@ -2131,7 +2131,6 @@ test("write_paper_wiki_source delegates to the injected wiki dependency and retu
           sourcePath: "knowledge-base/wiki/sources/arxiv-2406.06015.md",
           indexPath: "knowledge-base/wiki/index.md",
           logPath: "knowledge-base/wiki/log.md",
-          schemaPath: "knowledge-base/wiki/schema.md",
         };
       },
     });
@@ -2661,7 +2660,6 @@ test("answer_research_question can download, parse, summarize, and refresh wiki 
           sourcePath: "knowledge-base/wiki/sources/arxiv-2601.00425.md",
           indexPath: "knowledge-base/wiki/index.md",
           logPath: "knowledge-base/wiki/log.md",
-          schemaPath: "knowledge-base/wiki/schema.md",
         },
       }),
       paperSummaryWorker: async () => ({
@@ -2770,7 +2768,6 @@ test("bootstrap_wiki_page_evidence generates missing source summaries and refres
             sourcePath: "knowledge-base/wiki/sources/arxiv-2507.09690.md",
             indexPath: "knowledge-base/wiki/index.md",
             logPath: "knowledge-base/wiki/log.md",
-            schemaPath: "knowledge-base/wiki/schema.md",
           },
         };
       },
@@ -2846,7 +2843,8 @@ test("build_wiki_page writes a synthesis page from local wiki evidence", async (
     assert.match(page, /arxiv-2507\.09690/);
 
     const index = await readFile(path.join(workspace, "knowledge-base/wiki/index.md"), "utf8");
-    assert.match(index, /## Pages/);
+    assert.match(index, /## Knowledge Entries/);
+    assert.match(index, /\[qLDPC on Superconducting Chips\]\(pages\/qldpc-superconducting-chips\.md\)/);
     assert.match(index, /qldpc-superconducting-chips/);
   } finally {
     await rm(workspace, { recursive: true, force: true });

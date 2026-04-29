@@ -19,6 +19,7 @@ The agent already has paper acquisition, parsing, source summaries, wiki pages, 
 - `wiki_health` focuses on paper records and parse/summary state, not wiki graph structure
 - repeated source tags do not create any signal that a durable concept page should exist
 - broken page links and missing source citations are not diagnosed
+- `index.md` can degrade into a source-summary bibliography when no synthesis pages exist, which makes the wiki look like a download catalog rather than a knowledge-entry layer
 
 ## Minimal Scope
 
@@ -42,6 +43,10 @@ Add a deterministic `wiki_lint` tool for markdown/wiki structure. It reports:
 - `concept_gap`: a repeated source tag has no corresponding synthesis page
 
 This is intentionally separate from `wiki_health`, which remains responsible for download, authorization, parse, and summary quality.
+
+### Index
+
+Keep `knowledge-base/wiki/index.md` as a knowledge-entry table of contents over `pages/`. It may report source-summary counts and link to `sources/`, but it should not enumerate every paper source. The full source layer remains searchable through `search_paper_wiki` and citeable from synthesis pages.
 
 ### Build
 

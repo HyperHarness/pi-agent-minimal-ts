@@ -1,9 +1,8 @@
-import { appendFile, readFile, writeFile } from "node:fs/promises";
+import { readFile, writeFile } from "node:fs/promises";
 import path from "node:path";
 import { listLocalPapers, type LocalPaperEntry } from "./local-paper-library.js";
 import {
   ensurePaperWikiScaffold,
-  getPaperWikiLogPath,
   getPaperWikiSourcePath,
   relativeToWorkspace
 } from "./paper-wiki/paper-wiki-store.js";
@@ -442,11 +441,6 @@ export async function updatePaperWikiRelations(
     : uniqueKeys([...previousRelatedPaperKeys, ...options.relatedPaperKeys], options.paperKey);
   const now = new Date().toISOString();
   await writeFile(sourcePath, replaceRelatedPaperKeys(markdown, relatedPaperKeys, now), "utf8");
-  await appendFile(
-    getPaperWikiLogPath(workspaceDir),
-    `\n## [${now.slice(0, 10)}] relations | ${options.paperKey}\n\n- path: \`${relativeToWorkspace(workspaceDir, sourcePath)}\`\n- related: ${relatedPaperKeys.map((key) => `\`${key}\``).join(", ") || "(none)"}\n`,
-    "utf8"
-  );
   return {
     paperKey: options.paperKey,
     sourcePath: relativeToWorkspace(workspaceDir, sourcePath),

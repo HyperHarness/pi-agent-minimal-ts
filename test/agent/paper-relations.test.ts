@@ -119,7 +119,8 @@ Summary.
     assert.match(markdown, /updated_at: ".+?"/);
     assert.match(markdown, /related_papers:\s*\n  - "aps-related"\n  - "aps-second"/);
     const log = await readFile(path.join(workspace, "knowledge-base", "wiki", "log.md"), "utf8");
-    assert.match(log, /relations \| aps-target/);
+    assert.doesNotMatch(log, /relations \| aps-target/);
+    assert.doesNotMatch(log, /aps-related/);
   } finally {
     await rm(workspace, { recursive: true, force: true });
   }
