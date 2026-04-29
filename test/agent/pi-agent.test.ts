@@ -67,6 +67,8 @@ function findMessageIndex(
 test("default system prompt requires wiki evidence for scientific questions", () => {
   assert.match(DEFAULT_SYSTEM_PROMPT, /answer_research_question/);
   assert.match(DEFAULT_SYSTEM_PROMPT, /answer_paper_wiki_question/);
+  assert.match(DEFAULT_SYSTEM_PROMPT, /clarify_research_topic/);
+  assert.match(DEFAULT_SYSTEM_PROMPT, /user is the research lead/i);
   assert.match(DEFAULT_SYSTEM_PROMPT, /local wiki/i);
   assert.match(DEFAULT_SYSTEM_PROMPT, /cite/i);
 });

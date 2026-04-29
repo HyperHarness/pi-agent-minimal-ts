@@ -253,6 +253,45 @@ type BootstrapWikiPageEvidenceTool = {
   ) => Promise<ToolResult>;
 };
 
+type ClarifyResearchTopicTool = {
+  execute: (
+    toolCallId: string,
+    args: {
+      topic: string;
+      userRequest?: string;
+    },
+    signal: undefined,
+  ) => Promise<ToolResult>;
+};
+
+type ResearchTopicBootstrapTool = {
+  execute: (
+    toolCallId: string,
+    args: {
+      topic: string;
+      question?: string;
+      maxSeedQueries?: number;
+      maxSources?: number;
+    },
+    signal: undefined,
+  ) => Promise<ToolResult>;
+};
+
+type ExpandResearchTopicTool = {
+  execute: (
+    toolCallId: string,
+    args: {
+      topic: string;
+      question?: string;
+      mode?: "plan" | "search";
+      maxSeedQueries?: number;
+      maxSources?: number;
+      maxExternalCandidates?: number;
+    },
+    signal: undefined,
+  ) => Promise<ToolResult>;
+};
+
 type BuildWikiPageTool = {
   execute: (
     toolCallId: string,
@@ -635,6 +674,48 @@ function getBootstrapWikiPageEvidenceTool(
   return tool as BootstrapWikiPageEvidenceTool;
 }
 
+function getClarifyResearchTopicTool(
+  workspace: string,
+  dependencies?: Parameters<typeof createTools>[1],
+): ClarifyResearchTopicTool {
+  const tools = createTools(workspace, dependencies) as ReadonlyArray<{
+    name: string;
+    execute?: ClarifyResearchTopicTool["execute"];
+  }>;
+  const tool = tools.find((candidate) => candidate.name === "clarify_research_topic");
+  assert.ok(tool);
+  assert.equal(typeof tool.execute, "function");
+  return tool as ClarifyResearchTopicTool;
+}
+
+function getResearchTopicBootstrapTool(
+  workspace: string,
+  dependencies?: Parameters<typeof createTools>[1],
+): ResearchTopicBootstrapTool {
+  const tools = createTools(workspace, dependencies) as ReadonlyArray<{
+    name: string;
+    execute?: ResearchTopicBootstrapTool["execute"];
+  }>;
+  const tool = tools.find((candidate) => candidate.name === "research_topic_bootstrap");
+  assert.ok(tool);
+  assert.equal(typeof tool.execute, "function");
+  return tool as ResearchTopicBootstrapTool;
+}
+
+function getExpandResearchTopicTool(
+  workspace: string,
+  dependencies?: Parameters<typeof createTools>[1],
+): ExpandResearchTopicTool {
+  const tools = createTools(workspace, dependencies) as ReadonlyArray<{
+    name: string;
+    execute?: ExpandResearchTopicTool["execute"];
+  }>;
+  const tool = tools.find((candidate) => candidate.name === "expand_research_topic");
+  assert.ok(tool);
+  assert.equal(typeof tool.execute, "function");
+  return tool as ExpandResearchTopicTool;
+}
+
 function getListLocalPapersTool(
   workspace: string,
   dependencies?: Parameters<typeof createTools>[1],
@@ -798,6 +879,9 @@ test("createTools exposes the minimal default tool set", async () => {
       "answer_research_question",
       "bootstrap_wiki_page_evidence",
       "build_wiki_page",
+      "clarify_research_topic",
+      "research_topic_bootstrap",
+      "expand_research_topic",
       "search_local_papers",
       "wiki_health",
       "wiki_lint",
@@ -845,6 +929,9 @@ test("createTools full profile exposes every built-in tool", async () => {
       "answer_research_question",
       "bootstrap_wiki_page_evidence",
       "build_wiki_page",
+      "clarify_research_topic",
+      "research_topic_bootstrap",
+      "expand_research_topic",
       "search_local_papers",
       "wiki_health",
       "wiki_lint",
@@ -2791,6 +2878,170 @@ test("bootstrap_wiki_page_evidence generates missing source summaries and refres
     assert.deepEqual(generatedSummaries, ["arxiv-2507.09690"]);
     assert.equal(details.summariesWritten?.[0]?.status, "written");
     assert.equal(details.sourceEvidence?.length, 1);
+  } finally {
+    await rm(workspace, { recursive: true, force: true });
+  }
+});
+
+test("clarify_research_topic asks for user steering before broad research programs", async () => {
+  const workspace = await mkdtemp(path.join(tmpdir(), "pi-agent-tools-"));
+
+  try {
+    const tool = getClarifyResearchTopicTool(workspace);
+    const result = await tool.execute("clarify-call", {
+      topic: "superconducting quantum computing",
+      userRequest: "系统研究超导量子计算",
+    }, undefined);
+    const details = result.details as {
+      role?: string;
+      userLeads?: boolean;
+      status?: string;
+      questions?: Array<{ id?: string; question?: string }>;
+      defaultAssumptions?: string[];
+      nextStep?: string;
+    };
+
+    assert.equal(details.role, "research_assistant");
+    assert.equal(details.userLeads, true);
+    assert.equal(details.status, "needs_user_focus");
+    assert.ok(details.questions?.some((question) => question.id === "research_goal"));
+    assert.ok(details.questions?.some((question) => question.id === "deliverable"));
+    assert.match(details.nextStep ?? "", /等待用户/);
+  } finally {
+    await rm(workspace, { recursive: true, force: true });
+  }
+});
+
+test("research_topic_bootstrap maps local evidence into gaps and suggested pages", async () => {
+  const workspace = await mkdtemp(path.join(tmpdir(), "pi-agent-tools-"));
+
+  try {
+    const tool = getResearchTopicBootstrapTool(workspace, {
+      bootstrapPaperWikiPageEvidence: async (options) => ({
+        status: "ready",
+        topic: options.topic,
+        ...(options.question ? { question: options.question } : {}),
+        recommendedPageKey: "superconducting-quantum-computing",
+        seedQueries: ["superconducting quantum computing surface code"],
+        sourceEvidence: [
+          {
+            kind: "source",
+            key: "nature-s41586-024-08449-y",
+            paperKey: "nature-s41586-024-08449-y",
+            title: "Quantum error correction below the surface code threshold",
+            path: "knowledge-base/wiki/sources/nature-s41586-024-08449-y.md",
+            snippet: "surface code threshold on superconducting processors",
+            origin: "seed_search",
+          },
+        ],
+        pageContext: [],
+        expandedSources: [],
+        parsedFallbackMatches: [],
+        missingSummaries: [],
+        blocked: [],
+      }),
+    });
+
+    const result = await tool.execute("bootstrap-research-topic", {
+      topic: "superconducting quantum computing",
+      question: "map the direction",
+    }, undefined);
+    const details = result.details as {
+      recommendedPageKey?: string;
+      localEvidenceCount?: number;
+      gaps?: Array<{ id?: string; seedQuery?: string }>;
+      suggestedPages?: Array<{ pageKey?: string }>;
+    };
+
+    assert.equal(details.recommendedPageKey, "superconducting-quantum-computing");
+    assert.equal(details.localEvidenceCount, 1);
+    assert.ok(details.gaps?.some((gap) => gap.id === "surface-code"));
+    assert.ok(details.suggestedPages?.some((page) => page.pageKey === "surface-code-on-superconducting-processors"));
+  } finally {
+    await rm(workspace, { recursive: true, force: true });
+  }
+});
+
+test("expand_research_topic searches externally even when local wiki evidence exists", async () => {
+  const workspace = await mkdtemp(path.join(tmpdir(), "pi-agent-tools-"));
+  const searchedQueries: string[] = [];
+
+  try {
+    const tool = getExpandResearchTopicTool(workspace, {
+      bootstrapPaperWikiPageEvidence: async (options) => ({
+        status: "ready",
+        topic: options.topic,
+        ...(options.question ? { question: options.question } : {}),
+        recommendedPageKey: "superconducting-quantum-computing",
+        seedQueries: ["superconducting quantum computing roadmap"],
+        sourceEvidence: [
+          {
+            kind: "source",
+            key: "science-10.1126-science.1231930",
+            paperKey: "science-10.1126-science.1231930",
+            title: "Superconducting Circuits for Quantum Information",
+            path: "knowledge-base/wiki/sources/science-10.1126-science.1231930.md",
+            snippet: "local evidence exists",
+            origin: "seed_search",
+          },
+        ],
+        pageContext: [
+          {
+            kind: "page",
+            key: "superconducting-quantum-computing",
+            pageKey: "superconducting-quantum-computing",
+            title: "超导量子计算",
+            path: "knowledge-base/wiki/pages/superconducting-quantum-computing.md",
+            snippet: "existing synthesis page",
+            origin: "seed_search",
+          },
+        ],
+        expandedSources: [],
+        parsedFallbackMatches: [],
+        missingSummaries: [],
+        blocked: [],
+      }),
+      searchPapers: async (options) => {
+        searchedQueries.push(options.query);
+        return [
+          {
+            title: "Cryogenic control electronics for scalable superconducting quantum computing",
+            authors: ["A. Author"],
+            summary: "Candidate about cryogenic controls.",
+            primarySource: "arxiv",
+            primaryAction: "direct_download",
+            sources: [
+              {
+                source: "arxiv",
+                action: "direct_download",
+                canonicalId: "2601.00001",
+                articleUrl: "https://arxiv.org/abs/2601.00001",
+                pdfUrl: "https://arxiv.org/pdf/2601.00001.pdf",
+              },
+            ],
+          },
+        ];
+      },
+    });
+
+    const result = await tool.execute("expand-topic", {
+      topic: "superconducting quantum computing",
+      mode: "search",
+      maxSeedQueries: 2,
+      maxExternalCandidates: 2,
+    }, undefined);
+    const details = result.details as {
+      status?: string;
+      localEvidenceCount?: number;
+      externalCandidates?: unknown[];
+      searchedQueries?: string[];
+    };
+
+    assert.equal(details.status, "searched");
+    assert.equal(details.localEvidenceCount, 1);
+    assert.ok(searchedQueries.length > 0);
+    assert.equal(details.searchedQueries?.length, searchedQueries.length);
+    assert.equal(details.externalCandidates?.length, 1);
   } finally {
     await rm(workspace, { recursive: true, force: true });
   }

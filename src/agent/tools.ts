@@ -30,6 +30,7 @@ import {
   writePaperWikiPage,
   writePaperWikiSource
 } from "./paper-wiki/paper-wiki.js";
+import { sanitizeWikiFilename } from "./paper-wiki/paper-wiki-store.js";
 import {
   bootstrapPaperWikiPageEvidence,
   type BootstrapPaperWikiPageEvidenceDependencies
@@ -374,6 +375,51 @@ const buildWikiPageParameters = Type.Object({
   )
 });
 
+const clarifyResearchTopicParameters = Type.Object({
+  topic: Type.String({ description: "Broad research direction that needs user steering before a research program starts." }),
+  userRequest: Type.Optional(
+    Type.String({ description: "Original user request or context that triggered the clarification step." })
+  )
+});
+
+const researchTopicBootstrapParameters = Type.Object({
+  topic: Type.String({ description: "Research direction or durable topic to map into wiki pages." }),
+  question: Type.Optional(
+    Type.String({ description: "Optional user goal or research question that should shape the research map." })
+  ),
+  maxSeedQueries: Type.Optional(
+    Type.Integer({ description: "Maximum deterministic seed queries to generate. Defaults to 5.", minimum: 1 })
+  ),
+  maxSources: Type.Optional(
+    Type.Integer({ description: "Maximum local source-summary evidence items to inspect. Defaults to 12.", minimum: 1 })
+  )
+});
+
+const expandResearchTopicParameters = Type.Object({
+  topic: Type.String({ description: "Research direction or durable topic to actively expand." }),
+  question: Type.Optional(
+    Type.String({ description: "Optional user goal or research question that should shape the expansion queries." })
+  ),
+  mode: Type.Optional(
+    Type.Union([
+      Type.Literal("plan"),
+      Type.Literal("search")
+    ], {
+      description:
+        "Expansion depth for this turn. plan maps local gaps only; search also runs external paper search even when local wiki evidence exists. Defaults to search."
+    })
+  ),
+  maxSeedQueries: Type.Optional(
+    Type.Integer({ description: "Maximum seed/gap queries to use. Defaults to 5.", minimum: 1 })
+  ),
+  maxSources: Type.Optional(
+    Type.Integer({ description: "Maximum local evidence items to inspect. Defaults to 12.", minimum: 1 })
+  ),
+  maxExternalCandidates: Type.Optional(
+    Type.Integer({ description: "Maximum external paper candidates to return across expansion queries. Defaults to 8.", minimum: 1 })
+  )
+});
+
 const listLocalPapersParameters = Type.Object({
   query: Type.Optional(Type.String({ description: "Optional metadata query to filter local papers." })),
   status: Type.Optional(
@@ -458,6 +504,9 @@ type AnswerPaperWikiQuestionParameters = Static<typeof answerPaperWikiQuestionPa
 type AnswerResearchQuestionParameters = Static<typeof answerResearchQuestionParameters>;
 type BootstrapWikiPageEvidenceParameters = Static<typeof bootstrapWikiPageEvidenceParameters>;
 type BuildWikiPageParameters = Static<typeof buildWikiPageParameters>;
+type ClarifyResearchTopicParameters = Static<typeof clarifyResearchTopicParameters>;
+type ResearchTopicBootstrapParameters = Static<typeof researchTopicBootstrapParameters>;
+type ExpandResearchTopicParameters = Static<typeof expandResearchTopicParameters>;
 type ListLocalPapersParameters = Static<typeof listLocalPapersParameters>;
 type SearchLocalPapersParameters = Static<typeof searchLocalPapersParameters>;
 type WikiHealthParameters = Static<typeof wikiHealthParameters>;
@@ -705,6 +754,55 @@ type BuildWikiPageDetails = {
     origin?: "seed_search" | "related_expansion" | "local_fallback";
   }>;
 };
+type ClarifyResearchTopicDetails = {
+  topic: string;
+  userRequest?: string;
+  role: "research_assistant";
+  userLeads: true;
+  status: "needs_user_focus";
+  questions: Array<{
+    id: string;
+    question: string;
+    why: string;
+  }>;
+  defaultAssumptions: string[];
+  nextStep: string;
+};
+type ResearchSuggestedPage = {
+  pageKey: string;
+  title: string;
+  reason: string;
+  seedQuery: string;
+};
+type ResearchGap = {
+  id: string;
+  title: string;
+  reason: string;
+  seedQuery: string;
+};
+type ResearchTopicMap = {
+  topic: string;
+  question?: string;
+  recommendedPageKey: string;
+  seedQueries: string[];
+  localEvidenceCount: number;
+  localPageCount: number;
+  missingSummaryCount: number;
+  gaps: ResearchGap[];
+  suggestedPages: ResearchSuggestedPage[];
+  nextActions: string[];
+};
+type ResearchTopicBootstrapDetails = ResearchTopicMap & {
+  bootstrap: BootstrapWikiPageEvidenceDetails;
+};
+type ExpandResearchTopicDetails = ResearchTopicMap & {
+  mode: "plan" | "search";
+  bootstrap: BootstrapWikiPageEvidenceDetails;
+  externalCandidates: ResearchExternalCandidate[];
+  searchedQueries: string[];
+  blocked: ResearchBlockedItem[];
+  status: "planned" | "searched" | "needs_external_search" | "needs_user_action";
+};
 type ResearchWorkflowProgressStage =
   | "local_wiki_search"
   | "local_wiki_found"
@@ -717,6 +815,8 @@ type ResearchWorkflowProgressStage =
   | "summary_done"
   | "refreshed_wiki_search"
   | "research_done"
+  | "research_topic_bootstrap"
+  | "research_topic_expand"
   | "wiki_page_worker_start"
   | "wiki_page_worker_done"
   | "wiki_page_write";
@@ -733,6 +833,18 @@ type ResearchWorkflowProgress = {
 type BuildWikiPageTool = AgentTool<
   typeof buildWikiPageParameters,
   BuildWikiPageDetails
+>;
+type ClarifyResearchTopicTool = AgentTool<
+  typeof clarifyResearchTopicParameters,
+  ClarifyResearchTopicDetails
+>;
+type ResearchTopicBootstrapTool = AgentTool<
+  typeof researchTopicBootstrapParameters,
+  ResearchTopicBootstrapDetails
+>;
+type ExpandResearchTopicTool = AgentTool<
+  typeof expandResearchTopicParameters,
+  ExpandResearchTopicDetails
 >;
 type ListLocalPapersTool = AgentTool<
   typeof listLocalPapersParameters,
@@ -897,6 +1009,14 @@ function summarizeResearchCandidate(result: PaperSearchResult): ResearchExternal
     ...(primarySource?.canonicalId ? { canonicalId: primarySource.canonicalId } : {}),
     ...(result.summary ? { summary: compactPreviewText(result.summary, 500) } : {})
   };
+}
+
+function researchCandidateKey(candidate: ResearchExternalCandidate): string {
+  return [
+    candidate.canonicalId,
+    candidate.articleUrl,
+    candidate.title.toLowerCase().replace(/\s+/g, " ").trim()
+  ].find((value) => value !== undefined && value.length > 0) ?? candidate.title;
 }
 
 function summarizeWebSearchResults(results: WebSearchResult[]): SearchResultPreview[] {
@@ -1207,6 +1327,201 @@ function compactBuildWikiPageResult(result: BuildWikiPageDetails): Record<string
       ...(result.research?.blocked ?? [])
     ],
     externalCandidates: result.research?.externalCandidates ?? []
+  };
+}
+
+function buildResearchClarification(topic: string, userRequest?: string): ClarifyResearchTopicDetails {
+  return {
+    topic,
+    ...(userRequest ? { userRequest } : {}),
+    role: "research_assistant",
+    userLeads: true,
+    status: "needs_user_focus",
+    questions: [
+      {
+        id: "research_goal",
+        question: "你希望我优先回答哪类问题：入门理解、前沿进展、关键论文谱系、技术路线比较、工程落地，还是某个具体瓶颈？",
+        why: "宽泛方向需要先确定研究目标，否则会把综述、教材背景和前沿论文混在一起。"
+      },
+      {
+        id: "scope_boundary",
+        question: "这个方向的边界要怎么划：只研究超导硬件本身，还是连同量子纠错、低温电子学、制造工艺、控制软件和系统架构一起研究？",
+        why: "边界决定 wiki page 树和外部检索关键词。"
+      },
+      {
+        id: "depth_level",
+        question: "你希望研究深度到什么层级：概念框架、能读懂论文、能复现实验/仿真，还是能做选题判断？",
+        why: "不同深度对应不同证据标准和阅读队列规模。"
+      },
+      {
+        id: "time_window",
+        question: "文献时间范围要偏经典奠基、近五年前沿，还是两者都要但分层组织？",
+        why: "研究助手需要区分 foundational papers、milestone experiments 和最新候选论文。"
+      },
+      {
+        id: "deliverable",
+        question: "你希望本轮产出是什么：研究路线图、阅读清单、若干 wiki page、对比表，还是围绕一个开放问题的证据包？",
+        why: "产出形式决定是否立刻写 page、只建 reading queue，或先继续追引用。"
+      }
+    ],
+    defaultAssumptions: [
+      "如果用户不指定，我会先建立研究路线图，而不是直接下载大量论文。",
+      "用户是研究主导者；agent 负责提出分支、证据缺口和下一步建议，但不替用户决定长期研究重点。",
+      "候选论文必须先进入 source summary，之后才能支撑 wiki page 中的知识性结论。"
+    ],
+    nextStep:
+      "等待用户选择关注点；收到回答后，再运行 research_topic_bootstrap 和 expand_research_topic，并把确认后的范围写入后续 wiki page。"
+  };
+}
+
+function uniqueStrings(values: string[], maxItems: number): string[] {
+  const seen = new Set<string>();
+  const unique: string[] = [];
+
+  for (const value of values) {
+    const compacted = value.replace(/\s+/g, " ").trim();
+    const key = compacted.toLowerCase();
+    if (!compacted || seen.has(key)) {
+      continue;
+    }
+    seen.add(key);
+    unique.push(compacted);
+    if (unique.length >= maxItems) {
+      break;
+    }
+  }
+
+  return unique;
+}
+
+function makeResearchGap(id: string, title: string, topic: string, reason: string): ResearchGap {
+  return {
+    id,
+    title,
+    reason,
+    seedQuery: `${topic} ${title} recent review benchmark limitations`
+  };
+}
+
+function makeSuggestedPage(title: string, topic: string, reason: string): ResearchSuggestedPage {
+  return {
+    pageKey: sanitizeWikiFilename(title.toLowerCase()),
+    title,
+    reason,
+    seedQuery: `${topic} ${title} review experiment roadmap`
+  };
+}
+
+function inferResearchGaps(topic: string, bootstrap: BootstrapWikiPageEvidenceDetails): ResearchGap[] {
+  const text = [
+    topic,
+    ...bootstrap.seedQueries,
+    ...bootstrap.sourceEvidence.map((item) => `${item.title} ${item.snippet}`),
+    ...bootstrap.pageContext.map((item) => `${item.title} ${item.snippet}`),
+    ...bootstrap.missingSummaries.map((item) => `${item.title} ${item.reason}`)
+  ].join(" ").toLowerCase();
+  const gaps = [
+    makeResearchGap("foundations", "core mechanisms and vocabulary", topic, "A durable direction page needs a stable conceptual baseline before deeper branches."),
+    makeResearchGap("frontier", "state-of-the-art experiments and benchmarks", topic, "The wiki should track what results define the current frontier."),
+    makeResearchGap("scaling", "scaling bottlenecks and engineering constraints", topic, "Research understanding is incomplete without resource and systems limits."),
+    makeResearchGap("errors", "dominant error mechanisms and mitigation", topic, "A useful research map should separate intrinsic noise, correlated errors, and mitigation strategies."),
+    makeResearchGap("open-problems", "open questions and competing approaches", topic, "The agent needs explicit frontier questions to drive future page expansion.")
+  ];
+
+  if (text.includes("superconduct") || text.includes("超导")) {
+    gaps.push(
+      makeResearchGap("surface-code", "surface-code logical operations on superconducting processors", topic, "Surface-code demonstrations anchor the error-correction path for this platform."),
+      makeResearchGap("cryogenic-control", "cryogenic control electronics and wiring limits", topic, "Control-stack scaling is a central bottleneck beyond qubit count."),
+      makeResearchGap("correlated-errors", "correlated errors from radiation and cosmic rays", topic, "Correlated error channels can violate assumptions behind standard thresholds."),
+      makeResearchGap("modular-scaling", "modular superconducting quantum computing architectures", topic, "Large systems may require interconnects, modules, and packaging strategies.")
+    );
+  }
+
+  return gaps;
+}
+
+function inferSuggestedPages(topic: string, bootstrap: BootstrapWikiPageEvidenceDetails): ResearchSuggestedPage[] {
+  const text = [
+    topic,
+    ...bootstrap.seedQueries,
+    ...bootstrap.sourceEvidence.map((item) => `${item.title} ${item.snippet}`)
+  ].join(" ").toLowerCase();
+  const pages = [
+    makeSuggestedPage(topic, topic, "Root synthesis page for the research direction."),
+    makeSuggestedPage(`${topic} research roadmap`, topic, "Tracks frontier questions, evidence gaps, and next reading queues."),
+    makeSuggestedPage(`${topic} scaling bottlenecks`, topic, "Separates physics limits from engineering and control-system limits."),
+    makeSuggestedPage(`${topic} error mechanisms`, topic, "Collects evidence about decoherence, correlated errors, leakage, and mitigation.")
+  ];
+
+  if (text.includes("superconduct") || text.includes("超导")) {
+    pages.push(
+      makeSuggestedPage("surface code on superconducting processors", topic, "Core branch for threshold, logical-qubit, and cycle-time evidence."),
+      makeSuggestedPage("cryogenic control electronics for superconducting qubits", topic, "Needed for million-qubit scaling and wiring constraints."),
+      makeSuggestedPage("correlated errors in superconducting qubits", topic, "Needed to understand radiation, cosmic rays, and non-independent faults."),
+      makeSuggestedPage("random circuit sampling superconducting benchmarks", topic, "Captures supremacy-style benchmarks and their limits."),
+      makeSuggestedPage("modular superconducting quantum computing", topic, "Captures interconnect, packaging, and distributed scaling strategies.")
+    );
+  }
+
+  return uniqueStrings(pages.map((page) => page.pageKey), 12).map((pageKey) =>
+    pages.find((page) => page.pageKey === pageKey) as ResearchSuggestedPage
+  );
+}
+
+function buildResearchTopicMap(input: {
+  topic: string;
+  question?: string;
+  bootstrap: BootstrapWikiPageEvidenceDetails;
+  maxSeedQueries: number;
+}): ResearchTopicMap {
+  const gaps = inferResearchGaps(input.topic, input.bootstrap);
+  const suggestedPages = inferSuggestedPages(input.topic, input.bootstrap);
+  const gapQueries = gaps.map((gap) => gap.seedQuery);
+  const seedQueries = uniqueStrings([
+    ...input.bootstrap.seedQueries,
+    ...(input.question ? [input.question] : []),
+    ...gapQueries
+  ], input.maxSeedQueries);
+  const nextActions = [
+    "Run expand_research_topic in search mode to collect external paper candidates even if the local wiki already has evidence.",
+    "Download, parse, and summarize the highest-value candidates into knowledge-base/wiki/sources/ before turning them into claims.",
+    "Use build_wiki_page for the root page and the highest-priority suggestedPages once enough citeable source summaries exist.",
+    "Repeat expansion from gaps and from newly discovered references until suggestedPages have source-backed pages and wiki_lint no longer reports major concept gaps."
+  ];
+
+  return {
+    topic: input.topic,
+    ...(input.question ? { question: input.question } : {}),
+    recommendedPageKey: input.bootstrap.recommendedPageKey || sanitizeWikiFilename(input.topic.toLowerCase()),
+    seedQueries,
+    localEvidenceCount: input.bootstrap.sourceEvidence.length,
+    localPageCount: input.bootstrap.pageContext.length,
+    missingSummaryCount: input.bootstrap.missingSummaries.length,
+    gaps,
+    suggestedPages,
+    nextActions
+  };
+}
+
+function compactResearchTopicResult(result: ResearchTopicBootstrapDetails | ExpandResearchTopicDetails): Record<string, unknown> {
+  return {
+    topic: result.topic,
+    ...(result.question ? { question: result.question } : {}),
+    recommendedPageKey: result.recommendedPageKey,
+    seedQueries: result.seedQueries,
+    localEvidenceCount: result.localEvidenceCount,
+    localPageCount: result.localPageCount,
+    missingSummaryCount: result.missingSummaryCount,
+    gaps: result.gaps,
+    suggestedPages: result.suggestedPages,
+    ...("mode" in result ? {
+      mode: result.mode,
+      status: result.status,
+      searchedQueries: result.searchedQueries,
+      externalCandidates: result.externalCandidates,
+      blocked: result.blocked
+    } : {}),
+    nextActions: result.nextActions
   };
 }
 
@@ -2654,6 +2969,172 @@ export function createTools(workspaceDir: string, dependencies: ToolDependencies
     }
   };
 
+  const clarifyResearchTopicTool: ClarifyResearchTopicTool = {
+    name: "clarify_research_topic",
+    label: "Clarify Research Topic",
+    description:
+      "Asks focused steering questions before starting a broad research program. Use this when the user gives a wide research direction but has not specified focus, boundary, depth, time window, or desired output.",
+    parameters: clarifyResearchTopicParameters,
+    execute: async (_toolCallId: string, args: ClarifyResearchTopicParameters) => {
+      const result = buildResearchClarification(args.topic, args.userRequest);
+      return {
+        content: [{ type: "text", text: JSON.stringify(result) }],
+        details: result
+      };
+    }
+  };
+
+  const researchTopicBootstrapTool: ResearchTopicBootstrapTool = {
+    name: "research_topic_bootstrap",
+    label: "Research Topic Bootstrap",
+    description:
+      "Maps a research direction into local evidence, gaps, seed queries, and suggested durable wiki pages. Use this before running a long-horizon research program.",
+    parameters: researchTopicBootstrapParameters,
+    executionMode: "sequential",
+    execute: async (
+      _toolCallId: string,
+      args: ResearchTopicBootstrapParameters,
+      _signal: AbortSignal | undefined,
+      onUpdate: AgentToolUpdateCallback<any> | undefined
+    ) => {
+      const maxSeedQueries = Math.max(1, Math.trunc(args.maxSeedQueries ?? 5));
+      emitToolProgress(onUpdate, {
+        stage: "research_topic_bootstrap",
+        query: args.question ?? args.topic,
+        message: `Bootstrapping research map for ${args.topic}.`
+      });
+      const bootstrap = await runBootstrapWikiPageEvidence({
+        topic: args.topic,
+        ...(args.question ? { question: args.question } : {}),
+        maxSeedQueries,
+        ...(args.maxSources !== undefined ? { maxSources: args.maxSources } : {}),
+        autoSummarizeMissing: false
+      }, onUpdate);
+      const topicMap = buildResearchTopicMap({
+        topic: args.topic,
+        ...(args.question ? { question: args.question } : {}),
+        bootstrap,
+        maxSeedQueries
+      });
+      const result: ResearchTopicBootstrapDetails = {
+        ...topicMap,
+        bootstrap
+      };
+
+      return {
+        content: [{ type: "text", text: JSON.stringify(compactResearchTopicResult(result)) }],
+        details: result
+      };
+    }
+  };
+
+  const expandResearchTopicTool: ExpandResearchTopicTool = {
+    name: "expand_research_topic",
+    label: "Expand Research Topic",
+    description:
+      "Actively expands a research direction. Unlike answer_research_question, search mode runs external paper search even when local wiki evidence already exists, so the wiki can keep growing.",
+    parameters: expandResearchTopicParameters,
+    executionMode: "sequential",
+    execute: async (
+      _toolCallId: string,
+      args: ExpandResearchTopicParameters,
+      _signal: AbortSignal | undefined,
+      onUpdate: AgentToolUpdateCallback<any> | undefined
+    ) => {
+      const mode = args.mode ?? "search";
+      const maxSeedQueries = Math.max(1, Math.trunc(args.maxSeedQueries ?? 5));
+      const maxExternalCandidates = Math.max(
+        1,
+        Math.trunc(args.maxExternalCandidates ?? Math.max(DEFAULT_RESEARCH_EXTERNAL_CANDIDATES, 8))
+      );
+      emitToolProgress(onUpdate, {
+        stage: "research_topic_expand",
+        query: args.question ?? args.topic,
+        message: `Expanding research topic ${args.topic} in ${mode} mode.`
+      });
+      const bootstrap = await runBootstrapWikiPageEvidence({
+        topic: args.topic,
+        ...(args.question ? { question: args.question } : {}),
+        maxSeedQueries,
+        ...(args.maxSources !== undefined ? { maxSources: args.maxSources } : {}),
+        autoSummarizeMissing: false
+      }, onUpdate);
+      const topicMap = buildResearchTopicMap({
+        topic: args.topic,
+        ...(args.question ? { question: args.question } : {}),
+        bootstrap,
+        maxSeedQueries
+      });
+      const blocked: ResearchBlockedItem[] = [];
+      const externalCandidates: ResearchExternalCandidate[] = [];
+      const seenCandidates = new Set<string>();
+      const searchedQueries: string[] = [];
+
+      if (mode === "search") {
+        for (const query of topicMap.seedQueries) {
+          if (externalCandidates.length >= maxExternalCandidates) {
+            break;
+          }
+          searchedQueries.push(query);
+          emitToolProgress(onUpdate, {
+            stage: "external_search",
+            query,
+            message: `Searching external papers for research expansion: ${query}`
+          });
+          try {
+            const remaining = Math.max(1, maxExternalCandidates - externalCandidates.length);
+            const paperResults = await searchPapersImpl({
+              query,
+              maxResults: Math.min(DEFAULT_RESEARCH_EXTERNAL_CANDIDATES, remaining)
+            });
+            for (const candidate of paperResults.map(summarizeResearchCandidate)) {
+              const key = researchCandidateKey(candidate);
+              if (seenCandidates.has(key)) {
+                continue;
+              }
+              seenCandidates.add(key);
+              externalCandidates.push(candidate);
+              if (externalCandidates.length >= maxExternalCandidates) {
+                break;
+              }
+            }
+          } catch (error) {
+            blocked.push({
+              stage: "external_search",
+              reason: error instanceof Error ? error.message : `External paper search failed for query: ${query}`
+            });
+          }
+        }
+        emitToolProgress(onUpdate, {
+          stage: "external_search_done",
+          query: args.question ?? args.topic,
+          message: `Research expansion found ${externalCandidates.length} external paper candidate(s).`
+        });
+      }
+
+      const result: ExpandResearchTopicDetails = {
+        ...topicMap,
+        mode,
+        bootstrap,
+        externalCandidates,
+        searchedQueries,
+        blocked,
+        status: mode === "plan"
+          ? "planned"
+          : externalCandidates.length > 0
+            ? "searched"
+            : blocked.length > 0
+              ? "needs_user_action"
+              : "needs_external_search"
+      };
+
+      return {
+        content: [{ type: "text", text: JSON.stringify(compactResearchTopicResult(result)) }],
+        details: result
+      };
+    }
+  };
+
   const listLocalPapersTool: ListLocalPapersTool = {
     name: "list_local_papers",
     label: "List Local Papers",
@@ -2761,6 +3242,9 @@ export function createTools(workspaceDir: string, dependencies: ToolDependencies
     answerResearchQuestionTool,
     bootstrapWikiPageEvidenceTool,
     buildWikiPageTool,
+    clarifyResearchTopicTool,
+    researchTopicBootstrapTool,
+    expandResearchTopicTool,
     searchLocalPapersTool,
     wikiHealthTool,
     wikiLintTool,
