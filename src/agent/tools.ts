@@ -604,6 +604,8 @@ async function assertDownloadedFileIsPdf(pdfPath: string): Promise<void> {
   }
 }
 
+export type ToolProfile = "default" | "full";
+
 export interface ToolDependencies {
   searchWeb?: typeof searchWeb;
   fetchWebPage?: typeof fetchWebPage;
@@ -626,7 +628,7 @@ export interface ToolDependencies {
   paperBrowserManagerClient?: PaperBrowserManagerClient;
   extensionBridge?: PaperExtensionBridge;
   usePlaywrightPaperFallback?: boolean;
-  exposeAdvancedPaperTools?: boolean;
+  toolProfile?: ToolProfile;
 }
 
 interface ToolSetMetadata {
@@ -1457,8 +1459,6 @@ export function createTools(workspaceDir: string, dependencies: ToolDependencies
   };
 
   const tools = [
-    getTimeTool,
-    readFileTool,
     webSearchTool,
     fetchUrlTool,
     searchPapersTool,
@@ -1466,14 +1466,18 @@ export function createTools(workspaceDir: string, dependencies: ToolDependencies
     inspectPaperTool,
     readPaperSectionTool,
     searchPaperTextTool,
-    writePaperWikiSourceTool,
-    searchPaperWikiTool,
-    listLocalPapersTool,
     searchLocalPapersTool
   ] as unknown as AgentTools;
 
-  if (dependencies.exposeAdvancedPaperTools === true) {
+  if (dependencies.toolProfile === "full") {
+    tools.unshift(
+      getTimeTool,
+      readFileTool
+    );
     tools.push(
+      writePaperWikiSourceTool,
+      searchPaperWikiTool,
+      listLocalPapersTool,
       fetchPaperWebpageTool,
       registerManualPaperDownloadTool,
       openPaperPageForLoginTool,

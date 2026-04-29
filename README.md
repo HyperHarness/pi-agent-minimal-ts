@@ -226,10 +226,10 @@ Example interactive session:
 
 ```text
 model> openai/gpt-5.4
-> what time is it in UTC?
-[tool:start] get_time
-[tool:end] get_time ok
-assistant> Wednesday, April 22, 2026 at 1:23:45 PM UTC
+> search papers about retrieval augmented generation
+[tool:start] search_papers
+[tool:end] search_papers ok
+assistant> I found several relevant papers...
 > exit
 ```
 
@@ -262,8 +262,8 @@ In non-interactive mode:
 
 ## Built-in Tools
 
-- `get_time`: returns the current time, optionally for a given timezone
-- `read_file`: reads a UTF-8 text file from inside the current workspace
+The default chat agent exposes a compact paper-focused tool set:
+
 - `web_search`: searches the configured provider and returns JSON text for matching results
 - `fetch_url`: fetches an HTML page and returns JSON text for the extracted content
 - `search_papers`: searches arXiv, APS/Physical Review metadata, and configured web results, merges overlapping results, and classifies supported publishers versus external sources
@@ -271,18 +271,15 @@ In non-interactive mode:
 - `inspect_paper`: inspects parsed paper artifacts, parse quality, and section previews without returning the full paper body
 - `read_paper_section`: reads bounded text from a parsed paper by section id or page range, with source element metadata
 - `search_paper_text`: searches inside a parsed paper and returns snippets with page, section, and element metadata
-- `write_paper_wiki_source`: saves an LLM-authored, provenance-tracked paper summary under `knowledge-base/wiki/sources/`
-- `search_paper_wiki`: searches the LLM-authored source summaries for knowledge retrieval
-- `list_local_papers`: lists local paper records, parsed artifacts, and wiki summaries
 - `search_local_papers`: searches local paper records, parsed Markdown, and wiki summaries
 
-Advanced implementation tools such as `fetch_paper_webpage`, `parse_paper`, `register_manual_paper_download`, and `open_paper_page_for_login` are not exposed to the default chat agent. They remain available to diagnostics/tests by creating tools with `exposeAdvancedPaperTools: true`.
+Development and diagnostics can use `createTools(workspaceDir, { toolProfile: "full" })` to expose the complete tool set. Full mode adds `get_time`, `read_file`, `write_paper_wiki_source`, `search_paper_wiki`, `list_local_papers`, `fetch_paper_webpage`, `parse_paper`, `register_manual_paper_download`, and `open_paper_page_for_login`.
 
 For `search_papers`, concise English keyword queries still work best because the search stages include arXiv, APS/Crossref metadata, and the configured web provider.
 
 OpenDataLoader PDF installation and verification notes are in [docs/opendataloader-pdf-install.md](docs/opendataloader-pdf-install.md). Docling fallback installation notes are in [docs/docling-pdf-install.md](docs/docling-pdf-install.md). Pandoc and LaTeXML installation notes are in [docs/pandoc-latexml-install.md](docs/pandoc-latexml-install.md).
 
-`read_file` rejects absolute paths and paths that resolve outside the workspace.
+In full mode, `read_file` rejects absolute paths and paths that resolve outside the workspace.
 
 Example prompts:
 
@@ -292,7 +289,7 @@ Example prompts:
 - `Download arXiv paper 2401.01234 with download_paper.`
 - `Download this paper with download_paper: https://www.science.org/doi/10.1126/science.adz8659`
 - `Search papers about the latest superconducting quantum computing results, then download the best open result with download_paper.`
-- `Register the manually downloaded PDF for https://example.com/paper with register_manual_paper_download using downloads/inbox/paper.pdf.`
+- Full mode: `Register the manually downloaded PDF for https://example.com/paper with register_manual_paper_download using downloads/inbox/paper.pdf.`
 
 ## Scripts
 
@@ -312,4 +309,4 @@ npm test
 
 - conversation history is kept in memory only
 - failed assistant turns are not persisted into the ongoing context
-- very large files are not size-limited yet, so `read_file` can still create memory pressure if misused
+- full-mode `read_file` does not size-limit very large files yet, so it can still create memory pressure if misused

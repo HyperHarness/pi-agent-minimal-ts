@@ -1,6 +1,6 @@
 import test from "node:test";
 import assert from "node:assert/strict";
-import { mkdtemp, rm, writeFile } from "node:fs/promises";
+import { mkdtemp, rm } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import path from "node:path";
 import type { Api, AssistantMessage, Model, ToolResultMessage, UserMessage } from "@mariozechner/pi-ai";
@@ -66,9 +66,9 @@ function findMessageIndex(
 
 test("runAgentTurn executes a tool call and appends the resulting messages", async () => {
   const registration = registerFauxProvider();
-  const prompt = "What time is it?";
+  const prompt = "Search the local papers.";
   registration.setResponses([
-    fauxAssistantMessage([fauxToolCall("get_time", {})], { stopReason: "toolUse" }),
+    fauxAssistantMessage([fauxToolCall("search_local_papers", { query: "agent memory" })], { stopReason: "toolUse" }),
     fauxAssistantMessage([fauxText("Done using the tool.")])
   ]);
 
@@ -98,7 +98,7 @@ test("runAgentTurn executes a tool call and appends the resulting messages", asy
 
     const toolCallingAssistantIndex = findMessageIndex(
       result.newMessages,
-      (message) => isAssistantMessage(message) && findAssistantToolCall(message, "get_time") !== undefined
+      (message) => isAssistantMessage(message) && findAssistantToolCall(message, "search_local_papers") !== undefined
     );
     assert.notEqual(toolCallingAssistantIndex, -1);
 
@@ -106,7 +106,7 @@ test("runAgentTurn executes a tool call and appends the resulting messages", asy
     assert.ok(toolCallingAssistant);
     assert.ok(isAssistantMessage(toolCallingAssistant));
 
-    const toolCall = findAssistantToolCall(toolCallingAssistant, "get_time");
+    const toolCall = findAssistantToolCall(toolCallingAssistant, "search_local_papers");
     assert.ok(toolCall);
     assert.ok(userMessageIndex < toolCallingAssistantIndex);
 
@@ -114,7 +114,7 @@ test("runAgentTurn executes a tool call and appends the resulting messages", asy
       result.newMessages,
       (message) =>
         isToolResultMessage(message) &&
-        message.toolName === "get_time" &&
+        message.toolName === "search_local_papers" &&
         message.toolCallId === toolCall.id
     );
     assert.notEqual(toolResultIndex, -1);
@@ -124,7 +124,7 @@ test("runAgentTurn executes a tool call and appends the resulting messages", asy
     const toolResult = result.newMessages[toolResultIndex];
     assert.ok(toolResult);
     assert.ok(isToolResultMessage(toolResult));
-    assert.equal(toolResult.toolName, "get_time");
+    assert.equal(toolResult.toolName, "search_local_papers");
     assert.equal(toolResult.toolCallId, toolCall.id);
     assert.equal(toolResult.isError, false);
     assert.ok(
@@ -145,7 +145,7 @@ test("runAgentTurn executes a tool call and appends the resulting messages", asy
 
     const toolExecutionStart = observedEvents.find(
       (event): event is ToolExecutionStartEvent =>
-        event.type === "tool_execution_start" && event.toolName === "get_time"
+        event.type === "tool_execution_start" && event.toolName === "search_local_papers"
     );
     assert.ok(toolExecutionStart);
     assert.equal(toolExecutionStart.toolCallId, toolCall.id);
@@ -153,7 +153,7 @@ test("runAgentTurn executes a tool call and appends the resulting messages", asy
     const toolExecutionEnd = observedEvents.find(
       (event): event is ToolExecutionEndEvent =>
         event.type === "tool_execution_end" &&
-        event.toolName === "get_time" &&
+        event.toolName === "search_local_papers" &&
         event.toolCallId === toolCall.id
     );
     assert.ok(toolExecutionEnd);
@@ -172,14 +172,14 @@ test("runAgentTurn executes a tool call and appends the resulting messages", asy
 
     const persistedToolCallingAssistant = context.messages.find(
       (message): message is AssistantMessage =>
-        isAssistantMessage(message) && findAssistantToolCall(message, "get_time")?.id === toolCall.id
+        isAssistantMessage(message) && findAssistantToolCall(message, "search_local_papers")?.id === toolCall.id
     );
     assert.ok(persistedToolCallingAssistant);
 
     const persistedToolResult = context.messages.find(
       (message): message is ToolResultMessage =>
         isToolResultMessage(message) &&
-        message.toolName === "get_time" &&
+        message.toolName === "search_local_papers" &&
         message.toolCallId === toolCall.id
     );
     assert.ok(persistedToolResult);
@@ -316,18 +316,17 @@ test("runAgentTurn reuses the same tools across prompts in one context", async (
 
 test("runAgentTurn rebuilds built-in tools when the workspace changes", async () => {
   const registration = registerFauxProvider();
+  const articleUrlA = "https://example.com/workspace-a.pdf";
+  const articleUrlB = "https://example.com/workspace-b.pdf";
   registration.setResponses([
-    fauxAssistantMessage([fauxToolCall("read_file", { path: "notes.txt" })], { stopReason: "toolUse" }),
-    fauxAssistantMessage([fauxText("Read the first workspace.")]),
-    fauxAssistantMessage([fauxToolCall("read_file", { path: "notes.txt" })], { stopReason: "toolUse" }),
-    fauxAssistantMessage([fauxText("Read the second workspace.")])
+    fauxAssistantMessage([fauxToolCall("download_paper", { url: articleUrlA })], { stopReason: "toolUse" }),
+    fauxAssistantMessage([fauxText("Queued the first workspace paper.")]),
+    fauxAssistantMessage([fauxToolCall("download_paper", { url: articleUrlB })], { stopReason: "toolUse" }),
+    fauxAssistantMessage([fauxText("Queued the second workspace paper.")])
   ]);
 
   const workspaceA = await mkdtemp(path.join(tmpdir(), "pi-agent-workspace-a-"));
   const workspaceB = await mkdtemp(path.join(tmpdir(), "pi-agent-workspace-b-"));
-  const relativePath = "notes.txt";
-  await writeFile(path.join(workspaceA, relativePath), "from workspace A", "utf8");
-  await writeFile(path.join(workspaceB, relativePath), "from workspace B", "utf8");
 
   const context: AgentContext = {
     systemPrompt: "You are a helpful assistant. Use tools when they are useful.",
@@ -340,15 +339,15 @@ test("runAgentTurn rebuilds built-in tools when the workspace changes", async ()
       model: registration.getModel(),
       workspaceDir: workspaceA,
       context,
-      prompt: "Read notes.txt from the first workspace."
+      prompt: "Queue a paper from the first workspace."
     });
     const firstToolResult = firstTurn.newMessages.find(
       (message): message is ToolResultMessage =>
-        isToolResultMessage(message) && message.toolName === "read_file"
+        isToolResultMessage(message) && message.toolName === "download_paper"
     );
     assert.ok(firstToolResult);
     assert.equal(firstToolResult.isError, false);
-    assert.deepEqual(firstToolResult.content, [{ type: "text", text: "from workspace A" }]);
+    assert.equal((firstToolResult.details as { articleUrl?: string }).articleUrl, articleUrlA);
 
     const firstWorkspaceTools = context.tools;
     assert.ok(firstWorkspaceTools);
@@ -357,15 +356,15 @@ test("runAgentTurn rebuilds built-in tools when the workspace changes", async ()
       model: registration.getModel(),
       workspaceDir: workspaceB,
       context,
-      prompt: "Read notes.txt from the second workspace."
+      prompt: "Queue a paper from the second workspace."
     });
     const secondToolResult = secondTurn.newMessages.find(
       (message): message is ToolResultMessage =>
-        isToolResultMessage(message) && message.toolName === "read_file"
+        isToolResultMessage(message) && message.toolName === "download_paper"
     );
     assert.ok(secondToolResult);
     assert.equal(secondToolResult.isError, false);
-    assert.deepEqual(secondToolResult.content, [{ type: "text", text: "from workspace B" }]);
+    assert.equal((secondToolResult.details as { articleUrl?: string }).articleUrl, articleUrlB);
     assert.ok(context.tools);
     assert.notStrictEqual(context.tools, firstWorkspaceTools);
   } finally {
@@ -379,16 +378,16 @@ test("runAgentTurn rebuilds built-in tools when the workspace changes", async ()
 
 test("runAgentTurn cleans up the prior tool set before replacing it on workspace switch", async () => {
   const registration = registerFauxProvider();
+  const articleUrl = "https://example.com/rebuilt-workspace.pdf";
   registration.setResponses([
     fauxAssistantMessage([fauxToolCall("remember_counter", {})], { stopReason: "toolUse" }),
     fauxAssistantMessage([fauxText("Used the custom tool.")]),
-    fauxAssistantMessage([fauxToolCall("read_file", { path: "notes.txt" })], { stopReason: "toolUse" }),
+    fauxAssistantMessage([fauxToolCall("download_paper", { url: articleUrl })], { stopReason: "toolUse" }),
     fauxAssistantMessage([fauxText("Used the rebuilt tool set.")])
   ]);
 
   const workspaceA = await mkdtemp(path.join(tmpdir(), "pi-agent-workspace-a-"));
   const workspaceB = await mkdtemp(path.join(tmpdir(), "pi-agent-workspace-b-"));
-  await writeFile(path.join(workspaceB, "notes.txt"), "from workspace B", "utf8");
 
   const cleanupCalls: number[] = [];
   const customTools = [
@@ -429,15 +428,15 @@ test("runAgentTurn cleans up the prior tool set before replacing it on workspace
       model: registration.getModel(),
       workspaceDir: workspaceB,
       context,
-      prompt: "Switch workspaces and read notes.txt."
+      prompt: "Switch workspaces and queue a paper."
     });
     const secondToolResult = secondTurn.newMessages.find(
       (message): message is ToolResultMessage =>
-        isToolResultMessage(message) && message.toolName === "read_file"
+        isToolResultMessage(message) && message.toolName === "download_paper"
     );
     assert.ok(secondToolResult);
     assert.equal(secondToolResult.isError, false);
-    assert.deepEqual(secondToolResult.content, [{ type: "text", text: "from workspace B" }]);
+    assert.equal((secondToolResult.details as { articleUrl?: string }).articleUrl, articleUrl);
     assert.deepEqual(cleanupCalls, [1]);
     assert.notStrictEqual(context.tools, customTools);
   } finally {

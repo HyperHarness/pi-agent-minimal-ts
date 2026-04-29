@@ -193,7 +193,7 @@ type SearchLocalPapersTool = {
 type CreateToolsDependencies = NonNullable<Parameters<typeof createTools>[1]>;
 
 function getReadFileTool(workspace: string): ReadFileTool {
-  const tools = createTools(workspace) as ReadonlyArray<{
+  const tools = createTools(workspace, { toolProfile: "full" }) as ReadonlyArray<{
     name: string;
     execute?: ReadFileTool["execute"];
   }>;
@@ -204,7 +204,7 @@ function getReadFileTool(workspace: string): ReadFileTool {
 }
 
 function getGetTimeTool(workspace: string): GetTimeTool {
-  const tools = createTools(workspace) as ReadonlyArray<{
+  const tools = createTools(workspace, { toolProfile: "full" }) as ReadonlyArray<{
     name: string;
     execute?: GetTimeTool["execute"];
   }>;
@@ -248,7 +248,7 @@ function getFetchPaperWebpageTool(
 ): FetchPaperWebpageTool {
   const tools = createTools(workspace, {
     ...dependencies,
-    exposeAdvancedPaperTools: true,
+    toolProfile: "full",
   }) as ReadonlyArray<{
     name: string;
     execute?: FetchPaperWebpageTool["execute"];
@@ -293,7 +293,7 @@ function getOpenPaperPageForLoginTool(
 ): OpenPaperPageForLoginTool {
   const tools = createTools(workspace, {
     ...dependencies,
-    exposeAdvancedPaperTools: true,
+    toolProfile: "full",
   }) as ReadonlyArray<{
     name: string;
     execute?: OpenPaperPageForLoginTool["execute"];
@@ -312,7 +312,7 @@ function getRegisterManualPaperDownloadTool(
 ): RegisterManualPaperDownloadTool {
   const tools = createTools(workspace, {
     ...dependencies,
-    exposeAdvancedPaperTools: true,
+    toolProfile: "full",
   }) as ReadonlyArray<{
     name: string;
     execute?: RegisterManualPaperDownloadTool["execute"];
@@ -329,7 +329,7 @@ function getParsePaperTool(
 ): ParsePaperTool {
   const tools = createTools(workspace, {
     ...dependencies,
-    exposeAdvancedPaperTools: true,
+    toolProfile: "full",
   }) as ReadonlyArray<{
     name: string;
     execute?: ParsePaperTool["execute"];
@@ -386,7 +386,7 @@ function getWritePaperWikiSourceTool(
   workspace: string,
   dependencies?: Parameters<typeof createTools>[1],
 ): WritePaperWikiSourceTool {
-  const tools = createTools(workspace, dependencies) as ReadonlyArray<{
+  const tools = createTools(workspace, { ...dependencies, toolProfile: "full" }) as ReadonlyArray<{
     name: string;
     execute?: WritePaperWikiSourceTool["execute"];
   }>;
@@ -400,7 +400,7 @@ function getSearchPaperWikiTool(
   workspace: string,
   dependencies?: Parameters<typeof createTools>[1],
 ): SearchPaperWikiTool {
-  const tools = createTools(workspace, dependencies) as ReadonlyArray<{
+  const tools = createTools(workspace, { ...dependencies, toolProfile: "full" }) as ReadonlyArray<{
     name: string;
     execute?: SearchPaperWikiTool["execute"];
   }>;
@@ -414,7 +414,7 @@ function getListLocalPapersTool(
   workspace: string,
   dependencies?: Parameters<typeof createTools>[1],
 ): ListLocalPapersTool {
-  const tools = createTools(workspace, dependencies) as ReadonlyArray<{
+  const tools = createTools(workspace, { ...dependencies, toolProfile: "full" }) as ReadonlyArray<{
     name: string;
     execute?: ListLocalPapersTool["execute"];
   }>;
@@ -527,15 +527,13 @@ test("get_time returns text content", async () => {
   }
 });
 
-test("createTools exposes the streamlined built-in tool set by default", async () => {
+test("createTools exposes the minimal default tool set", async () => {
   const workspace = await mkdtemp(path.join(tmpdir(), "pi-agent-tools-"));
 
   try {
     const tools = createTools(workspace);
     const toolNames = tools.map((tool) => tool.name);
     assert.deepEqual(toolNames, [
-      "get_time",
-      "read_file",
       "web_search",
       "fetch_url",
       "search_papers",
@@ -543,9 +541,6 @@ test("createTools exposes the streamlined built-in tool set by default", async (
       "inspect_paper",
       "read_paper_section",
       "search_paper_text",
-      "write_paper_wiki_source",
-      "search_paper_wiki",
-      "list_local_papers",
       "search_local_papers",
     ]);
 
@@ -570,16 +565,31 @@ test("createTools exposes the streamlined built-in tool set by default", async (
   }
 });
 
-test("createTools can expose advanced paper implementation tools for diagnostics", async () => {
+test("createTools full profile exposes every built-in tool", async () => {
   const workspace = await mkdtemp(path.join(tmpdir(), "pi-agent-tools-"));
 
   try {
-    const tools = createTools(workspace, { exposeAdvancedPaperTools: true });
+    const tools = createTools(workspace, { toolProfile: "full" });
     const toolNames = tools.map((tool) => tool.name);
-    assert.ok(toolNames.includes("fetch_paper_webpage"));
-    assert.ok(toolNames.includes("register_manual_paper_download"));
-    assert.ok(toolNames.includes("open_paper_page_for_login"));
-    assert.ok(toolNames.includes("parse_paper"));
+    assert.deepEqual(toolNames, [
+      "get_time",
+      "read_file",
+      "web_search",
+      "fetch_url",
+      "search_papers",
+      "download_paper",
+      "inspect_paper",
+      "read_paper_section",
+      "search_paper_text",
+      "search_local_papers",
+      "write_paper_wiki_source",
+      "search_paper_wiki",
+      "list_local_papers",
+      "fetch_paper_webpage",
+      "register_manual_paper_download",
+      "open_paper_page_for_login",
+      "parse_paper",
+    ]);
   } finally {
     await rm(workspace, { recursive: true, force: true });
   }
