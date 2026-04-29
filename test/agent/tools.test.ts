@@ -2379,6 +2379,10 @@ test("wiki_health_fix delegates to the injected health fixer dependency", async 
             status: options.dryRun === true ? "skipped" : "fixed",
             action: "parse",
             message: `dry:${options.dryRun === true}; threshold:${options.lowQualityScoreThreshold ?? 0}`,
+            details: {
+              status: "parsed",
+              markdown: "x".repeat(20000),
+            },
           },
         ],
       }),
@@ -2397,6 +2401,8 @@ test("wiki_health_fix delegates to the injected health fixer dependency", async 
       JSON.parse(result.content?.[0]?.text ?? "{}").results[0].message,
       "dry:true; threshold:0.6",
     );
+    assert.ok((result.content?.[0]?.text?.length ?? 0) < 5000);
+    assert.doesNotMatch(result.content?.[0]?.text ?? "", /xxxxx/);
     assert.equal(
       (result.details as { checked?: { issues?: Array<{ reason?: string }> } }).checked?.issues?.[0]?.reason,
       "dry:true; kinds:parse_missing; max:3",

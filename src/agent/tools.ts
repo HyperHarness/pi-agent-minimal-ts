@@ -506,6 +506,7 @@ type WikiHealthFixTool = AgentTool<
 
 const MAX_SEARCH_RESULT_PREVIEWS = 5;
 const MAX_SEARCH_PREVIEW_TEXT_LENGTH = 220;
+const MAX_WIKI_HEALTH_FIX_RESULT_PREVIEWS = 80;
 
 function compactPreviewText(value: string | undefined, maxLength = MAX_SEARCH_PREVIEW_TEXT_LENGTH): string | undefined {
   const compacted = value?.replace(/\s+/g, " ").trim();
@@ -516,6 +517,47 @@ function compactPreviewText(value: string | undefined, maxLength = MAX_SEARCH_PR
   return compacted.length > maxLength
     ? `${compacted.slice(0, Math.max(0, maxLength - 1)).trimEnd()}...`
     : compacted;
+}
+
+function isRecord(value: unknown): value is Record<string, unknown> {
+  return typeof value === "object" && value !== null;
+}
+
+function compactWikiHealthFixContent(result: Awaited<ReturnType<typeof fixWikiHealth>>): string {
+  const orderedResults = [
+    ...result.results.filter((item) => item.status !== "fixed"),
+    ...result.results.filter((item) => item.status === "fixed")
+  ];
+  const previewResults = orderedResults.slice(0, MAX_WIKI_HEALTH_FIX_RESULT_PREVIEWS).map((item) => {
+    const details = isRecord(item.details) ? item.details : undefined;
+    return {
+      paperKey: item.issue.paperKey,
+      issueKind: item.issue.kind,
+      status: item.status,
+      action: item.action,
+      message: item.message,
+      ...(details && typeof details.status === "string" ? { detailStatus: details.status } : {}),
+      ...(details && typeof details.message === "string" ? { detailMessage: compactPreviewText(details.message, 240) } : {}),
+      ...(details && isRecord(details.source) && typeof details.source.sourcePath === "string"
+        ? { sourcePath: details.source.sourcePath }
+        : {})
+    };
+  });
+
+  return JSON.stringify({
+    checked: {
+      totalPapers: result.checked.totalPapers,
+      issueCount: result.checked.issueCount,
+      summary: result.checked.summary
+    },
+    attempted: result.attempted,
+    fixed: result.fixed,
+    queued: result.queued,
+    skipped: result.skipped,
+    failed: result.failed,
+    results: previewResults,
+    omittedResults: Math.max(0, orderedResults.length - previewResults.length)
+  });
 }
 
 function summarizeWebSearchResults(results: WebSearchResult[]): SearchResultPreview[] {
@@ -1711,7 +1753,7 @@ export function createTools(workspaceDir: string, dependencies: ToolDependencies
       });
 
       return {
-        content: [{ type: "text", text: JSON.stringify(result) }],
+        content: [{ type: "text", text: compactWikiHealthFixContent(result) }],
         details: result
       };
     }
