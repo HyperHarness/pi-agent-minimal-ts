@@ -49,7 +49,7 @@ import { getPublisherAdapter } from "./publisher-adapters/index.js";
 import { fetchWebPage } from "./web-fetch.js";
 import { fetchPaperWebPage } from "./paper-webpage-fetch.js";
 import { searchWeb, type WebSearchResult } from "./web-search.js";
-import type { PaperDownloadResult, PaperSearchResult, SupportedPaperSource } from "./paper-types.js";
+import type { PaperDownloadResult, PaperSearchResult, PaperSearchSource, SupportedPaperSource } from "./paper-types.js";
 import { buildArxivHtmlUrl } from "./arxiv.js";
 import {
   listLocalPapers,
@@ -284,6 +284,28 @@ const answerPaperWikiQuestionParameters = Type.Object({
   )
 });
 
+const answerResearchQuestionParameters = Type.Object({
+  query: Type.String({
+    description:
+      "Scientific or paper-related question. The tool searches local wiki evidence first, then searches and ingests external papers only if local evidence is insufficient."
+  }),
+  maxLocalResults: Type.Optional(
+    Type.Integer({ description: "Maximum local wiki evidence items to return. Defaults to 8.", minimum: 1 })
+  ),
+  maxExternalCandidates: Type.Optional(
+    Type.Integer({ description: "Maximum external paper candidates to inspect when local evidence is insufficient. Defaults to 5.", minimum: 1 })
+  ),
+  maxDownloads: Type.Optional(
+    Type.Integer({ description: "Maximum external candidates to download and ingest. Defaults to 1.", minimum: 0 })
+  ),
+  autoDownload: Type.Optional(
+    Type.Boolean({ description: "Whether to download external candidates when local evidence is insufficient. Defaults to true." })
+  ),
+  autoSummarize: Type.Optional(
+    Type.Boolean({ description: "Whether to write wiki source summaries for newly parsed papers when a summary worker is configured. Defaults to true." })
+  )
+});
+
 const listLocalPapersParameters = Type.Object({
   query: Type.Optional(Type.String({ description: "Optional metadata query to filter local papers." })),
   status: Type.Optional(
@@ -364,6 +386,7 @@ type GeneratePaperWikiSummaryParameters = Static<typeof generatePaperWikiSummary
 type PaperWikiRelationsParameters = Static<typeof paperWikiRelationsParameters>;
 type SearchPaperWikiParameters = Static<typeof searchPaperWikiParameters>;
 type AnswerPaperWikiQuestionParameters = Static<typeof answerPaperWikiQuestionParameters>;
+type AnswerResearchQuestionParameters = Static<typeof answerResearchQuestionParameters>;
 type ListLocalPapersParameters = Static<typeof listLocalPapersParameters>;
 type SearchLocalPapersParameters = Static<typeof searchLocalPapersParameters>;
 type WikiHealthParameters = Static<typeof wikiHealthParameters>;
@@ -524,6 +547,57 @@ type AnswerPaperWikiQuestionTool = AgentTool<
   typeof answerPaperWikiQuestionParameters,
   AnswerPaperWikiQuestionDetails
 >;
+type ResearchQuestionStatus =
+  | "answered_from_wiki"
+  | "expanded_with_new_sources"
+  | "needs_user_action"
+  | "insufficient_evidence";
+type ResearchExternalCandidate = {
+  title: string;
+  source: PaperSearchResult["primarySource"];
+  action: PaperSearchResult["primaryAction"];
+  articleUrl?: string;
+  canonicalId?: string;
+  summary?: string;
+};
+type ResearchDownloadedPaper = {
+  title: string;
+  source: PaperDownloadResult["source"];
+  status: PaperDownloadResult["status"];
+  articleUrl: string;
+  recordPath?: string;
+  paperKey?: string;
+  readingStatus?: DownloadPaperReadingClosure["status"];
+  message?: string;
+};
+type ResearchWrittenSummary = {
+  paperKey: string;
+  status: Awaited<ReturnType<typeof generatePaperWikiSummary>>["status"];
+  sourcePath?: string;
+  message: string;
+};
+type ResearchBlockedItem = {
+  stage: "local_summary" | "external_search" | "download" | "parse" | "summary" | "user_action";
+  title?: string;
+  paperKey?: string;
+  articleUrl?: string;
+  reason: string;
+};
+type AnswerResearchQuestionDetails = {
+  query: string;
+  status: ResearchQuestionStatus;
+  localEvidence: AnswerPaperWikiQuestionDetails;
+  refreshedEvidence?: AnswerPaperWikiQuestionDetails;
+  externalCandidates: ResearchExternalCandidate[];
+  downloaded: ResearchDownloadedPaper[];
+  summariesWritten: ResearchWrittenSummary[];
+  blocked: ResearchBlockedItem[];
+  answerPolicy: string[];
+};
+type AnswerResearchQuestionTool = AgentTool<
+  typeof answerResearchQuestionParameters,
+  AnswerResearchQuestionDetails
+>;
 type ListLocalPapersTool = AgentTool<
   typeof listLocalPapersParameters,
   Awaited<ReturnType<typeof listLocalPapers>>
@@ -545,6 +619,8 @@ const MAX_SEARCH_RESULT_PREVIEWS = 5;
 const MAX_SEARCH_PREVIEW_TEXT_LENGTH = 220;
 const MAX_WIKI_HEALTH_FIX_RESULT_PREVIEWS = 80;
 const DEFAULT_WIKI_QUESTION_RESULTS = 8;
+const DEFAULT_RESEARCH_EXTERNAL_CANDIDATES = 5;
+const DEFAULT_RESEARCH_DOWNLOADS = 1;
 
 function compactPreviewText(value: string | undefined, maxLength = MAX_SEARCH_PREVIEW_TEXT_LENGTH): string | undefined {
   const compacted = value?.replace(/\s+/g, " ").trim();
@@ -658,6 +734,25 @@ async function buildPaperWikiQuestionEvidence(input: {
     ],
     evidence: [],
     fallbackMatches
+  };
+}
+
+function findDownloadablePaperSource(result: PaperSearchResult): PaperSearchSource | undefined {
+  return result.sources.find((source) =>
+    source.action === "direct_download" ||
+    source.action === "authorized_download"
+  );
+}
+
+function summarizeResearchCandidate(result: PaperSearchResult): ResearchExternalCandidate {
+  const primarySource = result.sources.find((source) => source.source === result.primarySource) ?? result.sources[0];
+  return {
+    title: result.title,
+    source: result.primarySource,
+    action: result.primaryAction,
+    ...(primarySource?.articleUrl ? { articleUrl: primarySource.articleUrl } : {}),
+    ...(primarySource?.canonicalId ? { canonicalId: primarySource.canonicalId } : {}),
+    ...(result.summary ? { summary: compactPreviewText(result.summary, 500) } : {})
   };
 }
 
@@ -1787,6 +1882,223 @@ export function createTools(workspaceDir: string, dependencies: ToolDependencies
     }
   };
 
+  const answerResearchQuestionTool: AnswerResearchQuestionTool = {
+    name: "answer_research_question",
+    label: "Answer Research Question",
+    description:
+      "Runs the full evidence-first research workflow: search local paper wiki evidence first, then search/download/parse/summarize external papers only when the local wiki is insufficient. Use this for professional scientific questions that may require knowledge synthesis.",
+    parameters: answerResearchQuestionParameters,
+    executionMode: "sequential",
+    execute: async (_toolCallId: string, args: AnswerResearchQuestionParameters) => {
+      const maxLocalResults = Math.max(1, Math.trunc(args.maxLocalResults ?? DEFAULT_WIKI_QUESTION_RESULTS));
+      const maxExternalCandidates = Math.max(
+        1,
+        Math.trunc(args.maxExternalCandidates ?? DEFAULT_RESEARCH_EXTERNAL_CANDIDATES)
+      );
+      const maxDownloads = Math.max(0, Math.trunc(args.maxDownloads ?? DEFAULT_RESEARCH_DOWNLOADS));
+      const autoDownload = args.autoDownload ?? true;
+      const autoSummarize = args.autoSummarize ?? true;
+      const localEvidence = await buildPaperWikiQuestionEvidence({
+        workspaceDir: resolvedWorkspaceDir,
+        query: args.query,
+        maxResults: maxLocalResults,
+        searchPaperWikiImpl,
+        searchLocalPapersImpl
+      });
+
+      if (localEvidence.status === "has_wiki_evidence") {
+        const result: AnswerResearchQuestionDetails = {
+          query: args.query,
+          status: "answered_from_wiki",
+          localEvidence,
+          externalCandidates: [],
+          downloaded: [],
+          summariesWritten: [],
+          blocked: [],
+          answerPolicy: [
+            "Answer from localEvidence.evidence.",
+            "Cite paperKey or source path next to substantive claims.",
+            "Do not use network search because local wiki evidence was found."
+          ]
+        };
+        return {
+          content: [{ type: "text", text: JSON.stringify(result) }],
+          details: result
+        };
+      }
+
+      const blocked: ResearchBlockedItem[] = [];
+      let paperResults: PaperSearchResult[] = [];
+      try {
+        paperResults = await searchPapersImpl({
+          query: args.query,
+          maxResults: maxExternalCandidates
+        });
+      } catch (error) {
+        blocked.push({
+          stage: "external_search",
+          reason: error instanceof Error ? error.message : "External paper search failed."
+        });
+      }
+      const externalCandidates = paperResults.map(summarizeResearchCandidate);
+      const downloaded: ResearchDownloadedPaper[] = [];
+      const summariesWritten: ResearchWrittenSummary[] = [];
+
+      if (autoDownload && maxDownloads > 0) {
+        const downloadable = paperResults
+          .map((candidate) => ({ candidate, source: findDownloadablePaperSource(candidate) }))
+          .filter((item): item is { candidate: PaperSearchResult; source: PaperSearchSource } => item.source !== undefined)
+          .slice(0, maxDownloads);
+
+        for (const item of downloadable) {
+          try {
+            const downloadResult = await downloadPaperImpl({
+              workspaceDir: resolvedWorkspaceDir,
+              url: item.source.articleUrl,
+              title: item.candidate.title
+            });
+            const reading = await describeDownloadReadingClosure(downloadResult);
+            const paperKey = reading && "paperKey" in reading ? reading.paperKey : undefined;
+            downloaded.push({
+              title: item.candidate.title,
+              source: downloadResult.source,
+              status: downloadResult.status,
+              articleUrl: downloadResult.articleUrl,
+              ...("recordPath" in downloadResult ? { recordPath: downloadResult.recordPath } : {}),
+              ...(paperKey ? { paperKey } : {}),
+              ...(reading ? { readingStatus: reading.status } : {}),
+              ...("message" in downloadResult && typeof downloadResult.message === "string"
+                ? { message: downloadResult.message }
+                : {}),
+              ...(reading && "message" in reading && typeof reading.message === "string"
+                ? { message: reading.message }
+                : {})
+            });
+
+            if (!reading || reading.status === "failed") {
+              blocked.push({
+                stage: "parse",
+                title: item.candidate.title,
+                articleUrl: downloadResult.articleUrl,
+                reason: reading && "message" in reading ? reading.message : `Downloaded paper status is ${downloadResult.status}, but no parsed reading source is ready.`
+              });
+              continue;
+            }
+            if (reading.status === "queued") {
+              blocked.push({
+                stage: "user_action",
+                title: item.candidate.title,
+                articleUrl: downloadResult.articleUrl,
+                reason: reading.message
+              });
+              continue;
+            }
+
+            if (!autoSummarize) {
+              blocked.push({
+                stage: "summary",
+                title: item.candidate.title,
+                paperKey,
+                articleUrl: downloadResult.articleUrl,
+                reason: "autoSummarize is false; parsed paper was not written into the source-summary wiki."
+              });
+              continue;
+            }
+            if (!dependencies.paperSummaryWorker) {
+              blocked.push({
+                stage: "summary",
+                title: item.candidate.title,
+                paperKey,
+                articleUrl: downloadResult.articleUrl,
+                reason: "Summary worker is not configured; cannot automatically write a wiki source summary."
+              });
+              continue;
+            }
+            if (!paperKey) {
+              blocked.push({
+                stage: "summary",
+                title: item.candidate.title,
+                articleUrl: downloadResult.articleUrl,
+                reason: "Parsed reading did not return a paperKey for summary generation."
+              });
+              continue;
+            }
+
+            const summary = await generatePaperWikiSummaryImpl({
+              workspaceDir: resolvedWorkspaceDir,
+              paperKey,
+              mode: "write",
+              summaryWorker: dependencies.paperSummaryWorker
+            });
+            summariesWritten.push({
+              paperKey,
+              status: summary.status,
+              ...(summary.source?.sourcePath ? { sourcePath: summary.source.sourcePath } : {}),
+              message: summary.message
+            });
+            if (summary.status !== "written") {
+              blocked.push({
+                stage: "summary",
+                title: item.candidate.title,
+                paperKey,
+                articleUrl: downloadResult.articleUrl,
+                reason: summary.message
+              });
+            }
+          } catch (error) {
+            blocked.push({
+              stage: "download",
+              title: item.candidate.title,
+              articleUrl: item.source.articleUrl,
+              reason: error instanceof Error ? error.message : "Download failed."
+            });
+          }
+        }
+      }
+
+      const refreshedEvidence = summariesWritten.some((item) => item.status === "written")
+        ? await buildPaperWikiQuestionEvidence({
+            workspaceDir: resolvedWorkspaceDir,
+            query: args.query,
+            maxResults: maxLocalResults,
+            searchPaperWikiImpl,
+            searchLocalPapersImpl
+          })
+        : undefined;
+      const status: ResearchQuestionStatus =
+        refreshedEvidence?.status === "has_wiki_evidence"
+          ? "expanded_with_new_sources"
+          : blocked.length > 0
+            ? "needs_user_action"
+            : "insufficient_evidence";
+      const result: AnswerResearchQuestionDetails = {
+        query: args.query,
+        status,
+        localEvidence,
+        ...(refreshedEvidence ? { refreshedEvidence } : {}),
+        externalCandidates,
+        downloaded,
+        summariesWritten,
+        blocked,
+        answerPolicy: refreshedEvidence?.status === "has_wiki_evidence"
+          ? [
+              "Answer from refreshedEvidence.evidence.",
+              "Cite newly written or existing wiki source paths.",
+              "Mention which sources were ingested during this turn when relevant."
+            ]
+          : [
+              "Do not present the answer as fully wiki-grounded.",
+              "Explain the local evidence gap and any blocked downloads, queued browser work, authorization, parsing, or summary-worker issues.",
+              "Use externalCandidates only as candidate papers until they are downloaded, parsed, and summarized into the wiki."
+            ]
+      };
+      return {
+        content: [{ type: "text", text: JSON.stringify(result) }],
+        details: result
+      };
+    }
+  };
+
   const listLocalPapersTool: ListLocalPapersTool = {
     name: "list_local_papers",
     label: "List Local Papers",
@@ -1891,6 +2203,7 @@ export function createTools(workspaceDir: string, dependencies: ToolDependencies
     readPaperSectionTool,
     searchPaperTextTool,
     answerPaperWikiQuestionTool,
+    answerResearchQuestionTool,
     searchLocalPapersTool,
     wikiHealthTool,
     wikiHealthFixTool

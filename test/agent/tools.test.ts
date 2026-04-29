@@ -213,6 +213,21 @@ type AnswerPaperWikiQuestionTool = {
   ) => Promise<ToolResult>;
 };
 
+type AnswerResearchQuestionTool = {
+  execute: (
+    toolCallId: string,
+    args: {
+      query: string;
+      maxLocalResults?: number;
+      maxExternalCandidates?: number;
+      maxDownloads?: number;
+      autoDownload?: boolean;
+      autoSummarize?: boolean;
+    },
+    signal: undefined,
+  ) => Promise<ToolResult>;
+};
+
 type ListLocalPapersTool = {
   execute: (
     toolCallId: string,
@@ -521,6 +536,20 @@ function getAnswerPaperWikiQuestionTool(
   return tool as AnswerPaperWikiQuestionTool;
 }
 
+function getAnswerResearchQuestionTool(
+  workspace: string,
+  dependencies?: Parameters<typeof createTools>[1],
+): AnswerResearchQuestionTool {
+  const tools = createTools(workspace, dependencies) as ReadonlyArray<{
+    name: string;
+    execute?: AnswerResearchQuestionTool["execute"];
+  }>;
+  const tool = tools.find((candidate) => candidate.name === "answer_research_question");
+  assert.ok(tool);
+  assert.equal(typeof tool.execute, "function");
+  return tool as AnswerResearchQuestionTool;
+}
+
 function getListLocalPapersTool(
   workspace: string,
   dependencies?: Parameters<typeof createTools>[1],
@@ -681,6 +710,7 @@ test("createTools exposes the minimal default tool set", async () => {
       "read_paper_section",
       "search_paper_text",
       "answer_paper_wiki_question",
+      "answer_research_question",
       "search_local_papers",
       "wiki_health",
       "wiki_health_fix",
@@ -724,6 +754,7 @@ test("createTools full profile exposes every built-in tool", async () => {
       "read_paper_section",
       "search_paper_text",
       "answer_paper_wiki_question",
+      "answer_research_question",
       "search_local_papers",
       "wiki_health",
       "wiki_health_fix",
@@ -2340,6 +2371,183 @@ test("answer_paper_wiki_question reports local fallback matches as non-wiki evid
     assert.deepEqual(details.evidence, []);
     assert.equal(details.fallbackMatches?.[0]?.paperKey, "aps-target");
     assert.equal(details.fallbackMatches?.[0]?.field, "parsed_markdown");
+  } finally {
+    await rm(workspace, { recursive: true, force: true });
+  }
+});
+
+test("answer_research_question stops after local wiki evidence is found", async () => {
+  const workspace = await mkdtemp(path.join(tmpdir(), "pi-agent-tools-"));
+
+  try {
+    const tool = getAnswerResearchQuestionTool(workspace, {
+      searchPaperWiki: async (options) => ({
+        query: options.query,
+        results: [
+          {
+            paperKey: "arxiv-local",
+            title: "Local evidence",
+            path: "knowledge-base/wiki/sources/arxiv-local.md",
+            snippet: "local wiki evidence",
+          },
+        ],
+      }),
+      searchPapers: async () => {
+        throw new Error("external search should not run when wiki evidence exists");
+      },
+    });
+
+    const result = await tool.execute("research-call", {
+      query: "quantum LDPC",
+    }, undefined);
+    const details = result.details as {
+      status?: string;
+      localEvidence?: { evidence?: unknown[] };
+      externalCandidates?: unknown[];
+    };
+
+    assert.equal(details.status, "answered_from_wiki");
+    assert.equal(details.localEvidence?.evidence?.length, 1);
+    assert.deepEqual(details.externalCandidates, []);
+  } finally {
+    await rm(workspace, { recursive: true, force: true });
+  }
+});
+
+test("answer_research_question can download, parse, summarize, and refresh wiki evidence", async () => {
+  const workspace = await mkdtemp(path.join(tmpdir(), "pi-agent-tools-"));
+  const recordPath = path.join(workspace, "knowledge-base", "records", "arxiv-2601.00425.json");
+  const pdfPath = path.join(workspace, "knowledge-base", "raw", "pdfs", "arxiv-2601.00425.pdf");
+  let wikiSearchCalls = 0;
+
+  try {
+    const tool = getAnswerResearchQuestionTool(workspace, {
+      searchPaperWiki: async (options) => {
+        wikiSearchCalls += 1;
+        return {
+          query: options.query,
+          results: wikiSearchCalls > 1
+            ? [
+                {
+                  paperKey: "arxiv-2601.00425",
+                  title: "Newly summarized paper",
+                  path: "knowledge-base/wiki/sources/arxiv-2601.00425.md",
+                  snippet: "newly written wiki evidence",
+                },
+              ]
+            : [],
+        };
+      },
+      searchLocalPapers: async (options) => ({
+        query: options.query,
+        count: 0,
+        results: [],
+      }),
+      searchPapers: async () => [
+        {
+          title: "Newly summarized paper",
+          authors: ["A. Author"],
+          summary: "Candidate summary",
+          primarySource: "arxiv",
+          primaryAction: "direct_download",
+          sources: [
+            {
+              source: "arxiv",
+              action: "direct_download",
+              canonicalId: "2601.00425",
+              articleUrl: "https://arxiv.org/abs/2601.00425",
+              pdfUrl: "https://arxiv.org/pdf/2601.00425.pdf",
+            },
+          ],
+        },
+      ],
+      downloadPaper: async () => ({
+        status: "downloaded",
+        source: "arxiv",
+        canonicalId: "2601.00425",
+        articleUrl: "https://arxiv.org/abs/2601.00425",
+        finalPdfUrl: "https://arxiv.org/pdf/2601.00425.pdf",
+        path: pdfPath,
+        recordPath,
+      }),
+      fetchPaperWebPage: async () => {
+        throw new Error("HTML unavailable");
+      },
+      parsePaper: async () => ({
+        status: "parsed" as const,
+        paperKey: "arxiv-2601.00425",
+        engine: "tex-source" as const,
+        pdfSha256: "pdf-hash",
+        artifacts: {
+          sourcePath: path.join(workspace, "knowledge-base/wiki/sources/arxiv-2601.00425/source.json"),
+          parsePath: path.join(workspace, "knowledge-base/wiki/sources/arxiv-2601.00425/parses/tex-source/parse.json"),
+          markdownPath: path.join(workspace, "knowledge-base/wiki/sources/arxiv-2601.00425/parses/tex-source/document.md"),
+          qualityPath: path.join(workspace, "knowledge-base/wiki/sources/arxiv-2601.00425/parses/tex-source/quality.json"),
+          chunksPath: path.join(workspace, "knowledge-base/wiki/sources/arxiv-2601.00425/chunks/tex-source.jsonl"),
+        },
+        quality: {
+          status: "good" as const,
+          score: 1,
+          pages: 1,
+          totalTextLength: 128,
+          emptyPageCount: 0,
+          headingCount: 1,
+          tableCount: 0,
+          figureOrCaptionCount: 0,
+          warnings: [],
+        },
+        sections: [],
+      }),
+      generatePaperWikiSummary: async (options) => ({
+        status: "written",
+        paperKey: options.paperKey,
+        engine: "tex-source",
+        message: "Wrote wiki source summary.",
+        evidence: {
+          paperKey: options.paperKey,
+          engine: "tex-source",
+          pdfSha256: "pdf-hash",
+          paths: {
+            parseMarkdown: "document.md",
+            parseJson: "parse.json",
+            qualityJson: "quality.json",
+          },
+          sections: [],
+          totalMarkdownChars: 7,
+          truncated: false,
+          markdownPreview: "preview",
+        },
+        source: {
+          paperKey: options.paperKey,
+          title: "Newly summarized paper",
+          sourcePath: "knowledge-base/wiki/sources/arxiv-2601.00425.md",
+          indexPath: "knowledge-base/wiki/index.md",
+          logPath: "knowledge-base/wiki/log.md",
+          schemaPath: "knowledge-base/wiki/schema.md",
+        },
+      }),
+      paperSummaryWorker: async () => ({
+        summaryMarkdown: "summary",
+        confidence: "high",
+      }),
+    });
+
+    const result = await tool.execute("research-call", {
+      query: "new topic",
+      maxDownloads: 1,
+    }, undefined);
+    const details = result.details as {
+      status?: string;
+      downloaded?: Array<{ paperKey?: string; readingStatus?: string }>;
+      summariesWritten?: Array<{ paperKey?: string; status?: string }>;
+      refreshedEvidence?: { evidence?: unknown[] };
+    };
+
+    assert.equal(details.status, "expanded_with_new_sources");
+    assert.equal(details.downloaded?.[0]?.paperKey, "arxiv-2601.00425");
+    assert.equal(details.downloaded?.[0]?.readingStatus, "parsed");
+    assert.equal(details.summariesWritten?.[0]?.status, "written");
+    assert.equal(details.refreshedEvidence?.evidence?.length, 1);
   } finally {
     await rm(workspace, { recursive: true, force: true });
   }
