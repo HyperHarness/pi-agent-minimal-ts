@@ -723,7 +723,14 @@ export async function readInteractivePrompt(
   try {
     return await repl.question("> ");
   } catch (error) {
-    if (typeof error === "object" && error !== null && "code" in error && error.code === "ERR_USE_AFTER_CLOSE") {
+    if (
+      typeof error === "object" &&
+      error !== null &&
+      (
+        ("code" in error && error.code === "ERR_USE_AFTER_CLOSE") ||
+        ("name" in error && error.name === "AbortError")
+      )
+    ) {
       return null;
     }
 

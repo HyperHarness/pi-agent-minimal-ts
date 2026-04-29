@@ -610,6 +610,27 @@ test("readInteractivePrompt treats closed readline as a normal stop signal", asy
   assert.equal(result, null);
 });
 
+test("readInteractivePrompt treats Ctrl+C AbortError as a normal stop signal", async () => {
+  const readInteractivePrompt = (
+    piAgent as {
+      readInteractivePrompt?: (repl: {
+        question: (prompt: string) => Promise<string>;
+      }) => Promise<string | null>;
+    }
+  ).readInteractivePrompt;
+  assert.equal(typeof readInteractivePrompt, "function");
+
+  const repl = {
+    question: async () => {
+      throw Object.assign(new Error("Aborted with Ctrl+C"), { name: "AbortError" });
+    }
+  };
+
+  const result = await readInteractivePrompt!(repl);
+
+  assert.equal(result, null);
+});
+
 test("readInteractivePrompt rethrows non-close errors", async () => {
   const readInteractivePrompt = (
     piAgent as {
