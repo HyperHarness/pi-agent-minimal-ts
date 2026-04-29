@@ -9,6 +9,7 @@ import {
   resolveFetchTimeoutMs,
   withRequestTimeout
 } from "./network.js";
+import { sanitizeLatexmlMarkdown } from "./paper-reader/latexml-markdown.js";
 
 export interface FetchPaperWebPageOptions {
   url: string;
@@ -934,6 +935,29 @@ async function htmlToMarkdownWithPandoc(input: {
   }
 }
 
+function isArxivUrl(url: string): boolean {
+  try {
+    return /(^|\.)arxiv\.org$/i.test(new URL(url).hostname);
+  } catch {
+    return false;
+  }
+}
+
+function isLikelyLatexmlHtml(html: string): boolean {
+  return /\bltx_(?:document|page_main|page_content|para|section|abstract)\b|LaTeXML/i.test(html);
+}
+
+function maybeSanitizeLatexmlMarkdown(input: {
+  url: string;
+  html: string;
+  markdown: string;
+}): string {
+  if (!isArxivUrl(input.url) && !isLikelyLatexmlHtml(input.html)) {
+    return input.markdown;
+  }
+  return sanitizeLatexmlMarkdown(input.markdown);
+}
+
 function compactLine(line: string): string {
   return line
     .replace(/\s+/g, " ")
@@ -1084,10 +1108,15 @@ function buildPaperWebPageExtraction(input: {
 export function parsePaperWebPageHtml(options: ParsePaperWebPageHtmlOptions): PaperWebPageExtraction {
   const selected = selectArticleHtml(stripComments(options.html));
   const cleanedBlocks = removeKnownNoiseBlocks(selected.html);
-  return buildPaperWebPageExtraction({
+  const markdown = maybeSanitizeLatexmlMarkdown({
     url: options.url,
     html: options.html,
     markdown: htmlToMarkdown(cleanedBlocks.html)
+  });
+  return buildPaperWebPageExtraction({
+    url: options.url,
+    html: options.html,
+    markdown
   });
 }
 
@@ -1096,11 +1125,16 @@ export async function parsePaperWebPageHtmlWithPandoc(
 ): Promise<PaperWebPageExtraction> {
   const selected = selectArticleHtml(stripComments(options.html));
   const cleanedBlocks = removeKnownNoiseBlocks(selected.html);
-  const markdown = await htmlToMarkdownWithPandoc({
+  const rawMarkdown = await htmlToMarkdownWithPandoc({
     html: cleanedBlocks.html,
     env: options.env ?? process.env,
     ...(options.pandocBin ? { pandocBin: options.pandocBin } : {})
   }) ?? htmlToMarkdown(cleanedBlocks.html);
+  const markdown = maybeSanitizeLatexmlMarkdown({
+    url: options.url,
+    html: options.html,
+    markdown: rawMarkdown
+  });
   return buildPaperWebPageExtraction({
     url: options.url,
     html: options.html,

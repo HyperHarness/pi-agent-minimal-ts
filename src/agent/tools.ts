@@ -626,6 +626,7 @@ export interface ToolDependencies {
   paperBrowserManagerClient?: PaperBrowserManagerClient;
   extensionBridge?: PaperExtensionBridge;
   usePlaywrightPaperFallback?: boolean;
+  exposeAdvancedPaperTools?: boolean;
 }
 
 interface ToolSetMetadata {
@@ -633,25 +634,7 @@ interface ToolSetMetadata {
   workspaceDir: string;
 }
 
-export type AgentTools = [
-  GetTimeTool,
-  ReadFileTool,
-  WebSearchTool,
-  FetchUrlTool,
-  FetchPaperWebpageTool,
-  SearchPapersTool,
-  DownloadPaperTool,
-  RegisterManualPaperDownloadTool,
-  OpenPaperPageForLoginTool,
-  ParsePaperTool,
-  InspectPaperTool,
-  ReadPaperSectionTool,
-  SearchPaperTextTool,
-  WritePaperWikiSourceTool,
-  SearchPaperWikiTool,
-  ListLocalPapersTool,
-  SearchLocalPapersTool
-] & ToolSetMetadata;
+export type AgentTools = AgentTool<any>[] & ToolSetMetadata;
 
 export async function cleanupTools(tools: ReadonlyArray<AgentTool<any>> | undefined): Promise<void> {
   const cleanup = (tools as Partial<ToolSetMetadata> | undefined)?.cleanup;
@@ -963,9 +946,9 @@ export function createTools(workspaceDir: string, dependencies: ToolDependencies
 
       if (result.source === "arxiv") {
         return (
-          await parseDownloadedTexSourceForReading(result.recordPath)
-        ) ?? (
           await parseArxivWebpageForReading(result.canonicalId, result.recordPath)
+        ) ?? (
+          await parseDownloadedTexSourceForReading(result.recordPath)
         ) ?? parseDownloadedPdfForReading(result.recordPath);
       }
 
@@ -1215,7 +1198,7 @@ export function createTools(workspaceDir: string, dependencies: ToolDependencies
     name: "download_paper",
     label: "Download Paper",
     description:
-      "Downloads a paper by id or URL through the unified paper manager and closes the reading loop by generating or queuing markdown artifacts. APS, Nature, and Science use browser-extension webpage capture first; arXiv and other PDFs are parsed after download. When downloading a publisher URL from search_papers, pass the returned title so the manager can try an exact-title arXiv preprint fallback if the publisher download fails.",
+      "Downloads a paper by id or URL through the unified paper manager and closes the reading loop by generating or queuing markdown artifacts. APS, Nature, Science, and arXiv use webpage markdown first; arXiv falls back to TeX source and then PDF parsing, while other PDFs are parsed after download. When downloading a publisher URL from search_papers, pass the returned title so the manager can try an exact-title arXiv preprint fallback if the publisher download fails.",
     parameters: downloadPaperParameters,
     executionMode: "sequential",
     execute: async (_toolCallId: string, args: DownloadPaperParameters) => {
@@ -1388,7 +1371,7 @@ export function createTools(workspaceDir: string, dependencies: ToolDependencies
     name: "write_paper_wiki_source",
     label: "Write Paper Wiki Source",
     description:
-      "Saves an LLM-authored, provenance-tracked paper summary into knowledge-base/wiki/sources/ for later knowledge retrieval. Use after parse_paper and grounded reading.",
+      "Saves an LLM-authored, provenance-tracked paper summary into knowledge-base/wiki/sources/ for later knowledge retrieval. Use after download_paper has produced reading Markdown and the paper has been grounded with read_paper_section/search_paper_text.",
     parameters: writePaperWikiSourceParameters,
     executionMode: "sequential",
     execute: async (_toolCallId: string, args: WritePaperWikiSourceParameters) => {
@@ -1478,12 +1461,8 @@ export function createTools(workspaceDir: string, dependencies: ToolDependencies
     readFileTool,
     webSearchTool,
     fetchUrlTool,
-    fetchPaperWebpageTool,
     searchPapersTool,
     downloadPaperTool,
-    registerManualPaperDownloadTool,
-    openPaperPageForLoginTool,
-    parsePaperTool,
     inspectPaperTool,
     readPaperSectionTool,
     searchPaperTextTool,
@@ -1492,6 +1471,15 @@ export function createTools(workspaceDir: string, dependencies: ToolDependencies
     listLocalPapersTool,
     searchLocalPapersTool
   ] as unknown as AgentTools;
+
+  if (dependencies.exposeAdvancedPaperTools === true) {
+    tools.push(
+      fetchPaperWebpageTool,
+      registerManualPaperDownloadTool,
+      openPaperPageForLoginTool,
+      parsePaperTool
+    );
+  }
 
   Object.defineProperties(tools, {
     cleanup: {

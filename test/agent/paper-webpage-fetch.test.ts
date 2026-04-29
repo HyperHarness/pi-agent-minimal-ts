@@ -146,6 +146,49 @@ fs.writeFileSync(output, [
   }
 });
 
+test("parsePaperWebPageHtmlWithPandoc cleans arXiv LaTeXML raw HTML left by pandoc", async () => {
+  const workspace = await mkdtemp(path.join(tmpdir(), "pi-paper-webpage-arxiv-latexml-"));
+  try {
+    const pandocBin = await writeExecutableScript(workspace, "fake-pandoc", `#!/usr/bin/env node
+const fs = require("node:fs");
+const output = process.argv[process.argv.indexOf("--output") + 1];
+fs.writeFileSync(output, [
+  "<div class=\\"ltx_page_main\\">",
+  "# arXiv LaTeXML Paper",
+  "",
+  "## <span class=\\"ltx_tag ltx_tag_section\\">I </span>Introduction",
+  "",
+  "A <span class=\\"ltx_text ltx_font_italic\\">good</span> result [<a class=\\"ltx_ref\\" href=\\"#bib.bib1\\">1</a>].",
+  "",
+  "<figure class=\\"ltx_figure\\"><img src=\\"/html/2507.09690v3/Fig1.png\\" alt=\\"Figure 1\\" /><figcaption><span class=\\"ltx_tag\\">Figure 1: </span>Caption.</figcaption></figure>",
+  "</div>"
+].join("\\n"));
+`);
+    const extraction = await parsePaperWebPageHtmlWithPandoc({
+      url: "https://arxiv.org/html/2507.09690",
+      html: `
+        <html>
+          <body>
+            <article class="ltx_document">
+              <h1>arXiv LaTeXML Paper</h1>
+              <section class="ltx_section"><h2>Introduction</h2></section>
+            </article>
+          </body>
+        </html>
+      `,
+      pandocBin
+    });
+
+    assert.match(extraction.markdown, /# arXiv LaTeXML Paper/);
+    assert.match(extraction.markdown, /## I Introduction/);
+    assert.match(extraction.markdown, /A good result \[1\]\./);
+    assert.match(extraction.markdown, /!\[Figure 1]\(\/html\/2507\.09690v3\/Fig1\.png\)/);
+    assert.doesNotMatch(extraction.markdown, /<span|<div|<a\b|ltx_/);
+  } finally {
+    await rm(workspace, { recursive: true, force: true });
+  }
+});
+
 test("fetchPaperWebPage rejects non-html responses", async () => {
   await assert.rejects(
     () =>
@@ -227,6 +270,7 @@ test("fetchPaperWebPage downloads direct HTML image assets", async () => {
     });
     const markdown = await readFile(result.artifacts.markdownPath, "utf8");
     assert.match(markdown, /assets\/x1\.png/);
+    assert.doesNotMatch(markdown, /assets\/assets\//);
     const assetPath = path.join(
       workspace,
       "knowledge-base",
@@ -290,6 +334,51 @@ test("savePaperWebPageParse warns when arXiv comments report missing figures", a
     assert.ok(
       result.quality.warnings.some((warning) =>
         warning.includes("arXiv comments report 8 figures")
+      )
+    );
+  } finally {
+    await rm(workspace, { recursive: true, force: true });
+  }
+});
+
+test("savePaperWebPageParse downgrades webpage markdown with substantial raw HTML", async () => {
+  const workspace = await mkdtemp(path.join(tmpdir(), "pi-paper-webpage-raw-html-quality-"));
+  try {
+    const result = await savePaperWebPageParse({
+      workspaceDir: workspace,
+      paperKey: "arxiv-raw-html",
+      extraction: {
+        url: "https://arxiv.org/html/2507.09690",
+        title: "Raw HTML paper",
+        markdown: [
+          "# Raw HTML paper",
+          "",
+          "## Introduction",
+          "",
+          `${'<span class="ltx_text">raw</span> '.repeat(30)}${"article body ".repeat(250)}`
+        ].join("\n"),
+        metadata: {
+          title: "Raw HTML paper",
+          authors: []
+        },
+        access: {
+          status: "full_text",
+          signals: []
+        },
+        stats: {
+          chars: 5000,
+          wordsApprox: 800,
+          navigationLinesRemoved: 0,
+          extractedFrom: "article"
+        }
+      }
+    });
+
+    assert.equal(result.quality.status, "needs_hybrid");
+    assert.ok(result.quality.score < 0.7);
+    assert.ok(
+      result.quality.warnings.some((warning) =>
+        warning.includes("substantial raw HTML markup")
       )
     );
   } finally {

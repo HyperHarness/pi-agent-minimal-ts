@@ -171,7 +171,7 @@ knowledge-base/
     state/
 ```
 
-Use `parse_paper` first to convert a downloaded PDF into `wiki/sources/<paper-key>/parses/<engine>/document.md`. After reading and grounding the summary against the parsed text, use `write_paper_wiki_source` to save the final LLM-authored source page as `wiki/sources/<paper-key>.md`. Use `search_paper_wiki` for knowledge retrieval over those source summaries.
+Use `download_paper` first to close the download loop and generate the preferred Markdown source under `wiki/sources/<paper-key>/parses/<engine>/document.md`. After reading and grounding the summary against the parsed text, use `write_paper_wiki_source` to save the final LLM-authored source page as `wiki/sources/<paper-key>.md`. Use `search_paper_wiki` for knowledge retrieval over those source summaries.
 
 ## Search And Fetch Configuration
 
@@ -267,15 +267,16 @@ In non-interactive mode:
 - `web_search`: searches the configured provider and returns JSON text for matching results
 - `fetch_url`: fetches an HTML page and returns JSON text for the extracted content
 - `search_papers`: searches arXiv, APS/Physical Review metadata, and configured web results, merges overlapping results, and classifies supported publishers versus external sources
-- `download_paper`: downloads arXiv papers into `knowledge-base/raw/pdfs/`, uses the extension bridge for supported publisher and external URLs when configured, returns `already_downloaded` for existing indexed PDFs, and returns `extension_unavailable` when the bridge is needed but unavailable
-- `register_manual_paper_download`: registers a manually downloaded external PDF into `knowledge-base/raw/pdfs/` and updates the local index so repeated requests for the same URL are skipped
-- `open_paper_page_for_login`: opens the paper page in the managed browser session for manual login review without downloading anything
-- `parse_paper`: parses downloaded papers into structured reading artifacts under `knowledge-base/wiki/sources/<paper-key>/`; arXiv can use TeX source through `latexmlc -> pandoc`, publisher webpages use filtered HTML through Pandoc when available, and PDF `auto` starts with OpenDataLoader PDF, falls back to Docling, then uses `plain-text-baseline`
+- `download_paper`: downloads or queues a paper and owns the full reading-source pipeline; arXiv uses HTML webpage Markdown first with TeX source and PDF fallbacks, supported publishers use extension-captured webpage Markdown, and other PDFs are parsed after download
 - `inspect_paper`: inspects parsed paper artifacts, parse quality, and section previews without returning the full paper body
 - `read_paper_section`: reads bounded text from a parsed paper by section id or page range, with source element metadata
 - `search_paper_text`: searches inside a parsed paper and returns snippets with page, section, and element metadata
 - `write_paper_wiki_source`: saves an LLM-authored, provenance-tracked paper summary under `knowledge-base/wiki/sources/`
 - `search_paper_wiki`: searches the LLM-authored source summaries for knowledge retrieval
+- `list_local_papers`: lists local paper records, parsed artifacts, and wiki summaries
+- `search_local_papers`: searches local paper records, parsed Markdown, and wiki summaries
+
+Advanced implementation tools such as `fetch_paper_webpage`, `parse_paper`, `register_manual_paper_download`, and `open_paper_page_for_login` are not exposed to the default chat agent. They remain available to diagnostics/tests by creating tools with `exposeAdvancedPaperTools: true`.
 
 For `search_papers`, concise English keyword queries still work best because the search stages include arXiv, APS/Crossref metadata, and the configured web provider.
 

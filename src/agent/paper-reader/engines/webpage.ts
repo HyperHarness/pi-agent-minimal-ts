@@ -402,6 +402,7 @@ async function materializeWebpageAssets(input: {
   for (const [target, replacement] of replacements.entries()) {
     markdown = markdown.replace(new RegExp(escapeRegExp(target), "g"), replacement);
   }
+  markdown = markdown.replace(/\bassets\/assets\//g, "assets/");
   markdown = insertMissingFigureAssetLinks(markdown, materializedAssets);
   markdown = insertOrderedFigureAssetLinks({
     markdown,

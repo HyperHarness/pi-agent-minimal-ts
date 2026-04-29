@@ -246,7 +246,10 @@ function getFetchPaperWebpageTool(
   workspace: string,
   dependencies?: Parameters<typeof createTools>[1],
 ): FetchPaperWebpageTool {
-  const tools = createTools(workspace, dependencies) as ReadonlyArray<{
+  const tools = createTools(workspace, {
+    ...dependencies,
+    exposeAdvancedPaperTools: true,
+  }) as ReadonlyArray<{
     name: string;
     execute?: FetchPaperWebpageTool["execute"];
   }>;
@@ -288,7 +291,10 @@ function getOpenPaperPageForLoginTool(
   workspace: string,
   dependencies?: Parameters<typeof createTools>[1],
 ): OpenPaperPageForLoginTool {
-  const tools = createTools(workspace, dependencies) as ReadonlyArray<{
+  const tools = createTools(workspace, {
+    ...dependencies,
+    exposeAdvancedPaperTools: true,
+  }) as ReadonlyArray<{
     name: string;
     execute?: OpenPaperPageForLoginTool["execute"];
   }>;
@@ -304,7 +310,10 @@ function getRegisterManualPaperDownloadTool(
   workspace: string,
   dependencies?: Parameters<typeof createTools>[1],
 ): RegisterManualPaperDownloadTool {
-  const tools = createTools(workspace, dependencies) as ReadonlyArray<{
+  const tools = createTools(workspace, {
+    ...dependencies,
+    exposeAdvancedPaperTools: true,
+  }) as ReadonlyArray<{
     name: string;
     execute?: RegisterManualPaperDownloadTool["execute"];
   }>;
@@ -318,7 +327,10 @@ function getParsePaperTool(
   workspace: string,
   dependencies?: Parameters<typeof createTools>[1],
 ): ParsePaperTool {
-  const tools = createTools(workspace, dependencies) as ReadonlyArray<{
+  const tools = createTools(workspace, {
+    ...dependencies,
+    exposeAdvancedPaperTools: true,
+  }) as ReadonlyArray<{
     name: string;
     execute?: ParsePaperTool["execute"];
   }>;
@@ -515,7 +527,7 @@ test("get_time returns text content", async () => {
   }
 });
 
-test("createTools exposes the unified built-in tool set", async () => {
+test("createTools exposes the streamlined built-in tool set by default", async () => {
   const workspace = await mkdtemp(path.join(tmpdir(), "pi-agent-tools-"));
 
   try {
@@ -526,12 +538,8 @@ test("createTools exposes the unified built-in tool set", async () => {
       "read_file",
       "web_search",
       "fetch_url",
-      "fetch_paper_webpage",
       "search_papers",
       "download_paper",
-      "register_manual_paper_download",
-      "open_paper_page_for_login",
-      "parse_paper",
       "inspect_paper",
       "read_paper_section",
       "search_paper_text",
@@ -557,6 +565,21 @@ test("createTools exposes the unified built-in tool set", async () => {
     assert.equal(searchPapersMaxResults?.type, "integer");
     assert.equal(searchPapersMaxResults?.description, "Maximum number of results to return.");
     assert.equal(searchPapersMaxResults?.minimum, 1);
+  } finally {
+    await rm(workspace, { recursive: true, force: true });
+  }
+});
+
+test("createTools can expose advanced paper implementation tools for diagnostics", async () => {
+  const workspace = await mkdtemp(path.join(tmpdir(), "pi-agent-tools-"));
+
+  try {
+    const tools = createTools(workspace, { exposeAdvancedPaperTools: true });
+    const toolNames = tools.map((tool) => tool.name);
+    assert.ok(toolNames.includes("fetch_paper_webpage"));
+    assert.ok(toolNames.includes("register_manual_paper_download"));
+    assert.ok(toolNames.includes("open_paper_page_for_login"));
+    assert.ok(toolNames.includes("parse_paper"));
   } finally {
     await rm(workspace, { recursive: true, force: true });
   }
@@ -880,74 +903,7 @@ test("download_paper delegates id inputs to the injected paper manager dependenc
   }
 });
 
-test("download_paper prefers arXiv TeX source markdown before arXiv HTML and PDF parsing", async () => {
-  const workspace = await mkdtemp(path.join(tmpdir(), "pi-agent-tools-"));
-  const recordPath = path.join(workspace, "papers", "arxiv-2601.00425.json");
-  const pdfPath = path.join(workspace, "papers", "arxiv-2601.00425.pdf");
-  const managerResult: PaperDownloadResult = {
-    status: "downloaded",
-    source: "arxiv",
-    canonicalId: "2601.00425",
-    articleUrl: "https://arxiv.org/abs/2601.00425",
-    finalPdfUrl: "https://arxiv.org/pdf/2601.00425.pdf",
-    path: pdfPath,
-    recordPath,
-  };
-  const calls: string[] = [];
-
-  try {
-    const downloadPaperTool = getDownloadPaperTool(workspace, {
-      downloadPaper: async () => managerResult,
-      parsePaper: async (options) => {
-        calls.push(`parse:${options.engine ?? "auto"}`);
-        assert.equal(options.engine, "tex-source");
-        assert.equal(options.recordPath, recordPath);
-        return {
-          status: "parsed",
-          paperKey: "arxiv-2601.00425",
-          engine: "tex-source",
-          pdfSha256: "pdf-hash",
-          artifacts: {
-            sourcePath: path.join(workspace, "knowledge-base/wiki/sources/arxiv-2601.00425/source.json"),
-            parsePath: path.join(workspace, "knowledge-base/wiki/sources/arxiv-2601.00425/parses/tex-source/parse.json"),
-            markdownPath: path.join(workspace, "knowledge-base/wiki/sources/arxiv-2601.00425/parses/tex-source/document.md"),
-            qualityPath: path.join(workspace, "knowledge-base/wiki/sources/arxiv-2601.00425/parses/tex-source/quality.json"),
-            chunksPath: path.join(workspace, "knowledge-base/wiki/sources/arxiv-2601.00425/chunks/tex-source.jsonl"),
-          },
-          quality: {
-            status: "good",
-            score: 1,
-            pages: 1,
-            totalTextLength: 128,
-            emptyPageCount: 0,
-            headingCount: 2,
-            tableCount: 0,
-            figureOrCaptionCount: 0,
-            warnings: [],
-          },
-          sections: [],
-        };
-      },
-      fetchPaperWebPage: async () => {
-        throw new Error("arXiv HTML should not be fetched when TeX source parsing succeeds");
-      },
-    });
-
-    const result = await downloadPaperTool.execute(
-      "call-arxiv-tex-source",
-      { id: "2601.00425" },
-      undefined,
-    );
-
-    assert.deepEqual(calls, ["parse:tex-source"]);
-    assert.equal((result.details as { reading?: { strategy?: string } }).reading?.strategy, "pdf");
-    assert.equal((result.details as { reading?: { engine?: string } }).reading?.engine, "tex-source");
-  } finally {
-    await rm(workspace, { recursive: true, force: true });
-  }
-});
-
-test("download_paper prefers arXiv HTML webpage markdown before PDF parsing", async () => {
+test("download_paper prefers arXiv HTML webpage markdown before TeX source and PDF parsing", async () => {
   const workspace = await mkdtemp(path.join(tmpdir(), "pi-agent-tools-"));
   const recordPath = path.join(workspace, "papers", "arxiv-2601.00425.json");
   const pdfPath = path.join(workspace, "papers", "arxiv-2601.00425.pdf");
@@ -1005,6 +961,80 @@ test("download_paper prefers arXiv HTML webpage markdown before PDF parsing", as
             status: "good",
             score: 1,
             pages: 1,
+            totalTextLength: 128,
+            emptyPageCount: 0,
+            headingCount: 2,
+            tableCount: 0,
+            figureOrCaptionCount: 0,
+            warnings: [],
+          },
+          sections: [],
+        };
+      },
+      parsePaper: async () => {
+        throw new Error("TeX source should not be parsed when arXiv HTML succeeds");
+      },
+    });
+
+    const result = await downloadPaperTool.execute(
+      "call-arxiv-html-first",
+      { id: "2601.00425" },
+      undefined,
+    );
+
+    assert.deepEqual(calls, [
+      "fetch:https://arxiv.org/html/2601.00425",
+      "save:arxiv-2601.00425",
+    ]);
+    assert.equal((result.details as { reading?: { strategy?: string } }).reading?.strategy, "webpage");
+    assert.equal((result.details as { reading?: { engine?: string } }).reading?.engine, "webpage");
+  } finally {
+    await rm(workspace, { recursive: true, force: true });
+  }
+});
+
+test("download_paper falls back to arXiv TeX source before PDF parsing when HTML fails", async () => {
+  const workspace = await mkdtemp(path.join(tmpdir(), "pi-agent-tools-"));
+  const recordPath = path.join(workspace, "papers", "arxiv-2601.00425.json");
+  const pdfPath = path.join(workspace, "papers", "arxiv-2601.00425.pdf");
+  const managerResult: PaperDownloadResult = {
+    status: "downloaded",
+    source: "arxiv",
+    canonicalId: "2601.00425",
+    articleUrl: "https://arxiv.org/abs/2601.00425",
+    finalPdfUrl: "https://arxiv.org/pdf/2601.00425.pdf",
+    path: pdfPath,
+    recordPath,
+  };
+  const calls: string[] = [];
+
+  try {
+    const downloadPaperTool = getDownloadPaperTool(workspace, {
+      downloadPaper: async () => managerResult,
+      fetchPaperWebPage: async (options) => {
+        calls.push(`fetch:${options.url}`);
+        throw new Error("arXiv HTML unavailable");
+      },
+      parsePaper: async (options) => {
+        calls.push(`parse:${options.engine ?? "auto"}`);
+        assert.equal(options.engine, "tex-source");
+        assert.equal(options.recordPath, recordPath);
+        return {
+          status: "parsed",
+          paperKey: "arxiv-2601.00425",
+          engine: "tex-source",
+          pdfSha256: "pdf-hash",
+          artifacts: {
+            sourcePath: path.join(workspace, "knowledge-base/wiki/sources/arxiv-2601.00425/source.json"),
+            parsePath: path.join(workspace, "knowledge-base/wiki/sources/arxiv-2601.00425/parses/tex-source/parse.json"),
+            markdownPath: path.join(workspace, "knowledge-base/wiki/sources/arxiv-2601.00425/parses/tex-source/document.md"),
+            qualityPath: path.join(workspace, "knowledge-base/wiki/sources/arxiv-2601.00425/parses/tex-source/quality.json"),
+            chunksPath: path.join(workspace, "knowledge-base/wiki/sources/arxiv-2601.00425/chunks/tex-source.jsonl"),
+          },
+          quality: {
+            status: "good",
+            score: 1,
+            pages: 1,
             totalTextLength: 48,
             emptyPageCount: 0,
             headingCount: 1,
@@ -1018,17 +1048,17 @@ test("download_paper prefers arXiv HTML webpage markdown before PDF parsing", as
     });
 
     const result = await downloadPaperTool.execute(
-      "call-arxiv-html",
+      "call-arxiv-tex-fallback",
       { id: "2601.00425" },
       undefined,
     );
 
     assert.deepEqual(calls, [
       "fetch:https://arxiv.org/html/2601.00425",
-      "save:arxiv-2601.00425",
+      "parse:tex-source",
     ]);
-    assert.equal((result.details as { reading?: { strategy?: string } }).reading?.strategy, "webpage");
-    assert.equal((result.details as { reading?: { engine?: string } }).reading?.engine, "webpage");
+    assert.equal((result.details as { reading?: { strategy?: string } }).reading?.strategy, "pdf");
+    assert.equal((result.details as { reading?: { engine?: string } }).reading?.engine, "tex-source");
   } finally {
     await rm(workspace, { recursive: true, force: true });
   }

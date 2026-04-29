@@ -55,6 +55,15 @@ export function evaluateParseQuality(document: ParsedPaperDocument): PaperParseQ
       (element.text.match(/(?:%PDF-| endobj | endstream | xref | trailer )/g)?.length ?? 0),
     0
   );
+  const rawHtmlTagCount = document.elements.reduce(
+    (sum, element) =>
+      sum + (element.text.match(/<\/?(?:a|article|cite|div|figcaption|figure|section|span|sup)\b[^>]*>/gi)?.length ?? 0),
+    0
+  );
+  const latexmlClassCount = document.elements.reduce(
+    (sum, element) => sum + (element.text.match(/\bltx_[a-z0-9_-]+\b/gi)?.length ?? 0),
+    0
+  );
   const referenceTextLength = document.elements
     .filter((element) => element.type === "reference")
     .reduce((sum, element) => sum + element.text.trim().length, 0);
@@ -79,6 +88,9 @@ export function evaluateParseQuality(document: ParsedPaperDocument): PaperParseQ
   }
   if (pdfObjectDumpCount > 5) {
     warnings.push("Extracted text looks like raw PDF object syntax rather than paper body text.");
+  }
+  if (document.engine === "webpage" && (rawHtmlTagCount > 20 || latexmlClassCount > 20)) {
+    warnings.push("Extracted webpage markdown contains substantial raw HTML markup; post-processing likely failed.");
   }
   if (publisherWebpageWithoutMainBody) {
     warnings.push("No main body sections were detected; the publisher webpage may expose only abstract, metadata, references, or early-access placeholder text. Prefer PDF parsing.");
@@ -106,6 +118,9 @@ export function evaluateParseQuality(document: ParsedPaperDocument): PaperParseQ
   }
   if (pdfObjectDumpCount > 5) {
     score -= 0.8;
+  }
+  if (document.engine === "webpage" && (rawHtmlTagCount > 20 || latexmlClassCount > 20)) {
+    score -= 0.35;
   }
   if (publisherWebpageWithoutMainBody) {
     score -= 0.45;
