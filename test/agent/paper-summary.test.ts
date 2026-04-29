@@ -56,6 +56,7 @@ test("buildPaperSummaryEvidence returns bounded parsed markdown for a clean summ
 test("generatePaperWikiSummary writes a wiki source through an injected summary worker", async () => {
   const workspace = await createWorkspace();
   const receivedEvidence: string[] = [];
+  const progressStages: string[] = [];
 
   try {
     const pdfPath = await writePdf(
@@ -74,6 +75,9 @@ test("generatePaperWikiSummary writes a wiki source through an injected summary 
       paperKey: parsed.paperKey,
       mode: "write",
       force: true,
+      onProgress: (progress) => {
+        progressStages.push(progress.stage);
+      },
       summaryWorker: async ({ evidence }) => {
         receivedEvidence.push(evidence.markdown);
         return {
@@ -93,6 +97,14 @@ test("generatePaperWikiSummary writes a wiki source through an injected summary 
     const markdown = await readFile(path.join(workspace, result.source!.sourcePath), "utf8");
     assert.match(markdown, /paper-source-summary/);
     assert.match(markdown, /Repeated stabilizer measurements/);
+    assert.deepEqual(progressStages, [
+      "building_evidence",
+      "evidence_ready",
+      "summary_worker_start",
+      "summary_worker_done",
+      "writing_summary",
+      "summary_written"
+    ]);
   } finally {
     await rm(workspace, { recursive: true, force: true });
   }

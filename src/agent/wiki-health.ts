@@ -6,6 +6,7 @@ import { parsePaper, type ParsePaperOptions } from "./paper-reader/paper-reader.
 import {
   generatePaperWikiSummary,
   type GeneratePaperWikiSummaryOptions,
+  type PaperSummaryProgress,
   type PaperSummaryWorker
 } from "./paper-summary.js";
 import {
@@ -79,7 +80,29 @@ export interface WikiHealthFixOptions extends WikiHealthOptions {
     options: GeneratePaperWikiSummaryOptions
   ) => Promise<Awaited<ReturnType<typeof generatePaperWikiSummary>>>;
   paperSummaryWorker?: PaperSummaryWorker;
+  onProgress?: WikiHealthFixProgressReporter;
 }
+
+export type WikiHealthFixProgressStage =
+  | "checking_health"
+  | "health_checked"
+  | "summary_repair_start"
+  | "summary_repair_progress"
+  | "summary_repair_done";
+
+export interface WikiHealthFixProgress {
+  stage: WikiHealthFixProgressStage;
+  paperKey?: string;
+  issueKind?: WikiHealthIssueKind;
+  index?: number;
+  total?: number;
+  message: string;
+  summaryProgress?: PaperSummaryProgress;
+}
+
+export type WikiHealthFixProgressReporter = (
+  progress: WikiHealthFixProgress
+) => Promise<void> | void;
 
 export interface WikiHealthFixResult {
   checked: WikiHealthResult;
@@ -534,11 +557,22 @@ async function fixByDownload(input: {
 async function fixBySummary(input: {
   workspaceDir: string;
   issue: WikiHealthIssue;
+  index: number;
+  total: number;
   generatePaperWikiSummaryImpl: NonNullable<WikiHealthFixOptions["generatePaperWikiSummaryImpl"]>;
   paperSummaryWorker?: PaperSummaryWorker;
   dryRun: boolean;
+  onProgress?: WikiHealthFixProgressReporter;
 }): Promise<WikiHealthFixItem> {
   if (input.dryRun) {
+    await input.onProgress?.({
+      stage: "summary_repair_done",
+      paperKey: input.issue.paperKey,
+      issueKind: input.issue.kind,
+      index: input.index,
+      total: input.total,
+      message: `Dry run: would generate summary ${input.index}/${input.total} for ${input.issue.paperKey}.`
+    });
     return {
       issue: input.issue,
       status: "skipped",
@@ -548,11 +582,38 @@ async function fixBySummary(input: {
   }
 
   try {
+    await input.onProgress?.({
+      stage: "summary_repair_start",
+      paperKey: input.issue.paperKey,
+      issueKind: input.issue.kind,
+      index: input.index,
+      total: input.total,
+      message: `Generating summary ${input.index}/${input.total} for ${input.issue.paperKey}.`
+    });
     const result = await input.generatePaperWikiSummaryImpl({
       workspaceDir: input.workspaceDir,
       paperKey: input.issue.paperKey,
       mode: "write",
-      ...(input.paperSummaryWorker ? { summaryWorker: input.paperSummaryWorker } : {})
+      ...(input.paperSummaryWorker ? { summaryWorker: input.paperSummaryWorker } : {}),
+      onProgress: async (summaryProgress) => {
+        await input.onProgress?.({
+          stage: "summary_repair_progress",
+          paperKey: input.issue.paperKey,
+          issueKind: input.issue.kind,
+          index: input.index,
+          total: input.total,
+          message: `Summary ${input.index}/${input.total}: ${summaryProgress.message}`,
+          summaryProgress
+        });
+      }
+    });
+    await input.onProgress?.({
+      stage: "summary_repair_done",
+      paperKey: input.issue.paperKey,
+      issueKind: input.issue.kind,
+      index: input.index,
+      total: input.total,
+      message: `Finished summary ${input.index}/${input.total} for ${input.issue.paperKey}: ${result.status}.`
     });
     if (result.status === "written") {
       return {
@@ -571,6 +632,14 @@ async function fixBySummary(input: {
       details: result
     };
   } catch (error) {
+    await input.onProgress?.({
+      stage: "summary_repair_done",
+      paperKey: input.issue.paperKey,
+      issueKind: input.issue.kind,
+      index: input.index,
+      total: input.total,
+      message: `Failed summary ${input.index}/${input.total} for ${input.issue.paperKey}.`
+    });
     return {
       issue: input.issue,
       status: "failed",
@@ -592,9 +661,20 @@ function skippedFix(issue: WikiHealthIssue, message: string): WikiHealthFixItem 
 export async function fixWikiHealth(options: WikiHealthFixOptions): Promise<WikiHealthFixResult> {
   const workspaceDir = path.resolve(options.workspaceDir);
   const threshold = options.lowQualityScoreThreshold ?? DEFAULT_LOW_QUALITY_SCORE_THRESHOLD;
+  await options.onProgress?.({
+    stage: "checking_health",
+    message: "Checking wiki health before repair."
+  });
   const checked = await checkWikiHealth(options);
   const selectedKinds = options.issueKinds ? new Set(options.issueKinds) : undefined;
   const issues = checked.issues.filter((issue) => isIssueKindSelected(issue, selectedKinds));
+  const summaryIssues = issues.filter((issue) => issue.kind === "summary_missing");
+  let summaryIssueIndex = 0;
+  await options.onProgress?.({
+    stage: "health_checked",
+    total: summaryIssues.length,
+    message: `Wiki health check found ${checked.issueCount} issues; ${summaryIssues.length} summary repairs selected.`
+  });
   const authorizationBlocked = new Set(
     checked.issues
       .filter((issue) => issue.kind === "needs_authorization")
@@ -648,12 +728,16 @@ export async function fixWikiHealth(options: WikiHealthFixOptions): Promise<Wiki
       continue;
     }
     if (issue.kind === "summary_missing") {
+      summaryIssueIndex += 1;
       results.push(await fixBySummary({
         workspaceDir,
         issue,
+        index: summaryIssueIndex,
+        total: summaryIssues.length,
         generatePaperWikiSummaryImpl: options.generatePaperWikiSummaryImpl ?? generatePaperWikiSummary,
         ...(options.paperSummaryWorker ? { paperSummaryWorker: options.paperSummaryWorker } : {}),
-        dryRun: options.dryRun === true
+        dryRun: options.dryRun === true,
+        ...(options.onProgress ? { onProgress: options.onProgress } : {})
       }));
       continue;
     }

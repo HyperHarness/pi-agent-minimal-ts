@@ -221,6 +221,7 @@ model> openai/gpt-5.4
 - `> `: the REPL input prompt
 - `assistant> ...`: streamed or final assistant text
 - `[tool:start] ...` / `[tool:end] ...`: tool execution lifecycle messages
+- `[tool:progress] ...`: long-running tool progress, including summary generation stages
 
 Example interactive session:
 

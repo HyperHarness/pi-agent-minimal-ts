@@ -155,6 +155,30 @@ function formatToolExecutionDetails(event: Extract<AgentEvent, { type: "tool_exe
   return formatSearchToolDetails(event.result.details);
 }
 
+function formatToolProgressDetails(event: Extract<AgentEvent, { type: "tool_execution_update" }>): string | null {
+  const partialResult = event.partialResult;
+  if (!isRecord(partialResult)) {
+    return null;
+  }
+
+  const details = partialResult.details;
+  const progress = isRecord(details) ? details.progress : undefined;
+  const progressMessage = isRecord(progress) ? compactOutputText(progress.message, 260) : null;
+  if (progressMessage) {
+    return `[tool:progress] ${event.toolName} ${progressMessage}\n`;
+  }
+
+  const content = partialResult.content;
+  if (!Array.isArray(content)) {
+    return null;
+  }
+  const text = content
+    .filter(isRecord)
+    .find((item) => item.type === "text" && typeof item.text === "string")?.text;
+  const message = compactOutputText(text, 260);
+  return message ? `[tool:progress] ${event.toolName} ${message}\n` : null;
+}
+
 function normalizeBaseUrl(baseUrl: string | undefined): string | undefined {
   const trimmedBaseUrl = baseUrl?.trim();
   return trimmedBaseUrl ? trimmedBaseUrl : undefined;
@@ -244,6 +268,14 @@ export function createReplEventHandler(output: NodeJS.WriteStream): AgentMessage
     if (event.type === "tool_execution_end") {
       output.write(`[tool:end] ${event.toolName} ${event.isError ? "error" : "ok"}\n`);
       const detailsOutput = formatToolExecutionDetails(event);
+      if (detailsOutput) {
+        output.write(detailsOutput);
+      }
+      return;
+    }
+
+    if (event.type === "tool_execution_update") {
+      const detailsOutput = formatToolProgressDetails(event);
       if (detailsOutput) {
         output.write(detailsOutput);
       }

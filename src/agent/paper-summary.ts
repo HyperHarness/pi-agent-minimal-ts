@@ -72,6 +72,28 @@ export type PaperSummaryWorker = (
   input: PaperSummaryWorkerInput
 ) => Promise<PaperSummaryWorkerOutput>;
 
+export type PaperSummaryProgressStage =
+  | "building_evidence"
+  | "evidence_ready"
+  | "summary_worker_start"
+  | "summary_worker_done"
+  | "summary_skipped"
+  | "summary_drafted"
+  | "writing_summary"
+  | "summary_written";
+
+export interface PaperSummaryProgress {
+  stage: PaperSummaryProgressStage;
+  paperKey: string;
+  engine?: ConcretePaperParseEngine;
+  title?: string;
+  message: string;
+}
+
+export type PaperSummaryProgressReporter = (
+  progress: PaperSummaryProgress
+) => Promise<void> | void;
+
 export interface BuildPaperSummaryEvidenceOptions {
   workspaceDir: string;
   paperKey: string;
@@ -85,6 +107,7 @@ export interface GeneratePaperWikiSummaryOptions extends BuildPaperSummaryEviden
   mode?: "draft" | "write";
   force?: boolean;
   summaryWorker?: PaperSummaryWorker;
+  onProgress?: PaperSummaryProgressReporter;
 }
 
 export type GeneratePaperWikiSummaryStatus =
@@ -255,12 +278,31 @@ export async function generatePaperWikiSummary(
   options: GeneratePaperWikiSummaryOptions
 ): Promise<GeneratePaperWikiSummaryResult> {
   const mode = options.mode ?? "draft";
+  await options.onProgress?.({
+    stage: "building_evidence",
+    paperKey: options.paperKey,
+    message: `Building summary evidence for ${options.paperKey}.`
+  });
   const evidence = await buildPaperSummaryEvidence({
     ...options,
     includeRelatedCandidates: options.includeRelatedCandidates ?? true
   });
+  await options.onProgress?.({
+    stage: "evidence_ready",
+    paperKey: evidence.paperKey,
+    engine: evidence.engine,
+    ...(evidence.title ? { title: evidence.title } : {}),
+    message: `Prepared summary evidence for ${evidence.paperKey} using ${evidence.engine}.`
+  });
   const evidencePreview = previewEvidence(evidence);
   if (!options.force && evidence.quality && evidence.quality.status !== "good") {
+    await options.onProgress?.({
+      stage: "summary_skipped",
+      paperKey: evidence.paperKey,
+      engine: evidence.engine,
+      ...(evidence.title ? { title: evidence.title } : {}),
+      message: `Skipped summary generation for ${evidence.paperKey}; parse quality is ${evidence.quality.status}.`
+    });
     return {
       status: "skipped",
       paperKey: evidence.paperKey,
@@ -272,6 +314,13 @@ export async function generatePaperWikiSummary(
   }
 
   if (!options.summaryWorker) {
+    await options.onProgress?.({
+      stage: "summary_skipped",
+      paperKey: evidence.paperKey,
+      engine: evidence.engine,
+      ...(evidence.title ? { title: evidence.title } : {}),
+      message: `Skipped summary generation for ${evidence.paperKey}; summary worker is not configured.`
+    });
     return {
       status: "needs_worker",
       paperKey: evidence.paperKey,
@@ -282,8 +331,29 @@ export async function generatePaperWikiSummary(
     };
   }
 
+  await options.onProgress?.({
+    stage: "summary_worker_start",
+    paperKey: evidence.paperKey,
+    engine: evidence.engine,
+    ...(evidence.title ? { title: evidence.title } : {}),
+    message: `Running clean summary worker for ${evidence.paperKey}.`
+  });
   const draft = normalizeWorkerOutput(await options.summaryWorker({ evidence }));
+  await options.onProgress?.({
+    stage: "summary_worker_done",
+    paperKey: evidence.paperKey,
+    engine: evidence.engine,
+    ...(draft.title ?? evidence.title ? { title: draft.title ?? evidence.title } : {}),
+    message: `Summary worker finished for ${evidence.paperKey}.`
+  });
   if (!options.force && draft.confidence === "low") {
+    await options.onProgress?.({
+      stage: "summary_skipped",
+      paperKey: evidence.paperKey,
+      engine: evidence.engine,
+      ...(draft.title ?? evidence.title ? { title: draft.title ?? evidence.title } : {}),
+      message: `Skipped writing summary for ${evidence.paperKey}; worker confidence is low.`
+    });
     return {
       status: "skipped",
       paperKey: evidence.paperKey,
@@ -296,6 +366,13 @@ export async function generatePaperWikiSummary(
   }
 
   if (mode === "draft") {
+    await options.onProgress?.({
+      stage: "summary_drafted",
+      paperKey: evidence.paperKey,
+      engine: evidence.engine,
+      ...(draft.title ?? evidence.title ? { title: draft.title ?? evidence.title } : {}),
+      message: `Generated summary draft for ${evidence.paperKey}.`
+    });
     return {
       status: "drafted",
       paperKey: evidence.paperKey,
@@ -307,6 +384,13 @@ export async function generatePaperWikiSummary(
     };
   }
 
+  await options.onProgress?.({
+    stage: "writing_summary",
+    paperKey: evidence.paperKey,
+    engine: evidence.engine,
+    ...(draft.title ?? evidence.title ? { title: draft.title ?? evidence.title } : {}),
+    message: `Writing wiki source summary for ${evidence.paperKey}.`
+  });
   const source = await writePaperWikiSource({
     workspaceDir: path.resolve(options.workspaceDir),
     paperKey: evidence.paperKey,
@@ -318,6 +402,13 @@ export async function generatePaperWikiSummary(
     ...(draft.limitations ? { limitations: draft.limitations } : {}),
     ...(draft.openQuestions ? { openQuestions: draft.openQuestions } : {}),
     ...(draft.relatedPaperKeys ? { relatedPaperKeys: draft.relatedPaperKeys } : {})
+  });
+  await options.onProgress?.({
+    stage: "summary_written",
+    paperKey: evidence.paperKey,
+    engine: evidence.engine,
+    title: source.title,
+    message: `Wrote wiki source summary for ${evidence.paperKey}.`
   });
 
   return {

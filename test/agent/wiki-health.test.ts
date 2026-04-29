@@ -558,6 +558,7 @@ test("fixWikiHealth skips user-authored or user-authorized repairs with explicit
 test("fixWikiHealth generates missing summaries when a summary worker is available", async () => {
   const workspace = await createWorkspace();
   const generated: string[] = [];
+  const progressMessages: string[] = [];
 
   try {
     const parsedDir = path.join(
@@ -604,6 +605,9 @@ test("fixWikiHealth generates missing summaries when a summary worker is availab
     const result = await fixWikiHealth({
       workspaceDir: workspace,
       issueKinds: ["summary_missing"],
+      onProgress: (progress) => {
+        progressMessages.push(progress.message);
+      },
       paperSummaryWorker: async ({ evidence }) => {
         generated.push(evidence.paperKey);
         return {
@@ -617,6 +621,10 @@ test("fixWikiHealth generates missing summaries when a summary worker is availab
     assert.equal(result.fixed, 1);
     assert.equal(result.results[0]?.action, "summary");
     assert.equal(result.results[0]?.status, "fixed");
+    assert.ok(progressMessages.some((message) => message.includes("Checking wiki health")));
+    assert.ok(progressMessages.some((message) => message.includes("Generating summary 1/1")));
+    assert.ok(progressMessages.some((message) => message.includes("Summary 1/1: Running clean summary worker")));
+    assert.ok(progressMessages.some((message) => message.includes("Finished summary 1/1")));
   } finally {
     await rm(workspace, { recursive: true, force: true });
   }

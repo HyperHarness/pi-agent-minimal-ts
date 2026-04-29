@@ -734,6 +734,46 @@ test("createReplEventHandler prints compact search tool details", () => {
   assert.match(outputText, /https:\/\/journals\.aps\.org\/prapplied\/abstract\/10\.1103\/example/);
 });
 
+test("createReplEventHandler prints tool progress updates", () => {
+  const handlerFactory = (
+    piAgent as {
+      createReplEventHandler?: (output: NodeJS.WriteStream) => (event: AgentEvent) => void;
+    }
+  ).createReplEventHandler;
+  assert.equal(typeof handlerFactory, "function");
+
+  const writes: string[] = [];
+  const output: { write: (chunk: string | Uint8Array) => boolean } = {
+    write: (chunk) => {
+      writes.push(typeof chunk === "string" ? chunk : Buffer.from(chunk).toString("utf8"));
+      return true;
+    }
+  };
+  const handleEvent = handlerFactory!(output as NodeJS.WriteStream);
+
+  handleEvent({
+    type: "tool_execution_update",
+    toolName: "generate_paper_wiki_summary",
+    toolCallId: "call-summary",
+    args: { paperKey: "aps-target" },
+    partialResult: {
+      content: [{ type: "text", text: "Building summary evidence for aps-target." }],
+      details: {
+        progress: {
+          stage: "building_evidence",
+          paperKey: "aps-target",
+          message: "Building summary evidence for aps-target."
+        }
+      }
+    }
+  } as AgentEvent);
+
+  assert.match(
+    writes.join(""),
+    /\[tool:progress\] generate_paper_wiki_summary Building summary evidence for aps-target\./
+  );
+});
+
 test("parseCliArgs accepts --base-url", () => {
   const parseCliArgs = (
     piAgent as {

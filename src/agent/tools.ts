@@ -1,7 +1,7 @@
 import { readFile, realpath } from "node:fs/promises";
 import path from "node:path";
 import { Type, type Static } from "@mariozechner/pi-ai";
-import type { AgentTool } from "@mariozechner/pi-agent-core";
+import type { AgentTool, AgentToolUpdateCallback } from "@mariozechner/pi-agent-core";
 import {
   getPaperBrowserProfileDir,
   resolveDefaultPaperBrowserSessionFactory,
@@ -31,6 +31,7 @@ import {
 } from "./paper-wiki/paper-wiki.js";
 import {
   generatePaperWikiSummary,
+  type PaperSummaryProgress,
   type PaperSummaryWorker
 } from "./paper-summary.js";
 import { paperWikiRelations } from "./paper-relations.js";
@@ -54,7 +55,7 @@ import {
   listLocalPapers,
   searchLocalPapers
 } from "./local-paper-library.js";
-import { checkWikiHealth, fixWikiHealth } from "./wiki-health.js";
+import { checkWikiHealth, fixWikiHealth, type WikiHealthFixProgress } from "./wiki-health.js";
 import {
   readPaperRecord,
   readPaperRecordByPath,
@@ -766,6 +767,18 @@ interface ToolSetMetadata {
 }
 
 export type AgentTools = AgentTool<any>[] & ToolSetMetadata;
+
+type ToolProgress = PaperSummaryProgress | WikiHealthFixProgress;
+
+function emitToolProgress(
+  onUpdate: AgentToolUpdateCallback<any> | undefined,
+  progress: ToolProgress
+): void {
+  onUpdate?.({
+    content: [{ type: "text", text: progress.message }],
+    details: { progress }
+  });
+}
 
 export async function cleanupTools(tools: ReadonlyArray<AgentTool<any>> | undefined): Promise<void> {
   const cleanup = (tools as Partial<ToolSetMetadata> | undefined)?.cleanup;
@@ -1537,7 +1550,12 @@ export function createTools(workspaceDir: string, dependencies: ToolDependencies
       "Builds a bounded evidence package from parsed paper Markdown, sends it to a clean-context summary worker, and optionally writes the grounded wiki source summary.",
     parameters: generatePaperWikiSummaryParameters,
     executionMode: "sequential",
-    execute: async (_toolCallId: string, args: GeneratePaperWikiSummaryParameters) => {
+    execute: async (
+      _toolCallId: string,
+      args: GeneratePaperWikiSummaryParameters,
+      _signal: AbortSignal | undefined,
+      onUpdate: AgentToolUpdateCallback<any> | undefined
+    ) => {
       const result = await generatePaperWikiSummaryImpl({
         workspaceDir: resolvedWorkspaceDir,
         paperKey: args.paperKey,
@@ -1549,7 +1567,8 @@ export function createTools(workspaceDir: string, dependencies: ToolDependencies
           : {}),
         ...(args.maxRelatedCandidates !== undefined ? { maxRelatedCandidates: args.maxRelatedCandidates } : {}),
         ...(args.force !== undefined ? { force: args.force } : {}),
-        ...(dependencies.paperSummaryWorker ? { summaryWorker: dependencies.paperSummaryWorker } : {})
+        ...(dependencies.paperSummaryWorker ? { summaryWorker: dependencies.paperSummaryWorker } : {}),
+        onProgress: (progress) => emitToolProgress(onUpdate, progress)
       });
 
       return {
@@ -1672,7 +1691,12 @@ export function createTools(workspaceDir: string, dependencies: ToolDependencies
     description:
       "Attempts wiki health repairs, such as retrying downloads, parsing downloaded papers, and generating missing summaries through a clean-context summary worker; reports why unresolved issues need user action.",
     parameters: wikiHealthFixParameters,
-    execute: async (_toolCallId: string, args: WikiHealthFixParameters) => {
+    execute: async (
+      _toolCallId: string,
+      args: WikiHealthFixParameters,
+      _signal: AbortSignal | undefined,
+      onUpdate: AgentToolUpdateCallback<any> | undefined
+    ) => {
       const result = await fixWikiHealthImpl({
         workspaceDir: resolvedWorkspaceDir,
         ...(args.maxItems !== undefined ? { maxItems: args.maxItems } : {}),
@@ -1682,7 +1706,8 @@ export function createTools(workspaceDir: string, dependencies: ToolDependencies
         ...(args.issueKinds !== undefined ? { issueKinds: args.issueKinds } : {}),
         ...(args.dryRun !== undefined ? { dryRun: args.dryRun } : {}),
         ...(dependencies.paperSummaryWorker ? { paperSummaryWorker: dependencies.paperSummaryWorker } : {}),
-        generatePaperWikiSummaryImpl
+        generatePaperWikiSummaryImpl,
+        onProgress: (progress) => emitToolProgress(onUpdate, progress)
       });
 
       return {

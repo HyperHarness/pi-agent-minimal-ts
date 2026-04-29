@@ -179,6 +179,7 @@ type GeneratePaperWikiSummaryTool = {
       force?: boolean;
     },
     signal: undefined,
+    onUpdate?: (partialResult: ToolResult) => void,
   ) => Promise<ToolResult>;
 };
 
@@ -2016,6 +2017,7 @@ test("generate_paper_wiki_summary delegates to the injected summary dependency a
     paperKey: string;
     mode?: string;
     maxEvidenceChars?: number;
+    onProgress?: unknown;
   }> = [];
 
   try {
@@ -2063,9 +2065,69 @@ test("generate_paper_wiki_summary delegates to the injected summary dependency a
         paperKey: "aps-10.1103-nv7d-k3wr",
         mode: "draft",
         maxEvidenceChars: 4096,
+        onProgress: capturedCalls[0]?.onProgress,
       },
     ]);
+    assert.equal(typeof capturedCalls[0]?.onProgress, "function");
     assert.equal((result.details as { status?: string }).status, "drafted");
+  } finally {
+    await rm(workspace, { recursive: true, force: true });
+  }
+});
+
+test("generate_paper_wiki_summary streams progress updates", async () => {
+  const workspace = await mkdtemp(path.join(tmpdir(), "pi-agent-tools-"));
+  const updates: unknown[] = [];
+
+  try {
+    const tool = getGeneratePaperWikiSummaryTool(workspace, {
+      generatePaperWikiSummary: async (options) => {
+        await options.onProgress?.({
+          stage: "building_evidence",
+          paperKey: options.paperKey,
+          message: `Building summary evidence for ${options.paperKey}.`,
+        });
+        return {
+          status: "drafted" as const,
+          paperKey: options.paperKey,
+          engine: "webpage",
+          message: "Generated a draft.",
+          evidence: {
+            paperKey: options.paperKey,
+            engine: "webpage",
+            pdfSha256: "sha",
+            paths: {
+              parseMarkdown: "document.md",
+              parseJson: "parse.json",
+              qualityJson: "quality.json",
+            },
+            sections: [],
+            totalMarkdownChars: 10,
+            truncated: false,
+            markdownPreview: "preview",
+          },
+          draft: {
+            summaryMarkdown: "Grounded draft.",
+          },
+        };
+      },
+    });
+
+    await tool.execute("generate-summary-progress-call", {
+      paperKey: "aps-target",
+    }, undefined, (partialResult) => {
+      updates.push(partialResult.details);
+    });
+
+    assert.deepEqual(updates, [
+      {
+        progress: {
+          stage: "building_evidence",
+          paperKey: "aps-target",
+          message: "Building summary evidence for aps-target.",
+        },
+      },
+    ]);
   } finally {
     await rm(workspace, { recursive: true, force: true });
   }
