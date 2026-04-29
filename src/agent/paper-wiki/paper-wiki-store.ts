@@ -64,6 +64,10 @@ export function getPaperWikiSourcePath(workspaceDir: string, paperKey: string): 
   return path.join(getPaperWikiSourcesDir(workspaceDir), `${sanitizeWikiFilename(paperKey)}.md`);
 }
 
+export function getPaperWikiPagePath(workspaceDir: string, pageKey: string): string {
+  return path.join(getPaperWikiPagesDir(workspaceDir), `${sanitizeWikiFilename(pageKey)}.md`);
+}
+
 export function relativeToWorkspace(workspaceDir: string, filePath: string): string {
   return path.relative(workspaceDir, filePath).split(path.sep).join("/");
 }
@@ -77,18 +81,23 @@ This directory is maintained by the agent as a compact scientific-paper wiki.
 - Raw PDFs live in \`../raw/pdfs/\` and are immutable acquisition artifacts.
 - Parsed PDF output lives in \`sources/<paper-key>/\` and is derived evidence for that source.
 - LLM-authored retrieval summaries live in \`sources/<paper-key>.md\`.
-- Higher-level synthesis pages can live in \`pages/\` when the source layer is stable.
+- Higher-level synthesis pages live in \`pages/\` and must cite source summaries.
 - Source manifests can live in \`manifests/\` for migration and audit tooling.
 
 ## Conventions
 
 - Keep source pages grounded in parsed paper text and cite page numbers when possible.
+- Keep synthesis pages grounded in source summaries and cite paper keys inline.
 - Prefer short, searchable claims over long copied passages.
 - Preserve provenance in frontmatter: paper key, PDF hash, parser engine, raw PDF path, and parse paths.
 - Update \`index.md\` on every source write and append chronological events to \`log.md\`.
 `;
 
 const INITIAL_INDEX = `# Paper LLM Wiki Index
+
+## Pages
+
+No synthesis pages yet.
 
 ## Sources
 
@@ -131,6 +140,19 @@ export async function listPaperWikiSourceFiles(workspaceDir: string): Promise<st
     return entries
       .filter((entry) => entry.isFile() && entry.name.endsWith(".md"))
       .map((entry) => path.join(sourcesDir, entry.name))
+      .sort((left, right) => left.localeCompare(right));
+  } catch {
+    return [];
+  }
+}
+
+export async function listPaperWikiPageFiles(workspaceDir: string): Promise<string[]> {
+  const pagesDir = getPaperWikiPagesDir(workspaceDir);
+  try {
+    const entries = await readdir(pagesDir, { withFileTypes: true });
+    return entries
+      .filter((entry) => entry.isFile() && entry.name.endsWith(".md"))
+      .map((entry) => path.join(pagesDir, entry.name))
       .sort((left, right) => left.localeCompare(right));
   } catch {
     return [];

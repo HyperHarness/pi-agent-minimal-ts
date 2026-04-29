@@ -12,12 +12,18 @@ import {
   ensurePaperWikiScaffold,
   getPaperWikiIndexPath,
   getPaperWikiLogPath,
+  getPaperWikiPagePath,
   getPaperWikiSchemaPath,
   getPaperWikiSourcePath,
+  listPaperWikiPageFiles,
   listPaperWikiSourceFiles,
-  relativeToWorkspace
+  relativeToWorkspace,
+  sanitizeWikiFilename
 } from "./paper-wiki-store.js";
 import type {
+  PaperWikiPageInput,
+  PaperWikiPageResult,
+  PaperWikiPageSourceCitation,
   PaperWikiSearchOptions,
   PaperWikiSearchResult,
   PaperWikiSourceInput,
@@ -88,6 +94,18 @@ function sectionList(title: string, values: string[] | undefined): string {
     return "";
   }
   return `\n## ${title}\n\n${cleaned.map((value) => `- ${value}`).join("\n")}\n`;
+}
+
+function yamlSourceCitations(values: PaperWikiPageSourceCitation[]): string {
+  const cleaned = values.filter((value) => value.paperKey.trim() && value.path.trim());
+  if (cleaned.length === 0) {
+    return "[]";
+  }
+  return `\n${cleaned.map((value) => [
+    `  - paper_key: ${quoteYaml(value.paperKey)}`,
+    ...(value.title ? [`    title: ${quoteYaml(value.title)}`] : []),
+    `    path: ${quoteYaml(value.path)}`
+  ].join("\n")).join("\n")}`;
 }
 
 function extractFrontmatterValue(markdown: string, key: string): string | undefined {
@@ -285,20 +303,32 @@ function createBestSnippet(text: string, query: string, terms: SearchTerm[]): st
 
 async function rewriteWikiIndex(workspaceDir: string): Promise<void> {
   const sourceFiles = await listPaperWikiSourceFiles(workspaceDir);
-  const rows = await Promise.all(sourceFiles.map(async (filePath) => {
+  const sourceRows = await Promise.all(sourceFiles.map(async (filePath) => {
     const markdown = await readFile(filePath, "utf8");
     const paperKey = path.basename(filePath, ".md");
     const title = extractTitle(markdown, paperKey);
     const relativePath = relativeToWorkspace(workspaceDir, filePath);
     return `- [${title}](${relativePath}) - \`${paperKey}\``;
   }));
+  const pageFiles = await listPaperWikiPageFiles(workspaceDir);
+  const pageRows = await Promise.all(pageFiles.map(async (filePath) => {
+    const markdown = await readFile(filePath, "utf8");
+    const pageKey = path.basename(filePath, ".md");
+    const title = extractTitle(markdown, pageKey);
+    const relativePath = relativeToWorkspace(workspaceDir, filePath);
+    return `- [${title}](${relativePath}) - \`${pageKey}\``;
+  }));
 
   const content = [
     "# Paper LLM Wiki Index",
     "",
+    "## Pages",
+    "",
+    pageRows.length > 0 ? pageRows.join("\n") : "No synthesis pages yet.",
+    "",
     "## Sources",
     "",
-    rows.length > 0 ? rows.join("\n") : "No source summaries yet.",
+    sourceRows.length > 0 ? sourceRows.join("\n") : "No source summaries yet.",
     ""
   ].join("\n");
   await writeFile(getPaperWikiIndexPath(workspaceDir), content, "utf8");
@@ -376,6 +406,62 @@ ${sectionList("Open Questions", input.openQuestions)}
     indexPath: relativeToWorkspace(input.workspaceDir, getPaperWikiIndexPath(input.workspaceDir)),
     logPath: relativeToWorkspace(input.workspaceDir, getPaperWikiLogPath(input.workspaceDir)),
     schemaPath: relativeToWorkspace(input.workspaceDir, getPaperWikiSchemaPath(input.workspaceDir))
+  };
+}
+
+export async function writePaperWikiPage(input: PaperWikiPageInput): Promise<PaperWikiPageResult> {
+  const pageMarkdown = input.pageMarkdown.trim();
+  if (!pageMarkdown) {
+    throw new Error("pageMarkdown is required.");
+  }
+  if (input.sourceCitations.length === 0) {
+    throw new Error("sourceCitations must include at least one source summary.");
+  }
+
+  await ensurePaperWikiScaffold(input.workspaceDir);
+  const pageKey = sanitizeWikiFilename(input.pageKey ?? input.topic);
+  const pagePath = getPaperWikiPagePath(input.workspaceDir, pageKey);
+  const title = input.title?.trim() || input.topic.trim() || pageKey;
+  const now = new Date().toISOString();
+  const markdown = `---
+type: "wiki-synthesis-page"
+page_key: ${quoteYaml(pageKey)}
+title: ${quoteYaml(title)}
+topic: ${quoteYaml(input.topic)}
+created_at: ${quoteYaml(now)}
+updated_at: ${quoteYaml(now)}
+tags: ${yamlList(input.tags)}
+sources: ${yamlSourceCitations(input.sourceCitations)}
+related_pages: ${yamlList(input.relatedPageKeys)}
+---
+
+# ${title}
+
+${pageMarkdown}
+${sectionList("Open Questions", input.openQuestions)}
+## Sources
+
+${input.sourceCitations.map((source) =>
+  `- \`${source.paperKey}\`${source.title ? ` - ${source.title}` : ""} (${source.path})`
+).join("\n")}
+`;
+
+  await writeFile(pagePath, markdown.trimEnd() + "\n", "utf8");
+  await rewriteWikiIndex(input.workspaceDir);
+  await appendFile(
+    getPaperWikiLogPath(input.workspaceDir),
+    `\n## [${now.slice(0, 10)}] page | ${title}\n\n- pageKey: \`${pageKey}\`\n- path: \`${relativeToWorkspace(input.workspaceDir, pagePath)}\`\n- sources: ${input.sourceCitations.map((source) => `\`${source.paperKey}\``).join(", ")}\n`,
+    "utf8"
+  );
+
+  return {
+    pageKey,
+    title,
+    pagePath: relativeToWorkspace(input.workspaceDir, pagePath),
+    indexPath: relativeToWorkspace(input.workspaceDir, getPaperWikiIndexPath(input.workspaceDir)),
+    logPath: relativeToWorkspace(input.workspaceDir, getPaperWikiLogPath(input.workspaceDir)),
+    schemaPath: relativeToWorkspace(input.workspaceDir, getPaperWikiSchemaPath(input.workspaceDir)),
+    sourceCount: input.sourceCitations.length
   };
 }
 

@@ -35,3 +35,56 @@ export interface PaperWikiSearchResult {
     snippet: string;
   }>;
 }
+
+export interface PaperWikiPageSourceCitation {
+  paperKey: string;
+  title?: string;
+  path: string;
+}
+
+export interface PaperWikiPageInput {
+  workspaceDir: string;
+  topic: string;
+  pageMarkdown: string;
+  pageKey?: string;
+  title?: string;
+  tags?: string[];
+  sourceCitations: PaperWikiPageSourceCitation[];
+  openQuestions?: string[];
+  relatedPageKeys?: string[];
+}
+
+export interface PaperWikiPageResult {
+  pageKey: string;
+  title: string;
+  pagePath: string;
+  indexPath: string;
+  logPath: string;
+  schemaPath: string;
+  sourceCount: number;
+}
+
+export interface PaperWikiPageWorkerInput {
+  topic: string;
+  question?: string;
+  evidence: Array<{
+    paperKey: string;
+    title: string;
+    path: string;
+    snippet: string;
+  }>;
+}
+
+export interface PaperWikiPageWorkerOutput {
+  title: string;
+  pageMarkdown: string;
+  tags?: string[];
+  openQuestions?: string[];
+  relatedPageKeys?: string[];
+  confidence?: "high" | "medium" | "low";
+  groundingWarnings?: string[];
+}
+
+export type PaperWikiPageWorker = (
+  input: PaperWikiPageWorkerInput
+) => Promise<PaperWikiPageWorkerOutput>;

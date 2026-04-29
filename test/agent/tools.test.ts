@@ -1,7 +1,7 @@
 import test from "node:test";
 import assert from "node:assert/strict";
 import { createHash } from "node:crypto";
-import { mkdtemp, mkdir, rm, symlink, writeFile } from "node:fs/promises";
+import { mkdtemp, mkdir, readFile, rm, symlink, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import path from "node:path";
 import { PaperDownloadError } from "../../src/agent/paper-download.js";
@@ -218,6 +218,24 @@ type AnswerResearchQuestionTool = {
     toolCallId: string,
     args: {
       query: string;
+      maxLocalResults?: number;
+      maxExternalCandidates?: number;
+      maxDownloads?: number;
+      autoDownload?: boolean;
+      autoSummarize?: boolean;
+    },
+    signal: undefined,
+  ) => Promise<ToolResult>;
+};
+
+type BuildWikiPageTool = {
+  execute: (
+    toolCallId: string,
+    args: {
+      topic: string;
+      question?: string;
+      pageKey?: string;
+      mode?: "draft" | "write";
       maxLocalResults?: number;
       maxExternalCandidates?: number;
       maxDownloads?: number;
@@ -550,6 +568,20 @@ function getAnswerResearchQuestionTool(
   return tool as AnswerResearchQuestionTool;
 }
 
+function getBuildWikiPageTool(
+  workspace: string,
+  dependencies?: Parameters<typeof createTools>[1],
+): BuildWikiPageTool {
+  const tools = createTools(workspace, dependencies) as ReadonlyArray<{
+    name: string;
+    execute?: BuildWikiPageTool["execute"];
+  }>;
+  const tool = tools.find((candidate) => candidate.name === "build_wiki_page");
+  assert.ok(tool);
+  assert.equal(typeof tool.execute, "function");
+  return tool as BuildWikiPageTool;
+}
+
 function getListLocalPapersTool(
   workspace: string,
   dependencies?: Parameters<typeof createTools>[1],
@@ -711,6 +743,7 @@ test("createTools exposes the minimal default tool set", async () => {
       "search_paper_text",
       "answer_paper_wiki_question",
       "answer_research_question",
+      "build_wiki_page",
       "search_local_papers",
       "wiki_health",
       "wiki_health_fix",
@@ -755,6 +788,7 @@ test("createTools full profile exposes every built-in tool", async () => {
       "search_paper_text",
       "answer_paper_wiki_question",
       "answer_research_question",
+      "build_wiki_page",
       "search_local_papers",
       "wiki_health",
       "wiki_health_fix",
@@ -2548,6 +2582,101 @@ test("answer_research_question can download, parse, summarize, and refresh wiki 
     assert.equal(details.downloaded?.[0]?.readingStatus, "parsed");
     assert.equal(details.summariesWritten?.[0]?.status, "written");
     assert.equal(details.refreshedEvidence?.evidence?.length, 1);
+  } finally {
+    await rm(workspace, { recursive: true, force: true });
+  }
+});
+
+test("build_wiki_page writes a synthesis page from local wiki evidence", async () => {
+  const workspace = await mkdtemp(path.join(tmpdir(), "pi-agent-tools-"));
+
+  try {
+    const tool = getBuildWikiPageTool(workspace, {
+      searchPaperWiki: async (options) => ({
+        query: options.query,
+        results: [
+          {
+            paperKey: "arxiv-2507.09690",
+            title: "Small Quantum LDPC Codes",
+            path: "knowledge-base/wiki/sources/arxiv-2507.09690.md",
+            snippet: "LDPC implementation evidence",
+          },
+        ],
+      }),
+      paperWikiPageWorker: async (input) => ({
+        title: "qLDPC on Superconducting Chips",
+        pageMarkdown: `## Overview\n\n${input.topic} depends on long-range couplers [arxiv-2507.09690].`,
+        tags: ["qldpc", "superconducting-qubits"],
+        openQuestions: ["How much crosstalk is tolerable?"],
+        confidence: "high",
+      }),
+    });
+
+    const result = await tool.execute("build-page-call", {
+      topic: "qLDPC on superconducting chips",
+      question: "请总结一下qLDPC码在超导量子芯片上实现的难点",
+      pageKey: "qldpc-superconducting-chips",
+    }, undefined);
+    const details = result.details as {
+      status?: string;
+      page?: { pagePath?: string; sourceCount?: number };
+      evidence?: unknown[];
+    };
+
+    assert.equal(details.status, "written");
+    assert.equal(details.page?.pagePath, "knowledge-base/wiki/pages/qldpc-superconducting-chips.md");
+    assert.equal(details.page?.sourceCount, 1);
+    assert.equal(details.evidence?.length, 1);
+
+    const page = await readFile(path.join(workspace, "knowledge-base/wiki/pages/qldpc-superconducting-chips.md"), "utf8");
+    assert.match(page, /type: "wiki-synthesis-page"/);
+    assert.match(page, /qLDPC on Superconducting Chips/);
+    assert.match(page, /arxiv-2507\.09690/);
+
+    const index = await readFile(path.join(workspace, "knowledge-base/wiki/index.md"), "utf8");
+    assert.match(index, /## Pages/);
+    assert.match(index, /qldpc-superconducting-chips/);
+  } finally {
+    await rm(workspace, { recursive: true, force: true });
+  }
+});
+
+test("build_wiki_page can return a draft without writing the page", async () => {
+  const workspace = await mkdtemp(path.join(tmpdir(), "pi-agent-tools-"));
+
+  try {
+    const tool = getBuildWikiPageTool(workspace, {
+      searchPaperWiki: async (options) => ({
+        query: options.query,
+        results: [
+          {
+            paperKey: "arxiv-local",
+            title: "Local source",
+            path: "knowledge-base/wiki/sources/arxiv-local.md",
+            snippet: "local evidence",
+          },
+        ],
+      }),
+      paperWikiPageWorker: async () => ({
+        title: "Draft Page",
+        pageMarkdown: "## Overview\n\nDraft content [arxiv-local].",
+        confidence: "high",
+      }),
+    });
+
+    const result = await tool.execute("build-page-draft-call", {
+      topic: "draft topic",
+      mode: "draft",
+    }, undefined);
+    const details = result.details as {
+      status?: string;
+      draft?: { title?: string };
+      page?: unknown;
+    };
+
+    assert.equal(details.status, "drafted");
+    assert.equal(details.draft?.title, "Draft Page");
+    assert.equal(details.page, undefined);
   } finally {
     await rm(workspace, { recursive: true, force: true });
   }

@@ -21,6 +21,10 @@ import type {
   PaperSummaryWorker,
   PaperSummaryWorkerOutput
 } from "./agent/paper-summary.js";
+import type {
+  PaperWikiPageWorker,
+  PaperWikiPageWorkerOutput
+} from "./agent/paper-wiki/types.js";
 import { cleanupTools, createTools, getToolsWorkspaceDir } from "./agent/tools.js";
 
 type LlmMessage = UserMessage | AssistantMessage | ToolResultMessage;
@@ -29,6 +33,7 @@ type AgentMessageEventHandler = (event: AgentEvent) => Promise<void> | void;
 export const DEFAULT_SYSTEM_PROMPT = [
   "You are a helpful assistant. Use tools when they are useful.",
   "For scientific, technical, paper, physics, quantum, method, experiment, or literature-comparison questions, first run answer_research_question so local wiki evidence is checked before any external search or download.",
+  "When the user asks to organize, build, maintain, or update a durable knowledge framework or topic page, use build_wiki_page.",
   "Use answer_paper_wiki_question only for explicitly local-wiki-only questions or quick evidence checks.",
   "When calling paper wiki or research tools, use concise English search terms when that will better match paper titles, abstracts, and source summaries.",
   "Ground claims in the retrieved wiki evidence and cite paper keys or source paths for substantive conclusions.",
@@ -369,6 +374,40 @@ function parsePaperSummaryWorkerOutput(value: unknown): PaperSummaryWorkerOutput
   };
 }
 
+function parsePaperWikiPageWorkerOutput(value: unknown): PaperWikiPageWorkerOutput {
+  if (!isRecord(value)) {
+    throw new Error("Wiki page worker did not return a JSON object.");
+  }
+  const title = value.title;
+  const pageMarkdown = value.pageMarkdown;
+  if (typeof title !== "string" || !title.trim()) {
+    throw new Error("Wiki page worker JSON must include title.");
+  }
+  if (typeof pageMarkdown !== "string" || !pageMarkdown.trim()) {
+    throw new Error("Wiki page worker JSON must include pageMarkdown.");
+  }
+
+  const readString = (key: string): string | undefined =>
+    typeof value[key] === "string" ? value[key] : undefined;
+  const readStringList = (key: string): string[] | undefined => {
+    const candidate = value[key];
+    return Array.isArray(candidate)
+      ? candidate.filter((item): item is string => typeof item === "string")
+      : undefined;
+  };
+  const confidence = readString("confidence");
+
+  return {
+    title,
+    pageMarkdown,
+    ...(readStringList("tags") ? { tags: readStringList("tags") } : {}),
+    ...(readStringList("openQuestions") ? { openQuestions: readStringList("openQuestions") } : {}),
+    ...(readStringList("relatedPageKeys") ? { relatedPageKeys: readStringList("relatedPageKeys") } : {}),
+    ...(confidence === "high" || confidence === "medium" || confidence === "low" ? { confidence } : {}),
+    ...(readStringList("groundingWarnings") ? { groundingWarnings: readStringList("groundingWarnings") } : {})
+  };
+}
+
 function createPaperSummaryWorker(model: Model<Api>): PaperSummaryWorker {
   return async (input) => {
     const prompt: UserMessage = {
@@ -426,10 +465,60 @@ function createPaperSummaryWorker(model: Model<Api>): PaperSummaryWorker {
   };
 }
 
+function createPaperWikiPageWorker(model: Model<Api>): PaperWikiPageWorker {
+  return async (input) => {
+    const prompt: UserMessage = {
+      role: "user",
+      timestamp: Date.now(),
+      content: [
+        "Create a grounded topic wiki synthesis page from the evidence JSON below.",
+        "Use only the supplied source-summary evidence. Do not invent papers, metrics, or unsupported claims.",
+        "Return only a JSON object with these fields: title, pageMarkdown, tags, openQuestions, relatedPageKeys, confidence, groundingWarnings.",
+        "pageMarkdown should be concise but structured Markdown with sections such as Overview, Key Concepts, Evidence, Challenges, Representative Papers, and Open Questions when appropriate.",
+        "Every substantive claim should cite supplied paper keys inline, for example [arxiv-2507.09690].",
+        "tags, openQuestions, relatedPageKeys, and groundingWarnings must be arrays of strings.",
+        "confidence must be high, medium, or low.",
+        JSON.stringify({
+          topic: input.topic,
+          question: input.question,
+          evidence: input.evidence
+        })
+      ].join("\n\n")
+    };
+    const context: AgentContext = {
+      systemPrompt:
+        "You are a careful scientific wiki synthesis subagent. You write grounded topic pages from supplied paper source summaries only.",
+      messages: [],
+      tools: []
+    };
+    const stream = agentLoop(
+      [prompt],
+      context,
+      {
+        model,
+        convertToLlm: convertAgentMessagesToLlm,
+        getApiKey: (provider) => getEnvApiKey(provider),
+        toolExecution: "sequential"
+      }
+    );
+    const resultPromise = stream.result();
+    for await (const _event of stream) {
+      // Drain the stream; the wiki page worker intentionally does not emit UI events.
+    }
+    const messages = await resultPromise;
+    const assistant = messages
+      .filter((message): message is AssistantMessage => message.role === "assistant")
+      .at(-1);
+    const text = assistant ? getAssistantText(assistant) : "";
+    return parsePaperWikiPageWorkerOutput(extractJsonObject(text));
+  };
+}
+
 function createRuntimeTools(workspaceDir: string, model: Model<Api>) {
   return createTools(workspaceDir, {
     extensionBridge: createQueuedPaperExtensionBridge({ workspaceDir }),
-    paperSummaryWorker: createPaperSummaryWorker(model)
+    paperSummaryWorker: createPaperSummaryWorker(model),
+    paperWikiPageWorker: createPaperWikiPageWorker(model)
   });
 }
 

@@ -12,6 +12,7 @@ import {
 } from "../../src/agent/paper-reader/paper-reader.js";
 import {
   searchPaperWiki,
+  writePaperWikiPage,
   writePaperWikiSource
 } from "../../src/agent/paper-wiki/paper-wiki.js";
 import { PaperReaderError } from "../../src/agent/paper-reader/types.js";
@@ -263,6 +264,40 @@ This paper studies microwave control of superconducting qubits.
 
     assert.equal(search.results[0]?.paperKey, "arxiv-2507.09690");
     assert.match(search.results[0]?.snippet ?? "", /quantum LDPC|superconducting|long-range/i);
+  } finally {
+    await rm(workspace, { recursive: true, force: true });
+  }
+});
+
+test("writePaperWikiPage saves a synthesis page and updates the wiki index", async () => {
+  const workspace = await createWorkspace();
+  try {
+    const page = await writePaperWikiPage({
+      workspaceDir: workspace,
+      topic: "qLDPC on superconducting chips",
+      pageKey: "qldpc-superconducting-chips",
+      title: "qLDPC on Superconducting Chips",
+      pageMarkdown: "## Overview\n\nImplementation needs non-local couplers [arxiv-2507.09690].",
+      tags: ["qldpc", "superconducting-qubits"],
+      sourceCitations: [
+        {
+          paperKey: "arxiv-2507.09690",
+          title: "Small Quantum LDPC Codes",
+          path: "knowledge-base/wiki/sources/arxiv-2507.09690.md"
+        }
+      ]
+    });
+
+    assert.equal(page.pagePath, "knowledge-base/wiki/pages/qldpc-superconducting-chips.md");
+    assert.equal(page.sourceCount, 1);
+    const markdown = await readFile(path.join(workspace, page.pagePath), "utf8");
+    assert.match(markdown, /type: "wiki-synthesis-page"/);
+    assert.match(markdown, /sources:/);
+    assert.match(markdown, /arxiv-2507\.09690/);
+
+    const index = await readFile(path.join(workspace, page.indexPath), "utf8");
+    assert.match(index, /## Pages/);
+    assert.match(index, /qldpc-superconducting-chips/);
   } finally {
     await rm(workspace, { recursive: true, force: true });
   }

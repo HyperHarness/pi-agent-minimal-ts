@@ -165,13 +165,13 @@ knowledge-base/
     log.md                     # chronological audit log
     sources/<paper-key>.md     # LLM-authored retrieval source summary
     sources/<paper-key>/       # parsed PDF markdown, JSON, quality, chunks
-    pages/                     # future cross-paper synthesis pages
+    pages/                     # durable cross-paper topic synthesis pages
     manifests/                 # future machine-readable source manifests
     assets/
     state/
 ```
 
-Use `download_paper` first to close the download loop and generate the preferred Markdown source under `wiki/sources/<paper-key>/parses/<engine>/document.md`. After reading and grounding the summary against the parsed text, use `write_paper_wiki_source` to save the final LLM-authored source page as `wiki/sources/<paper-key>.md`. Full mode also exposes `generate_paper_wiki_summary`, which builds a bounded evidence package from parsed Markdown, includes local related-paper candidates by default, and sends it to a clean-context summary worker before optionally writing the source page. `paper_wiki_relations` suggests related local papers and can write confirmed `related_papers` links into a source summary. Use `answer_research_question` for professional paper or topic Q&A; it checks local wiki evidence first, then searches/downloads/parses/summarizes external papers only when the local wiki is insufficient. Use `answer_paper_wiki_question` for local-wiki-only evidence checks, and `search_paper_wiki` in full mode for direct retrieval over source summaries.
+Use `download_paper` first to close the download loop and generate the preferred Markdown source under `wiki/sources/<paper-key>/parses/<engine>/document.md`. After reading and grounding the summary against the parsed text, use `write_paper_wiki_source` to save the final LLM-authored source page as `wiki/sources/<paper-key>.md`. Full mode also exposes `generate_paper_wiki_summary`, which builds a bounded evidence package from parsed Markdown, includes local related-paper candidates by default, and sends it to a clean-context summary worker before optionally writing the source page. `paper_wiki_relations` suggests related local papers and can write confirmed `related_papers` links into a source summary. Use `answer_research_question` for professional paper or topic Q&A; it checks local wiki evidence first, then searches/downloads/parses/summarizes external papers only when the local wiki is insufficient. Use `build_wiki_page` when a question should become durable knowledge: it runs the same evidence-first retrieval path, asks a clean-context page worker to synthesize the supplied source summaries, then writes `wiki/pages/<page-key>.md` with citations back to source summaries. Use `answer_paper_wiki_question` for local-wiki-only evidence checks, and `search_paper_wiki` in full mode for direct retrieval over source summaries.
 
 ## Search And Fetch Configuration
 
@@ -274,6 +274,7 @@ The default chat agent exposes a compact paper-focused tool set:
 - `search_paper_text`: searches inside a parsed paper and returns snippets with page, section, and element metadata
 - `answer_paper_wiki_question`: builds a citeable evidence package from local paper wiki source summaries for scientific Q&A, or reports that the wiki lacks supporting source-summary evidence
 - `answer_research_question`: answers research-style questions through an evidence-first workflow: local wiki retrieval, local fallback inspection, external paper search, bounded download/parse/summary ingestion, then refreshed wiki evidence
+- `build_wiki_page`: turns evidence-first research results into a durable topic synthesis page under `knowledge-base/wiki/pages/`
 - `search_local_papers`: searches local paper records, parsed Markdown, and wiki summaries
 - `wiki_health`: reports knowledge-base health across records, downloads, authorization state, parse quality, missing summaries, and missing artifacts
 - `wiki_health_fix`: attempts health repairs such as retrying downloads, parsing downloaded records, and generating missing summaries through a clean-context summary worker when configured; reports issues that still need login or queued browser work
@@ -296,6 +297,7 @@ Example prompts:
 - `Search papers about the latest superconducting quantum computing results, then download the best open result with download_paper.`
 - `Run wiki_health and tell me which papers need login, parsing, or summaries.`
 - `Run wiki_health_fix in dry-run mode, then repair parse_missing and needs_download issues.`
+- `Build a wiki page about qLDPC implementation challenges on superconducting chips.`
 - Full mode: `Register the manually downloaded PDF for https://example.com/paper with register_manual_paper_download using downloads/inbox/paper.pdf.`
 
 ## Scripts

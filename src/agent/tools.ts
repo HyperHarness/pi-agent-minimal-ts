@@ -27,8 +27,13 @@ import {
 import { savePaperWebPageParse } from "./paper-reader/engines/webpage.js";
 import {
   searchPaperWiki,
+  writePaperWikiPage,
   writePaperWikiSource
 } from "./paper-wiki/paper-wiki.js";
+import type {
+  PaperWikiPageWorker,
+  PaperWikiPageWorkerOutput
+} from "./paper-wiki/types.js";
 import {
   generatePaperWikiSummary,
   type PaperSummaryProgress,
@@ -306,6 +311,37 @@ const answerResearchQuestionParameters = Type.Object({
   )
 });
 
+const buildWikiPageParameters = Type.Object({
+  topic: Type.String({ description: "Topic or concept for the synthesis wiki page." }),
+  question: Type.Optional(
+    Type.String({ description: "Optional user question that should drive the page evidence and structure." })
+  ),
+  pageKey: Type.Optional(
+    Type.String({ description: "Optional filename-safe wiki page key. Defaults to a sanitized topic." })
+  ),
+  mode: Type.Optional(
+    Type.Union([
+      Type.Literal("draft"),
+      Type.Literal("write")
+    ], { description: "Build a draft only or write knowledge-base/wiki/pages/<page-key>.md. Defaults to write." })
+  ),
+  maxLocalResults: Type.Optional(
+    Type.Integer({ description: "Maximum local wiki evidence items to return. Defaults to 8.", minimum: 1 })
+  ),
+  maxExternalCandidates: Type.Optional(
+    Type.Integer({ description: "Maximum external paper candidates to inspect when local evidence is insufficient. Defaults to 5.", minimum: 1 })
+  ),
+  maxDownloads: Type.Optional(
+    Type.Integer({ description: "Maximum external candidates to download and ingest. Defaults to 1.", minimum: 0 })
+  ),
+  autoDownload: Type.Optional(
+    Type.Boolean({ description: "Whether to download external candidates when local evidence is insufficient. Defaults to true." })
+  ),
+  autoSummarize: Type.Optional(
+    Type.Boolean({ description: "Whether to write missing source summaries before building the page. Defaults to true." })
+  )
+});
+
 const listLocalPapersParameters = Type.Object({
   query: Type.Optional(Type.String({ description: "Optional metadata query to filter local papers." })),
   status: Type.Optional(
@@ -387,6 +423,7 @@ type PaperWikiRelationsParameters = Static<typeof paperWikiRelationsParameters>;
 type SearchPaperWikiParameters = Static<typeof searchPaperWikiParameters>;
 type AnswerPaperWikiQuestionParameters = Static<typeof answerPaperWikiQuestionParameters>;
 type AnswerResearchQuestionParameters = Static<typeof answerResearchQuestionParameters>;
+type BuildWikiPageParameters = Static<typeof buildWikiPageParameters>;
 type ListLocalPapersParameters = Static<typeof listLocalPapersParameters>;
 type SearchLocalPapersParameters = Static<typeof searchLocalPapersParameters>;
 type WikiHealthParameters = Static<typeof wikiHealthParameters>;
@@ -597,6 +634,51 @@ type AnswerResearchQuestionDetails = {
 type AnswerResearchQuestionTool = AgentTool<
   typeof answerResearchQuestionParameters,
   AnswerResearchQuestionDetails
+>;
+type BuildWikiPageDetails = {
+  topic: string;
+  question?: string;
+  mode: "draft" | "write";
+  research: AnswerResearchQuestionDetails;
+  status: "drafted" | "written" | "needs_evidence" | "needs_worker" | "skipped";
+  message: string;
+  draft?: PaperWikiPageWorkerOutput;
+  page?: Awaited<ReturnType<typeof writePaperWikiPage>>;
+  evidence: Array<{
+    paperKey: string;
+    title: string;
+    path: string;
+    snippet: string;
+  }>;
+};
+type ResearchWorkflowProgressStage =
+  | "local_wiki_search"
+  | "local_wiki_found"
+  | "external_search"
+  | "external_search_done"
+  | "download_start"
+  | "download_done"
+  | "summary_start"
+  | "summary_progress"
+  | "summary_done"
+  | "refreshed_wiki_search"
+  | "research_done"
+  | "wiki_page_worker_start"
+  | "wiki_page_worker_done"
+  | "wiki_page_write";
+type ResearchWorkflowProgress = {
+  stage: ResearchWorkflowProgressStage;
+  query: string;
+  title?: string;
+  paperKey?: string;
+  index?: number;
+  total?: number;
+  message: string;
+  summaryProgress?: PaperSummaryProgress;
+};
+type BuildWikiPageTool = AgentTool<
+  typeof buildWikiPageParameters,
+  BuildWikiPageDetails
 >;
 type ListLocalPapersTool = AgentTool<
   typeof listLocalPapersParameters,
@@ -983,9 +1065,11 @@ export interface ToolDependencies {
   readPaperSection?: typeof readPaperSection;
   searchPaperText?: typeof searchPaperText;
   writePaperWikiSource?: typeof writePaperWikiSource;
+  writePaperWikiPage?: typeof writePaperWikiPage;
   generatePaperWikiSummary?: typeof generatePaperWikiSummary;
   paperWikiRelations?: typeof paperWikiRelations;
   paperSummaryWorker?: PaperSummaryWorker;
+  paperWikiPageWorker?: PaperWikiPageWorker;
   searchPaperWiki?: typeof searchPaperWiki;
   listLocalPapers?: typeof listLocalPapers;
   searchLocalPapers?: typeof searchLocalPapers;
@@ -1006,7 +1090,7 @@ interface ToolSetMetadata {
 
 export type AgentTools = AgentTool<any>[] & ToolSetMetadata;
 
-type ToolProgress = PaperSummaryProgress | WikiHealthFixProgress;
+type ToolProgress = PaperSummaryProgress | WikiHealthFixProgress | ResearchWorkflowProgress;
 
 function emitToolProgress(
   onUpdate: AgentToolUpdateCallback<any> | undefined,
@@ -1016,6 +1100,35 @@ function emitToolProgress(
     content: [{ type: "text", text: progress.message }],
     details: { progress }
   });
+}
+
+function compactBuildWikiPageResult(result: BuildWikiPageDetails): Record<string, unknown> {
+  return {
+    topic: result.topic,
+    ...(result.question ? { question: result.question } : {}),
+    mode: result.mode,
+    status: result.status,
+    message: result.message,
+    researchStatus: result.research.status,
+    ...(result.page ? { page: result.page } : {}),
+    ...(result.draft && result.mode === "draft" ? { draft: result.draft } : {}),
+    ...(result.draft && result.mode !== "draft"
+      ? {
+          draft: {
+            title: result.draft.title,
+            confidence: result.draft.confidence,
+            groundingWarnings: result.draft.groundingWarnings
+          }
+        }
+      : {}),
+    evidence: result.evidence.map((item) => ({
+      paperKey: item.paperKey,
+      title: item.title,
+      path: item.path
+    })),
+    blocked: result.research.blocked,
+    externalCandidates: result.research.externalCandidates
+  };
 }
 
 export async function cleanupTools(tools: ReadonlyArray<AgentTool<any>> | undefined): Promise<void> {
@@ -1047,6 +1160,7 @@ export function createTools(workspaceDir: string, dependencies: ToolDependencies
         searchApsPapersImpl
       }));
   const writePaperWikiSourceImpl = dependencies.writePaperWikiSource ?? writePaperWikiSource;
+  const writePaperWikiPageImpl = dependencies.writePaperWikiPage ?? writePaperWikiPage;
   const generatePaperWikiSummaryImpl = dependencies.generatePaperWikiSummary ?? generatePaperWikiSummary;
   const paperWikiRelationsImpl = dependencies.paperWikiRelations ?? paperWikiRelations;
   const searchPaperWikiImpl = dependencies.searchPaperWiki ?? searchPaperWiki;
@@ -1889,7 +2003,12 @@ export function createTools(workspaceDir: string, dependencies: ToolDependencies
       "Runs the full evidence-first research workflow: search local paper wiki evidence first, then search/download/parse/summarize external papers only when the local wiki is insufficient. Use this for professional scientific questions that may require knowledge synthesis.",
     parameters: answerResearchQuestionParameters,
     executionMode: "sequential",
-    execute: async (_toolCallId: string, args: AnswerResearchQuestionParameters) => {
+    execute: async (
+      _toolCallId: string,
+      args: AnswerResearchQuestionParameters,
+      _signal: AbortSignal | undefined,
+      onUpdate: AgentToolUpdateCallback<any> | undefined
+    ) => {
       const maxLocalResults = Math.max(1, Math.trunc(args.maxLocalResults ?? DEFAULT_WIKI_QUESTION_RESULTS));
       const maxExternalCandidates = Math.max(
         1,
@@ -1898,6 +2017,11 @@ export function createTools(workspaceDir: string, dependencies: ToolDependencies
       const maxDownloads = Math.max(0, Math.trunc(args.maxDownloads ?? DEFAULT_RESEARCH_DOWNLOADS));
       const autoDownload = args.autoDownload ?? true;
       const autoSummarize = args.autoSummarize ?? true;
+      emitToolProgress(onUpdate, {
+        stage: "local_wiki_search",
+        query: args.query,
+        message: "Searching local paper wiki evidence."
+      });
       const localEvidence = await buildPaperWikiQuestionEvidence({
         workspaceDir: resolvedWorkspaceDir,
         query: args.query,
@@ -1907,6 +2031,11 @@ export function createTools(workspaceDir: string, dependencies: ToolDependencies
       });
 
       if (localEvidence.status === "has_wiki_evidence") {
+        emitToolProgress(onUpdate, {
+          stage: "local_wiki_found",
+          query: args.query,
+          message: `Found ${localEvidence.evidence.length} local wiki evidence item(s).`
+        });
         const result: AnswerResearchQuestionDetails = {
           query: args.query,
           status: "answered_from_wiki",
@@ -1929,6 +2058,11 @@ export function createTools(workspaceDir: string, dependencies: ToolDependencies
 
       const blocked: ResearchBlockedItem[] = [];
       let paperResults: PaperSearchResult[] = [];
+      emitToolProgress(onUpdate, {
+        stage: "external_search",
+        query: args.query,
+        message: "Local wiki evidence was insufficient; searching external paper candidates."
+      });
       try {
         paperResults = await searchPapersImpl({
           query: args.query,
@@ -1940,6 +2074,11 @@ export function createTools(workspaceDir: string, dependencies: ToolDependencies
           reason: error instanceof Error ? error.message : "External paper search failed."
         });
       }
+      emitToolProgress(onUpdate, {
+        stage: "external_search_done",
+        query: args.query,
+        message: `Found ${paperResults.length} external paper candidate(s).`
+      });
       const externalCandidates = paperResults.map(summarizeResearchCandidate);
       const downloaded: ResearchDownloadedPaper[] = [];
       const summariesWritten: ResearchWrittenSummary[] = [];
@@ -1950,8 +2089,16 @@ export function createTools(workspaceDir: string, dependencies: ToolDependencies
           .filter((item): item is { candidate: PaperSearchResult; source: PaperSearchSource } => item.source !== undefined)
           .slice(0, maxDownloads);
 
-        for (const item of downloadable) {
+        for (const [index, item] of downloadable.entries()) {
           try {
+            emitToolProgress(onUpdate, {
+              stage: "download_start",
+              query: args.query,
+              title: item.candidate.title,
+              index: index + 1,
+              total: downloadable.length,
+              message: `Downloading candidate ${index + 1}/${downloadable.length}: ${item.candidate.title}`
+            });
             const downloadResult = await downloadPaperImpl({
               workspaceDir: resolvedWorkspaceDir,
               url: item.source.articleUrl,
@@ -1973,6 +2120,15 @@ export function createTools(workspaceDir: string, dependencies: ToolDependencies
               ...(reading && "message" in reading && typeof reading.message === "string"
                 ? { message: reading.message }
                 : {})
+            });
+            emitToolProgress(onUpdate, {
+              stage: "download_done",
+              query: args.query,
+              title: item.candidate.title,
+              paperKey,
+              index: index + 1,
+              total: downloadable.length,
+              message: `Download finished for ${item.candidate.title} with status ${downloadResult.status}.`
             });
 
             if (!reading || reading.status === "failed") {
@@ -2024,11 +2180,30 @@ export function createTools(workspaceDir: string, dependencies: ToolDependencies
               continue;
             }
 
+            emitToolProgress(onUpdate, {
+              stage: "summary_start",
+              query: args.query,
+              title: item.candidate.title,
+              paperKey,
+              index: index + 1,
+              total: downloadable.length,
+              message: `Generating wiki source summary for ${paperKey}.`
+            });
             const summary = await generatePaperWikiSummaryImpl({
               workspaceDir: resolvedWorkspaceDir,
               paperKey,
               mode: "write",
-              summaryWorker: dependencies.paperSummaryWorker
+              summaryWorker: dependencies.paperSummaryWorker,
+              onProgress: (summaryProgress) => emitToolProgress(onUpdate, {
+                stage: "summary_progress",
+                query: args.query,
+                title: item.candidate.title,
+                paperKey,
+                index: index + 1,
+                total: downloadable.length,
+                message: summaryProgress.message,
+                summaryProgress
+              })
             });
             summariesWritten.push({
               paperKey,
@@ -2045,6 +2220,15 @@ export function createTools(workspaceDir: string, dependencies: ToolDependencies
                 reason: summary.message
               });
             }
+            emitToolProgress(onUpdate, {
+              stage: "summary_done",
+              query: args.query,
+              title: item.candidate.title,
+              paperKey,
+              index: index + 1,
+              total: downloadable.length,
+              message: `Summary step finished for ${paperKey} with status ${summary.status}.`
+            });
           } catch (error) {
             blocked.push({
               stage: "download",
@@ -2056,15 +2240,21 @@ export function createTools(workspaceDir: string, dependencies: ToolDependencies
         }
       }
 
-      const refreshedEvidence = summariesWritten.some((item) => item.status === "written")
-        ? await buildPaperWikiQuestionEvidence({
-            workspaceDir: resolvedWorkspaceDir,
-            query: args.query,
-            maxResults: maxLocalResults,
-            searchPaperWikiImpl,
-            searchLocalPapersImpl
-          })
-        : undefined;
+      let refreshedEvidence: AnswerPaperWikiQuestionDetails | undefined;
+      if (summariesWritten.some((item) => item.status === "written")) {
+        emitToolProgress(onUpdate, {
+          stage: "refreshed_wiki_search",
+          query: args.query,
+          message: "Refreshing local wiki evidence after newly written summaries."
+        });
+        refreshedEvidence = await buildPaperWikiQuestionEvidence({
+          workspaceDir: resolvedWorkspaceDir,
+          query: args.query,
+          maxResults: maxLocalResults,
+          searchPaperWikiImpl,
+          searchLocalPapersImpl
+        });
+      }
       const status: ResearchQuestionStatus =
         refreshedEvidence?.status === "has_wiki_evidence"
           ? "expanded_with_new_sources"
@@ -2092,8 +2282,142 @@ export function createTools(workspaceDir: string, dependencies: ToolDependencies
               "Use externalCandidates only as candidate papers until they are downloaded, parsed, and summarized into the wiki."
             ]
       };
+      emitToolProgress(onUpdate, {
+        stage: "research_done",
+        query: args.query,
+        message: `Research workflow finished with status ${status}.`
+      });
       return {
         content: [{ type: "text", text: JSON.stringify(result) }],
+        details: result
+      };
+    }
+  };
+
+  const buildWikiPageTool: BuildWikiPageTool = {
+    name: "build_wiki_page",
+    label: "Build Wiki Page",
+    description:
+      "Builds a higher-level synthesis page under knowledge-base/wiki/pages/ from evidence-first research results. Use this when the user wants the agent to organize accumulated paper evidence into a durable topic wiki page.",
+    parameters: buildWikiPageParameters,
+    executionMode: "sequential",
+    execute: async (
+      _toolCallId: string,
+      args: BuildWikiPageParameters,
+      _signal: AbortSignal | undefined,
+      onUpdate: AgentToolUpdateCallback<any> | undefined
+    ) => {
+      const mode = args.mode ?? "write";
+      const query = args.question ?? args.topic;
+      const researchResult = await answerResearchQuestionTool.execute("research-for-wiki-page", {
+        query,
+        ...(args.maxLocalResults !== undefined ? { maxLocalResults: args.maxLocalResults } : {}),
+        ...(args.maxExternalCandidates !== undefined ? { maxExternalCandidates: args.maxExternalCandidates } : {}),
+        ...(args.maxDownloads !== undefined ? { maxDownloads: args.maxDownloads } : {}),
+        ...(args.autoDownload !== undefined ? { autoDownload: args.autoDownload } : {}),
+        ...(args.autoSummarize !== undefined ? { autoSummarize: args.autoSummarize } : {})
+      }, undefined, onUpdate);
+      const research = researchResult.details as AnswerResearchQuestionDetails;
+      const evidence = research.refreshedEvidence?.evidence ?? research.localEvidence.evidence;
+
+      if (evidence.length === 0) {
+        const result: BuildWikiPageDetails = {
+          topic: args.topic,
+          ...(args.question ? { question: args.question } : {}),
+          mode,
+          research,
+          status: "needs_evidence",
+          message:
+            "Cannot build a wiki page because no citeable local wiki evidence is available after the research workflow.",
+          evidence: []
+        };
+        return {
+          content: [{ type: "text", text: JSON.stringify(compactBuildWikiPageResult(result)) }],
+          details: result
+        };
+      }
+
+      if (!dependencies.paperWikiPageWorker) {
+        const result: BuildWikiPageDetails = {
+          topic: args.topic,
+          ...(args.question ? { question: args.question } : {}),
+          mode,
+          research,
+          status: "needs_worker",
+          message: "Wiki page worker is not configured; cannot synthesize a topic page automatically.",
+          evidence
+        };
+        return {
+          content: [{ type: "text", text: JSON.stringify(compactBuildWikiPageResult(result)) }],
+          details: result
+        };
+      }
+
+      emitToolProgress(onUpdate, {
+        stage: "wiki_page_worker_start",
+        query,
+        message: "Starting clean-context wiki page synthesis worker."
+      });
+      const draft = await dependencies.paperWikiPageWorker({
+        topic: args.topic,
+        ...(args.question ? { question: args.question } : {}),
+        evidence
+      });
+      emitToolProgress(onUpdate, {
+        stage: "wiki_page_worker_done",
+        query,
+        message: `Wiki page worker produced draft "${draft.title}".`
+      });
+      if (mode === "draft") {
+        const result: BuildWikiPageDetails = {
+          topic: args.topic,
+          ...(args.question ? { question: args.question } : {}),
+          mode,
+          research,
+          status: "drafted",
+          message: "Built a wiki page draft without writing it.",
+          draft,
+          evidence
+        };
+        return {
+          content: [{ type: "text", text: JSON.stringify(compactBuildWikiPageResult(result)) }],
+          details: result
+        };
+      }
+
+      emitToolProgress(onUpdate, {
+        stage: "wiki_page_write",
+        query,
+        message: "Writing wiki synthesis page."
+      });
+      const page = await writePaperWikiPageImpl({
+        workspaceDir: resolvedWorkspaceDir,
+        topic: args.topic,
+        ...(args.pageKey ? { pageKey: args.pageKey } : {}),
+        title: draft.title,
+        pageMarkdown: draft.pageMarkdown,
+        ...(draft.tags ? { tags: draft.tags } : {}),
+        ...(draft.openQuestions ? { openQuestions: draft.openQuestions } : {}),
+        ...(draft.relatedPageKeys ? { relatedPageKeys: draft.relatedPageKeys } : {}),
+        sourceCitations: evidence.map((item) => ({
+          paperKey: item.paperKey,
+          title: item.title,
+          path: item.path
+        }))
+      });
+      const result: BuildWikiPageDetails = {
+        topic: args.topic,
+        ...(args.question ? { question: args.question } : {}),
+        mode,
+        research,
+        status: "written",
+        message: `Wrote wiki page ${page.pagePath}.`,
+        draft,
+        page,
+        evidence
+      };
+      return {
+        content: [{ type: "text", text: JSON.stringify(compactBuildWikiPageResult(result)) }],
         details: result
       };
     }
@@ -2204,6 +2528,7 @@ export function createTools(workspaceDir: string, dependencies: ToolDependencies
     searchPaperTextTool,
     answerPaperWikiQuestionTool,
     answerResearchQuestionTool,
+    buildWikiPageTool,
     searchLocalPapersTool,
     wikiHealthTool,
     wikiHealthFixTool
