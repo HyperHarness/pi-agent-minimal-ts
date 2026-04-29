@@ -190,6 +190,14 @@ type SearchLocalPapersTool = {
   ) => Promise<ToolResult>;
 };
 
+type WikiHealthTool = {
+  execute: (
+    toolCallId: string,
+    args: { maxItems?: number; lowQualityScoreThreshold?: number },
+    signal: undefined,
+  ) => Promise<ToolResult>;
+};
+
 type CreateToolsDependencies = NonNullable<Parameters<typeof createTools>[1]>;
 
 function getReadFileTool(workspace: string): ReadFileTool {
@@ -438,6 +446,20 @@ function getSearchLocalPapersTool(
   return tool as SearchLocalPapersTool;
 }
 
+function getWikiHealthTool(
+  workspace: string,
+  dependencies?: Parameters<typeof createTools>[1],
+): WikiHealthTool {
+  const tools = createTools(workspace, dependencies) as ReadonlyArray<{
+    name: string;
+    execute?: WikiHealthTool["execute"];
+  }>;
+  const tool = tools.find((candidate) => candidate.name === "wiki_health");
+  assert.ok(tool);
+  assert.equal(typeof tool.execute, "function");
+  return tool as WikiHealthTool;
+}
+
 async function createDirectoryLink(targetDir: string, linkDir: string): Promise<void> {
   await symlink(targetDir, linkDir, process.platform === "win32" ? "junction" : "dir");
 }
@@ -542,6 +564,7 @@ test("createTools exposes the minimal default tool set", async () => {
       "read_paper_section",
       "search_paper_text",
       "search_local_papers",
+      "wiki_health",
     ]);
 
     const webSearchTool = tools.find((tool) => tool.name === "web_search");
@@ -582,6 +605,7 @@ test("createTools full profile exposes every built-in tool", async () => {
       "read_paper_section",
       "search_paper_text",
       "search_local_papers",
+      "wiki_health",
       "write_paper_wiki_source",
       "search_paper_wiki",
       "list_local_papers",
@@ -1979,6 +2003,51 @@ test("search_local_papers delegates to the injected local library dependency", a
 
     assert.equal((result.details as { count?: number }).count, 1);
     assert.equal((result.details as { results?: Array<{ score?: number }> }).results?.[0]?.score, 3);
+  } finally {
+    await rm(workspace, { recursive: true, force: true });
+  }
+});
+
+test("wiki_health delegates to the injected health checker dependency", async () => {
+  const workspace = await mkdtemp(path.join(tmpdir(), "pi-agent-tools-"));
+  try {
+    const tool = getWikiHealthTool(workspace, {
+      checkWikiHealth: async (options) => ({
+        totalPapers: 2,
+        issueCount: 1,
+        summary: {
+          needs_download: 0,
+          needs_authorization: 1,
+          queued: 0,
+          parse_missing: 0,
+          parse_failed: 0,
+          low_quality: 0,
+          summary_missing: 0,
+          missing_artifact: 0,
+        },
+        issues: [
+          {
+            kind: "needs_authorization",
+            severity: "high",
+            paperKey: "nature-s41586-024-00001-y",
+            reason: `threshold:${options.lowQualityScoreThreshold ?? 0}; max:${options.maxItems ?? 0}`,
+          },
+        ],
+        actions: ["1: Open/login through the paper browser or extension, then retry the affected downloads."],
+      }),
+    });
+
+    const result = await tool.execute("wiki-health-call", {
+      maxItems: 7,
+      lowQualityScoreThreshold: 0.5,
+    }, undefined);
+
+    assert.equal((result.details as { totalPapers?: number }).totalPapers, 2);
+    assert.equal((result.details as { issues?: Array<{ reason?: string }> }).issues?.[0]?.reason, "threshold:0.5; max:7");
+    assert.equal(
+      JSON.parse(result.content?.[0]?.text ?? "{}").summary.needs_authorization,
+      1,
+    );
   } finally {
     await rm(workspace, { recursive: true, force: true });
   }

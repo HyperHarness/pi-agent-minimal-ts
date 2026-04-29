@@ -272,6 +272,7 @@ The default chat agent exposes a compact paper-focused tool set:
 - `read_paper_section`: reads bounded text from a parsed paper by section id or page range, with source element metadata
 - `search_paper_text`: searches inside a parsed paper and returns snippets with page, section, and element metadata
 - `search_local_papers`: searches local paper records, parsed Markdown, and wiki summaries
+- `wiki_health`: reports knowledge-base health across records, downloads, authorization state, parse quality, missing summaries, and missing artifacts
 
 Development and diagnostics can use `createTools(workspaceDir, { toolProfile: "full" })` to expose the complete tool set. Full mode adds `get_time`, `read_file`, `write_paper_wiki_source`, `search_paper_wiki`, `list_local_papers`, `fetch_paper_webpage`, `parse_paper`, `register_manual_paper_download`, and `open_paper_page_for_login`.
 
@@ -289,6 +290,7 @@ Example prompts:
 - `Download arXiv paper 2401.01234 with download_paper.`
 - `Download this paper with download_paper: https://www.science.org/doi/10.1126/science.adz8659`
 - `Search papers about the latest superconducting quantum computing results, then download the best open result with download_paper.`
+- `Run wiki_health and tell me which papers need login, parsing, or summaries.`
 - Full mode: `Register the manually downloaded PDF for https://example.com/paper with register_manual_paper_download using downloads/inbox/paper.pdf.`
 
 ## Scripts

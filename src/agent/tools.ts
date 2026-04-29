@@ -49,6 +49,7 @@ import {
   listLocalPapers,
   searchLocalPapers
 } from "./local-paper-library.js";
+import { checkWikiHealth } from "./wiki-health.js";
 import {
   readPaperRecord,
   readPaperRecordByPath,
@@ -228,6 +229,18 @@ const searchLocalPapersParameters = Type.Object({
   maxResults: Type.Optional(Type.Integer({ description: "Maximum local paper matches to return.", minimum: 1 }))
 });
 
+const wikiHealthParameters = Type.Object({
+  maxItems: Type.Optional(Type.Integer({ description: "Maximum health issues to return.", minimum: 1 })),
+  lowQualityScoreThreshold: Type.Optional(
+    Type.Number({
+      description:
+        "Parse quality score below which parsed papers are reported as low quality. Defaults to 0.7.",
+      minimum: 0,
+      maximum: 1
+    })
+  )
+});
+
 type GetTimeParameters = Static<typeof getTimeParameters>;
 type ReadFileParameters = Static<typeof readFileParameters>;
 type WebSearchParameters = Static<typeof webSearchParameters>;
@@ -245,6 +258,7 @@ type WritePaperWikiSourceParameters = Static<typeof writePaperWikiSourceParamete
 type SearchPaperWikiParameters = Static<typeof searchPaperWikiParameters>;
 type ListLocalPapersParameters = Static<typeof listLocalPapersParameters>;
 type SearchLocalPapersParameters = Static<typeof searchLocalPapersParameters>;
+type WikiHealthParameters = Static<typeof wikiHealthParameters>;
 
 function assertPathInsideDirectory(rootDir: string, candidatePath: string): void {
   const relativePath = path.relative(rootDir, candidatePath);
@@ -377,6 +391,10 @@ type ListLocalPapersTool = AgentTool<
 type SearchLocalPapersTool = AgentTool<
   typeof searchLocalPapersParameters,
   Awaited<ReturnType<typeof searchLocalPapers>>
+>;
+type WikiHealthTool = AgentTool<
+  typeof wikiHealthParameters,
+  Awaited<ReturnType<typeof checkWikiHealth>>
 >;
 
 const MAX_SEARCH_RESULT_PREVIEWS = 5;
@@ -623,6 +641,7 @@ export interface ToolDependencies {
   searchPaperWiki?: typeof searchPaperWiki;
   listLocalPapers?: typeof listLocalPapers;
   searchLocalPapers?: typeof searchLocalPapers;
+  checkWikiHealth?: typeof checkWikiHealth;
   openPaperPageForLogin?: OpenPaperPageForLoginDependency;
   browserSessionFactory?: ReturnType<typeof resolveDefaultPaperBrowserSessionFactory>;
   paperBrowserManagerClient?: PaperBrowserManagerClient;
@@ -670,6 +689,7 @@ export function createTools(workspaceDir: string, dependencies: ToolDependencies
   const searchPaperWikiImpl = dependencies.searchPaperWiki ?? searchPaperWiki;
   const listLocalPapersImpl = dependencies.listLocalPapers ?? listLocalPapers;
   const searchLocalPapersImpl = dependencies.searchLocalPapers ?? searchLocalPapers;
+  const checkWikiHealthImpl = dependencies.checkWikiHealth ?? checkWikiHealth;
   const browserSessionFactoryImpl =
     dependencies.browserSessionFactory ??
     resolveDefaultPaperBrowserSessionFactory({ workspaceDir: resolvedWorkspaceDir });
@@ -1458,6 +1478,28 @@ export function createTools(workspaceDir: string, dependencies: ToolDependencies
     }
   };
 
+  const wikiHealthTool: WikiHealthTool = {
+    name: "wiki_health",
+    label: "Wiki Health",
+    description:
+      "Diagnoses local paper knowledge-base health across records, downloads, authorization state, parse quality, wiki summaries, and missing artifacts.",
+    parameters: wikiHealthParameters,
+    execute: async (_toolCallId: string, args: WikiHealthParameters) => {
+      const result = await checkWikiHealthImpl({
+        workspaceDir: resolvedWorkspaceDir,
+        ...(args.maxItems !== undefined ? { maxItems: args.maxItems } : {}),
+        ...(args.lowQualityScoreThreshold !== undefined
+          ? { lowQualityScoreThreshold: args.lowQualityScoreThreshold }
+          : {})
+      });
+
+      return {
+        content: [{ type: "text", text: JSON.stringify(result) }],
+        details: result
+      };
+    }
+  };
+
   const tools = [
     webSearchTool,
     fetchUrlTool,
@@ -1466,7 +1508,8 @@ export function createTools(workspaceDir: string, dependencies: ToolDependencies
     inspectPaperTool,
     readPaperSectionTool,
     searchPaperTextTool,
-    searchLocalPapersTool
+    searchLocalPapersTool,
+    wikiHealthTool
   ] as unknown as AgentTools;
 
   if (dependencies.toolProfile === "full") {

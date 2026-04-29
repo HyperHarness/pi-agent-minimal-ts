@@ -18,6 +18,7 @@ export * from "./agent/paper-extension-protocol.js";
 export * from "./agent/paper-extension-host.js";
 export * from "./agent/paper-extension-bridge.js";
 export * from "./agent/paper-download-jobs.js";
+export * from "./agent/wiki-health.js";
 export * from "./agent/codex-approval-doctor.js";
 export * from "./agent/paper-reader/types.js";
 export * from "./agent/paper-reader/paper-reader.js";
