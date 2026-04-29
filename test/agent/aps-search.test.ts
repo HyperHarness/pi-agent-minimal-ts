@@ -16,7 +16,7 @@ test("searchApsPapers queries Crossref for APS DOI-prefix papers and returns new
 
   const results = await searchApsPapers({
     query: "superconducting quantum computing",
-    maxResults: 3,
+    maxResults: 4,
     fetchImpl: async (input) => {
       calls.push({ url: String(input) });
       return jsonResponse({
@@ -44,13 +44,24 @@ test("searchApsPapers queries Crossref for APS DOI-prefix papers and returns new
             },
             {
               DOI: "10.1103/k3d5-v43c",
-              title: ["A routed superconducting quantum processor paper"],
+              title: ["An accepted superconducting quantum processor paper"],
               abstract: "Superconducting quantum computing with routed DOI.",
               published: {
                 "date-parts": [[2025, 10, 1]]
               },
               author: [{ given: "Katherine", family: "Johnson" }],
               "container-title": ["Physical Review Applied"]
+            },
+            {
+              DOI: "10.1103/9shv-l4cx",
+              title: ["A published short-DOI superconducting qubit paper"],
+              abstract: "Superconducting quantum computing with a published short APS DOI.",
+              published: {
+                "date-parts": [[2025, 9, 30]]
+              },
+              author: [{ given: "Mary", family: "Jackson" }],
+              "container-title": ["PRX Quantum"],
+              "article-number": "030313"
             },
             {
               DOI: "10.1103/PhysRevB.120.123456",
@@ -84,10 +95,16 @@ test("searchApsPapers queries Crossref for APS DOI-prefix papers and returns new
     })),
     [
       {
-        title: "A routed superconducting quantum processor paper",
+        title: "An accepted superconducting quantum processor paper",
         primarySource: "aps",
-        articleUrl: "https://journals.aps.org/doi/10.1103/k3d5-v43c",
+        articleUrl: "https://journals.aps.org/prapplied/accepted/10.1103/k3d5-v43c",
         canonicalId: "10.1103/k3d5-v43c"
+      },
+      {
+        title: "A published short-DOI superconducting qubit paper",
+        primarySource: "aps",
+        articleUrl: "https://journals.aps.org/prxquantum/abstract/10.1103/9shv-l4cx",
+        canonicalId: "10.1103/9shv-l4cx"
       },
       {
         title: "On-chip direct-current source for scalable superconducting quantum computing",

@@ -18,6 +18,9 @@ type CrossrefItem = {
   abstract?: unknown;
   author?: unknown;
   published?: unknown;
+  "article-number"?: unknown;
+  volume?: unknown;
+  issue?: unknown;
   "container-title"?: unknown;
 };
 
@@ -178,16 +181,24 @@ function getApsJournalSlug(containerTitle: string | undefined): string | null {
 function toApsArticleUrl(input: {
   doi: string;
   containerTitle?: string;
+  articleNumber?: string;
 }): string {
   const doiPath = encodeApsDoiPath(input.doi);
   const journalSlug = getApsJournalSlug(input.containerTitle);
   const doiSuffix = input.doi.replace(/^10\.1103\//i, "");
-  if (!/^PhysRev[A-Za-z]+?\.\d+\.\d+$/i.test(doiSuffix)) {
-    return `https://journals.aps.org/doi/${doiPath}`;
+  if (/^PhysRev[A-Za-z]+?\.\d+\.\d+$/i.test(doiSuffix)) {
+    return journalSlug
+      ? `https://journals.aps.org/${journalSlug}/abstract/${doiPath}`
+      : `https://journals.aps.org/doi/${doiPath}`;
   }
-  return journalSlug
-    ? `https://journals.aps.org/${journalSlug}/abstract/${doiPath}`
-    : `https://journals.aps.org/doi/${doiPath}`;
+
+  if (journalSlug) {
+    return input.articleNumber
+      ? `https://journals.aps.org/${journalSlug}/abstract/${doiPath}`
+      : `https://journals.aps.org/${journalSlug}/accepted/${doiPath}`;
+  }
+
+  return `https://link.aps.org/doi/${doiPath}`;
 }
 
 function toPaperSearchResult(item: CrossrefItem): PaperSearchResult | null {
@@ -202,9 +213,13 @@ function toPaperSearchResult(item: CrossrefItem): PaperSearchResult | null {
 
   const doi = item.DOI.trim();
   const journal = getStringArray(item["container-title"])[0]?.trim();
+  const articleNumber = typeof item["article-number"] === "string" && item["article-number"].trim()
+    ? item["article-number"].trim()
+    : undefined;
   const articleUrl = toApsArticleUrl({
     doi,
-    containerTitle: journal
+    containerTitle: journal,
+    ...(articleNumber ? { articleNumber } : {})
   });
   const publishedDate = formatPublishedDate(item.published);
   const abstract = typeof item.abstract === "string" ? stripMarkup(item.abstract) : "";
