@@ -236,6 +236,10 @@ function getTitleKey(title: string): string {
   return normalizeTitle(title);
 }
 
+function getCompactTitleKey(title: string): string {
+  return normalizeTitle(title).replace(/\s+/g, "");
+}
+
 function sortSearchSource(left: RankedSearchSource, right: RankedSearchSource): number {
   if (left.rank !== right.rank) {
     return left.rank - right.rank;
@@ -382,19 +386,32 @@ function classifySupportedSource(url: URL): Extract<
     url.hostname === "link.aps.org" ||
     url.hostname === "aps.org"
   ) {
+    const articleUrl = normalizeApsArticleUrl(url);
     const canonicalId = resolvePublisherCanonicalId({
       publisher: "aps",
-      url: url.toString()
+      url: articleUrl
     });
     return {
       source: "aps",
       action: "authorized_download",
-      articleUrl: url.toString(),
+      articleUrl,
       ...(canonicalId ? { canonicalId } : {})
     };
   }
 
   return null;
+}
+
+function normalizeApsArticleUrl(url: URL): string {
+  if (url.hostname !== "journals.aps.org" || !/^\/doi\/(?!pdf\/).+/i.test(url.pathname)) {
+    return url.toString();
+  }
+
+  const normalizedUrl = new URL(url);
+  normalizedUrl.hostname = "link.aps.org";
+  normalizedUrl.search = "";
+  normalizedUrl.hash = "";
+  return normalizedUrl.toString();
 }
 
 function isApsAcceptedPaperUrl(articleUrl: string): boolean {
@@ -904,6 +921,13 @@ async function tryDownloadDirectExternalPaper(options: {
 function resolveDirectPublisherPdfUrl(
   classification: Extract<ClassifiedPaperUrl, { source: SupportedPaperSource }>
 ): string | undefined {
+  const directArticleUrl = new URL(classification.articleUrl);
+  if (directArticleUrl.pathname.toLowerCase().endsWith(".pdf")) {
+    directArticleUrl.search = "";
+    directArticleUrl.hash = "";
+    return directArticleUrl.toString();
+  }
+
   if (classification.source !== "aps") {
     return undefined;
   }
@@ -940,6 +964,17 @@ function resolveDirectPublisherPdfUrl(
   articleUrl.search = "";
   articleUrl.hash = "";
   return articleUrl.toString();
+}
+
+function isDirectPublisherPdfUrl(
+  classification: Extract<ClassifiedPaperUrl, { source: SupportedPaperSource }>
+): boolean {
+  try {
+    const parsedUrl = new URL(classification.articleUrl);
+    return parsedUrl.pathname.toLowerCase().endsWith(".pdf");
+  } catch {
+    return false;
+  }
 }
 
 async function tryDownloadDirectSupportedPublisherPaper(options: {
@@ -1168,7 +1203,11 @@ async function tryDownloadArxivPreprintByTitle(options: {
   }
 
   const titleKey = normalizeTitle(title);
-  const match = results.find((result) => normalizeTitle(result.title) === titleKey);
+  const compactTitleKey = getCompactTitleKey(title);
+  const match = results.find((result) => {
+    const resultTitleKey = normalizeTitle(result.title);
+    return resultTitleKey === titleKey || resultTitleKey.replace(/\s+/g, "") === compactTitleKey;
+  });
   if (!match) {
     return null;
   }
@@ -1188,7 +1227,7 @@ function createPublisherPreprintFallbackFailure(arxivId: string): PaperFailure {
   return {
     code: "publisher_version_not_available",
     message:
-      `Publisher page is an accepted paper without a formal PDF yet; using matching arXiv preprint ${arxivId}.`
+      `Publisher PDF was not downloaded automatically; using matching arXiv preprint ${arxivId}.`
   };
 }
 
@@ -1246,7 +1285,7 @@ async function writePublisherPreprintFallbackRecord(options: {
     canonicalId: options.classification.canonicalId
   });
   const reason =
-    `Publisher page is an accepted paper without a formal PDF yet; using matching arXiv preprint ${options.arxivResult.canonicalId}.`;
+    `Publisher PDF was not downloaded automatically; using matching arXiv preprint ${options.arxivResult.canonicalId}.`;
   const recordPath = await writePaperRecord({
     workspaceDir: options.workspaceDir,
     record: {
@@ -1454,6 +1493,17 @@ export async function downloadPaper(options: DownloadPaperOptions): Promise<Pape
     });
   }
 
+  if (isDirectPublisherPdfUrl(classification)) {
+    const directPublisherDownload = await tryDownloadDirectSupportedPublisherPaper({
+      workspaceDir: options.workspaceDir,
+      classification,
+      fetchImpl: options.fetchImpl
+    });
+    if (directPublisherDownload) {
+      return directPublisherDownload;
+    }
+  }
+
   if (classification.source === "aps" && isApsAcceptedPaperUrl(classification.articleUrl)) {
     const acceptedPaperTitle = await resolveApsAcceptedPaperTitle({
       articleUrl: classification.articleUrl,
@@ -1483,8 +1533,9 @@ export async function downloadPaper(options: DownloadPaperOptions): Promise<Pape
     canonicalId: classification.canonicalId
   });
   if (priorNonPdfArtifact) {
-    const arxivFallback = await tryDownloadArxivPreprintByTitle({
+    const arxivFallback = await tryDownloadArxivPreprintForPublisherFallback({
       workspaceDir: options.workspaceDir,
+      classification,
       title: options.title,
       fetchImpl: options.fetchImpl,
       searchArxivImpl: options.searchArxivImpl
@@ -1506,8 +1557,9 @@ export async function downloadPaper(options: DownloadPaperOptions): Promise<Pape
     source: classification.source
   });
   if (priorExtensionFailure) {
-    const arxivFallback = await tryDownloadArxivPreprintByTitle({
+    const arxivFallback = await tryDownloadArxivPreprintForPublisherFallback({
       workspaceDir: options.workspaceDir,
+      classification,
       title: options.title,
       fetchImpl: options.fetchImpl,
       searchArxivImpl: options.searchArxivImpl
@@ -1534,8 +1586,9 @@ export async function downloadPaper(options: DownloadPaperOptions): Promise<Pape
       });
     } catch (error) {
       if (options.usePlaywrightFallback !== true) {
-        const arxivFallback = await tryDownloadArxivPreprintByTitle({
+        const arxivFallback = await tryDownloadArxivPreprintForPublisherFallback({
           workspaceDir: options.workspaceDir,
+          classification,
           title: options.title,
           fetchImpl: options.fetchImpl,
           searchArxivImpl: options.searchArxivImpl
@@ -1552,8 +1605,9 @@ export async function downloadPaper(options: DownloadPaperOptions): Promise<Pape
       }
     }
   } else if (options.usePlaywrightFallback !== true) {
-    const arxivFallback = await tryDownloadArxivPreprintByTitle({
+    const arxivFallback = await tryDownloadArxivPreprintForPublisherFallback({
       workspaceDir: options.workspaceDir,
+      classification,
       title: options.title,
       fetchImpl: options.fetchImpl,
       searchArxivImpl: options.searchArxivImpl
@@ -1623,8 +1677,9 @@ export async function downloadPaper(options: DownloadPaperOptions): Promise<Pape
       throw error;
     }
 
-    const arxivFallback = await tryDownloadArxivPreprintByTitle({
+    const arxivFallback = await tryDownloadArxivPreprintForPublisherFallback({
       workspaceDir: options.workspaceDir,
+      classification,
       title: options.title,
       fetchImpl: options.fetchImpl,
       searchArxivImpl: options.searchArxivImpl

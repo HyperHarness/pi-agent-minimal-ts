@@ -40,7 +40,7 @@ function decodePublisherPathSegment(value: string): string {
 }
 
 function extractNatureArticleId(urlString: string): string | null {
-  const match = new URL(urlString).pathname.match(/^\/articles\/([^/?#]+?)(?:\.pdf)?$/i);
+  const match = new URL(urlString).pathname.match(/^\/articles\/([^/?#]+?)(?:_reference)?(?:\.pdf)?$/i);
   return match?.[1] ? decodePublisherPathSegment(match[1]) : null;
 }
 

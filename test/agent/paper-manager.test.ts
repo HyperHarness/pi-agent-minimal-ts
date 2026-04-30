@@ -885,6 +885,118 @@ test("downloadPaper queues extension bridge before attempting direct APS PDF fet
   }
 });
 
+test("downloadPaper normalizes invalid APS journals DOI resolver URLs before queueing", async () => {
+  const workspaceDir = await mkdtemp(path.join(os.tmpdir(), "paper-manager-"));
+  const invalidArticleUrl = "https://journals.aps.org/doi/10.1103/9shv-l4cx";
+  const normalizedArticleUrl = "https://link.aps.org/doi/10.1103/9shv-l4cx";
+  const submittedJobs: unknown[] = [];
+
+  try {
+    const result = await downloadPaper({
+      workspaceDir,
+      url: invalidArticleUrl,
+      extensionBridge: {
+        async submitJob(job) {
+          submittedJobs.push(job);
+          return {
+            status: "extension_job_queued",
+            source: job.source,
+            articleUrl: job.articleUrl,
+            jobId: job.jobId,
+            message: "Paper download job queued for the browser extension."
+          };
+        }
+      },
+      downloadPublisherPaperImpl: async () => {
+        throw new Error("Playwright fallback should not run by default");
+      }
+    });
+
+    assert.deepEqual(submittedJobs, [
+      {
+        jobId: "paper-aps-3ba6a6a8c92e",
+        articleUrl: normalizedArticleUrl,
+        source: "aps",
+        purpose: "download_and_webpage"
+      }
+    ]);
+    assert.deepEqual(result, {
+      status: "extension_job_queued",
+      source: "aps",
+      articleUrl: normalizedArticleUrl,
+      jobId: "paper-aps-3ba6a6a8c92e",
+      message: "Paper download job queued for the browser extension."
+    });
+  } finally {
+    await rm(workspaceDir, { recursive: true, force: true });
+  }
+});
+
+test("downloadPaper downloads direct Nature reference PDFs without requiring the extension", async () => {
+  const workspaceDir = await mkdtemp(path.join(os.tmpdir(), "paper-manager-"));
+  const articleUrl = "https://www.nature.com/articles/s41534-026-01243-w_reference.pdf";
+  const pdfBytes = Buffer.from("%PDF-1.7\nnature article in press\n", "utf8");
+  const fetchCalls: string[] = [];
+
+  try {
+    const result = await downloadPaper({
+      workspaceDir,
+      url: articleUrl,
+      fetchImpl: async (input) => {
+        fetchCalls.push(String(input));
+        return new Response(pdfBytes, {
+          status: 200,
+          headers: {
+            "content-type": "application/pdf"
+          }
+        });
+      },
+      downloadPublisherPaperImpl: async () => {
+        throw new Error("browser fallback should not run for direct Nature PDF downloads");
+      }
+    });
+
+    const expectedPdfPath = resolvePaperPdfPath({
+      workspaceDir,
+      source: "nature",
+      canonicalId: "s41534-026-01243-w"
+    });
+    const expectedRecordPath = resolvePaperRecordPath({
+      workspaceDir,
+      source: "nature",
+      canonicalId: "s41534-026-01243-w",
+      articleUrl
+    });
+    const savedRecord = JSON.parse(await readFile(expectedRecordPath, "utf8"));
+
+    assert.deepEqual(fetchCalls, [articleUrl]);
+    assert.deepEqual(result, {
+      status: "downloaded",
+      source: "nature",
+      canonicalId: "s41534-026-01243-w",
+      articleUrl,
+      finalPdfUrl: articleUrl,
+      path: expectedPdfPath,
+      recordPath: expectedRecordPath
+    });
+    assert.equal(await readFile(expectedPdfPath, "utf8"), pdfBytes.toString("utf8"));
+    assert.deepEqual(stripRecordManifest(savedRecord), {
+      source: "nature",
+      articleUrl,
+      recordedAt: savedRecord.recordedAt,
+      handlingMethod: "direct_http",
+      status: "downloaded",
+      canonicalId: "s41534-026-01243-w",
+      pdfUrl: articleUrl,
+      downloadPath: expectedPdfPath
+    });
+    assert.equal(savedRecord.download.status, "downloaded");
+    assert.equal(savedRecord.reading.status, "not_ready");
+  } finally {
+    await rm(workspaceDir, { recursive: true, force: true });
+  }
+});
+
 test("downloadPaper tries an exact-title arXiv preprint when a publisher URL cannot be downloaded", async () => {
   const workspaceDir = await mkdtemp(path.join(os.tmpdir(), "paper-manager-"));
   const articleUrl = "https://journals.aps.org/prxquantum/abstract/10.1103/example";
@@ -942,6 +1054,12 @@ test("downloadPaper tries an exact-title arXiv preprint when a publisher URL can
       canonicalId: "2406.06015",
       articleUrl: "https://arxiv.org/abs/2406.06015"
     });
+    const expectedPublisherFallbackRecordPath = resolvePaperRecordPath({
+      workspaceDir,
+      source: "aps",
+      canonicalId: "10.1103/example",
+      articleUrl
+    });
 
     assert.deepEqual(fetchCalls, [arxivPdfUrl]);
     assert.deepEqual(searchCalls, [{ query: title, maxResults: 5 }]);
@@ -952,9 +1070,71 @@ test("downloadPaper tries an exact-title arXiv preprint when a publisher URL can
       articleUrl: "https://arxiv.org/abs/2406.06015",
       finalPdfUrl: arxivPdfUrl,
       path: expectedPdfPath,
-      recordPath: expectedRecordPath
+      recordPath: expectedRecordPath,
+      publisherFallback: {
+        source: "aps",
+        canonicalId: "10.1103/example",
+        articleUrl,
+        recordPath: expectedPublisherFallbackRecordPath,
+        reason: "Publisher PDF was not downloaded automatically; using matching arXiv preprint 2406.06015.",
+        title
+      }
     });
     assert.equal(await readFile(expectedPdfPath, "utf8"), pdfBytes.toString("utf8"));
+    const publisherFallbackRecord = JSON.parse(await readFile(expectedPublisherFallbackRecordPath, "utf8"));
+    assert.equal(publisherFallbackRecord.status, "preprint_fallback");
+    assert.equal(publisherFallbackRecord.preprint.canonicalId, "2406.06015");
+  } finally {
+    await rm(workspaceDir, { recursive: true, force: true });
+  }
+});
+
+test("downloadPaper matches arXiv preprints across hyphenated publisher title variants", async () => {
+  const workspaceDir = await mkdtemp(path.join(os.tmpdir(), "paper-manager-"));
+  const articleUrl = "https://journals.aps.org/prxquantum/abstract/10.1103/9shv-l4cx";
+  const title = "Parametric Multielement Coupling Architecture for Coherent and Dissipative Control of Superconducting Qubits";
+  const arxivTitle = "Parametric multi-element coupling architecture for coherent and dissipative control of superconducting qubits";
+  const arxivPdfUrl = "https://arxiv.org/pdf/2403.02203.pdf";
+  const pdfBytes = Buffer.from("%PDF-1.7\narxiv preprint\n", "utf8");
+
+  try {
+    const result = await downloadPaper({
+      workspaceDir,
+      url: articleUrl,
+      title,
+      fetchImpl: async (input) => {
+        assert.equal(String(input), arxivPdfUrl);
+        return new Response(pdfBytes, {
+          status: 200,
+          headers: {
+            "content-type": "application/pdf"
+          }
+        });
+      },
+      searchArxivImpl: async () => [
+        createArxivResult({
+          id: "2403.02203",
+          title: arxivTitle,
+          absUrl: "https://arxiv.org/abs/2403.02203",
+          pdfUrl: arxivPdfUrl
+        })
+      ]
+    });
+
+    const expectedPublisherFallbackRecordPath = resolvePaperRecordPath({
+      workspaceDir,
+      source: "aps",
+      canonicalId: "10.1103/9shv-l4cx",
+      articleUrl
+    });
+    const publisherFallbackRecord = JSON.parse(await readFile(expectedPublisherFallbackRecordPath, "utf8"));
+
+    assert.equal(result.status, "downloaded");
+    assert.equal(result.source, "arxiv");
+    assert.equal(result.canonicalId, "2403.02203");
+    assert.equal(result.publisherFallback?.recordPath, expectedPublisherFallbackRecordPath);
+    assert.equal(publisherFallbackRecord.status, "preprint_fallback");
+    assert.equal(publisherFallbackRecord.preprint.canonicalId, "2403.02203");
   } finally {
     await rm(workspaceDir, { recursive: true, force: true });
   }

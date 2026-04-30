@@ -356,6 +356,15 @@ test("downloadPaperPdf formats Nature output filenames from the article identifi
   assert.equal(downloadedPath, expectedPath);
 });
 
+test("resolvePublisherCanonicalId treats Nature article-in-press reference PDFs as the article id", () => {
+  const canonicalId = resolvePublisherCanonicalId({
+    publisher: "nature",
+    url: "https://www.nature.com/articles/s41534-026-01243-w_reference.pdf"
+  });
+
+  assert.equal(canonicalId, "s41534-026-01243-w");
+});
+
 test("resolvePublisherCanonicalId decodes percent-encoded Science DOI path segments", () => {
   const canonicalId = resolvePublisherCanonicalId({
     publisher: "science",

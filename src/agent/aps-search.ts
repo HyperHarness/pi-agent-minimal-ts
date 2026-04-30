@@ -189,7 +189,7 @@ function toApsArticleUrl(input: {
   if (/^PhysRev[A-Za-z]+?\.\d+\.\d+$/i.test(doiSuffix)) {
     return journalSlug
       ? `https://journals.aps.org/${journalSlug}/abstract/${doiPath}`
-      : `https://journals.aps.org/doi/${doiPath}`;
+      : `https://link.aps.org/doi/${doiPath}`;
   }
 
   if (journalSlug) {
