@@ -4,6 +4,7 @@ export interface MemoryDebugPayload {
   message: ParsedIncomingMessage;
   sessionDir?: string;
   history: ChatTurn[];
+  promptHistory?: ChatTurn[];
   userMemoryText: string;
   groupMemoryText: string;
   keyMemoryText: string;
@@ -29,14 +30,15 @@ export function buildMemoryDebugLines(payload: MemoryDebugPayload): string[] {
   const groupItems = normalizeMemoryItems(payload.groupMemoryText);
   const keyItems = normalizeMemoryItems(payload.keyMemoryText);
   const webItems = normalizeMemoryItems(payload.webContext);
-  const historyPreview = payload.history
+  const promptHistory = payload.promptHistory ?? payload.history;
+  const historyPreview = promptHistory
     .slice(-3)
     .map((turn) => `${turn.role}:${turn.text}`)
     .join(' | ') || '(empty)';
 
   return [
     `chat=${payload.message.chatId} sender=${payload.message.senderName} session_dir=${payload.sessionDir || 'stateless'}`,
-    `history_turns=${payload.history.length} history_preview=${historyPreview}`,
+    `stored_history_turns=${payload.history.length} prompt_history_turns=${promptHistory.length} prompt_history_preview=${historyPreview}`,
     `user_memory_hits=${userItems.length} ${userItems.join(' | ') || '(none)'}`,
     `group_memory_hits=${groupItems.length} ${groupItems.join(' | ') || '(none)'}`,
     `key_memory_hits=${keyItems.length} ${keyItems.join(' | ') || '(none)'}`,

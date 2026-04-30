@@ -24,7 +24,7 @@ import { buildMemoryDebugLines } from './memory/debug.js';
 import { extractDurableGroupFacts, extractDurableUserFacts } from './memory/extractors.js';
 import { KeyMemoryStore, extractKeyMemoryCandidates } from './memory/key-memory.js';
 import { LongTermMemoryStore } from './memory/long-term-memory.js';
-import { PiRpcClient } from './pi-client.js';
+import { PiRpcClient, type PiEvent } from './pi-client.js';
 import { buildPiClientOptionsForMessage, getPiClientKey } from './pi-session.js';
 import { startPiClientWithRetry } from './pi-client-retry.js';
 import { buildSearchQuery, formatWebResults, searchWeb } from './web/search.js';
@@ -40,6 +40,108 @@ const messageQueue = createPerKeyQueue();
 const PROCESSED_CACHE_LIMIT = 1000;
 const defaultPiSessionRoot = config.pi.sessionDir || `${config.memory.dir}/pi-sessions`;
 const piClients = new Map<string, PiRpcClient>();
+
+function isRecord(value: unknown): value is Record<string, unknown> {
+  return typeof value === 'object' && value !== null;
+}
+
+function compactLogText(value: unknown, maxLength = 180): string | undefined {
+  if (typeof value !== 'string') {
+    return undefined;
+  }
+
+  const compacted = value.replace(/\s+/g, ' ').trim();
+  if (!compacted) {
+    return undefined;
+  }
+
+  return compacted.length > maxLength
+    ? `${compacted.slice(0, Math.max(0, maxLength - 1)).trimEnd()}…`
+    : compacted;
+}
+
+function getStringField(record: Record<string, unknown>, key: string): string | undefined {
+  return compactLogText(record[key], 220);
+}
+
+function formatArgsSummary(args: unknown): string {
+  if (!isRecord(args)) {
+    return '';
+  }
+
+  const fields = ['query', 'url', 'id', 'paperKey', 'topic', 'question']
+    .map((key) => {
+      const value = getStringField(args, key);
+      return value ? `${key}=${value}` : undefined;
+    })
+    .filter(Boolean);
+
+  return fields.length > 0 ? ` ${fields.join(' ')}` : '';
+}
+
+function formatToolResultSummary(result: unknown): string {
+  if (!isRecord(result)) {
+    return '';
+  }
+
+  const details = isRecord(result.details) ? result.details : undefined;
+  if (!details) {
+    return '';
+  }
+
+  const fields = ['status', 'source', 'query', 'count', 'jobId', 'paperKey', 'canonicalId', 'articleUrl', 'recordPath', 'message']
+    .map((key) => {
+      const value = typeof details[key] === 'number' ? String(details[key]) : getStringField(details, key);
+      return value ? `${key}=${value}` : undefined;
+    })
+    .filter(Boolean);
+
+  return fields.length > 0 ? ` ${fields.join(' ')}` : '';
+}
+
+function formatToolProgressSummary(partialResult: unknown): string {
+  if (!isRecord(partialResult)) {
+    return '';
+  }
+
+  const details = isRecord(partialResult.details) ? partialResult.details : undefined;
+  const progress = details && isRecord(details.progress) ? details.progress : undefined;
+  const progressMessage = progress ? getStringField(progress, 'message') : undefined;
+  if (progressMessage) {
+    return ` ${progressMessage}`;
+  }
+
+  const content = Array.isArray(partialResult.content) ? partialResult.content : [];
+  const text = content
+    .filter(isRecord)
+    .find((item) => item.type === 'text' && typeof item.text === 'string')?.text;
+  const compactText = compactLogText(text, 220);
+  return compactText ? ` ${compactText}` : '';
+}
+
+function logPiEvent(clientKey: string, event: PiEvent): void {
+  const toolName = compactLogText(event.toolName, 80) ?? 'unknown_tool';
+
+  if (event.type === 'tool_execution_start') {
+    log.pi(`[${clientKey}] tool:start ${toolName}${formatArgsSummary(event.args)}`);
+    return;
+  }
+
+  if (event.type === 'tool_execution_update') {
+    log.pi(`[${clientKey}] tool:progress ${toolName}${formatToolProgressSummary(event.partialResult)}`);
+    return;
+  }
+
+  if (event.type === 'tool_execution_end') {
+    const status = event.isError === true ? 'error' : 'ok';
+    log.pi(`[${clientKey}] tool:end ${toolName} ${status}${formatToolResultSummary(event.result)}`);
+    return;
+  }
+
+  if (event.type === 'agent_end') {
+    log.pi(`[${clientKey}] agent:end`);
+  }
+}
 
 function trimProcessedCache(): void {
   if (processedMessageIds.size <= PROCESSED_CACHE_LIMIT) {
@@ -69,6 +171,7 @@ async function ensurePiClient(message: ParsedIncomingMessage): Promise<PiRpcClie
     createClient: () => {
       const nextClient = new PiRpcClient(options);
       nextClient.on('stderr', (stderrMessage: string) => log.pi(stderrMessage.trim()));
+      nextClient.on('event', (event: PiEvent) => logPiEvent(clientKey, event));
       nextClient.on('exit', (code: number) => {
         log.warn(`PI 进程退出[${clientKey}]: ${code}`);
         if (piClients.get(clientKey) === nextClient) {
@@ -470,6 +573,9 @@ async function processMessage(client: Lark.Client, message: ParsedIncomingMessag
   const replyMessageId = await sendThinkingMessage(client, message.chatId, message.senderName, replyTargetMessageId);
 
   const history = memory.getTurns(message.chatId);
+  const promptHistory = config.memory.includeAgentMessagesInHistory
+    ? history
+    : history.filter((turn) => turn.role !== 'assistant');
   const piClientOptions = buildPiClientOptionsForMessage(config.pi, message, defaultPiSessionRoot);
   const userMemoryText = config.memory.longTermEnabled ? longTermMemory.renderUserMemory(message.senderId) : '(无)';
   const groupMemoryText = config.memory.longTermEnabled ? longTermMemory.renderGroupMemory(message.chatId) : '(无)';
@@ -517,12 +623,14 @@ async function processMessage(client: Lark.Client, message: ParsedIncomingMessag
       keyMemory: keyMemoryText,
       webContext: currentWebContext,
       maxRecentTurns: 10,
+      includeAgentMessagesInHistory: config.memory.includeAgentMessagesInHistory,
     });
 
   for (const debugLine of buildMemoryDebugLines({
     message,
     sessionDir: piClientOptions.sessionDir,
     history,
+    promptHistory,
     userMemoryText,
     groupMemoryText,
     keyMemoryText,
@@ -548,6 +656,10 @@ async function processMessage(client: Lark.Client, message: ParsedIncomingMessag
   const pi = await piClientPromise;
 
   try {
+    const agentStartedAt = Date.now();
+    log.pi(
+      `prompt:start chat=${message.chatId} stored_history_turns=${history.length} prompt_history_turns=${promptHistory.length}`,
+    );
     const agentResult = await runAgentWithWebSearch({
       initialWebContext: webContext,
       maxSearchSteps: config.web.enabled ? maxAgentWebSearchSteps : 0,
@@ -559,6 +671,9 @@ async function processMessage(client: Lark.Client, message: ParsedIncomingMessag
       },
     });
     const finalResponse = agentResult.finalResponse;
+    log.pi(
+      `prompt:end chat=${message.chatId} duration_ms=${Date.now() - agentStartedAt} response_chars=${finalResponse.length} search_queries=${agentResult.searchQueries.length}`,
+    );
     webContext = agentResult.webContext;
     const finalAsText = isTextFinalMode();
     await updater.complete(finalResponse);

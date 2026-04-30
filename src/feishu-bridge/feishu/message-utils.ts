@@ -85,6 +85,7 @@ export interface PromptMemoryContext {
   keyMemory?: string;
   webContext?: string;
   maxRecentTurns?: number;
+  includeAgentMessagesInHistory?: boolean;
 }
 
 export function buildAgentPrompt(
@@ -94,7 +95,11 @@ export function buildAgentPrompt(
   memoryContext?: PromptMemoryContext,
 ): string {
   const maxRecentTurns = memoryContext?.maxRecentTurns ?? 10;
-  const recentHistory = history.slice(-maxRecentTurns);
+  const includeAgentMessagesInHistory = memoryContext?.includeAgentMessagesInHistory ?? false;
+  const promptHistory = includeAgentMessagesInHistory
+    ? history
+    : history.filter((turn) => turn.role !== 'assistant');
+  const recentHistory = promptHistory.slice(-maxRecentTurns);
   const historyBlock = recentHistory.length
     ? recentHistory
         .map((turn) => {

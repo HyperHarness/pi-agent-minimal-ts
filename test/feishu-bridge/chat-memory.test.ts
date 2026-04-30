@@ -34,7 +34,7 @@ test('chat memory isolates chats', () => {
   assert.equal(store.getTurns('chat-a')[0].text, 'hello a');
 });
 
-test('chat memory renders summary for prompt injection with sender identity in group chats', () => {
+test('chat memory renders only user messages by default for prompt injection', () => {
   const dir = makeTempDir();
   const store = new ChatMemoryStore(dir, 5);
 
@@ -48,6 +48,24 @@ test('chat memory renders summary for prompt injection with sender identity in g
   store.appendTurn('chat-1', { role: 'assistant', text: '第一答', timestamp: '2026-04-14T00:00:02Z' });
 
   const summary = store.renderHistory('chat-1');
+  assert.match(summary, /Alice: 第一问/);
+  assert.doesNotMatch(summary, /助手: 第一答/);
+});
+
+test('chat memory can render assistant messages when explicitly enabled', () => {
+  const dir = makeTempDir();
+  const store = new ChatMemoryStore(dir, 5);
+
+  store.appendTurn('chat-1', {
+    role: 'user',
+    text: '第一问',
+    timestamp: '2026-04-14T00:00:01Z',
+    senderId: 'ou_alice',
+    senderName: 'Alice',
+  });
+  store.appendTurn('chat-1', { role: 'assistant', text: '第一答', timestamp: '2026-04-14T00:00:02Z' });
+
+  const summary = store.renderHistory('chat-1', { includeAgentMessages: true });
   assert.match(summary, /Alice: 第一问/);
   assert.match(summary, /助手: 第一答/);
 });

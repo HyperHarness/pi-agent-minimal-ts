@@ -31,7 +31,8 @@ test('buildMemoryDebugLines shows session dir and memory hit summaries', () => {
   });
 
   assert.match(lines.join('\n'), /session_dir=.memory\/pi-sessions\/oc_debug_chat/);
-  assert.match(lines.join('\n'), /history_turns=2/);
+  assert.match(lines.join('\n'), /stored_history_turns=2/);
+  assert.match(lines.join('\n'), /prompt_history_turns=2/);
   assert.match(lines.join('\n'), /user_memory_hits=2/);
   assert.match(lines.join('\n'), /group_memory_hits=1/);
   assert.match(lines.join('\n'), /key_memory_hits=2/);
@@ -52,9 +53,34 @@ test('buildMemoryDebugLines handles empty memory sources', () => {
   });
 
   assert.match(lines.join('\n'), /session_dir=stateless/);
-  assert.match(lines.join('\n'), /history_turns=0/);
+  assert.match(lines.join('\n'), /stored_history_turns=0/);
+  assert.match(lines.join('\n'), /prompt_history_turns=0/);
   assert.match(lines.join('\n'), /user_memory_hits=0/);
   assert.match(lines.join('\n'), /group_memory_hits=0/);
   assert.match(lines.join('\n'), /key_memory_hits=0/);
   assert.match(lines.join('\n'), /web_hits=0/);
+});
+
+test('buildMemoryDebugLines can show filtered prompt history separately from stored history', () => {
+  const lines = buildMemoryDebugLines({
+    message,
+    sessionDir: '.memory/pi-sessions/oc_debug_chat',
+    history: [
+      { role: 'user', text: '帮我搜索论文', timestamp: '2026-04-15T00:00:00Z' },
+      { role: 'assistant', text: '这是一段很长的回复', timestamp: '2026-04-15T00:00:01Z' },
+    ],
+    promptHistory: [
+      { role: 'user', text: '帮我搜索论文', timestamp: '2026-04-15T00:00:00Z' },
+    ],
+    userMemoryText: '(无)',
+    groupMemoryText: '(无)',
+    keyMemoryText: '(无)',
+    webContext: '(无联网结果)',
+  });
+
+  const output = lines.join('\n');
+  assert.match(output, /stored_history_turns=2/);
+  assert.match(output, /prompt_history_turns=1/);
+  assert.match(output, /user:帮我搜索论文/);
+  assert.doesNotMatch(output, /assistant:这是一段很长的回复/);
 });

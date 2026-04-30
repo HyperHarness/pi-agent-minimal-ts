@@ -278,7 +278,7 @@ The process responds with `response`, streams `message_update` text deltas, and 
 
 ## Feishu Bridge
 
-This repository includes a Feishu long-connection bridge under `src/feishu-bridge/`. It receives Feishu messages, applies private-chat/group-mention rules, keeps per-chat memory under `.memory/`, forwards prompts into this agent's RPC mode, and sends streaming or final replies back to Feishu.
+This repository includes a Feishu long-connection bridge under `src/feishu-bridge/`. It receives Feishu messages, applies private-chat/group-mention rules, keeps per-chat memory under `.memory/`, forwards prompts into this agent's RPC mode, and sends streaming or final replies back to Feishu. Prompt history excludes the agent's previous replies by default so long answers are not fed back into the next turn; set `BRIDGE_INCLUDE_AGENT_MESSAGES_IN_HISTORY=true` to include them again.
 
 Start it after configuring Feishu credentials and model env vars:
 

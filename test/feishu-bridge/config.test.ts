@@ -90,6 +90,35 @@ test('loadConfig does not default to openai-compatible only because OPENAI_API_K
   );
 });
 
+test('loadConfig excludes agent messages from prompt history by default', () => {
+  withEnv(
+    {
+      FEISHU_APP_ID: 'cli-test-app',
+      FEISHU_APP_SECRET: 'cli-test-secret',
+    },
+    () => {
+      const config = loadConfig(makeTempDir());
+
+      assert.equal(config.memory.includeAgentMessagesInHistory, false);
+    },
+  );
+});
+
+test('loadConfig can include agent messages in prompt history when explicitly enabled', () => {
+  withEnv(
+    {
+      FEISHU_APP_ID: 'cli-test-app',
+      FEISHU_APP_SECRET: 'cli-test-secret',
+      BRIDGE_INCLUDE_AGENT_MESSAGES_IN_HISTORY: 'true',
+    },
+    () => {
+      const config = loadConfig(makeTempDir());
+
+      assert.equal(config.memory.includeAgentMessagesInHistory, true);
+    },
+  );
+});
+
 test('loadConfig defaults the bridge to this repository agent RPC entrypoint', () => {
   const cwd = makeTempDir();
   withEnv(

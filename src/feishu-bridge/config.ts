@@ -34,6 +34,7 @@ export interface Config {
     historyLimit: number;
     longTermEnabled: boolean;
     learnFromAllGroupMessages: boolean;
+    includeAgentMessagesInHistory: boolean;
   };
   bridge: {
     promptInstruction?: string;
@@ -223,6 +224,7 @@ export function loadConfig(cwd: string = process.cwd()): Config {
       historyLimit: parseNumber(process.env.BRIDGE_HISTORY_LIMIT, 12),
       longTermEnabled: parseBoolean(process.env.BRIDGE_LONG_TERM_MEMORY_ENABLED, true),
       learnFromAllGroupMessages: parseBoolean(process.env.BRIDGE_LEARN_FROM_ALL_GROUP_MESSAGES, true),
+      includeAgentMessagesInHistory: parseBoolean(process.env.BRIDGE_INCLUDE_AGENT_MESSAGES_IN_HISTORY, false),
     },
     bridge: {
       promptInstruction: process.env.BRIDGE_PROMPT_INSTRUCTION,

@@ -521,6 +521,37 @@ async function runRpcMode(options: {
                 type: "message_update",
                 assistantMessageEvent: event.assistantMessageEvent
               });
+              return;
+            }
+
+            if (event.type === "tool_execution_start") {
+              writeRpcEvent(options.output, {
+                type: "tool_execution_start",
+                toolName: event.toolName,
+                toolCallId: event.toolCallId,
+                args: event.args
+              });
+              return;
+            }
+
+            if (event.type === "tool_execution_update") {
+              writeRpcEvent(options.output, {
+                type: "tool_execution_update",
+                toolName: event.toolName,
+                toolCallId: event.toolCallId,
+                partialResult: event.partialResult
+              });
+              return;
+            }
+
+            if (event.type === "tool_execution_end") {
+              writeRpcEvent(options.output, {
+                type: "tool_execution_end",
+                toolName: event.toolName,
+                toolCallId: event.toolCallId,
+                isError: event.isError,
+                result: event.result
+              });
             }
           }
         });

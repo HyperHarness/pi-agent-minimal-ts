@@ -88,7 +88,7 @@ test('shouldStoreAsPassiveMemory ignores direct messages and @ messages', () => 
   );
 });
 
-test('buildAgentPrompt includes memory and current question', () => {
+test('buildAgentPrompt includes memory, user history, and current question', () => {
   const history: ChatTurn[] = Array.from({ length: 12 }, (_, index) => ({
     role: index % 2 === 0 ? 'user' : 'assistant',
     text: `消息-${index + 1}`,
@@ -104,14 +104,37 @@ test('buildAgentPrompt includes memory and current question', () => {
   });
 
   assert.match(prompt, /Alice/);
-  assert.doesNotMatch(prompt, /用户: 消息-1\n/);
+  assert.match(prompt, /用户: 消息-1/);
   assert.doesNotMatch(prompt, /助手: 消息-2\n/);
-  assert.match(prompt, /用户: 消息-3/);
-  assert.match(prompt, /助手: 消息-12/);
+  assert.match(prompt, /用户: 消息-11/);
+  assert.doesNotMatch(prompt, /助手: 消息-12/);
   assert.match(prompt, /请给出简洁回答/);
   assert.match(prompt, /用户长期偏好：喜欢中文、简洁输出/);
   assert.match(prompt, /群记忆：这是一个芯片设计讨论群/);
   assert.match(prompt, /关键信息：项目代号是 Polaris；截止日期是下周五/);
   assert.match(prompt, /联网搜索结果：1. OpenAI 发布了 GPT-5.4；2. 官方文档更新于今天/);
   assert.match(prompt, /当前用户消息：hello bridge/);
+});
+
+test('buildAgentPrompt can include agent messages when explicitly enabled', () => {
+  const history: ChatTurn[] = [
+    {
+      role: 'user',
+      text: '第一问',
+      timestamp: '2026-04-14T10:00:00.000Z',
+      senderName: 'Alice',
+    },
+    {
+      role: 'assistant',
+      text: '第一答',
+      timestamp: '2026-04-14T10:00:01.000Z',
+    },
+  ];
+
+  const prompt = buildAgentPrompt(baseMessage, history, undefined, {
+    includeAgentMessagesInHistory: true,
+  });
+
+  assert.match(prompt, /Alice: 第一问/);
+  assert.match(prompt, /助手: 第一答/);
 });

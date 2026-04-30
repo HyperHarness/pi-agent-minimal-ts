@@ -39,8 +39,9 @@ export class ChatMemoryStore {
     return [...(this.cache.chats[chatId] ?? [])];
   }
 
-  renderHistory(chatId: string): string {
-    const turns = this.getTurns(chatId);
+  renderHistory(chatId: string, options: { includeAgentMessages?: boolean } = {}): string {
+    const turns = this.getTurns(chatId)
+      .filter((turn) => options.includeAgentMessages === true || turn.role !== 'assistant');
     if (turns.length === 0) {
       return '(无历史上下文)';
     }
