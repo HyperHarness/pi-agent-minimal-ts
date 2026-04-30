@@ -4,6 +4,7 @@ dist/
 .env.*
 .worktrees/
 .browser-profile/
+.memory/
 .codex
 downloads/
 knowledge-base/

@@ -1,5 +1,5 @@
 import { createInterface } from "node:readline/promises";
-import { readdir } from "node:fs/promises";
+import { mkdir, readdir } from "node:fs/promises";
 import path from "node:path";
 import { pathToFileURL } from "node:url";
 import process from "node:process";
@@ -52,6 +52,9 @@ export interface CliArgs {
   provider?: string;
   model?: string;
   baseUrl?: string;
+  mode: "chat" | "rpc";
+  useSession: boolean;
+  sessionDir?: string;
   help: boolean;
 }
 
@@ -373,7 +376,7 @@ export function formatAgentChatSessionStats(stats: AgentChatSessionStats): strin
 }
 
 export function parseCliArgs(argv: string[]): CliArgs {
-  const parsed: CliArgs = { help: false };
+  const parsed: CliArgs = { mode: "chat", useSession: true, help: false };
 
   for (let index = 0; index < argv.length; index += 1) {
     const arg = argv[index];
@@ -382,7 +385,12 @@ export function parseCliArgs(argv: string[]): CliArgs {
       continue;
     }
 
-    if (arg === "--provider" || arg === "--model" || arg === "--base-url") {
+    if (arg === "--no-session") {
+      parsed.useSession = false;
+      continue;
+    }
+
+    if (arg === "--provider" || arg === "--model" || arg === "--base-url" || arg === "--mode" || arg === "--session-dir") {
       const value = argv[index + 1];
       if (!value) {
         throw new Error(`Missing value for ${arg}`);
@@ -392,8 +400,15 @@ export function parseCliArgs(argv: string[]): CliArgs {
         parsed.provider = value;
       } else if (arg === "--model") {
         parsed.model = value;
-      } else {
+      } else if (arg === "--base-url") {
         parsed.baseUrl = normalizeBaseUrl(value);
+      } else if (arg === "--mode") {
+        if (value !== "chat" && value !== "rpc") {
+          throw new Error(`Unsupported mode: ${value}`);
+        }
+        parsed.mode = value;
+      } else {
+        parsed.sessionDir = value;
       }
 
       index += 1;
@@ -404,6 +419,132 @@ export function parseCliArgs(argv: string[]): CliArgs {
   }
 
   return parsed;
+}
+
+function writeRpcEvent(output: NodeJS.WriteStream, event: Record<string, unknown>): void {
+  output.write(`${JSON.stringify(event)}\n`);
+}
+
+function extractRpcPromptMessage(command: unknown): string | undefined {
+  if (!isRecord(command)) {
+    return undefined;
+  }
+
+  const message = command.message;
+  return typeof message === "string" ? message : undefined;
+}
+
+async function runRpcMode(options: {
+  model: Model<Api>;
+  workspaceDir: string;
+  sessionDir?: string;
+  useSession: boolean;
+  input: NodeJS.ReadStream;
+  output: NodeJS.WriteStream;
+}): Promise<void> {
+  if (options.useSession && options.sessionDir) {
+    await mkdir(options.sessionDir, { recursive: true });
+  }
+
+  const context: AgentContext = {
+    systemPrompt: DEFAULT_SYSTEM_PROMPT,
+    messages: [],
+    tools: []
+  };
+  const repl = createInterface({
+    input: options.input
+  });
+
+  try {
+    for await (const line of repl) {
+      const trimmedLine = line.trim();
+      if (!trimmedLine) {
+        continue;
+      }
+
+      let command: unknown;
+      try {
+        command = JSON.parse(trimmedLine);
+      } catch (error) {
+        writeRpcEvent(options.output, {
+          type: "error",
+          errorMessage: error instanceof Error ? error.message : String(error)
+        });
+        continue;
+      }
+
+      if (!isRecord(command)) {
+        writeRpcEvent(options.output, {
+          type: "error",
+          errorMessage: "RPC command must be a JSON object."
+        });
+        continue;
+      }
+
+      const id = typeof command.id === "string" ? command.id : undefined;
+      if (command.type !== "prompt") {
+        writeRpcEvent(options.output, {
+          type: "response",
+          ...(id ? { id } : {}),
+          success: false,
+          error: `Unsupported RPC command: ${String(command.type)}`
+        });
+        continue;
+      }
+
+      const message = extractRpcPromptMessage(command);
+      if (message === undefined) {
+        writeRpcEvent(options.output, {
+          type: "response",
+          ...(id ? { id } : {}),
+          success: false,
+          error: "RPC prompt command requires a string message."
+        });
+        continue;
+      }
+
+      writeRpcEvent(options.output, {
+        type: "response",
+        ...(id ? { id } : {}),
+        success: true
+      });
+
+      try {
+        const result = await runSessionPrompt({
+          model: options.model,
+          workspaceDir: options.workspaceDir,
+          context,
+          prompt: message,
+          onEvent: (event) => {
+            if (event.type === "message_update") {
+              writeRpcEvent(options.output, {
+                type: "message_update",
+                assistantMessageEvent: event.assistantMessageEvent
+              });
+            }
+          }
+        });
+
+        writeRpcEvent(options.output, {
+          type: "agent_end",
+          action: result.action
+        });
+
+        if (result.action === "stop") {
+          break;
+        }
+      } catch (error) {
+        writeRpcEvent(options.output, {
+          type: "error",
+          errorMessage: error instanceof Error ? error.message : String(error)
+        });
+      }
+    }
+  } finally {
+    repl.close();
+    await cleanupTools(context.tools);
+    contextWorkspaceDirs.delete(context);
+  }
 }
 
 export function applyModelBaseUrlOverride<TApi extends Api>(
@@ -806,7 +947,7 @@ export async function main(argv = process.argv.slice(2)): Promise<void> {
   const cli = parseCliArgs(argv);
   if (cli.help) {
     process.stdout.write(
-      "Usage: node dist/src/pi-agent.js [--provider <name>] [--model <id>] [--base-url <url>]\n"
+      "Usage: node dist/src/pi-agent.js [--mode chat|rpc] [--session-dir <dir>] [--no-session] [--provider <name>] [--model <id>] [--base-url <url>]\n"
     );
     return;
   }
@@ -823,6 +964,18 @@ export async function main(argv = process.argv.slice(2)): Promise<void> {
     cliBaseUrl: cli.baseUrl,
     envBaseUrl: process.env.PI_BASE_URL
   });
+
+  if (cli.mode === "rpc") {
+    await runRpcMode({
+      model: runtimeModel,
+      workspaceDir: process.cwd(),
+      sessionDir: cli.sessionDir,
+      useSession: cli.useSession,
+      input: process.stdin,
+      output: process.stdout
+    });
+    return;
+  }
 
   const context: AgentContext = {
     systemPrompt: DEFAULT_SYSTEM_PROMPT,

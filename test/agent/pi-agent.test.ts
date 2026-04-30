@@ -929,6 +929,9 @@ test("parseCliArgs accepts --base-url", () => {
         provider?: string;
         model?: string;
         baseUrl?: string;
+        mode: "chat" | "rpc";
+        useSession: boolean;
+        sessionDir?: string;
         help: boolean;
       };
     }
@@ -948,6 +951,31 @@ test("parseCliArgs accepts --base-url", () => {
     provider: "openai",
     model: "gpt-5.4",
     baseUrl: "https://proxy.example.com/v1",
+    mode: "chat",
+    useSession: true,
+    help: false
+  });
+});
+
+test("parseCliArgs accepts RPC mode and session controls", () => {
+  const parseCliArgs = (
+    piAgent as {
+      parseCliArgs?: (argv: string[]) => {
+        mode: "chat" | "rpc";
+        useSession: boolean;
+        sessionDir?: string;
+        help: boolean;
+      };
+    }
+  ).parseCliArgs;
+  assert.equal(typeof parseCliArgs, "function");
+
+  const parsed = parseCliArgs!(["--mode", "rpc", "--session-dir", ".memory/pi-sessions/chat-1", "--no-session"]);
+
+  assert.deepEqual(parsed, {
+    mode: "rpc",
+    useSession: false,
+    sessionDir: ".memory/pi-sessions/chat-1",
     help: false
   });
 });

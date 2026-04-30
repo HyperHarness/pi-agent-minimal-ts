@@ -260,6 +260,35 @@ In non-interactive mode:
 - `exit` or `quit` stops the session cleanly
 - stdin EOF ends the process without the old `ERR_USE_AFTER_CLOSE` readline failure
 
+### RPC mode
+
+The same agent can run as a JSONL RPC process for local bridges:
+
+```sh
+npm run agent:rpc -- --provider openai --model gpt-5.4 --session-dir .memory/pi-sessions/example
+```
+
+RPC mode reads one JSON command per stdin line and writes JSON events to stdout. It supports the prompt command used by the built-in Feishu bridge:
+
+```json
+{"type":"prompt","id":"cmd-1","message":"hello","streamingBehavior":"followUp"}
+```
+
+The process responds with `response`, streams `message_update` text deltas, and ends each prompt with `agent_end`.
+
+## Feishu Bridge
+
+This repository includes a Feishu long-connection bridge under `src/feishu-bridge/`. It receives Feishu messages, applies private-chat/group-mention rules, keeps per-chat memory under `.memory/`, forwards prompts into this agent's RPC mode, and sends streaming or final replies back to Feishu.
+
+Start it after configuring Feishu credentials and model env vars:
+
+```sh
+cp docs/feishu-bridge.env.example .env
+npm run feishu-bridge
+```
+
+By default the bridge starts this repository's compiled agent with `node dist/src/pi-agent.js --mode rpc`. Set `PI_COMMAND` only if you want to target another compatible agent process.
+
 ## Built-in Tools
 
 The default chat agent exposes a compact paper-focused tool set:
@@ -307,6 +336,8 @@ Example prompts:
 - `npm run build`: compile TypeScript to `dist/`
 - `npm test`: run the automated test suite
 - `npm run agent`: build and start the agent
+- `npm run agent:rpc`: build and start the JSONL RPC agent
+- `npm run feishu-bridge`: build and start the Feishu bridge
 - `npm run doctor:approval`: diagnose Windows PowerShell Codex approval rules for routine Git commands
 - `npm run doctor:approval -- --apply`: append missing safe approval rules without allowing broad `git` prefixes
 
