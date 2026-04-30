@@ -28,6 +28,22 @@ function isMainBodySectionTitle(title: string): boolean {
     .test(normalizedTitle);
 }
 
+export function countMarkdownTextLength(markdown: string): number {
+  return markdown
+    .split(/\r?\n/)
+    .map((line) => line
+      .replace(/!\[[^\]]*]\([^)]+\)/g, " ")
+      .replace(/\[([^\]]+)]\([^)]+\)/g, "$1")
+      .replace(/^#{1,6}\s+/, "")
+      .replace(/^[-*+]\s+/, "")
+      .replace(/^\d+\.\s+/, "")
+      .replace(/[*_`~|>]/g, " ")
+      .trim())
+    .filter((line) => line.length > 0)
+    .join("\n")
+    .length;
+}
+
 export function evaluateParseQuality(document: ParsedPaperDocument): PaperParseQualityReport {
   const totalTextLength = document.elements.reduce(
     (sum, element) => sum + element.text.trim().length,
@@ -146,6 +162,34 @@ export function evaluateParseQuality(document: ParsedPaperDocument): PaperParseQ
     headingCount,
     tableCount,
     figureOrCaptionCount,
+    warnings
+  };
+}
+
+export function evaluateParseQualityWithMarkdown(
+  document: ParsedPaperDocument,
+  markdown: string
+): PaperParseQualityReport {
+  const quality = evaluateParseQuality(document);
+  const markdownTextLength = countMarkdownTextLength(markdown);
+  if (markdownTextLength <= quality.totalTextLength) {
+    return quality;
+  }
+
+  const warnings = quality.warnings.filter(
+    (warning) => warning !== "Extracted text is short for a scientific paper."
+  );
+  let score = quality.score;
+  if (quality.totalTextLength < 1500 && markdownTextLength >= 1500) {
+    score = Math.min(1, Number((score + 0.35).toFixed(2)));
+  }
+  const status = score >= 0.7 ? "good" : score >= 0.4 ? "needs_hybrid" : "poor";
+
+  return {
+    ...quality,
+    status,
+    score,
+    totalTextLength: markdownTextLength,
     warnings
   };
 }

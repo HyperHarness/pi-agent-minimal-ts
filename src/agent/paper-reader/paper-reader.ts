@@ -16,7 +16,7 @@ import {
   resolvePaperSource,
   writeParseArtifacts
 } from "./paper-reader-store.js";
-import { evaluateParseQuality } from "./quality.js";
+import { evaluateParseQuality, evaluateParseQualityWithMarkdown } from "./quality.js";
 import type {
   ConcretePaperParseEngine,
   PaperInspectionResult,
@@ -268,7 +268,7 @@ async function parseWithConcreteEngine(input: {
     ...(input.latexmlBin ? { latexmlBin: input.latexmlBin } : {}),
     ...(input.pandocBin ? { pandocBin: input.pandocBin } : {})
   });
-  const quality = evaluateParseQuality(parsed.document);
+  const quality = evaluateParseQualityWithMarkdown(parsed.document, parsed.markdown);
   const chunks = createPaperChunks(parsed.document);
   const artifacts = await writeParseArtifacts({
     workspaceDir: input.workspaceDir,

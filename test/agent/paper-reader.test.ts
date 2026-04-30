@@ -17,7 +17,8 @@ import {
 } from "../../src/agent/paper-wiki/paper-wiki.js";
 import { bootstrapPaperWikiPageEvidence } from "../../src/agent/paper-wiki/bootstrap.js";
 import { lintPaperWiki } from "../../src/agent/paper-wiki/lint.js";
-import { PaperReaderError } from "../../src/agent/paper-reader/types.js";
+import { evaluateParseQualityWithMarkdown } from "../../src/agent/paper-reader/quality.js";
+import { PaperReaderError, type ParsedPaperDocument } from "../../src/agent/paper-reader/types.js";
 import { parsePaperWebPageHtml } from "../../src/agent/paper-webpage-fetch.js";
 import { savePaperWebPageParse } from "../../src/agent/paper-reader/engines/webpage.js";
 
@@ -62,6 +63,59 @@ async function writeExecutableScript(dir: string, filename: string, source: stri
   await chmod(scriptPath, 0o755);
   return scriptPath;
 }
+
+test("parse quality uses rich markdown length when structured elements are sparse", () => {
+  const document: ParsedPaperDocument = {
+    paperKey: "nature-s41534-026-01243-w",
+    engine: "opendataloader-local",
+    pdfSha256: "sha256",
+    createdAt: "2026-04-30T00:00:00.000Z",
+    title: "Sparse structured parse",
+    pages: 15,
+    elements: [
+      {
+        id: "e1",
+        type: "heading",
+        text: "Sparse structured parse",
+        page: 1,
+        headingLevel: 1,
+        sectionId: "s1"
+      },
+      {
+        id: "e2",
+        type: "paragraph",
+        text: "Short element text.",
+        page: 1,
+        sectionId: "s1"
+      }
+    ],
+    sections: [
+      {
+        id: "s1",
+        title: "Results",
+        level: 1,
+        pageFrom: 1,
+        pageTo: 15,
+        elementIds: ["e1", "e2"]
+      }
+    ]
+  };
+  const markdown = [
+    "# Sparse structured parse",
+    "",
+    "This markdown contains the complete paper body extracted by the parser.",
+    "superconducting qubit processor ".repeat(300)
+  ].join("\n");
+
+  const quality = evaluateParseQualityWithMarkdown(document, markdown);
+
+  assert.ok(quality.totalTextLength > 8000);
+  assert.equal(quality.status, "good");
+  assert.equal(
+    quality.warnings.includes("Extracted text is short for a scientific paper."),
+    false
+  );
+});
 
 test("parsePaper writes reading artifacts and reuses a same-hash cache", async () => {
   const workspace = await createWorkspace();
