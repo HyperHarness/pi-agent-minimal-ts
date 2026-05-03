@@ -44,6 +44,7 @@ function createFakeChrome(options = {}) {
   let nextTabId = 100;
   const createdTabs = [];
   const removedTabs = [];
+  const updatedTabs = [];
   const sentTabMessages = [];
   const downloadedRequests = [];
   const nativeMessages = [];
@@ -97,6 +98,10 @@ function createFakeChrome(options = {}) {
       },
       async remove(tabId) {
         removedTabs.push(tabId);
+      },
+      async update(tabId, input) {
+        updatedTabs.push({ tabId, ...input });
+        return { id: tabId, ...input };
       },
       async sendMessage(tabId, message) {
         sentTabMessages.push({ tabId, message });
@@ -163,6 +168,7 @@ function createFakeChrome(options = {}) {
     events,
     createdTabs,
     removedTabs,
+    updatedTabs,
     sentTabMessages,
     downloadedRequests,
     nativeMessages,
@@ -426,7 +432,7 @@ test("manifest declares required MV3 extension shell fields", async () => {
 
   assert.equal(manifest.manifest_version, 3);
   assert.equal(manifest.name, "Pi Agent Paper Downloader");
-  assert.equal(manifest.version, "0.1.14");
+  assert.equal(manifest.version, "0.1.19");
 
   for (const permission of [
     "activeTab",
@@ -675,6 +681,49 @@ test("background gates publisher PDF downloads on complete webpage snapshot qual
   const verificationStatuses = statusMessagesOf(fakeChrome, "awaiting_user_verification");
   assert.equal(verificationStatuses.length, 1);
   assert.match(verificationStatuses[0].message, /does not look complete enough/);
+});
+
+test("background does not register Science ePDF reader shells as webpage snapshots", async () => {
+  const articleUrl = "https://www.science.org/doi/10.1126/science.aao4309";
+  const epdfUrl = "https://www.science.org/doi/epdf/10.1126/science.aao4309";
+  const job = {
+    jobId: "job-science-epdf-webpage",
+    articleUrl,
+    source: "science",
+    title: "Science paper",
+    purpose: "download_and_webpage"
+  };
+  const fakeChrome = createFakeChrome({
+    jobs: [job],
+    nativeHandler(message) {
+      if (message.type === "poll_jobs") {
+        return { type: "jobs", jobs: [job] };
+      }
+      return { type: "status_ack", jobId: message.jobId, status: message.status };
+    }
+  });
+
+  await importBackground(fakeChrome);
+  fakeChrome.events.onMessage.emit(
+    {
+      type: "paper_page_classified",
+      status: "page_classified",
+      finalUrl: epdfUrl,
+      title: "A blueprint for demonstrating quantum supremacy with superconducting qubits",
+      html: "<html><body>Reader environment loaded Loading publication</body></html>",
+      pdfUrl: epdfUrl
+    },
+    { tab: { id: 100 } }
+  );
+  await flushAsyncWork();
+
+  assert.equal(messagesOf(fakeChrome, "register_webpage_snapshot").length, 0);
+  assert.equal(statusMessagesOf(fakeChrome, "pdf_candidate_found").length, 0);
+  assert.deepEqual(fakeChrome.downloadedRequests, []);
+  assert.deepEqual(fakeChrome.updatedTabs, [{ tabId: 100, url: articleUrl }]);
+  const verificationStatuses = statusMessagesOf(fakeChrome, "awaiting_user_verification");
+  assert.equal(verificationStatuses.length, 1);
+  assert.match(verificationStatuses[0].message, /ePDF is a PDF reader page/);
 });
 
 test("background starts publisher PDF download after good webpage snapshot quality", async () => {

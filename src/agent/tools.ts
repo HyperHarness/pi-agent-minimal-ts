@@ -132,7 +132,7 @@ const downloadPaperParameters = Type.Object({
   title: Type.Optional(
     Type.String({
       description:
-        "Paper title for arXiv preprint fallback when a publisher URL cannot be downloaded."
+        "Optional paper title for exact-title arXiv preprint fallback when a publisher URL cannot be downloaded. If omitted, the manager tries to derive the title from publisher page metadata."
     })
   )
 });
@@ -2164,7 +2164,7 @@ export function createTools(workspaceDir: string, dependencies: ToolDependencies
     name: "download_paper",
     label: "Download Paper",
     description:
-      "Downloads a paper by id or URL through the unified paper manager and closes the reading loop by generating or queuing markdown artifacts. APS, Nature, Science, and arXiv use webpage markdown first; arXiv falls back to TeX source and then PDF parsing, while other PDFs are parsed after download. When downloading a publisher URL from search_papers, pass the returned title so the manager can try an exact-title arXiv preprint fallback if the publisher download fails. For APS short DOIs, use the exact URL returned by search_papers or a DOI resolver URL such as https://link.aps.org/doi/<doi>; do not fabricate https://journals.aps.org/doi/<doi> URLs.",
+      "Downloads a paper by id or URL through the unified paper manager and closes the reading loop by generating or queuing markdown artifacts. APS, Nature, Science, and arXiv use webpage markdown first; arXiv falls back to TeX source and then PDF parsing, while other PDFs are parsed after download. If a non-arXiv publisher download is blocked, incomplete, or unavailable, the manager tries an exact-title arXiv preprint fallback, deriving the title from publisher metadata when the caller did not pass one. For APS short DOIs, use the exact URL returned by search_papers or a DOI resolver URL such as https://link.aps.org/doi/<doi>; do not fabricate https://journals.aps.org/doi/<doi> URLs.",
     parameters: downloadPaperParameters,
     executionMode: "sequential",
     execute: async (_toolCallId: string, args: DownloadPaperParameters) => {

@@ -435,8 +435,38 @@ function extractHtmlTitle(html: string): string | undefined {
     .replace(/\s+/g, " ")
     .replace(/^Physical Review [^-]+ - Accepted Paper:\s*/i, "")
     .replace(/\s*\|\s*APS\s*$/i, "")
+    .replace(/\s*\|\s*Science\s*$/i, "")
+    .replace(/\s*\|\s*AAAS\s*$/i, "")
+    .replace(/\s*\|\s*Nature\s*$/i, "")
+    .replace(/\s*-\s*Nature\s*$/i, "")
     .trim();
   return title || undefined;
+}
+
+async function resolvePublisherFallbackTitle(options: {
+  articleUrl: string;
+  title?: string;
+  fetchImpl?: typeof fetch;
+}): Promise<string | undefined> {
+  const providedTitle = options.title?.trim();
+  if (providedTitle) {
+    return formatTitle(providedTitle);
+  }
+
+  try {
+    const response = await (options.fetchImpl ?? fetch)(options.articleUrl, {
+      headers: {
+        accept: "text/html,application/xhtml+xml"
+      }
+    });
+    if (!response.ok) {
+      return undefined;
+    }
+
+    return extractHtmlTitle(await response.text());
+  } catch {
+    return undefined;
+  }
 }
 
 async function resolveApsAcceptedPaperTitle(options: {
@@ -1380,6 +1410,8 @@ export async function downloadPaper(options: DownloadPaperOptions): Promise<Pape
 
   const paperUrl = options.url as string;
   const classification = classifyPaperUrl(paperUrl);
+  let publisherFallbackTitleResolved = false;
+  let publisherFallbackTitle: string | undefined;
 
   if (classification.source === "arxiv") {
     return downloadArxivPaper({
@@ -1460,6 +1492,19 @@ export async function downloadPaper(options: DownloadPaperOptions): Promise<Pape
     };
   }
 
+  const getPublisherFallbackTitle = async (): Promise<string | undefined> => {
+    if (!publisherFallbackTitleResolved) {
+      publisherFallbackTitleResolved = true;
+      publisherFallbackTitle = await resolvePublisherFallbackTitle({
+        articleUrl: classification.articleUrl,
+        title: options.title,
+        fetchImpl: options.fetchImpl
+      });
+    }
+
+    return publisherFallbackTitle;
+  };
+
   if (classification.canonicalId) {
     const existingDownload = await findDownloadedPaperRecord({
       workspaceDir: options.workspaceDir,
@@ -1510,6 +1555,8 @@ export async function downloadPaper(options: DownloadPaperOptions): Promise<Pape
       title: options.title,
       fetchImpl: options.fetchImpl
     });
+    publisherFallbackTitleResolved = true;
+    publisherFallbackTitle = acceptedPaperTitle;
     const arxivFallback = await tryDownloadArxivPreprintForPublisherFallback({
       workspaceDir: options.workspaceDir,
       classification,
@@ -1536,7 +1583,7 @@ export async function downloadPaper(options: DownloadPaperOptions): Promise<Pape
     const arxivFallback = await tryDownloadArxivPreprintForPublisherFallback({
       workspaceDir: options.workspaceDir,
       classification,
-      title: options.title,
+      title: await getPublisherFallbackTitle(),
       fetchImpl: options.fetchImpl,
       searchArxivImpl: options.searchArxivImpl
     });
@@ -1560,7 +1607,7 @@ export async function downloadPaper(options: DownloadPaperOptions): Promise<Pape
     const arxivFallback = await tryDownloadArxivPreprintForPublisherFallback({
       workspaceDir: options.workspaceDir,
       classification,
-      title: options.title,
+      title: await getPublisherFallbackTitle(),
       fetchImpl: options.fetchImpl,
       searchArxivImpl: options.searchArxivImpl
     });
@@ -1589,7 +1636,7 @@ export async function downloadPaper(options: DownloadPaperOptions): Promise<Pape
         const arxivFallback = await tryDownloadArxivPreprintForPublisherFallback({
           workspaceDir: options.workspaceDir,
           classification,
-          title: options.title,
+          title: await getPublisherFallbackTitle(),
           fetchImpl: options.fetchImpl,
           searchArxivImpl: options.searchArxivImpl
         });
@@ -1608,7 +1655,7 @@ export async function downloadPaper(options: DownloadPaperOptions): Promise<Pape
     const arxivFallback = await tryDownloadArxivPreprintForPublisherFallback({
       workspaceDir: options.workspaceDir,
       classification,
-      title: options.title,
+      title: await getPublisherFallbackTitle(),
       fetchImpl: options.fetchImpl,
       searchArxivImpl: options.searchArxivImpl
     });
@@ -1680,7 +1727,7 @@ export async function downloadPaper(options: DownloadPaperOptions): Promise<Pape
     const arxivFallback = await tryDownloadArxivPreprintForPublisherFallback({
       workspaceDir: options.workspaceDir,
       classification,
-      title: options.title,
+      title: await getPublisherFallbackTitle(),
       fetchImpl: options.fetchImpl,
       searchArxivImpl: options.searchArxivImpl
     });

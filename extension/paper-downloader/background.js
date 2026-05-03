@@ -149,6 +149,35 @@ function formatWebpageQuality(quality) {
     : status + " (score " + score + ")";
 }
 
+function isScienceEpdfUrl(value) {
+  try {
+    var parsed = new URL(value);
+    return (
+      (parsed.hostname === "www.science.org" || parsed.hostname === "science.org") &&
+      /^\/doi\/epdf\/.+/i.test(parsed.pathname)
+    );
+  } catch (error) {
+    return false;
+  }
+}
+
+function scienceArticleUrlFromEpdf(value) {
+  try {
+    var parsed = new URL(value);
+    var match = parsed.pathname.match(/^\/doi\/epdf\/(.+)$/i);
+    if (!match || !match[1]) {
+      return null;
+    }
+
+    parsed.pathname = "/doi/" + match[1];
+    parsed.search = "";
+    parsed.hash = "";
+    return parsed.toString();
+  } catch (error) {
+    return null;
+  }
+}
+
 function isCompleteWebpageSnapshot(response) {
   if (!response || response.type !== "webpage_registered") {
     return false;
@@ -485,6 +514,18 @@ async function enterPublisherManualDownloadMode(job, pdfUrl) {
   );
 }
 
+async function redirectScienceWebpageJobToArticlePage(job, tabId, finalUrl) {
+  var articleUrl = scienceArticleUrlFromEpdf(finalUrl) || job.articleUrl;
+  await reportJobStatus(
+    job,
+    "awaiting_user_verification",
+    "Science ePDF is a PDF reader page, not the article webpage. Returning to the article page for webpage snapshot capture."
+  );
+  if (typeof tabId === "number" && articleUrl && articleUrl !== finalUrl) {
+    await chrome.tabs.update(tabId, { url: articleUrl });
+  }
+}
+
 async function handlePaperPageClassified(message, sender) {
   await withHydratedState(async () => {
     const tabId = sender && sender.tab ? sender.tab.id : undefined;
@@ -503,6 +544,11 @@ async function handlePaperPageClassified(message, sender) {
     var shouldRegisterWebpageSnapshot =
       job.purpose === "webpage" || job.purpose === "download_and_webpage";
     if (shouldRegisterWebpageSnapshot) {
+      if (job.source === "science" && isScienceEpdfUrl(message.finalUrl)) {
+        await redirectScienceWebpageJobToArticlePage(job, tabId, message.finalUrl);
+        return;
+      }
+
       if (!message.html) {
         await reportJobStatus(
           job,

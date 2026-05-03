@@ -17,7 +17,10 @@ import {
 } from "../../src/agent/paper-wiki/paper-wiki.js";
 import { bootstrapPaperWikiPageEvidence } from "../../src/agent/paper-wiki/bootstrap.js";
 import { lintPaperWiki } from "../../src/agent/paper-wiki/lint.js";
-import { evaluateParseQualityWithMarkdown } from "../../src/agent/paper-reader/quality.js";
+import {
+  evaluateParseQuality,
+  evaluateParseQualityWithMarkdown
+} from "../../src/agent/paper-reader/quality.js";
 import { PaperReaderError, type ParsedPaperDocument } from "../../src/agent/paper-reader/types.js";
 import { parsePaperWebPageHtml } from "../../src/agent/paper-webpage-fetch.js";
 import { savePaperWebPageParse } from "../../src/agent/paper-reader/engines/webpage.js";
@@ -113,6 +116,99 @@ test("parse quality uses rich markdown length when structured elements are spars
   assert.equal(quality.status, "good");
   assert.equal(
     quality.warnings.includes("Extracted text is short for a scientific paper."),
+    false
+  );
+});
+
+test("parse quality treats rich publisher webpage text as complete even without canonical section titles", () => {
+  const document: ParsedPaperDocument = {
+    paperKey: "science-10.1126-science.aao4309",
+    engine: "webpage",
+    pdfSha256: "sha256",
+    createdAt: "2026-05-03T00:00:00.000Z",
+    title: "Science article webpage",
+    pages: 1,
+    elements: [
+      {
+        id: "e1",
+        type: "heading",
+        text: "Scaling up to supremacy",
+        page: 1,
+        headingLevel: 2,
+        sectionId: "s1"
+      },
+      {
+        id: "e2",
+        type: "paragraph",
+        text: "Quantum information scientists are getting closer to building a quantum computer. ".repeat(180),
+        page: 1,
+        sectionId: "s1"
+      },
+      {
+        id: "e3",
+        type: "heading",
+        text: "Abstract",
+        page: 1,
+        headingLevel: 2,
+        sectionId: "s2"
+      },
+      {
+        id: "e4",
+        type: "paragraph",
+        text: "A key step toward demonstrating a quantum system that can address difficult problems. ".repeat(180),
+        page: 1,
+        sectionId: "s2"
+      },
+      {
+        id: "e5",
+        type: "heading",
+        text: "Figure: Fig. 1 Device and experimental protocol.",
+        page: 1,
+        headingLevel: 2,
+        sectionId: "s3"
+      },
+      {
+        id: "e6",
+        type: "caption",
+        text: "Optical micrograph of the nine-qubit array. ".repeat(40),
+        page: 1,
+        sectionId: "s3"
+      }
+    ],
+    sections: [
+      {
+        id: "s1",
+        title: "Scaling up to supremacy",
+        level: 2,
+        pageFrom: 1,
+        pageTo: 1,
+        elementIds: ["e1", "e2"]
+      },
+      {
+        id: "s2",
+        title: "Abstract",
+        level: 2,
+        pageFrom: 1,
+        pageTo: 1,
+        elementIds: ["e3", "e4"]
+      },
+      {
+        id: "s3",
+        title: "Figure: Fig. 1 Device and experimental protocol.",
+        level: 2,
+        pageFrom: 1,
+        pageTo: 1,
+        elementIds: ["e5", "e6"]
+      }
+    ]
+  };
+
+  const quality = evaluateParseQuality(document);
+
+  assert.equal(quality.status, "good");
+  assert.ok(quality.score >= 0.7);
+  assert.equal(
+    quality.warnings.some((warning) => warning.includes("No main body sections were detected")),
     false
   );
 });

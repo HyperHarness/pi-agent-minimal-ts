@@ -28,6 +28,18 @@ function isMainBodySectionTitle(title: string): boolean {
     .test(normalizedTitle);
 }
 
+function hasRichPublisherWebpageBody(input: {
+  totalTextLength: number;
+  headingCount: number;
+  referenceTextLength: number;
+}): boolean {
+  return (
+    input.totalTextLength >= 8000 &&
+    input.headingCount >= 3 &&
+    input.referenceTextLength / Math.max(1, input.totalTextLength) <= 0.65
+  );
+}
+
 export function countMarkdownTextLength(markdown: string): number {
   return markdown
     .split(/\r?\n/)
@@ -87,7 +99,14 @@ export function evaluateParseQuality(document: ParsedPaperDocument): PaperParseQ
     isMainBodySectionTitle(section.title)
   );
   const publisherWebpageWithoutMainBody =
-    document.engine === "webpage" && !isArxivWebpage(document) && !hasMainBodySection;
+    document.engine === "webpage" &&
+    !isArxivWebpage(document) &&
+    !hasMainBodySection &&
+    !hasRichPublisherWebpageBody({
+      totalTextLength,
+      headingCount,
+      referenceTextLength
+    });
 
   const warnings: string[] = [];
   if (totalTextLength < 1500) {

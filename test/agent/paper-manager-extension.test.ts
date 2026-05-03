@@ -69,6 +69,93 @@ test("downloadPaper routes supported publisher URLs through the extension bridge
   }
 });
 
+test("downloadPaper derives publisher title and falls back to exact arXiv preprint when publisher download is restricted", async () => {
+  const workspaceDir = await mkdtemp(path.join(os.tmpdir(), "paper-manager-extension-"));
+  const articleUrl = "https://www.science.org/doi/10.1126/science.abb2823";
+  const title = "A blueprint for demonstrating quantum supremacy with superconducting qubits";
+  const arxivId = "1709.06678";
+  const searchedTitles: string[] = [];
+  const fetchedUrls: string[] = [];
+
+  try {
+    const result = await downloadPaper({
+      workspaceDir,
+      url: articleUrl,
+      extensionBridge: {
+        async submitJob() {
+          throw new Error("Science download requires publisher login.");
+        }
+      },
+      searchArxivImpl: async (options) => {
+        searchedTitles.push(options.query);
+        return [
+          {
+            id: arxivId,
+            title,
+            authors: ["A. Author"],
+            summary: "Preprint summary",
+            absUrl: `https://arxiv.org/abs/${arxivId}`,
+            pdfUrl: `https://arxiv.org/pdf/${arxivId}.pdf`
+          }
+        ];
+      },
+      fetchImpl: async (input) => {
+        const url = String(input);
+        fetchedUrls.push(url);
+        if (url === articleUrl) {
+          return new Response(
+            `<html><head><meta name="citation_title" content="${title} | Science"></head></html>`,
+            {
+              status: 200,
+              headers: { "content-type": "text/html" }
+            }
+          );
+        }
+
+        return new Response("%PDF-science-arxiv", {
+          status: 200,
+          headers: { "content-type": "application/pdf" }
+        });
+      }
+    });
+
+    assert.deepEqual(searchedTitles, [title]);
+    assert.deepEqual(fetchedUrls, [
+      articleUrl,
+      `https://arxiv.org/pdf/${arxivId}.pdf`
+    ]);
+    assert.equal(result.status, "downloaded");
+    assert.equal(result.source, "arxiv");
+    assert.equal(result.canonicalId, arxivId);
+    assert.equal(result.publisherFallback?.source, "science");
+    assert.equal(result.publisherFallback?.articleUrl, articleUrl);
+
+    const scienceRecordPath = resolvePaperRecordPath({
+      workspaceDir,
+      source: "science",
+      canonicalId: "10.1126/science.abb2823",
+      articleUrl
+    });
+    const scienceRecord = JSON.parse(await readFile(scienceRecordPath, "utf8")) as {
+      source?: string;
+      status?: string;
+      handlingMethod?: string;
+      title?: string;
+      preprint?: { source?: string; canonicalId?: string };
+      failure?: { code?: string };
+    };
+    assert.equal(scienceRecord.source, "science");
+    assert.equal(scienceRecord.status, "preprint_fallback");
+    assert.equal(scienceRecord.handlingMethod, "arxiv_preprint_fallback");
+    assert.equal(scienceRecord.title, title);
+    assert.equal(scienceRecord.preprint?.source, "arxiv");
+    assert.equal(scienceRecord.preprint?.canonicalId, arxivId);
+    assert.equal(scienceRecord.failure?.code, "publisher_version_not_available");
+  } finally {
+    await rm(workspaceDir, { recursive: true, force: true });
+  }
+});
+
 test("downloadPaper resolves APS accepted papers through exact-title arXiv fallback", async () => {
   const workspaceDir = await mkdtemp(path.join(os.tmpdir(), "paper-manager-extension-"));
   const articleUrl = "https://journals.aps.org/prapplied/accepted/10.1103/k3d5-v43c";
