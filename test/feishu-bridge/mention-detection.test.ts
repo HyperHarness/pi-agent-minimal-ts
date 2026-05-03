@@ -32,6 +32,28 @@ test('detectBotMention returns false when only other users are mentioned', () =>
   );
 });
 
+test('detectBotMention trusts Feishu mentioned_type bot even when open_id differs', () => {
+  assert.equal(
+    detectBotMention(
+      {
+        message: {
+          mentions: [
+            {
+              id: { open_id: 'ou_event_bot_open_id' },
+              key: '@_user_1',
+              mentioned_type: 'bot',
+              name: '物理之神',
+            },
+          ],
+        },
+      },
+      '@物理之神 帮我看一下',
+      { botOpenId: 'ou_configured_open_id', botAliases: ['物理之神'] },
+    ),
+    true,
+  );
+});
+
 test('detectBotMention can fall back to alias matching when mention ids are unavailable', () => {
   assert.equal(
     detectBotMention(

@@ -13,6 +13,10 @@ export function detectBotMention(event: any, text: string, config: BotMentionCon
 
   if (Array.isArray(mentions) && mentions.length > 0) {
     for (const mention of mentions) {
+      if (mention?.mentioned_type === 'bot') {
+        return true;
+      }
+
       const mentionOpenId = mention?.id?.open_id ?? mention?.id ?? mention?.open_id;
       if (config.botOpenId && mentionOpenId === config.botOpenId) {
         return true;
