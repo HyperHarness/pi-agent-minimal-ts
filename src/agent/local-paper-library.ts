@@ -143,6 +143,24 @@ function readOptionalString(value: unknown): string | undefined {
   return typeof value === "string" && value.trim() ? value : undefined;
 }
 
+function normalizePortableFilePath(filePath: string): string {
+  const drivePathMatch = filePath.match(/^([A-Za-z]):[\\/](.*)$/);
+  if (drivePathMatch?.[1] && drivePathMatch[2]) {
+    return path.posix.join(
+      "/mnt",
+      drivePathMatch[1].toLowerCase(),
+      ...drivePathMatch[2].split(/[\\/]+/).filter(Boolean)
+    );
+  }
+
+  const uncWslMatch = filePath.match(/^\\\\(?:wsl\.localhost|wsl\$)\\[^\\]+\\(.+)$/i);
+  if (uncWslMatch?.[1]) {
+    return path.posix.join("/", ...uncWslMatch[1].split(/[\\/]+/).filter(Boolean));
+  }
+
+  return filePath.includes("\\") ? filePath.replace(/\\/g, "/") : filePath;
+}
+
 function applyRecord(entry: LocalPaperEntry, record: PaperRecord, recordPath: string, workspaceDir: string): void {
   const rawRecord = record as unknown as Record<string, unknown>;
   entry.source = record.source;
@@ -155,9 +173,10 @@ function applyRecord(entry: LocalPaperEntry, record: PaperRecord, recordPath: st
     entry.canonicalId = record.canonicalId;
   }
   if ("downloadPath" in record && typeof record.downloadPath === "string") {
-    entry.pdfPath = path.isAbsolute(record.downloadPath)
-      ? record.downloadPath
-      : relativeToWorkspace(workspaceDir, path.resolve(workspaceDir, record.downloadPath));
+    const normalizedDownloadPath = normalizePortableFilePath(record.downloadPath);
+    entry.pdfPath = path.isAbsolute(normalizedDownloadPath)
+      ? normalizedDownloadPath
+      : relativeToWorkspace(workspaceDir, path.resolve(workspaceDir, normalizedDownloadPath));
   }
 }
 
@@ -208,10 +227,8 @@ function resolveKnownPdfPath(workspaceDir: string, pdfPath: string | undefined):
   if (!pdfPath) {
     return undefined;
   }
-  if (/^\\\\(?:wsl\.localhost|wsl\$)\\/i.test(pdfPath)) {
-    return undefined;
-  }
-  return path.isAbsolute(pdfPath) ? pdfPath : path.resolve(workspaceDir, pdfPath);
+  const normalizedPdfPath = normalizePortableFilePath(pdfPath);
+  return path.isAbsolute(normalizedPdfPath) ? normalizedPdfPath : path.resolve(workspaceDir, normalizedPdfPath);
 }
 
 async function collectRecords(workspaceDir: string, entries: Map<string, LocalPaperEntry>): Promise<void> {

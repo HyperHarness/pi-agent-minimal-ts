@@ -24,6 +24,7 @@ import {
 } from "../../src/agent/paper-reader/quality.js";
 import { PaperReaderError, type ParsedPaperDocument } from "../../src/agent/paper-reader/types.js";
 import { parsePaperWebPageHtml } from "../../src/agent/paper-webpage-fetch.js";
+import { appendPaperDownloadJobEvent } from "../../src/agent/paper-download-jobs.js";
 
 async function createWorkspace(): Promise<string> {
   const workspace = await mkdtemp(path.join(os.tmpdir(), "pi-paper-reader-"));
@@ -728,6 +729,79 @@ test("inspectPaper distinguishes webpage parses from downloaded PDFs", async () 
     assert.equal(inspection.parses[0]?.engine, "webpage");
     assert.equal(inspection.parses[0]?.sourceKind, "webpage");
     assert.equal(inspection.parses[0]?.sourceSha256, result.pdfSha256);
+  } finally {
+    await rm(workspace, { recursive: true, force: true });
+  }
+});
+
+test("inspectPaper resolves extension job ids and finds PDFs registered after webpage parsing", async () => {
+  const workspace = await createWorkspace();
+  try {
+    const webpage = await savePaperWebPageParse({
+      workspaceDir: workspace,
+      extraction: {
+        url: "https://journals.aps.org/prl/abstract/10.1103/nv7d-k3wr#fulltext",
+        title: "Complete Self-Testing of a System of Remote Superconducting Qubits",
+        markdown: "# Abstract\n\nFull APS publisher webpage text.",
+        metadata: {
+          authors: []
+        },
+        access: {
+          status: "full_text",
+          signals: []
+        },
+        stats: {
+          chars: 40,
+          wordsApprox: 6,
+          navigationLinesRemoved: 0,
+          extractedFrom: "article"
+        }
+      }
+    });
+    const pdfPath = await writePdf(workspace, "aps-10.1103-nv7d-k3wr.pdf", "aps downloaded pdf");
+    const uncPdfPath = `\\\\wsl.localhost\\Ubuntu-24.04\\${pdfPath.slice(1).split(path.sep).join("\\")}`;
+    const recordPath = path.join(workspace, "knowledge-base", "records", "aps-10.1103-nv7d-k3wr.json");
+    await writeFile(recordPath, `${JSON.stringify({
+      source: "aps",
+      articleUrl: "https://journals.aps.org/prl/abstract/10.1103/nv7d-k3wr",
+      recordedAt: "2026-05-06T06:04:05.776Z",
+      handlingMethod: "browser_session",
+      status: "downloaded",
+      canonicalId: "10.1103/nv7d-k3wr",
+      pdfUrl: "https://journals.aps.org/prl/pdf/10.1103/nv7d-k3wr",
+      downloadPath: uncPdfPath,
+      download: {
+        status: "downloaded",
+        updatedAt: "2026-05-06T06:04:05.776Z",
+        method: "browser_session",
+        pdfPath,
+        pdfUrl: "https://journals.aps.org/prl/pdf/10.1103/nv7d-k3wr"
+      }
+    }, null, 2)}\n`, "utf8");
+    await appendPaperDownloadJobEvent({
+      workspaceDir: workspace,
+      event: {
+        jobId: "paper-aps-5e77bca2f317-motnitfr-0",
+        recordedAt: "2026-05-06T06:04:05.776Z",
+        status: "downloaded",
+        articleUrl: "https://journals.aps.org/prl/abstract/10.1103/nv7d-k3wr",
+        source: "aps",
+        paperKey: webpage.paperKey,
+        recordPath,
+        downloadPath: uncPdfPath
+      }
+    });
+
+    const inspection = await inspectPaper({
+      workspaceDir: workspace,
+      paperKey: "paper-aps-5e77bca2f317-motnitfr-0"
+    });
+
+    assert.equal(inspection.paperKey, "aps-10.1103-nv7d-k3wr");
+    assert.equal(inspection.localPdf.hasPdf, true);
+    assert.equal(inspection.localPdf.path, pdfPath);
+    assert.equal(inspection.source?.pdfPath, pdfPath);
+    assert.equal(inspection.parses[0]?.engine, "webpage");
   } finally {
     await rm(workspace, { recursive: true, force: true });
   }

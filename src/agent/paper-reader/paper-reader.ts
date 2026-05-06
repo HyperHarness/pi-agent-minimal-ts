@@ -1,5 +1,15 @@
 import path from "node:path";
 import { access, readFile } from "node:fs/promises";
+import {
+  readPaperDownloadJobEvents,
+  summarizePaperDownloadJobs
+} from "../paper-download-jobs.js";
+import {
+  readPaperRecord,
+  readPaperRecordByPath
+} from "../paper-store.js";
+import type { PaperRecord } from "../paper-types.js";
+import type { PaperSource } from "../paper-types.js";
 import { createPaperChunks } from "./chunks.js";
 import { parseWithDocling } from "./engines/docling.js";
 import { parseWithOpenDataLoader } from "./engines/opendataloader.js";
@@ -101,6 +111,24 @@ function enginePreference(engine: ConcretePaperParseEngine): number {
 
 function sortEnginesByPreference(engines: ConcretePaperParseEngine[]): ConcretePaperParseEngine[] {
   return engines.slice().sort((left, right) => enginePreference(left) - enginePreference(right));
+}
+
+function normalizePortableFilePath(filePath: string): string {
+  const drivePathMatch = filePath.match(/^([A-Za-z]):[\\/](.*)$/);
+  if (drivePathMatch?.[1] && drivePathMatch[2]) {
+    return path.posix.join(
+      "/mnt",
+      drivePathMatch[1].toLowerCase(),
+      ...drivePathMatch[2].split(/[\\/]+/).filter(Boolean)
+    );
+  }
+
+  const uncWslMatch = filePath.match(/^\\\\(?:wsl\.localhost|wsl\$)\\[^\\]+\\(.+)$/i);
+  if (uncWslMatch?.[1]) {
+    return path.posix.join("/", ...uncWslMatch[1].split(/[\\/]+/).filter(Boolean));
+  }
+
+  return filePath.includes("\\") ? filePath.replace(/\\/g, "/") : filePath;
 }
 
 function qualityStatusRank(status: PaperParseQualityReport["status"]): number {
@@ -438,15 +466,110 @@ async function sourcePdfExists(input: {
     return false;
   }
 
-  const pdfPath = path.isAbsolute(source.pdfPath)
-    ? source.pdfPath
-    : path.resolve(input.workspaceDir, source.pdfPath);
+  const normalizedPdfPath = normalizePortableFilePath(source.pdfPath);
+  const pdfPath = path.isAbsolute(normalizedPdfPath)
+    ? normalizedPdfPath
+    : path.resolve(input.workspaceDir, normalizedPdfPath);
   try {
     await access(pdfPath);
     return true;
   } catch {
     return false;
   }
+}
+
+function paperRecordDownloadPath(record: PaperRecord | undefined): string | undefined {
+  if (record?.status === "downloaded") {
+    return record.downloadPath;
+  }
+  return record?.download?.status === "downloaded" ? record.download.pdfPath : undefined;
+}
+
+function isPaperSource(value: string | undefined): value is PaperSource {
+  return value === "arxiv" ||
+    value === "science" ||
+    value === "nature" ||
+    value === "aps" ||
+    value === "external";
+}
+
+async function readRecordForSource(input: {
+  workspaceDir: string;
+  source: Awaited<ReturnType<typeof readPaperSourceByKey>>;
+}): Promise<{ record: PaperRecord; recordPath: string } | null> {
+  const source = input.source;
+  if (!source) {
+    return null;
+  }
+  if (source.recordPath) {
+    return readPaperRecordByPath({
+      workspaceDir: input.workspaceDir,
+      recordPath: source.recordPath
+    });
+  }
+  if (!isPaperSource(source.source) || !source.articleUrl) {
+    return null;
+  }
+  if (source.source !== "external" && !source.canonicalId) {
+    return null;
+  }
+  return readPaperRecord({
+    workspaceDir: input.workspaceDir,
+    source: source.source,
+    articleUrl: source.articleUrl,
+    ...(source.source !== "external" ? { canonicalId: source.canonicalId } : {})
+  });
+}
+
+async function downloadedRecordPdf(input: {
+  workspaceDir: string;
+  record: PaperRecord | undefined;
+}): Promise<{ hasPdf: boolean; path?: string; sha256?: string }> {
+  const recordPdfPath = paperRecordDownloadPath(input.record);
+  if (!recordPdfPath) {
+    return { hasPdf: false };
+  }
+
+  const normalizedPdfPath = normalizePortableFilePath(recordPdfPath);
+  const pdfPath = path.isAbsolute(normalizedPdfPath)
+    ? normalizedPdfPath
+    : path.resolve(input.workspaceDir, normalizedPdfPath);
+  try {
+    await access(pdfPath);
+    return {
+      hasPdf: true,
+      path: pdfPath,
+      ...(input.record?.download?.pdfSha256 ? { sha256: input.record.download.pdfSha256 } : {})
+    };
+  } catch {
+    return { hasPdf: false, path: pdfPath };
+  }
+}
+
+async function resolvePaperKeyFromExtensionJob(input: {
+  workspaceDir: string;
+  jobId: string;
+}): Promise<string | undefined> {
+  const summaries = summarizePaperDownloadJobs(await readPaperDownloadJobEvents({
+    workspaceDir: input.workspaceDir
+  }));
+  const job = summaries.find((candidate) => candidate.jobId === input.jobId);
+  if (!job) {
+    return undefined;
+  }
+  if (job.paperKey) {
+    return job.paperKey;
+  }
+  if (job.recordPath) {
+    const saved = await readPaperRecordByPath({
+      workspaceDir: input.workspaceDir,
+      recordPath: job.recordPath
+    });
+    if (saved) {
+      return path.basename(saved.recordPath, ".json");
+    }
+  }
+  return undefined;
 }
 
 export async function inspectPaper(options: InspectPaperOptions): Promise<PaperInspectionResult> {
@@ -462,6 +585,10 @@ export async function inspectPaper(options: InspectPaperOptions): Promise<PaperI
   if (!paperKey) {
     throw new PaperReaderError("paper_not_found", "paperKey is required.");
   }
+  paperKey = await resolvePaperKeyFromExtensionJob({
+    workspaceDir: options.workspaceDir,
+    jobId: paperKey
+  }) ?? paperKey;
   paperKey = await resolveExistingPaperKey({ workspaceDir: options.workspaceDir, paperKey });
 
   await assertPaperReadingExists({ workspaceDir: options.workspaceDir, paperKey });
@@ -476,14 +603,29 @@ export async function inspectPaper(options: InspectPaperOptions): Promise<PaperI
       engine
     }))
   )).filter((parse): parse is PaperInspectionResult["parses"][number] => parse !== undefined);
+  const savedRecord = await readRecordForSource({
+    workspaceDir: options.workspaceDir,
+    source
+  });
+  const sourceHasPdf = await sourcePdfExists({ workspaceDir: options.workspaceDir, source });
+  const recordPdf = sourceHasPdf ? { hasPdf: false } : await downloadedRecordPdf({
+    workspaceDir: options.workspaceDir,
+    record: savedRecord?.record
+  });
+  const sourcePdfPath = source?.pdfPath ? normalizePortableFilePath(source.pdfPath) : undefined;
+  const localPdfPath = sourcePdfPath ?? recordPdf.path;
+  const localPdfSha256 = source?.pdfSha256 ?? recordPdf.sha256;
+  const inspectSource = source && !source.pdfPath && recordPdf.hasPdf && recordPdf.path
+    ? { ...source, pdfPath: recordPdf.path }
+    : source;
 
   return {
     paperKey,
-    ...(source ? { source } : {}),
+    ...(inspectSource ? { source: inspectSource } : {}),
     localPdf: {
-      hasPdf: await sourcePdfExists({ workspaceDir: options.workspaceDir, source }),
-      ...(source?.pdfPath ? { path: source.pdfPath } : {}),
-      ...(source?.pdfSha256 ? { sha256: source.pdfSha256 } : {})
+      hasPdf: sourceHasPdf || recordPdf.hasPdf,
+      ...(localPdfPath ? { path: localPdfPath } : {}),
+      ...(localPdfSha256 ? { sha256: localPdfSha256 } : {})
     },
     parses
   };

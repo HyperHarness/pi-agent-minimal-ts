@@ -119,6 +119,40 @@ test("listLocalPapers merges slash canonical IDs using the record filename key",
   }
 });
 
+test("listLocalPapers resolves WSL UNC PDF paths from download records", async () => {
+  const workspace = await createWorkspace();
+  try {
+    const pdfPath = path.join(workspace, "knowledge-base", "raw", "pdfs", "aps-10.1103-nv7d-k3wr.pdf");
+    await writeText(pdfPath, "%PDF-1.4\naps paper\n%%EOF\n");
+    const uncPdfPath = `\\\\wsl.localhost\\Ubuntu-24.04\\${pdfPath.slice(1).split(path.sep).join("\\")}`;
+    await writeJson(path.join(workspace, "knowledge-base", "records", "aps-10.1103-nv7d-k3wr.json"), {
+      source: "aps",
+      articleUrl: "https://journals.aps.org/prl/abstract/10.1103/nv7d-k3wr",
+      recordedAt: "2026-05-06T06:04:05.776Z",
+      handlingMethod: "browser_session",
+      status: "downloaded",
+      canonicalId: "10.1103/nv7d-k3wr",
+      pdfUrl: "https://journals.aps.org/prl/pdf/10.1103/nv7d-k3wr",
+      downloadPath: uncPdfPath
+    });
+
+    const listed = await listLocalPapers({ workspaceDir: workspace, status: "downloaded" });
+    const paper = listed.results.find((candidate) => candidate.paperKey === "aps-10.1103-nv7d-k3wr");
+
+    assert.ok(paper);
+    assert.equal(paper.hasPdf, true);
+    assert.equal(paper.pdfPath, pdfPath);
+
+    const searched = await searchLocalPapers({
+      workspaceDir: workspace,
+      query: "10.1103/nv7d-k3wr"
+    });
+    assert.equal(searched.results[0]?.paper.hasPdf, true);
+  } finally {
+    await rm(workspace, { recursive: true, force: true });
+  }
+});
+
 test("listLocalPapers canonicalizes accepted APS webpage artifact directories", async () => {
   const workspace = await createWorkspace();
   try {
