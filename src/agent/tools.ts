@@ -67,6 +67,10 @@ import {
   listLocalPapers,
   searchLocalPapers
 } from "./local-paper-library.js";
+import {
+  blockPaperDownload,
+  type PaperBlockReasonCode
+} from "./paper-blocklist.js";
 import { checkWikiHealth, fixWikiHealth, type WikiHealthFixProgress } from "./wiki-health.js";
 import {
   readPaperRecord,
@@ -154,6 +158,31 @@ const downloadPaperParameters = Type.Object({
         "Optional paper title for exact-title arXiv preprint fallback when a publisher URL cannot be downloaded. If omitted, the manager tries to derive the title from publisher page metadata."
     })
   )
+});
+
+const blockPaperDownloadParameters = Type.Object({
+  paperKey: Type.Optional(Type.String({ description: "Optional local paper key to block." })),
+  source: Type.Optional(
+    Type.Union([
+      Type.Literal("arxiv"),
+      Type.Literal("science"),
+      Type.Literal("nature"),
+      Type.Literal("aps"),
+      Type.Literal("external")
+    ], { description: "Optional paper source." })
+  ),
+  canonicalId: Type.Optional(Type.String({ description: "Optional DOI, arXiv id, or publisher canonical id." })),
+  articleUrl: Type.Optional(Type.String({ description: "Optional article URL to block." })),
+  title: Type.Optional(Type.String({ description: "Optional exact paper title to block." })),
+  reasonCode: Type.Union([
+    Type.Literal("irrelevant"),
+    Type.Literal("license_denied"),
+    Type.Literal("not_a_paper"),
+    Type.Literal("download_failed"),
+    Type.Literal("duplicate"),
+    Type.Literal("other")
+  ], { description: "Reason this paper should not be downloaded again." }),
+  note: Type.Optional(Type.String({ description: "Optional human-readable note." }))
 });
 
 const registerManualPaperDownloadParameters = Type.Object({
@@ -480,7 +509,8 @@ const wikiHealthIssueKindParameters = Type.Union([
   Type.Literal("parse_failed"),
   Type.Literal("low_quality"),
   Type.Literal("summary_missing"),
-  Type.Literal("missing_artifact")
+  Type.Literal("missing_artifact"),
+  Type.Literal("download_blocked")
 ]);
 
 const wikiHealthFixParameters = Type.Object({
@@ -509,6 +539,7 @@ type FetchUrlParameters = Static<typeof fetchUrlParameters>;
 type FetchPaperWebpageParameters = Static<typeof fetchPaperWebpageParameters>;
 type SearchPapersParameters = Static<typeof searchPapersParameters>;
 type DownloadPaperParameters = Static<typeof downloadPaperParameters>;
+type BlockPaperDownloadParameters = Static<typeof blockPaperDownloadParameters>;
 type RegisterManualPaperDownloadParameters = Static<typeof registerManualPaperDownloadParameters>;
 type OpenPaperPageForLoginParameters = Static<typeof openPaperPageForLoginParameters>;
 type ParsePaperParameters = Static<typeof parsePaperParameters>;
@@ -723,6 +754,10 @@ type DownloadPaperClosedLoopDetails = PaperDownloadResult & {
 type DownloadPaperTool = AgentTool<
   typeof downloadPaperParameters,
   DownloadPaperClosedLoopDetails
+>;
+type BlockPaperDownloadTool = AgentTool<
+  typeof blockPaperDownloadParameters,
+  Awaited<ReturnType<typeof blockPaperDownload>>
 >;
 type RegisterManualPaperDownloadTool = AgentTool<
   typeof registerManualPaperDownloadParameters,
@@ -2301,7 +2336,7 @@ export function createTools(workspaceDir: string, dependencies: ToolDependencies
     name: "download_paper",
     label: "Download Paper",
     description:
-      "Downloads a paper by id or URL through the unified paper manager and closes the reading loop by generating or queuing markdown artifacts. APS, Nature, Science, and arXiv use webpage markdown first; arXiv falls back to TeX source and then PDF parsing, while other PDFs are parsed after download. If a non-arXiv publisher download is blocked, incomplete, or unavailable, the manager tries an exact-title arXiv preprint fallback, deriving the title from publisher metadata when the caller did not pass one. For APS short DOIs, use the exact URL returned by search_papers or a DOI resolver URL such as https://link.aps.org/doi/<doi>; do not fabricate https://journals.aps.org/doi/<doi> URLs.",
+      "Downloads a paper by id or URL through the unified paper manager and closes the reading loop by generating or queuing markdown artifacts. Before downloading, it checks the local paper blocklist and returns blocked for known irrelevant, license-denied, non-paper, duplicate, or repeatedly failed papers. APS, Nature, Science, and arXiv use webpage markdown first; arXiv falls back to TeX source and then PDF parsing, while other PDFs are parsed after download. If a non-arXiv publisher download is blocked, incomplete, or unavailable, the manager tries an exact-title arXiv preprint fallback, deriving the title from publisher metadata when the caller did not pass one. For APS short DOIs, use the exact URL returned by search_papers or a DOI resolver URL such as https://link.aps.org/doi/<doi>; do not fabricate https://journals.aps.org/doi/<doi> URLs.",
     parameters: downloadPaperParameters,
     executionMode: "sequential",
     execute: async (_toolCallId: string, args: DownloadPaperParameters) => {
@@ -2318,6 +2353,32 @@ export function createTools(workspaceDir: string, dependencies: ToolDependencies
         ...rawResult,
         ...(reading ? { reading } : {})
       };
+
+      return {
+        content: [{ type: "text", text: JSON.stringify(result) }],
+        details: result
+      };
+    }
+  };
+
+  const blockPaperDownloadTool: BlockPaperDownloadTool = {
+    name: "block_paper_download",
+    label: "Block Paper Download",
+    description:
+      "Adds a paper to the local download blocklist so future download_paper calls stop before using the browser extension, network, or parser. Use for papers the user marks irrelevant, license-denied, non-paper, duplicate, or not worth retrying.",
+    parameters: blockPaperDownloadParameters,
+    executionMode: "sequential",
+    execute: async (_toolCallId: string, args: BlockPaperDownloadParameters) => {
+      const result = await blockPaperDownload({
+        workspaceDir: resolvedWorkspaceDir,
+        ...(args.paperKey ? { paperKey: args.paperKey } : {}),
+        ...(args.source ? { source: args.source } : {}),
+        ...(args.canonicalId ? { canonicalId: args.canonicalId } : {}),
+        ...(args.articleUrl ? { articleUrl: args.articleUrl } : {}),
+        ...(args.title ? { title: args.title } : {}),
+        reasonCode: args.reasonCode as PaperBlockReasonCode,
+        ...(args.note ? { note: args.note } : {})
+      });
 
       return {
         content: [{ type: "text", text: JSON.stringify(result) }],
@@ -2732,7 +2793,7 @@ export function createTools(workspaceDir: string, dependencies: ToolDependencies
               title: item.candidate.title,
               source: downloadResult.source,
               status: downloadResult.status,
-              articleUrl: downloadResult.articleUrl,
+              articleUrl: downloadResult.articleUrl ?? item.source.articleUrl,
               ...("recordPath" in downloadResult ? { recordPath: downloadResult.recordPath } : {}),
               ...(paperKey ? { paperKey } : {}),
               ...(reading ? { readingStatus: reading.status } : {}),
@@ -3383,6 +3444,7 @@ export function createTools(workspaceDir: string, dependencies: ToolDependencies
     fetchUrlTool,
     searchPapersTool,
     downloadPaperTool,
+    blockPaperDownloadTool,
     inspectPaperTool,
     readPaperSectionTool,
     searchPaperTextTool,

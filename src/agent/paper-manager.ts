@@ -49,6 +49,12 @@ import {
 } from "./publisher-access-state.js";
 import { searchWeb, type WebSearchResult } from "./web-search.js";
 import { listLocalPapers } from "./local-paper-library.js";
+import {
+  derivePaperKeyForBlocklist,
+  findBlockedPaperDownload,
+  type PaperBlocklistEntry,
+  type PaperBlocklistLookup
+} from "./paper-blocklist.js";
 import type {
   PaperDownloadResult,
   PaperFailure,
@@ -681,6 +687,34 @@ function toExtensionUnavailablePaperResult(input: {
       message: formatExtensionBridgeFailure(input.error)
     }
   };
+}
+
+function toBlockedPaperDownloadResult(
+  lookup: PaperBlocklistLookup,
+  entry: PaperBlocklistEntry
+): PaperDownloadResult {
+  return {
+    status: "blocked",
+    ...(lookup.source ? { source: lookup.source } : entry.source ? { source: entry.source } : {}),
+    ...(lookup.canonicalId ? { canonicalId: lookup.canonicalId } : entry.canonicalId ? { canonicalId: entry.canonicalId } : {}),
+    ...(lookup.articleUrl ? { articleUrl: lookup.articleUrl } : entry.articleUrl ? { articleUrl: entry.articleUrl } : {}),
+    ...(lookup.paperKey ? { paperKey: lookup.paperKey } : entry.paperKey ? { paperKey: entry.paperKey } : {}),
+    ...(lookup.title ? { title: lookup.title } : entry.title ? { title: entry.title } : {}),
+    failure: {
+      code: `blocked_${entry.reasonCode}`,
+      message: entry.note
+        ? `Paper download is blocked by the local blocklist: ${entry.note}`
+        : `Paper download is blocked by the local blocklist (${entry.reasonCode}).`
+    }
+  };
+}
+
+async function findBlockedDownloadForLookup(options: {
+  workspaceDir: string;
+  lookup: PaperBlocklistLookup;
+}): Promise<PaperDownloadResult | undefined> {
+  const blocked = await findBlockedPaperDownload(options);
+  return blocked ? toBlockedPaperDownloadResult(options.lookup, blocked) : undefined;
 }
 
 async function submitPaperExtensionJob(input: {
@@ -1426,15 +1460,52 @@ export async function downloadPaper(options: DownloadPaperOptions): Promise<Pape
   assertExactlyOnePaperLocator(options);
 
   if (options.id) {
+    const locator = parseArxivLocator(options.id);
+    const blocked = await findBlockedDownloadForLookup({
+      workspaceDir: options.workspaceDir,
+      lookup: {
+        source: "arxiv",
+        canonicalId: locator.id,
+        articleUrl: locator.absUrl,
+        paperKey: derivePaperKeyForBlocklist({ source: "arxiv", canonicalId: locator.id }),
+        ...(options.title ? { title: options.title } : {})
+      }
+    });
+    if (blocked) {
+      return blocked;
+    }
+
     return downloadArxivPaper({
       workspaceDir: options.workspaceDir,
-      input: options.id,
+      input: locator.id,
       fetchImpl: options.fetchImpl
     });
   }
 
   const paperUrl = options.url as string;
   const classification = classifyPaperUrl(paperUrl);
+  const blocked = await findBlockedDownloadForLookup({
+    workspaceDir: options.workspaceDir,
+    lookup: {
+      source: classification.source,
+      ...("canonicalId" in classification && classification.canonicalId
+        ? { canonicalId: classification.canonicalId }
+        : {}),
+      articleUrl: classification.articleUrl,
+      ...("canonicalId" in classification && classification.canonicalId
+        ? {
+            paperKey: derivePaperKeyForBlocklist({
+              source: classification.source,
+              canonicalId: classification.canonicalId
+            })
+          }
+        : {}),
+      ...(options.title ? { title: options.title } : {})
+    }
+  });
+  if (blocked) {
+    return blocked;
+  }
   let publisherFallbackTitleResolved = false;
   let publisherFallbackTitle: string | undefined;
 

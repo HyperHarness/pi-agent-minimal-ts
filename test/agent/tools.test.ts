@@ -357,6 +357,7 @@ type WikiHealthFixTool = {
         | "low_quality"
         | "summary_missing"
         | "missing_artifact"
+        | "download_blocked"
       >;
       dryRun?: boolean;
     },
@@ -941,6 +942,7 @@ test("createTools exposes the minimal default tool set", async () => {
       "fetch_url",
       "search_papers",
       "download_paper",
+      "block_paper_download",
       "inspect_paper",
       "read_paper_section",
       "search_paper_text",
@@ -992,6 +994,7 @@ test("createTools full profile exposes every built-in tool", async () => {
       "fetch_url",
       "search_papers",
       "download_paper",
+      "block_paper_download",
       "inspect_paper",
       "read_paper_section",
       "search_paper_text",
@@ -3292,6 +3295,7 @@ test("wiki_health delegates to the injected health checker dependency", async ()
           low_quality: 0,
           summary_missing: 0,
           missing_artifact: 0,
+          download_blocked: 0,
         },
         issues: [
           {
@@ -3338,6 +3342,7 @@ test("wiki_health_fix delegates to the injected health fixer dependency", async 
             low_quality: 0,
             summary_missing: 0,
             missing_artifact: 0,
+            download_blocked: 0,
           },
           issues: [
             {

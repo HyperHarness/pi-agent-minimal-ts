@@ -322,6 +322,16 @@ export interface ExtensionUnavailablePaperResult {
   failure: PaperFailure;
 }
 
+export interface BlockedPaperDownloadResult {
+  status: "blocked";
+  source?: PaperSource;
+  canonicalId?: string;
+  articleUrl?: string;
+  paperKey?: string;
+  title?: string;
+  failure: PaperFailure;
+}
+
 export interface PublisherPendingPaperResult {
   status: "publisher_pending";
   source: SupportedPaperSource;
@@ -361,5 +371,6 @@ export type PaperDownloadResult =
   | ManualFallbackPaperResult
   | ExternalOpenedPaperResult
   | ExtensionUnavailablePaperResult
+  | BlockedPaperDownloadResult
   | PublisherPendingPaperResult
   | ExtensionPaperJobResult;

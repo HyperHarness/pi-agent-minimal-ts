@@ -188,6 +188,7 @@ test("wiki_health_fix routes download repairs through the injected extension bri
               low_quality: 0,
               summary_missing: 0,
               missing_artifact: 0,
+              download_blocked: 0,
             },
             issues: [
               {

@@ -18,6 +18,7 @@ import {
   resolvePaperRecordPath
 } from "../../src/agent/paper-store.js";
 import { appendPaperDownloadJobEvent } from "../../src/agent/paper-download-jobs.js";
+import { blockPaperDownload } from "../../src/agent/paper-blocklist.js";
 import type { WebSearchResult } from "../../src/agent/web-search.js";
 import type { PaperSearchResult, PaperSearchSource } from "../../src/agent/paper-types.js";
 
@@ -612,6 +613,98 @@ test("downloadPaper returns an existing arXiv download without fetching it again
       path: pdfPath,
       recordPath,
       recordedAt: "2026-04-25T10:00:00.000Z"
+    });
+  } finally {
+    await rm(workspaceDir, { recursive: true, force: true });
+  }
+});
+
+test("downloadPaper blocks arXiv downloads from the local blocklist before fetching", async () => {
+  const workspaceDir = await mkdtemp(path.join(os.tmpdir(), "paper-manager-blocklist-"));
+  let fetchCalls = 0;
+
+  try {
+    await blockPaperDownload({
+      workspaceDir,
+      source: "arxiv",
+      canonicalId: "2401.01234",
+      reasonCode: "irrelevant",
+      note: "Outside the project scope.",
+      createdAt: "2026-05-06T00:00:00.000Z"
+    });
+
+    const result = await downloadPaper({
+      workspaceDir,
+      id: "2401.01234v2",
+      fetchImpl: async () => {
+        fetchCalls += 1;
+        throw new Error("fetch should not run for a blocked paper");
+      }
+    });
+
+    assert.equal(fetchCalls, 0);
+    assert.deepEqual(result, {
+      status: "blocked",
+      source: "arxiv",
+      canonicalId: "2401.01234",
+      articleUrl: "https://arxiv.org/abs/2401.01234",
+      paperKey: "arxiv-2401.01234",
+      failure: {
+        code: "blocked_irrelevant",
+        message: "Paper download is blocked by the local blocklist: Outside the project scope."
+      }
+    });
+  } finally {
+    await rm(workspaceDir, { recursive: true, force: true });
+  }
+});
+
+test("downloadPaper blocks publisher downloads before queueing extension jobs", async () => {
+  const workspaceDir = await mkdtemp(path.join(os.tmpdir(), "paper-manager-blocklist-"));
+  const articleUrl = "https://www.science.org/doi/10.1126/science.ado6285";
+  const submittedJobs: unknown[] = [];
+
+  try {
+    await blockPaperDownload({
+      workspaceDir,
+      source: "science",
+      canonicalId: "10.1126/science.ado6285",
+      articleUrl,
+      title: "Beyond-classical computation in quantum simulation",
+      reasonCode: "license_denied",
+      note: "Science license does not permit PDF download.",
+      createdAt: "2026-05-06T00:00:00.000Z"
+    });
+
+    const result = await downloadPaper({
+      workspaceDir,
+      url: "https://www.science.org/doi/epdf/10.1126/science.ado6285",
+      extensionBridge: {
+        async submitJob(job) {
+          submittedJobs.push(job);
+          return {
+            status: "extension_job_queued",
+            source: job.source,
+            articleUrl: job.articleUrl,
+            jobId: job.jobId,
+            message: "Paper download job queued for the browser extension."
+          };
+        }
+      }
+    });
+
+    assert.deepEqual(submittedJobs, []);
+    assert.deepEqual(result, {
+      status: "blocked",
+      source: "science",
+      canonicalId: "10.1126/science.ado6285",
+      articleUrl: "https://www.science.org/doi/epdf/10.1126/science.ado6285",
+      paperKey: "science-10.1126-science.ado6285",
+      title: "Beyond-classical computation in quantum simulation",
+      failure: {
+        code: "blocked_license_denied",
+        message: "Paper download is blocked by the local blocklist: Science license does not permit PDF download."
+      }
     });
   } finally {
     await rm(workspaceDir, { recursive: true, force: true });

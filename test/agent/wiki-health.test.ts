@@ -5,6 +5,7 @@ import { tmpdir } from "node:os";
 import path from "node:path";
 import { checkWikiHealth, fixWikiHealth } from "../../src/agent/wiki-health.js";
 import { appendPaperDownloadJobEvent } from "../../src/agent/paper-download-jobs.js";
+import { blockPaperDownload } from "../../src/agent/paper-blocklist.js";
 import type { PaperParseResult } from "../../src/agent/paper-reader/types.js";
 
 async function createWorkspace(): Promise<string> {
@@ -346,6 +347,79 @@ test("checkWikiHealth preserves Science license failures from extension history 
     assert.ok(issue);
     assert.equal(issue.severity, "medium");
     assert.match(issue.reason, /current license does not permit/);
+  } finally {
+    await rm(workspace, { recursive: true, force: true });
+  }
+});
+
+test("checkWikiHealth downgrades blocklisted download issues without hiding summary gaps", async () => {
+  const workspace = await createWorkspace();
+
+  try {
+    const paperKey = "science-10.1126-science.ado6285";
+    const articleUrl = "https://www.science.org/doi/10.1126/science.ado6285";
+    const paperDir = path.join(workspace, "knowledge-base", "wiki", "sources", paperKey);
+    const parseDir = path.join(paperDir, "parses", "webpage");
+    await writeJson(path.join(paperDir, "source.json"), {
+      paperKey,
+      source: "science",
+      canonicalId: "10.1126/science.ado6285",
+      articleUrl,
+      title: "Beyond-classical computation in quantum simulation"
+    });
+    await writeText(path.join(parseDir, "document.md"), "# Abstract\n\nFull Science webpage text.");
+    await writeJson(path.join(parseDir, "parse.json"), {
+      paperKey,
+      engine: "webpage"
+    });
+    await writeJson(path.join(parseDir, "quality.json"), {
+      status: "good",
+      score: 1,
+      pages: 1,
+      totalTextLength: 65200,
+      emptyPageCount: 0,
+      headingCount: 16,
+      tableCount: 0,
+      figureOrCaptionCount: 5,
+      warnings: []
+    });
+    await writeText(path.join(paperDir, "chunks", "webpage.jsonl"), "{\"id\":\"chunk-1\"}\n");
+    await appendPaperDownloadJobEvent({
+      workspaceDir: workspace,
+      event: {
+        jobId: "paper-science-license",
+        recordedAt: "2026-05-06T05:07:22.400Z",
+        status: "automatic_download_failed",
+        articleUrl,
+        source: "science",
+        failureCode: "publisher_license_not_permitted",
+        message: "Science reports that the current license does not permit this publication to be downloaded."
+      }
+    });
+    await blockPaperDownload({
+      workspaceDir: workspace,
+      paperKey,
+      source: "science",
+      canonicalId: "10.1126/science.ado6285",
+      articleUrl,
+      title: "Beyond-classical computation in quantum simulation",
+      reasonCode: "license_denied",
+      note: "Science license does not permit PDF download.",
+      createdAt: "2026-05-06T06:00:00.000Z"
+    });
+
+    const result = await checkWikiHealth({ workspaceDir: workspace });
+
+    assert.equal(result.summary.needs_authorization, 0);
+    assert.equal(result.summary.needs_download, 0);
+    assert.equal(result.summary.download_blocked, 1);
+    assert.equal(result.summary.summary_missing, 1);
+    const blockedIssue = result.issues.find((candidate) =>
+      candidate.kind === "download_blocked" && candidate.paperKey === paperKey
+    );
+    assert.ok(blockedIssue);
+    assert.equal(blockedIssue.severity, "low");
+    assert.match(blockedIssue.reason, /local download blocklist/);
   } finally {
     await rm(workspace, { recursive: true, force: true });
   }

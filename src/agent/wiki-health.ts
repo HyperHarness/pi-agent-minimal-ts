@@ -17,7 +17,12 @@ import {
   updatePaperRecordParseManifest,
   updatePaperRecordReadingFailure
 } from "./paper-store.js";
-import type { PaperRecord } from "./paper-types.js";
+import {
+  derivePaperKeyForBlocklist,
+  findBlockedPaperDownload,
+  type PaperBlocklistEntry
+} from "./paper-blocklist.js";
+import type { PaperRecord, PaperSource } from "./paper-types.js";
 import type { PaperParseResult } from "./paper-reader/types.js";
 
 export type WikiHealthIssueKind =
@@ -28,7 +33,8 @@ export type WikiHealthIssueKind =
   | "parse_failed"
   | "low_quality"
   | "summary_missing"
-  | "missing_artifact";
+  | "missing_artifact"
+  | "download_blocked";
 
 export type WikiHealthSeverity = "high" | "medium" | "low";
 
@@ -126,11 +132,16 @@ const ISSUE_KINDS: WikiHealthIssueKind[] = [
   "parse_failed",
   "low_quality",
   "summary_missing",
-  "missing_artifact"
+  "missing_artifact",
+  "download_blocked"
 ];
 
 const DEFAULT_MAX_ITEMS = 20;
 const DEFAULT_LOW_QUALITY_SCORE_THRESHOLD = 0.7;
+const DOWNLOAD_BLOCKABLE_ISSUE_KINDS = new Set<WikiHealthIssueKind>([
+  "needs_download",
+  "needs_authorization"
+]);
 
 function toWorkspacePath(workspaceDir: string, filePath: string | undefined): string | undefined {
   if (!filePath) {
@@ -251,6 +262,10 @@ function recordIsPublisherPending(record: PaperRecord | undefined): boolean {
   return record?.status === "publisher_pending";
 }
 
+function isPaperSource(value: string | undefined): value is PaperSource {
+  return value === "arxiv" || value === "science" || value === "nature" || value === "aps" || value === "external";
+}
+
 function normalizeArticleUrl(value: string | undefined): string | undefined {
   if (!value) {
     return undefined;
@@ -310,6 +325,34 @@ function entryIsSupportedPublisher(entry: LocalPaperEntry): boolean {
   return entry.source === "science" || entry.source === "nature" || entry.source === "aps";
 }
 
+async function findBlockedEntry(workspaceDir: string, entry: LocalPaperEntry): Promise<PaperBlocklistEntry | undefined> {
+  const source = isPaperSource(entry.source) ? entry.source : undefined;
+  return findBlockedPaperDownload({
+    workspaceDir,
+    lookup: {
+      paperKey: entry.paperKey,
+      ...(source ? { source } : {}),
+      ...(entry.canonicalId ? { canonicalId: entry.canonicalId } : {}),
+      ...(entry.articleUrl ? { articleUrl: entry.articleUrl } : {}),
+      ...(entry.title ? { title: entry.title } : {}),
+      ...(!entry.paperKey && source && entry.canonicalId
+        ? { paperKey: derivePaperKeyForBlocklist({ source, canonicalId: entry.canonicalId }) }
+        : {})
+    }
+  });
+}
+
+function downloadBlockedIssue(entry: LocalPaperEntry, blocked: PaperBlocklistEntry): WikiHealthIssue {
+  return baseIssue(
+    entry,
+    "download_blocked",
+    "low",
+    blocked.note
+      ? `Paper download is blocked by the local download blocklist (${blocked.reasonCode}): ${blocked.note}`
+      : `Paper download is blocked by the local download blocklist (${blocked.reasonCode}); download and authorization health issues are downgraded.`
+  );
+}
+
 function entryHasOnlyWebpageReading(entry: LocalPaperEntry): boolean {
   return entry.hasParsedArtifacts && entry.parses.every((parse) => parse.engine === "webpage");
 }
@@ -359,7 +402,8 @@ function summarizeActions(issues: WikiHealthIssue[]): string[] {
     ["low_quality", "Inspect low-quality parses and prefer webpage/TeX/Docling alternatives where available."],
     ["parse_missing", "Parse downloaded papers that do not yet have reading artifacts."],
     ["summary_missing", "Write wiki source summaries for parsed papers without a summary page."],
-    ["missing_artifact", "Repair or regenerate records that point at missing files."]
+    ["missing_artifact", "Repair or regenerate records that point at missing files."],
+    ["download_blocked", "No repair needed for download-blocklisted papers unless the paper is removed from the local download blocklist."]
   ].flatMap(([kind, text]) => {
     const count = counts.get(kind as WikiHealthIssueKind) ?? 0;
     return count > 0 ? [`${count}: ${text}`] : [];
@@ -379,6 +423,8 @@ export async function checkWikiHealth(options: WikiHealthOptions): Promise<WikiH
   const issues: WikiHealthIssue[] = [];
 
   for (const entry of localPapers.results) {
+    const entryIssues: WikiHealthIssue[] = [];
+    const blocked = await findBlockedEntry(workspaceDir, entry);
     const record = await readRecord(workspaceDir, entry);
     const pdfExists = await pathExists(toWorkspacePath(workspaceDir, entry.pdfPath));
     const usesPreprintFallback = recordUsesPreprintFallback(record);
@@ -393,7 +439,7 @@ export async function checkWikiHealth(options: WikiHealthOptions): Promise<WikiH
     const authorizationSeverity: WikiHealthSeverity = hasUsableParsedReading ? "medium" : "high";
 
     if (!usesPreprintFallback && !isPublisherPending && !needsAuthorization && !hasUsableParsedReading && (entry.status !== "downloaded" || (entry.status === "downloaded" && !pdfExists))) {
-      issues.push(baseIssue(
+      entryIssues.push(baseIssue(
         entry,
         "needs_download",
         "high",
@@ -411,7 +457,7 @@ export async function checkWikiHealth(options: WikiHealthOptions): Promise<WikiH
       entryHasOnlyWebpageReading(entry) &&
       !pdfExists
     ) {
-      issues.push(baseIssue(
+      entryIssues.push(baseIssue(
         entry,
         "needs_download",
         "medium",
@@ -420,7 +466,7 @@ export async function checkWikiHealth(options: WikiHealthOptions): Promise<WikiH
     }
 
     if (needsAuthorization) {
-      issues.push(baseIssue(
+      entryIssues.push(baseIssue(
         entry,
         "needs_authorization",
         authorizationSeverity,
@@ -429,20 +475,20 @@ export async function checkWikiHealth(options: WikiHealthOptions): Promise<WikiH
     }
 
     if (recordIsQueued(record)) {
-      issues.push(baseIssue(entry, "queued", "medium", "Record has queued download, webpage, parse, or reading work."));
+      entryIssues.push(baseIssue(entry, "queued", "medium", "Record has queued download, webpage, parse, or reading work."));
     }
 
     if (entry.status === "downloaded" && pdfExists && !entry.hasParsedArtifacts && record?.reading?.status !== "queued") {
-      issues.push(baseIssue(entry, "parse_missing", "medium", "Downloaded paper has no parsed reading artifacts."));
+      entryIssues.push(baseIssue(entry, "parse_missing", "medium", "Downloaded paper has no parsed reading artifacts."));
     }
 
     if (recordParseFailed(record)) {
-      issues.push(baseIssue(entry, "parse_failed", "high", record?.reading?.reason ?? "Record has failed parse, webpage, or reading status."));
+      entryIssues.push(baseIssue(entry, "parse_failed", "high", record?.reading?.reason ?? "Record has failed parse, webpage, or reading status."));
     }
 
     if (!usesPreprintFallback && !isPublisherPending && !needsAuthorization) {
       for (const parse of entry.parses.filter((candidate) => !hasAcceptableParse && parseIsLowQuality(candidate, threshold))) {
-        issues.push({
+        entryIssues.push({
           ...baseIssue(entry, "low_quality", "medium", `Parse quality is ${parse.status ?? "unknown"}${typeof parse.score === "number" ? ` with score ${parse.score}` : ""}.`),
           quality: {
             engine: parse.engine,
@@ -455,17 +501,25 @@ export async function checkWikiHealth(options: WikiHealthOptions): Promise<WikiH
     }
 
     if (!usesPreprintFallback && !isPublisherPending && hasUsableParsedReading && !entry.hasWikiSummary) {
-      issues.push(baseIssue(entry, "summary_missing", "low", "Parsed paper has no wiki source summary."));
+      entryIssues.push(baseIssue(entry, "summary_missing", "low", "Parsed paper has no wiki source summary."));
     }
 
     if (!usesPreprintFallback && !isPublisherPending && !needsAuthorization) {
       const missingPaths = await missingArtifactPaths(workspaceDir, entry);
       if (missingPaths.length > 0) {
-        issues.push({
+        entryIssues.push({
           ...baseIssue(entry, "missing_artifact", "high", "One or more indexed artifacts are missing on disk."),
           paths: missingPaths
         });
       }
+    }
+
+    const blockedDownloadIssues = entryIssues.filter((issue) => DOWNLOAD_BLOCKABLE_ISSUE_KINDS.has(issue.kind));
+    const remainingIssues = entryIssues.filter((issue) => !DOWNLOAD_BLOCKABLE_ISSUE_KINDS.has(issue.kind));
+    if (blocked && blockedDownloadIssues.length > 0) {
+      issues.push(downloadBlockedIssue(entry, blocked), ...remainingIssues);
+    } else {
+      issues.push(...entryIssues);
     }
   }
 
@@ -932,6 +986,10 @@ export async function fixWikiHealth(options: WikiHealthFixOptions): Promise<Wiki
     }
     if (issue.kind === "missing_artifact") {
       results.push(skippedFix(issue, "Missing artifacts require regenerating the owning download, parse, or summary artifact; rerun targeted repair after inspecting the missing paths."));
+      continue;
+    }
+    if (issue.kind === "download_blocked") {
+      results.push(skippedFix(issue, "Paper is on the local download blocklist; remove it from the blocklist before running automatic repair."));
     }
   }
 
