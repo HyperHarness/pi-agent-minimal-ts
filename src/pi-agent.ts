@@ -48,6 +48,14 @@ export const DEFAULT_SYSTEM_PROMPT = [
   "If the local wiki has no supporting evidence, say that the current wiki does not contain enough evidence instead of presenting unsupported claims as wiki-grounded."
 ].join(" ");
 const contextWorkspaceDirs = new WeakMap<AgentContext, string>();
+const TRANSIENT_MODEL_RETRY_ATTEMPTS = 5;
+const TRANSIENT_MODEL_RETRY_PATTERNS = [
+  /\boverloaded\b/i,
+  /try again later/i,
+  /temporarily unavailable/i,
+  /service unavailable/i,
+  /\b503\b/i
+];
 
 export interface CliArgs {
   provider?: string;
@@ -671,6 +679,73 @@ function isFailedTurn(messages: AgentMessage[]): boolean {
   );
 }
 
+function getFailedAssistantMessage(messages: AgentMessage[]): AssistantMessage | undefined {
+  const lastMessage = messages[messages.length - 1];
+  return lastMessage !== undefined &&
+    lastMessage.role === "assistant" &&
+    (lastMessage.stopReason === "error" || lastMessage.stopReason === "aborted")
+    ? lastMessage
+    : undefined;
+}
+
+function isTransientModelFailure(message: AssistantMessage | undefined): boolean {
+  const errorMessage = message?.errorMessage;
+  return typeof errorMessage === "string" &&
+    TRANSIENT_MODEL_RETRY_PATTERNS.some((pattern) => pattern.test(errorMessage));
+}
+
+async function flushAgentEvents(
+  events: AgentEvent[],
+  onEvent: AgentMessageEventHandler | undefined
+): Promise<void> {
+  if (!onEvent) {
+    return;
+  }
+
+  for (const event of events) {
+    await onEvent(event);
+  }
+}
+
+async function runAgentLoopAttempt(options: {
+  inputMessages: AgentMessage[];
+  context: AgentContext;
+  tools: NonNullable<AgentContext["tools"]>;
+  model: Model<Api>;
+  onEvent?: AgentMessageEventHandler;
+}): Promise<{ delayedEvents: AgentEvent[]; messages: AgentMessage[] }> {
+  const delayedEvents: AgentEvent[] = [];
+  const stream = agentLoop(
+    options.inputMessages,
+    { ...options.context, tools: options.tools },
+    {
+      model: options.model,
+      convertToLlm: convertAgentMessagesToLlm,
+      getApiKey: (provider) => getEnvApiKey(provider),
+      toolExecution: "sequential"
+    }
+  );
+  const resultPromise = stream.result();
+
+  for await (const event of stream) {
+    if (
+      event.type === "message_end" &&
+      event.message.role === "assistant" &&
+      (event.message.stopReason === "error" || event.message.stopReason === "aborted")
+    ) {
+      delayedEvents.push(event);
+      continue;
+    }
+
+    await options.onEvent?.(event);
+  }
+
+  return {
+    delayedEvents,
+    messages: await resultPromise
+  };
+}
+
 function extractJsonObject(text: string): unknown {
   const trimmed = text.trim();
   const fenced = trimmed.match(/^```(?:json)?\s*([\s\S]*?)\s*```$/i)?.[1]?.trim();
@@ -947,25 +1022,39 @@ export async function runAgentTurn(options: RunAgentTurnOptions): Promise<RunAge
     tools = createRuntimeTools(workspaceDir, options.model);
   }
 
-  const stream = agentLoop(
-    [userMessage],
-    { ...options.context, tools },
-    {
-      model: options.model,
-      convertToLlm: convertAgentMessagesToLlm,
-      getApiKey: (provider) => getEnvApiKey(provider),
-      toolExecution: "sequential"
-    }
-  );
-  const resultPromise = stream.result();
+  const originalMessages = options.context.messages;
+  let contextMessages = originalMessages;
+  let inputMessages: AgentMessage[] = [userMessage];
+  let acceptedTurnMessages: AgentMessage[] = [];
+  let newMessages: AgentMessage[] = [];
 
-  for await (const event of stream) {
-    await options.onEvent?.(event);
+  for (let attempt = 0; attempt <= TRANSIENT_MODEL_RETRY_ATTEMPTS; attempt += 1) {
+    const attemptResult = await runAgentLoopAttempt({
+      inputMessages,
+      context: { ...options.context, messages: contextMessages },
+      tools,
+      model: options.model,
+      onEvent: options.onEvent
+    });
+    const failedAssistant = getFailedAssistantMessage(attemptResult.messages);
+    const shouldRetry =
+      attempt < TRANSIENT_MODEL_RETRY_ATTEMPTS &&
+      isTransientModelFailure(failedAssistant);
+
+    if (!shouldRetry) {
+      await flushAgentEvents(attemptResult.delayedEvents, options.onEvent);
+      newMessages = [...acceptedTurnMessages, ...attemptResult.messages];
+      break;
+    }
+
+    const retryMessages = attemptResult.messages.slice(0, -1);
+    acceptedTurnMessages = [...acceptedTurnMessages, ...retryMessages];
+    contextMessages = [...originalMessages, ...acceptedTurnMessages];
+    inputMessages = [];
   }
 
-  const newMessages = await resultPromise;
   if (!isFailedTurn(newMessages)) {
-    options.context.messages = [...options.context.messages, ...newMessages];
+    options.context.messages = [...originalMessages, ...newMessages];
   }
   options.context.tools = tools;
   contextWorkspaceDirs.set(options.context, workspaceDir);

@@ -508,6 +508,92 @@ test("runAgentTurn does not persist a failed turn into context history", async (
   }
 });
 
+test("runAgentTurn retries transient overloaded assistant errors without rerunning completed tools", async () => {
+  const registration = registerFauxProvider();
+  const prompt = "Download the paper.";
+  registration.setResponses([
+    fauxAssistantMessage([fauxToolCall("remember_counter", {})], { stopReason: "toolUse" }),
+    fauxAssistantMessage([], {
+      stopReason: "error",
+      errorMessage: "Our servers are currently overloaded. Please try again later."
+    }),
+    fauxAssistantMessage([fauxText("Download task was queued.")])
+  ]);
+
+  let executionCount = 0;
+  const context: AgentContext = {
+    systemPrompt: "You are a helpful assistant. Use tools when they are useful.",
+    messages: [],
+    tools: [
+      {
+        name: "remember_counter",
+        label: "Remember Counter",
+        description: "Tracks executions.",
+        parameters: Type.Object({}),
+        execute: async () => {
+          executionCount += 1;
+          return {
+            content: [{ type: "text", text: `count:${executionCount}` }],
+            details: { count: executionCount }
+          };
+        }
+      }
+    ]
+  };
+  const observedEvents: AgentEvent[] = [];
+
+  try {
+    const result = await runAgentTurn({
+      model: registration.getModel(),
+      workspaceDir: process.cwd(),
+      context,
+      prompt,
+      onEvent: (event) => {
+        observedEvents.push(event);
+      }
+    });
+
+    assert.equal(executionCount, 1);
+    assert.equal(
+      observedEvents.filter(
+        (event) => event.type === "tool_execution_start" && event.toolName === "remember_counter"
+      ).length,
+      1
+    );
+    assert.equal(
+      observedEvents.filter(
+        (event) => event.type === "tool_execution_end" && event.toolName === "remember_counter"
+      ).length,
+      1
+    );
+    assert.equal(
+      observedEvents.some(
+        (event) =>
+          event.type === "message_end" &&
+          event.message.role === "assistant" &&
+          event.message.errorMessage === "Our servers are currently overloaded. Please try again later."
+      ),
+      false
+    );
+    assert.ok(
+      result.newMessages.some(
+        (message) => isAssistantMessage(message) && messageHasText(message, "Download task was queued.")
+      )
+    );
+    assert.equal(
+      result.newMessages.some(
+        (message) =>
+          isAssistantMessage(message) &&
+          message.errorMessage === "Our servers are currently overloaded. Please try again later."
+      ),
+      false
+    );
+    assert.deepEqual(context.messages, result.newMessages);
+  } finally {
+    registration.unregister();
+  }
+});
+
 test("runSessionPrompt stops on exit and quit commands", async () => {
   const runSessionPrompt = (
     piAgent as {
