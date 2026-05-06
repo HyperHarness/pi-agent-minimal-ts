@@ -3218,6 +3218,15 @@ export function createTools(workspaceDir: string, dependencies: ToolDependencies
           : {}),
         ...(args.issueKinds !== undefined ? { issueKinds: args.issueKinds } : {}),
         ...(args.dryRun !== undefined ? { dryRun: args.dryRun } : {}),
+        ...(dependencies.extensionBridge
+          ? {
+              downloadPaperImpl: (downloadOptions) =>
+                downloadPaper({
+                  ...downloadOptions,
+                  extensionBridge: dependencies.extensionBridge
+                })
+            }
+          : {}),
         ...(dependencies.paperSummaryWorker ? { paperSummaryWorker: dependencies.paperSummaryWorker } : {}),
         generatePaperWikiSummaryImpl,
         onProgress: (progress) => emitToolProgress(onUpdate, progress)

@@ -48,6 +48,7 @@ import {
   type PublisherAccessState
 } from "./publisher-access-state.js";
 import { searchWeb, type WebSearchResult } from "./web-search.js";
+import { listLocalPapers } from "./local-paper-library.js";
 import type {
   PaperDownloadResult,
   PaperFailure,
@@ -645,7 +646,7 @@ function toPaperFailure(error: PaperDownloadError): PaperFailure {
 
 function formatExtensionBridgeFailure(error: unknown): string {
   if (error === undefined) {
-    return "Paper extension bridge is not configured. Set usePlaywrightFallback to true to use browser fallback.";
+    return "Paper extension bridge is not configured, and no direct PDF or exact-title open fallback was available.";
   }
   if (error instanceof Error) {
     return error.message;
@@ -1225,6 +1226,31 @@ async function tryDownloadArxivPreprintByTitle(options: {
     return null;
   }
 
+  const titleKey = normalizeTitle(title);
+  const compactTitleKey = getCompactTitleKey(title);
+  const localPapers = await listLocalPapers({
+    workspaceDir: options.workspaceDir,
+    status: "downloaded",
+    maxResults: Number.MAX_SAFE_INTEGER
+  }).catch(() => undefined);
+  const localMatch = localPapers?.results.find((paper) =>
+    paper.source === "arxiv" &&
+    paper.canonicalId &&
+    paper.title &&
+    (normalizeTitle(paper.title) === titleKey || getCompactTitleKey(paper.title) === compactTitleKey)
+  );
+  if (localMatch?.canonicalId) {
+    try {
+      return await downloadArxivPaper({
+        workspaceDir: options.workspaceDir,
+        input: localMatch.canonicalId,
+        fetchImpl: options.fetchImpl
+      });
+    } catch {
+      // Continue to live arXiv search below.
+    }
+  }
+
   const searchArxivImpl = options.searchArxivImpl ?? searchArxiv;
   let results: ArxivSearchResult[];
   try {
@@ -1233,8 +1259,6 @@ async function tryDownloadArxivPreprintByTitle(options: {
     return null;
   }
 
-  const titleKey = normalizeTitle(title);
-  const compactTitleKey = getCompactTitleKey(title);
   const match = results.find((result) => {
     const resultTitleKey = normalizeTitle(result.title);
     return resultTitleKey === titleKey || resultTitleKey.replace(/\s+/g, "") === compactTitleKey;
@@ -1678,6 +1702,17 @@ export async function downloadPaper(options: DownloadPaperOptions): Promise<Pape
   });
   if (directPublisherDownload) {
     return directPublisherDownload;
+  }
+
+  const arxivFallback = await tryDownloadArxivPreprintForPublisherFallback({
+    workspaceDir: options.workspaceDir,
+    classification,
+    title: await getPublisherFallbackTitle(),
+    fetchImpl: options.fetchImpl,
+    searchArxivImpl: options.searchArxivImpl
+  });
+  if (arxivFallback) {
+    return arxivFallback;
   }
 
   const browserSessionFactory =

@@ -4,6 +4,7 @@ import { mkdir, mkdtemp, readFile, rm, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import path from "node:path";
 import { checkWikiHealth, fixWikiHealth } from "../../src/agent/wiki-health.js";
+import { appendPaperDownloadJobEvent } from "../../src/agent/paper-download-jobs.js";
 import type { PaperParseResult } from "../../src/agent/paper-reader/types.js";
 
 async function createWorkspace(): Promise<string> {
@@ -273,6 +274,47 @@ test("checkWikiHealth reports publisher webpage-only parses as not PDF-downloade
       issue.reason.includes("Webpage parsing is not a successful PDF download")
     ));
     assert.equal(result.summary.summary_missing, 1);
+  } finally {
+    await rm(workspace, { recursive: true, force: true });
+  }
+});
+
+test("checkWikiHealth reports Cloudflare extension handoff as user authorization", async () => {
+  const workspace = await createWorkspace();
+
+  try {
+    const paperKey = "aps-10.1103-nv7d-k3wr";
+    const articleUrl = "https://journals.aps.org/prl/abstract/10.1103/NV7D-K3WR";
+    await writeJson(path.join(workspace, "knowledge-base", "wiki", "sources", paperKey, "source.json"), {
+      paperKey,
+      source: "aps",
+      canonicalId: "10.1103/NV7D-K3WR",
+      articleUrl,
+      title: "Complete Self-Testing of a System of Remote Superconducting Qubits"
+    });
+    await appendPaperDownloadJobEvent({
+      workspaceDir: workspace,
+      event: {
+        jobId: "paper-aps-cloudflare",
+        recordedAt: "2026-05-06T04:00:00.000Z",
+        status: "awaiting_user_verification",
+        articleUrl,
+        source: "aps",
+        purpose: "download_and_webpage",
+        paperKey,
+        message: "Cloudflare verification is blocking this publisher page. Complete the Cloudflare check in the browser extension tab, then retry the download."
+      }
+    });
+
+    const result = await checkWikiHealth({ workspaceDir: workspace });
+
+    assert.equal(result.summary.needs_authorization, 1);
+    assert.equal(result.summary.needs_download, 0);
+    const issue = result.issues.find((candidate) =>
+      candidate.kind === "needs_authorization" && candidate.articleUrl === articleUrl
+    );
+    assert.ok(issue);
+    assert.match(issue.reason, /Cloudflare verification is blocking/);
   } finally {
     await rm(workspace, { recursive: true, force: true });
   }
@@ -609,6 +651,59 @@ test("fixWikiHealth parses missing downloaded records and updates the record man
       updatedRecord.parse?.markdownPath,
       "knowledge-base/wiki/sources/arxiv-2401.00004/parses/plain-text-baseline/document.md"
     );
+  } finally {
+    await rm(workspace, { recursive: true, force: true });
+  }
+});
+
+test("fixWikiHealth does not enable browser fallback for missing publisher PDFs", async () => {
+  const workspace = await createWorkspace();
+
+  try {
+    const paperKey = "science-10.1126-sciadv.adp6388";
+    const paperDir = path.join(workspace, "knowledge-base", "wiki", "sources", paperKey);
+    await writeJson(path.join(paperDir, "source.json"), {
+      paperKey,
+      source: "science",
+      canonicalId: "10.1126/sciadv.adp6388",
+      articleUrl: "https://www.science.org/doi/10.1126/sciadv.adp6388",
+      title: "High-performance fault-tolerant quantum computing with many-hypercube codes"
+    });
+    await writeText(path.join(paperDir, "parses", "webpage", "document.md"), "# Abstract\n\nScience webpage text.");
+    await writeJson(path.join(paperDir, "parses", "webpage", "quality.json"), {
+      status: "good",
+      score: 1,
+      pages: 1,
+      totalTextLength: 66597,
+      emptyPageCount: 0,
+      headingCount: 10,
+      tableCount: 0,
+      figureOrCaptionCount: 10,
+      warnings: []
+    });
+
+    const result = await fixWikiHealth({
+      workspaceDir: workspace,
+      issueKinds: ["needs_download"],
+      downloadPaperImpl: async (options) => {
+        assert.equal(options.url, "https://www.science.org/doi/10.1126/sciadv.adp6388");
+        assert.equal(options.usePlaywrightFallback, undefined);
+        return {
+          status: "extension_unavailable",
+          source: "science",
+          articleUrl: options.url as string,
+          failure: {
+            code: "extension_unavailable",
+            message: "Paper extension bridge is not configured."
+          }
+        };
+      }
+    });
+
+    assert.equal(result.attempted, 1);
+    assert.equal(result.fixed, 0);
+    assert.equal(result.skipped, 1);
+    assert.equal(result.results[0]?.action, "download");
   } finally {
     await rm(workspace, { recursive: true, force: true });
   }

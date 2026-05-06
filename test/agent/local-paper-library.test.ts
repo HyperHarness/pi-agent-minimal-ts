@@ -179,6 +179,44 @@ test("listLocalPapers canonicalizes accepted APS webpage artifact directories", 
   }
 });
 
+test("listLocalPapers reads missing titles from wiki source summaries", async () => {
+  const workspace = await createWorkspace();
+  try {
+    const pdfPath = path.join(workspace, "knowledge-base", "raw", "pdfs", "arxiv-1709.06678.pdf");
+    await writeText(pdfPath, "%PDF-1.4\nexample\n%%EOF\n");
+    await writeJson(path.join(workspace, "knowledge-base", "records", "arxiv-1709.06678.json"), {
+      source: "arxiv",
+      articleUrl: "https://arxiv.org/abs/1709.06678",
+      recordedAt: "2026-05-03T01:35:27.669Z",
+      handlingMethod: "direct_http",
+      status: "downloaded",
+      canonicalId: "1709.06678",
+      pdfUrl: "https://arxiv.org/pdf/1709.06678",
+      downloadPath: pdfPath
+    });
+    await writeText(
+      path.join(workspace, "knowledge-base", "wiki", "sources", "arxiv-1709.06678.md"),
+      [
+        "---",
+        'title: "A blueprint for demonstrating quantum supremacy with superconducting qubits"',
+        "---",
+        "",
+        "# A blueprint for demonstrating quantum supremacy with superconducting qubits"
+      ].join("\n")
+    );
+
+    const result = await listLocalPapers({ workspaceDir: workspace, status: "downloaded" });
+
+    assert.equal(result.total, 1);
+    assert.equal(
+      result.results[0]?.title,
+      "A blueprint for demonstrating quantum supremacy with superconducting qubits"
+    );
+  } finally {
+    await rm(workspace, { recursive: true, force: true });
+  }
+});
+
 test("searchLocalPapers searches metadata, wiki summaries, and parsed markdown", async () => {
   const workspace = await createWorkspace();
   try {

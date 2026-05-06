@@ -25,6 +25,14 @@ type DownloadPaperTool = {
   ) => Promise<ToolResult>;
 };
 
+type WikiHealthFixTool = {
+  execute: (
+    toolCallId: string,
+    args: { issueKinds?: string[] },
+    signal: undefined,
+  ) => Promise<ToolResult>;
+};
+
 type CreateToolsDependencies = NonNullable<Parameters<typeof createTools>[1]>;
 
 function getDownloadPaperTool(
@@ -39,6 +47,20 @@ function getDownloadPaperTool(
   assert.ok(downloadPaperTool);
   assert.equal(typeof downloadPaperTool.execute, "function");
   return downloadPaperTool as DownloadPaperTool;
+}
+
+function getWikiHealthFixTool(
+  workspace: string,
+  dependencies?: Parameters<typeof createTools>[1],
+): WikiHealthFixTool {
+  const tools = createTools(workspace, dependencies) as ReadonlyArray<{
+    name: string;
+    execute?: WikiHealthFixTool["execute"];
+  }>;
+  const wikiHealthFixTool = tools.find((tool) => tool.name === "wiki_health_fix");
+  assert.ok(wikiHealthFixTool);
+  assert.equal(typeof wikiHealthFixTool.execute, "function");
+  return wikiHealthFixTool as WikiHealthFixTool;
 }
 
 test("download_paper reports extension_unavailable when no bridge is configured", async () => {
@@ -70,7 +92,7 @@ test("download_paper reports extension_unavailable when no bridge is configured"
       articleUrl,
       failure: {
         code: "extension_unavailable",
-        message: "Paper extension bridge is not configured. Set usePlaywrightFallback to true to use browser fallback.",
+        message: "Paper extension bridge is not configured, and no direct PDF or exact-title open fallback was available.",
       },
     });
   } finally {
@@ -121,6 +143,102 @@ test("download_paper uses injected extension bridge for publisher URLs", async (
           "Browser extension will first capture and parse the publisher webpage. PDF download starts only if the webpage markdown quality is good; otherwise the job waits for user login or access verification.",
       },
     });
+  } finally {
+    await rm(workspace, { recursive: true, force: true });
+  }
+});
+
+test("wiki_health_fix routes download repairs through the injected extension bridge", async () => {
+  const workspace = await mkdtemp(path.join(tmpdir(), "pi-agent-tools-extension-"));
+  const articleUrl = "https://www.science.org/doi/10.1126/sciadv.adp6388";
+  const submittedJobs: unknown[] = [];
+  const extensionBridge: PaperExtensionBridge = {
+    async submitJob(job) {
+      submittedJobs.push(job);
+      return {
+        status: "extension_job_queued",
+        source: job.source,
+        articleUrl: job.articleUrl,
+        jobId: job.jobId,
+        message: "Queued by wiki health repair.",
+      };
+    },
+  };
+
+  try {
+    const tool = getWikiHealthFixTool(workspace, {
+      extensionBridge,
+      fixWikiHealth: async (options) => {
+        assert.equal(typeof options.downloadPaperImpl, "function");
+        const download = await options.downloadPaperImpl?.({
+          workspaceDir: options.workspaceDir,
+          url: articleUrl,
+          title: "High-performance fault-tolerant quantum computing with many-hypercube codes",
+        });
+        return {
+          checked: {
+            totalPapers: 1,
+            issueCount: 1,
+            summary: {
+              needs_download: 1,
+              needs_authorization: 0,
+              queued: 0,
+              parse_missing: 0,
+              parse_failed: 0,
+              low_quality: 0,
+              summary_missing: 0,
+              missing_artifact: 0,
+            },
+            issues: [
+              {
+                kind: "needs_download",
+                severity: "medium",
+                paperKey: "science-10.1126-sciadv.adp6388",
+                source: "science",
+                title: "High-performance fault-tolerant quantum computing with many-hypercube codes",
+                articleUrl,
+                reason: "Publisher webpage parsing artifacts exist, but no local PDF file has been downloaded.",
+              },
+            ],
+            actions: ["Retry downloads."],
+          },
+          attempted: 1,
+          fixed: 0,
+          queued: download?.status === "extension_job_queued" ? 1 : 0,
+          skipped: 0,
+          failed: 0,
+          results: [
+            {
+              issue: {
+                kind: "needs_download",
+                severity: "medium",
+                paperKey: "science-10.1126-sciadv.adp6388",
+                source: "science",
+                title: "High-performance fault-tolerant quantum computing with many-hypercube codes",
+                articleUrl,
+                reason: "Publisher webpage parsing artifacts exist, but no local PDF file has been downloaded.",
+              },
+              status: "queued",
+              action: "download",
+              message: "Browser extension job was queued.",
+              details: download,
+            },
+          ],
+        };
+      },
+    });
+
+    const result = await tool.execute("wiki-health-extension", { issueKinds: ["needs_download"] }, undefined);
+
+    assert.equal(submittedJobs.length, 1);
+    assert.deepEqual(submittedJobs[0], {
+      jobId: (submittedJobs[0] as { jobId: string }).jobId,
+      articleUrl,
+      source: "science",
+      title: "High-performance fault-tolerant quantum computing with many-hypercube codes",
+      purpose: "download_and_webpage",
+    });
+    assert.equal((result.details as { queued?: number }).queued, 1);
   } finally {
     await rm(workspace, { recursive: true, force: true });
   }

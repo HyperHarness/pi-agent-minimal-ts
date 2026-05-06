@@ -261,7 +261,7 @@ test("classifyPage detects Cloudflare and login handoff pages", () => {
     }),
     {
       status: "awaiting_user_verification",
-      message: "This page appears to require user verification before download can continue."
+      message: "Cloudflare verification is blocking this publisher page. Complete the Cloudflare check in the browser extension tab, then retry the download."
     }
   );
 
@@ -405,6 +405,7 @@ test("runner keeps Cloudflare challenge pages in verification handoff", async ()
   }
 
   assert.equal(sentMessages[0].status, "awaiting_user_verification");
+  assert.match(sentMessages[0].message, /Cloudflare verification is blocking/);
   assert.equal(sentMessages[0].pdfUrl, null);
 });
 

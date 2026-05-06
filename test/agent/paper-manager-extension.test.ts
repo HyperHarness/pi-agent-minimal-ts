@@ -21,6 +21,16 @@ function expectedJobId(source: string, articleUrl: string): string {
   return `paper-${source}-${createHash("sha1").update(`${source}:${articleUrl}`).digest("hex").slice(0, 12)}`;
 }
 
+async function writeJson(filePath: string, value: unknown): Promise<void> {
+  await mkdir(path.dirname(filePath), { recursive: true });
+  await writeFile(filePath, `${JSON.stringify(value, null, 2)}\n`, "utf8");
+}
+
+async function writeText(filePath: string, value: string): Promise<void> {
+  await mkdir(path.dirname(filePath), { recursive: true });
+  await writeFile(filePath, value, "utf8");
+}
+
 test("downloadPaper routes supported publisher URLs through the extension bridge by default", async () => {
   const workspaceDir = await mkdtemp(path.join(os.tmpdir(), "paper-manager-extension-"));
   const articleUrl = "https://www.science.org/doi/10.1126/science.adz8659";
@@ -324,9 +334,68 @@ test("downloadPaper returns extension_unavailable without launching fallback whe
       articleUrl,
       failure: {
         code: "extension_unavailable",
-        message: "Paper extension bridge is not configured. Set usePlaywrightFallback to true to use browser fallback."
+        message: "Paper extension bridge is not configured, and no direct PDF or exact-title open fallback was available."
       }
     });
+  } finally {
+    await rm(workspaceDir, { recursive: true, force: true });
+  }
+});
+
+test("downloadPaper uses a local exact-title arXiv preprint before live arXiv search", async () => {
+  const workspaceDir = await mkdtemp(path.join(os.tmpdir(), "paper-manager-extension-"));
+  const articleUrl = "https://www.science.org/doi/10.1126/science.aao4309";
+  const title = "A blueprint for demonstrating quantum supremacy with superconducting qubits";
+  const arxivPdfPath = path.join(workspaceDir, "knowledge-base", "raw", "pdfs", "arxiv-1709.06678.pdf");
+
+  try {
+    await mkdir(path.dirname(arxivPdfPath), { recursive: true });
+    await writeFile(arxivPdfPath, "%PDF-1.4\nexample\n%%EOF\n", "utf8");
+    await writeJson(path.join(workspaceDir, "knowledge-base", "records", "arxiv-1709.06678.json"), {
+      source: "arxiv",
+      articleUrl: "https://arxiv.org/abs/1709.06678",
+      recordedAt: "2026-05-03T01:35:27.669Z",
+      handlingMethod: "direct_http",
+      status: "downloaded",
+      canonicalId: "1709.06678",
+      pdfUrl: "https://arxiv.org/pdf/1709.06678",
+      downloadPath: arxivPdfPath
+    });
+    await writeText(
+      path.join(workspaceDir, "knowledge-base", "wiki", "sources", "arxiv-1709.06678.md"),
+      [
+        "---",
+        `title: "${title}"`,
+        "---",
+        "",
+        `# ${title}`
+      ].join("\n")
+    );
+
+    const result = await downloadPaper({
+      workspaceDir,
+      url: articleUrl,
+      title,
+      usePlaywrightFallback: true,
+      searchArxivImpl: async () => {
+        throw new Error("live arXiv search should not be needed");
+      },
+      downloadPublisherPaperImpl: async () => {
+        throw new Error("browser fallback should not be needed");
+      }
+    });
+
+    assert.equal(result.status, "already_downloaded");
+    assert.equal(result.source, "arxiv");
+    assert.equal(result.canonicalId, "1709.06678");
+    assert.equal(result.publisherFallback?.source, "science");
+    assert.equal(result.publisherFallback?.canonicalId, "10.1126/science.aao4309");
+
+    const scienceRecord = JSON.parse(
+      await readFile(path.join(workspaceDir, "knowledge-base", "records", "science-10.1126-science.aao4309.json"), "utf8")
+    ) as { status?: string; preprint?: { canonicalId?: string } };
+    assert.equal(scienceRecord.status, "preprint_fallback");
+    assert.equal(scienceRecord.preprint?.canonicalId, "1709.06678");
   } finally {
     await rm(workspaceDir, { recursive: true, force: true });
   }
@@ -354,7 +423,7 @@ test("downloadPaper returns extension_unavailable for external URLs without laun
       articleUrl,
       failure: {
         code: "extension_unavailable",
-        message: "Paper extension bridge is not configured. Set usePlaywrightFallback to true to use browser fallback."
+        message: "Paper extension bridge is not configured, and no direct PDF or exact-title open fallback was available."
       }
     });
   } finally {

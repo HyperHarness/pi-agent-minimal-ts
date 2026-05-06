@@ -10,6 +10,11 @@ import {
   type PaperSummaryWorker
 } from "./paper-summary.js";
 import {
+  readPaperDownloadJobEvents,
+  summarizePaperDownloadJobs,
+  type PaperDownloadJobEvent
+} from "./paper-download-jobs.js";
+import {
   updatePaperRecordParseManifest,
   updatePaperRecordReadingFailure
 } from "./paper-store.js";
@@ -186,22 +191,29 @@ function textIncludesAccessProblem(value: unknown): boolean {
   if (typeof value !== "string") {
     return false;
   }
-  return /authorization|manual[_ -]?login|login|required|access wall|access_limited|credentials/i.test(value);
+  return /authorization|manual[_ -]?login|login|required|access wall|access_limited|access options|credentials|cloudflare|cdn-cgi|captcha|challenge|user verification|publisher verification|verify you are human|verify article access|license does not permit/i.test(value);
 }
 
-function recordNeedsAuthorization(record: PaperRecord | undefined): boolean {
+function recordAuthorizationReason(record: PaperRecord | undefined): string | undefined {
   if (!record) {
-    return false;
+    return undefined;
   }
   const failure = "failure" in record ? record.failure : undefined;
-  return (
-    record.status === "manual_fallback_opened" ||
-    textIncludesAccessProblem(failure?.code) ||
-    textIncludesAccessProblem(failure?.message) ||
-    textIncludesAccessProblem(record.reading?.reason) ||
-    textIncludesAccessProblem(record.webpage?.message) ||
-    textIncludesAccessProblem(record.parse?.message)
-  );
+  if (record.status === "manual_fallback_opened") {
+    return "Record is in manual fallback mode; complete publisher login or verification in the browser, then retry.";
+  }
+  for (const value of [
+    failure?.message,
+    record.reading?.reason,
+    record.webpage?.message,
+    record.parse?.message,
+    failure?.code
+  ]) {
+    if (textIncludesAccessProblem(value)) {
+      return `Record reports: ${value}`;
+    }
+  }
+  return undefined;
 }
 
 function recordIsQueued(record: PaperRecord | undefined): boolean {
@@ -231,6 +243,47 @@ function recordUsesPreprintFallback(record: PaperRecord | undefined): boolean {
 
 function recordIsPublisherPending(record: PaperRecord | undefined): boolean {
   return record?.status === "publisher_pending";
+}
+
+function normalizeArticleUrl(value: string | undefined): string | undefined {
+  if (!value) {
+    return undefined;
+  }
+  try {
+    const parsed = new URL(value);
+    parsed.hash = "";
+    return parsed.toString();
+  } catch {
+    return value.trim();
+  }
+}
+
+function findLatestJobForEntry(entry: LocalPaperEntry, jobs: PaperDownloadJobEvent[]): PaperDownloadJobEvent | undefined {
+  const articleUrl = normalizeArticleUrl(entry.articleUrl);
+  const matches = jobs.filter((job) =>
+    (job.paperKey && job.paperKey === entry.paperKey) ||
+    (articleUrl && normalizeArticleUrl(job.articleUrl) === articleUrl)
+  );
+  return matches.sort((left, right) =>
+    Date.parse(right.recordedAt) - Date.parse(left.recordedAt)
+  )[0];
+}
+
+function jobAuthorizationReason(job: PaperDownloadJobEvent | undefined): string | undefined {
+  if (!job) {
+    return undefined;
+  }
+  if (job.status === "awaiting_user_verification") {
+    return job.message
+      ? `Browser extension reports: ${job.message}`
+      : "Browser extension reports that the publisher page needs user verification.";
+  }
+  for (const value of [job.message, job.failureCode]) {
+    if (textIncludesAccessProblem(value)) {
+      return `Browser extension reports: ${value}`;
+    }
+  }
+  return undefined;
 }
 
 function entryIsSupportedPublisher(entry: LocalPaperEntry): boolean {
@@ -302,16 +355,22 @@ export async function checkWikiHealth(options: WikiHealthOptions): Promise<WikiH
     status: "all",
     maxResults: Number.MAX_SAFE_INTEGER
   });
+  const jobSummaries = summarizePaperDownloadJobs(await readPaperDownloadJobEvents({ workspaceDir }));
   const issues: WikiHealthIssue[] = [];
 
   for (const entry of localPapers.results) {
     const record = await readRecord(workspaceDir, entry);
+    const latestJob = findLatestJobForEntry(entry, jobSummaries);
     const pdfExists = await pathExists(toWorkspacePath(workspaceDir, entry.pdfPath));
     const usesPreprintFallback = recordUsesPreprintFallback(record);
     const isPublisherPending = recordIsPublisherPending(record);
     const hasAcceptableParse = entry.parses.some((parse) => parseIsAcceptable(parse, threshold));
     const hasUsableParsedReading = entry.hasParsedArtifacts && hasAcceptableParse;
-    const needsAuthorization = recordNeedsAuthorization(record) && !hasUsableParsedReading;
+    const recordAccessReason = recordAuthorizationReason(record);
+    const authorizationReason =
+      (recordAccessReason && !hasUsableParsedReading ? recordAccessReason : undefined) ??
+      (!pdfExists ? jobAuthorizationReason(latestJob) : undefined);
+    const needsAuthorization = Boolean(authorizationReason);
 
     if (!usesPreprintFallback && !isPublisherPending && !needsAuthorization && !hasUsableParsedReading && (entry.status !== "downloaded" || (entry.status === "downloaded" && !pdfExists))) {
       issues.push(baseIssue(
@@ -341,7 +400,12 @@ export async function checkWikiHealth(options: WikiHealthOptions): Promise<WikiH
     }
 
     if (needsAuthorization) {
-      issues.push(baseIssue(entry, "needs_authorization", "high", "Record indicates login, authorization, or access-wall handling is needed."));
+      issues.push(baseIssue(
+        entry,
+        "needs_authorization",
+        "high",
+        authorizationReason ?? "Record indicates login, authorization, or access-wall handling is needed."
+      ));
     }
 
     if (recordIsQueued(record)) {

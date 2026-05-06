@@ -9,13 +9,15 @@
     var text = normalizeText(input && input.text).toLowerCase();
     var combined = [url, title, text].join(" ");
 
-    var needsVerification =
+    var isCloudflareChallenge =
       url.indexOf("/cdn-cgi/") !== -1 ||
       combined.indexOf("just a moment") !== -1 ||
       combined.indexOf("checking if the site connection is secure") !== -1 ||
       combined.indexOf("cloudflare") !== -1 ||
       combined.indexOf("captcha") !== -1 ||
-      combined.indexOf("verify you are human") !== -1 ||
+      combined.indexOf("verify you are human") !== -1;
+    var needsVerification =
+      isCloudflareChallenge ||
       url.indexOf("/login") !== -1 ||
       url.indexOf("/signin") !== -1 ||
       /^(login|log in|sign in|sign-in)$/.test(title) ||
@@ -25,7 +27,9 @@
     if (needsVerification) {
       return {
         status: "awaiting_user_verification",
-        message: "This page appears to require user verification before download can continue."
+        message: isCloudflareChallenge
+          ? "Cloudflare verification is blocking this publisher page. Complete the Cloudflare check in the browser extension tab, then retry the download."
+          : "This page appears to require user verification before download can continue."
       };
     }
 

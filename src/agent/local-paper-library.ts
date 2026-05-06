@@ -312,8 +312,14 @@ async function collectWikiSummaries(workspaceDir: string, entries: Map<string, L
     }
     const paperKey = path.basename(file.name, ".md");
     const entry = entries.get(paperKey) ?? createEmptyEntry(paperKey);
+    const summaryPath = path.join(paths.sourcesRoot, file.name);
+    const summary = await readFile(summaryPath, "utf8").catch(() => undefined);
+    const title = summary?.match(/^title:\s*["']?(.+?)["']?\s*$/m)?.[1]?.trim();
+    if (title) {
+      entry.title = entry.title ?? title;
+    }
     entry.hasWikiSummary = true;
-    entry.wikiSummaryPath = relativeToWorkspace(workspaceDir, path.join(paths.sourcesRoot, file.name));
+    entry.wikiSummaryPath = relativeToWorkspace(workspaceDir, summaryPath);
     entries.set(paperKey, entry);
   }
 }

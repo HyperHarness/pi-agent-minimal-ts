@@ -1173,7 +1173,7 @@ test("downloadPaper keeps publisher failure results when title does not match an
       articleUrl,
       failure: {
         code: "extension_unavailable",
-        message: "Paper extension bridge is not configured. Set usePlaywrightFallback to true to use browser fallback."
+        message: "Paper extension bridge is not configured, and no direct PDF or exact-title open fallback was available."
       }
     });
   } finally {
