@@ -33,7 +33,7 @@ Native Messaging is registered in the browser's host operating system. If you ru
 4. Select:
 
 ```text
-extension/paper-downloader
+browser-extension/paper-downloader
 ```
 
 5. Copy the extension ID from the extension card.
@@ -45,7 +45,7 @@ extension/paper-downloader
 7. Fully restart Chrome or Edge.
 8. Restart the agent.
 
-When updating this repository, reload the unpacked extension from `chrome://extensions` or `edge://extensions`. The extension version is shown on the extension card and in `extension/paper-downloader/manifest.json`.
+When updating this repository, reload the unpacked extension from `chrome://extensions` or `edge://extensions`. The extension version is shown on the extension card and in `browser-extension/paper-downloader/manifest.json`.
 
 ## Verify Registration
 

@@ -102,7 +102,7 @@ Detailed setup and troubleshooting live in [docs/paper-downloader-extension.md](
 1. Run `npm run build`.
 2. Open `chrome://extensions` or `edge://extensions`.
 3. Enable Developer Mode.
-4. Load unpacked extension from `extension/paper-downloader`.
+4. Load unpacked extension from `browser-extension/paper-downloader`.
 5. Copy the extension id.
 6. Register the native host using the PowerShell or WSL instructions in [docs/paper-downloader-extension.md](docs/paper-downloader-extension.md).
 7. Restart the browser.

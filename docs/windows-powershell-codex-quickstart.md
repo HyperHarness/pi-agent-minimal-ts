@@ -134,7 +134,7 @@ Detailed setup and troubleshooting live in [paper-downloader-extension.md](paper
 1. Run `npm.cmd run build`.
 2. Open `chrome://extensions` or `edge://extensions`.
 3. Enable Developer Mode.
-4. Load unpacked extension from `extension/paper-downloader`.
+4. Load unpacked extension from `browser-extension/paper-downloader`.
 5. Copy the extension id.
 6. Run `powershell -ExecutionPolicy Bypass -File scripts/register-paper-extension-host.ps1 -ExtensionId <id>`.
 7. Restart the browser.

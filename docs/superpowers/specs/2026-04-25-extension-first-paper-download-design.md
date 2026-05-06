@@ -249,9 +249,9 @@ Errors must be structured with `code` and `message`.
 
 Expected new areas:
 
-- `extension/paper-downloader/manifest.json`
-- `extension/paper-downloader/background.js`
-- `extension/paper-downloader/content/*.js`
+- `browser-extension/paper-downloader/manifest.json`
+- `browser-extension/paper-downloader/background.js`
+- `browser-extension/paper-downloader/content/*.js`
 - `src/agent/paper-extension-host.ts`
 - `src/agent/paper-extension-protocol.ts`
 - `src/agent/paper-download-jobs.ts`

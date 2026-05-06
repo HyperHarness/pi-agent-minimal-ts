@@ -202,7 +202,7 @@ npm run build
 Open the extension folder in Windows Explorer if needed:
 
 ```sh
-explorer.exe extension/paper-downloader
+explorer.exe browser-extension/paper-downloader
 ```
 
 Then in Chrome or Edge:
@@ -210,7 +210,7 @@ Then in Chrome or Edge:
 1. Open `chrome://extensions` or `edge://extensions`.
 2. Enable Developer Mode.
 3. Choose **Load unpacked**.
-4. Select the `extension/paper-downloader` folder.
+4. Select the `browser-extension/paper-downloader` folder.
 5. Copy the extension ID from the extension card.
 
 Register the native host from WSL by invoking Windows PowerShell:

@@ -16,20 +16,20 @@
 - Create `src/agent/paper-download-jobs.ts`: append-only JSONL job state store for queued/open/manual/downloaded extension jobs.
 - Create `src/agent/paper-extension-host.ts`: native messaging host logic that reads framed JSON messages, validates PDFs, writes the paper index, and emits framed JSON responses.
 - Create `src/paper-extension-host.ts`: CLI entrypoint for Chrome Native Messaging.
-- Create `extension/paper-downloader/manifest.json`: MV3 extension manifest for Chrome/Edge.
-- Create `extension/paper-downloader/background.js`: service worker for jobs, tabs, downloads, native messaging, and tab closing.
-- Create `extension/paper-downloader/content/common.js`: publisher-independent page classification and PDF candidate extraction.
-- Create `extension/paper-downloader/content/nature.js`: Nature-specific PDF candidate extraction.
-- Create `extension/paper-downloader/content/science.js`: Science-specific PDF candidate extraction.
-- Create `extension/paper-downloader/content/aps.js`: APS-specific PDF candidate extraction and challenge detection.
-- Create `extension/paper-downloader/content/runner.js`: sends page classification and PDF candidates from content scripts to the background worker.
-- Create `extension/paper-downloader/popup.html` and `extension/paper-downloader/popup.js`: minimal status UI for pending/manual jobs.
+- Create `browser-extension/paper-downloader/manifest.json`: MV3 extension manifest for Chrome/Edge.
+- Create `browser-extension/paper-downloader/background.js`: service worker for jobs, tabs, downloads, native messaging, and tab closing.
+- Create `browser-extension/paper-downloader/content/common.js`: publisher-independent page classification and PDF candidate extraction.
+- Create `browser-extension/paper-downloader/content/nature.js`: Nature-specific PDF candidate extraction.
+- Create `browser-extension/paper-downloader/content/science.js`: Science-specific PDF candidate extraction.
+- Create `browser-extension/paper-downloader/content/aps.js`: APS-specific PDF candidate extraction and challenge detection.
+- Create `browser-extension/paper-downloader/content/runner.js`: sends page classification and PDF candidates from content scripts to the background worker.
+- Create `browser-extension/paper-downloader/popup.html` and `browser-extension/paper-downloader/popup.js`: minimal status UI for pending/manual jobs.
 - Create `scripts/register-paper-extension-host.ps1`: Windows registration script for Chrome and Edge native messaging manifests.
 - Modify `src/agent/paper-manager.ts`: route supported publisher/external URLs to the extension bridge when available; keep arXiv direct download.
 - Modify `src/agent/tools.ts`: expose extension bridge status and preserve existing `download_paper`, `register_manual_paper_download`, and `open_paper_page_for_login` behavior.
 - Modify `src/index.ts`: export new extension protocol/job/host APIs.
 - Modify `README.md` and `docs/windows-powershell-codex-quickstart.md`: document extension install, native host registration, and fallback rules.
-- Test with `test/agent/paper-extension-protocol.test.ts`, `test/agent/paper-download-jobs.test.ts`, `test/agent/paper-extension-host.test.ts`, `test/agent/paper-manager-extension.test.ts`, `test/agent/tools-extension.test.ts`, and extension helper tests under `test/extension/paper-downloader.test.mjs`.
+- Test with `test/agent/paper-extension-protocol.test.ts`, `test/agent/paper-download-jobs.test.ts`, `test/agent/paper-extension-host.test.ts`, `test/agent/paper-manager-extension.test.ts`, `test/agent/tools-extension.test.ts`, and extension helper tests under `test/browser-extension/paper-downloader.test.mjs`.
 
 ## Task 1: Protocol Types and Parsers
 
@@ -1122,29 +1122,29 @@ git commit -m "Add paper extension native host"
 ## Task 4: Extension Shell and Static Helper Tests
 
 **Files:**
-- Create: `extension/paper-downloader/manifest.json`
-- Create: `extension/paper-downloader/background.js`
-- Create: `extension/paper-downloader/content/common.js`
-- Create: `extension/paper-downloader/content/nature.js`
-- Create: `extension/paper-downloader/content/science.js`
-- Create: `extension/paper-downloader/content/aps.js`
-- Create: `extension/paper-downloader/content/runner.js`
-- Create: `extension/paper-downloader/popup.html`
-- Create: `extension/paper-downloader/popup.js`
-- Create: `test/extension/paper-downloader.test.mjs`
+- Create: `browser-extension/paper-downloader/manifest.json`
+- Create: `browser-extension/paper-downloader/background.js`
+- Create: `browser-extension/paper-downloader/content/common.js`
+- Create: `browser-extension/paper-downloader/content/nature.js`
+- Create: `browser-extension/paper-downloader/content/science.js`
+- Create: `browser-extension/paper-downloader/content/aps.js`
+- Create: `browser-extension/paper-downloader/content/runner.js`
+- Create: `browser-extension/paper-downloader/popup.html`
+- Create: `browser-extension/paper-downloader/popup.js`
+- Create: `test/browser-extension/paper-downloader.test.mjs`
 
 - [ ] **Step 1: Write failing extension helper tests**
 
-Create `test/extension/paper-downloader.test.mjs`:
+Create `test/browser-extension/paper-downloader.test.mjs`:
 
 ```js
 import test from "node:test";
 import assert from "node:assert/strict";
 
-await import("../../extension/paper-downloader/content/common.js");
-await import("../../extension/paper-downloader/content/nature.js");
-await import("../../extension/paper-downloader/content/science.js");
-await import("../../extension/paper-downloader/content/aps.js");
+await import("../../browser-extension/paper-downloader/content/common.js");
+await import("../../browser-extension/paper-downloader/content/nature.js");
+await import("../../browser-extension/paper-downloader/content/science.js");
+await import("../../browser-extension/paper-downloader/content/aps.js");
 
 const { classifyPage, findPdfCandidate } = globalThis.PiAgentPaperCommon;
 const { findNaturePdfCandidate } = globalThis.PiAgentPaperNature;
@@ -1244,14 +1244,14 @@ test("publisher helpers extract Nature, Science, and APS PDF candidates", () => 
 Run:
 
 ```powershell
-node --test test/extension/paper-downloader.test.mjs
+node --test test/browser-extension/paper-downloader.test.mjs
 ```
 
 Expected: Node fails because extension helper files do not exist.
 
 - [ ] **Step 3: Add extension manifest and content helpers**
 
-Create `extension/paper-downloader/manifest.json`:
+Create `browser-extension/paper-downloader/manifest.json`:
 
 ```json
 {
@@ -1300,7 +1300,7 @@ Create `extension/paper-downloader/manifest.json`:
 }
 ```
 
-Create `extension/paper-downloader/content/common.js`:
+Create `browser-extension/paper-downloader/content/common.js`:
 
 ```js
 (function installPiAgentPaperCommon(root) {
@@ -1343,7 +1343,7 @@ Create `extension/paper-downloader/content/common.js`:
 })(globalThis);
 ```
 
-Create `extension/paper-downloader/content/nature.js`:
+Create `browser-extension/paper-downloader/content/nature.js`:
 
 ```js
 (function installPiAgentPaperNature(root) {
@@ -1357,7 +1357,7 @@ Create `extension/paper-downloader/content/nature.js`:
 })(globalThis);
 ```
 
-Create `extension/paper-downloader/content/science.js`:
+Create `browser-extension/paper-downloader/content/science.js`:
 
 ```js
 (function installPiAgentPaperScience(root) {
@@ -1371,7 +1371,7 @@ Create `extension/paper-downloader/content/science.js`:
 })(globalThis);
 ```
 
-Create `extension/paper-downloader/content/aps.js`:
+Create `browser-extension/paper-downloader/content/aps.js`:
 
 ```js
 (function installPiAgentPaperAps(root) {
@@ -1395,7 +1395,7 @@ Create `extension/paper-downloader/content/aps.js`:
 })(globalThis);
 ```
 
-Create `extension/paper-downloader/content/runner.js`:
+Create `browser-extension/paper-downloader/content/runner.js`:
 
 ```js
 (function runPiAgentPaperContent(root) {
@@ -1440,7 +1440,7 @@ Create `extension/paper-downloader/content/runner.js`:
 })(globalThis);
 ```
 
-Create `extension/paper-downloader/background.js`:
+Create `browser-extension/paper-downloader/background.js`:
 
 ```js
 const nativeHostName = "com.pi_agent.paper_downloader";
@@ -1649,7 +1649,7 @@ chrome.alarms.onAlarm.addListener((alarm) => {
 pollQueuedJobs();
 ```
 
-Create `extension/paper-downloader/popup.html`:
+Create `browser-extension/paper-downloader/popup.html`:
 
 ```html
 <!doctype html>
@@ -1668,7 +1668,7 @@ Create `extension/paper-downloader/popup.html`:
 </html>
 ```
 
-Create `extension/paper-downloader/popup.js`:
+Create `browser-extension/paper-downloader/popup.js`:
 
 ```js
 document.getElementById("status").textContent = "Open paper jobs are tracked in the background worker.";
@@ -1679,7 +1679,7 @@ document.getElementById("status").textContent = "Open paper jobs are tracked in 
 Run:
 
 ```powershell
-node --test test/extension/paper-downloader.test.mjs
+node --test test/browser-extension/paper-downloader.test.mjs
 ```
 
 Expected: extension helper tests pass.
@@ -1689,7 +1689,7 @@ Expected: extension helper tests pass.
 Run:
 
 ```powershell
-git add extension/paper-downloader test/extension/paper-downloader.test.mjs
+git add browser-extension/paper-downloader test/browser-extension/paper-downloader.test.mjs
 git commit -m "Add paper downloader extension shell"
 ```
 
@@ -2247,7 +2247,7 @@ Modify README and Windows quickstart with:
 1. Run `npm.cmd run build`.
 2. Open `chrome://extensions` or `edge://extensions`.
 3. Enable Developer Mode.
-4. Load unpacked extension from `extension/paper-downloader`.
+4. Load unpacked extension from `browser-extension/paper-downloader`.
 5. Copy the extension id.
 6. Run `powershell -ExecutionPolicy Bypass -File scripts/register-paper-extension-host.ps1 -ExtensionId <id>`.
 7. Restart the browser.
@@ -2306,7 +2306,7 @@ Run through these exact browser steps:
 ```text
 1. Open chrome://extensions.
 2. Enable Developer Mode.
-3. Load unpacked extension/paper-downloader.
+3. Load unpacked extension from `browser-extension/paper-downloader`.
 4. Copy the extension id.
 5. Run scripts/register-paper-extension-host.ps1 with that id.
 6. Restart Chrome.

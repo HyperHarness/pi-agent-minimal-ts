@@ -5,7 +5,7 @@ import path from "node:path";
 import { fileURLToPath, pathToFileURL } from "node:url";
 
 const testDir = path.dirname(fileURLToPath(import.meta.url));
-const extensionDir = path.resolve(testDir, "../../extension/paper-downloader");
+const extensionDir = path.resolve(testDir, "../../browser-extension/paper-downloader");
 const contentDir = path.join(extensionDir, "content");
 
 await import(pathToFileURL(path.join(contentDir, "common.js")).href);

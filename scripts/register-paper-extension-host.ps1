@@ -17,7 +17,7 @@ $ResolvedWorkspaceDir = if ($WorkspaceDir.Trim()) {
 } else {
   Join-Path $PSScriptRoot ".."
 }
-$WorkspacePath = (Resolve-Path -LiteralPath $ResolvedWorkspaceDir).ProviderPath
+$WorkspacePath = [System.IO.Path]::GetFullPath((Resolve-Path -LiteralPath $ResolvedWorkspaceDir).ProviderPath)
 
 $ScriptsDir = Join-Path $WorkspacePath "scripts"
 $HostCmd = Join-Path $ScriptsDir "paper-extension-host.cmd"
