@@ -594,6 +594,80 @@ test("runAgentTurn retries transient overloaded assistant errors without rerunni
   }
 });
 
+test("runAgentTurn stops after ninety tool loops in one turn", async () => {
+  const registration = registerFauxProvider();
+  const prompt = "Keep using the tool.";
+  registration.setResponses([
+    ...Array.from({ length: 91 }, (_value, index) =>
+      fauxAssistantMessage([fauxToolCall("remember_counter", { index })], { stopReason: "toolUse" })
+    ),
+    fauxAssistantMessage([fauxText("This response should be aborted before it streams.")])
+  ]);
+
+  let executionCount = 0;
+  const context: AgentContext = {
+    systemPrompt: "You are a helpful assistant. Use tools when they are useful.",
+    messages: [],
+    tools: [
+      {
+        name: "remember_counter",
+        label: "Remember Counter",
+        description: "Tracks executions.",
+        parameters: Type.Object({ index: Type.Number() }),
+        execute: async () => {
+          executionCount += 1;
+          return {
+            content: [{ type: "text", text: `count:${executionCount}` }],
+            details: { count: executionCount }
+          };
+        }
+      }
+    ]
+  };
+  const observedEvents: AgentEvent[] = [];
+
+  try {
+    const result = await runAgentTurn({
+      model: registration.getModel(),
+      workspaceDir: process.cwd(),
+      context,
+      prompt,
+      onEvent: (event) => {
+        observedEvents.push(event);
+      }
+    });
+
+    assert.equal(executionCount, 90);
+    assert.equal(
+      observedEvents.filter(
+        (event) =>
+          event.type === "tool_execution_end" &&
+          event.toolName === "remember_counter" &&
+          !event.isError
+      ).length,
+      90
+    );
+    assert.equal(
+      observedEvents.filter(
+        (event) =>
+          event.type === "tool_execution_end" &&
+          event.toolName === "remember_counter" &&
+          event.isError
+      ).length,
+      1
+    );
+
+    const finalMessage = result.newMessages.at(-1);
+    assert.ok(finalMessage);
+    assert.ok(isAssistantMessage(finalMessage));
+    assert.equal(finalMessage.stopReason, "aborted");
+    assert.match(finalMessage.errorMessage ?? "", /stopped after 90 tool loops/);
+    assert.deepEqual(context.messages, []);
+  } finally {
+    registration.unregister();
+  }
+});
+
 test("runSessionPrompt stops on exit and quit commands", async () => {
   const runSessionPrompt = (
     piAgent as {

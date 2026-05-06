@@ -49,6 +49,7 @@ export const DEFAULT_SYSTEM_PROMPT = [
 ].join(" ");
 const contextWorkspaceDirs = new WeakMap<AgentContext, string>();
 const TRANSIENT_MODEL_RETRY_ATTEMPTS = 5;
+const MAX_AGENT_TOOL_LOOPS_PER_TURN = 90;
 const TRANSIENT_MODEL_RETRY_PATTERNS = [
   /\boverloaded\b/i,
   /try again later/i,
@@ -694,6 +695,99 @@ function isTransientModelFailure(message: AssistantMessage | undefined): boolean
     TRANSIENT_MODEL_RETRY_PATTERNS.some((pattern) => pattern.test(errorMessage));
 }
 
+interface AgentToolLoopLimiter {
+  abortController: AbortController;
+  exceeded: boolean;
+  maxLoops: number;
+  seenAssistantMessages: WeakSet<AssistantMessage>;
+  toolLoops: number;
+}
+
+function createToolLoopLimitErrorMessage(maxLoops: number): string {
+  return `Agent tool loop limit exceeded: stopped after ${maxLoops} tool loops in one user turn.`;
+}
+
+function createAgentToolLoopLimiter(maxLoops: number): AgentToolLoopLimiter {
+  return {
+    abortController: new AbortController(),
+    exceeded: false,
+    maxLoops,
+    seenAssistantMessages: new WeakSet(),
+    toolLoops: 0
+  };
+}
+
+function registerAssistantToolLoop(
+  limiter: AgentToolLoopLimiter,
+  assistantMessage: AssistantMessage
+): string | undefined {
+  if (limiter.seenAssistantMessages.has(assistantMessage)) {
+    return limiter.exceeded
+      ? createToolLoopLimitErrorMessage(limiter.maxLoops)
+      : undefined;
+  }
+
+  limiter.seenAssistantMessages.add(assistantMessage);
+  limiter.toolLoops += 1;
+  if (limiter.toolLoops <= limiter.maxLoops) {
+    return undefined;
+  }
+
+  limiter.exceeded = true;
+  const reason = createToolLoopLimitErrorMessage(limiter.maxLoops);
+  limiter.abortController.abort(reason);
+  return reason;
+}
+
+function applyToolLoopLimitToMessages(
+  messages: AgentMessage[],
+  limiter: AgentToolLoopLimiter
+): AgentMessage[] {
+  if (!limiter.exceeded) {
+    return messages;
+  }
+
+  const failedAssistant = getFailedAssistantMessage(messages);
+  if (!failedAssistant) {
+    return messages;
+  }
+
+  return [
+    ...messages.slice(0, -1),
+    {
+      ...failedAssistant,
+      errorMessage: createToolLoopLimitErrorMessage(limiter.maxLoops)
+    }
+  ];
+}
+
+function applyToolLoopLimitToDelayedEvents(
+  events: AgentEvent[],
+  limiter: AgentToolLoopLimiter
+): AgentEvent[] {
+  if (!limiter.exceeded) {
+    return events;
+  }
+
+  return events.map((event) => {
+    if (
+      event.type !== "message_end" ||
+      event.message.role !== "assistant" ||
+      (event.message.stopReason !== "error" && event.message.stopReason !== "aborted")
+    ) {
+      return event;
+    }
+
+    return {
+      ...event,
+      message: {
+        ...event.message,
+        errorMessage: createToolLoopLimitErrorMessage(limiter.maxLoops)
+      }
+    };
+  });
+}
+
 async function flushAgentEvents(
   events: AgentEvent[],
   onEvent: AgentMessageEventHandler | undefined
@@ -713,6 +807,7 @@ async function runAgentLoopAttempt(options: {
   tools: NonNullable<AgentContext["tools"]>;
   model: Model<Api>;
   onEvent?: AgentMessageEventHandler;
+  toolLoopLimiter: AgentToolLoopLimiter;
 }): Promise<{ delayedEvents: AgentEvent[]; messages: AgentMessage[] }> {
   const delayedEvents: AgentEvent[] = [];
   const stream = agentLoop(
@@ -722,8 +817,13 @@ async function runAgentLoopAttempt(options: {
       model: options.model,
       convertToLlm: convertAgentMessagesToLlm,
       getApiKey: (provider) => getEnvApiKey(provider),
+      beforeToolCall: async ({ assistantMessage }) => {
+        const reason = registerAssistantToolLoop(options.toolLoopLimiter, assistantMessage);
+        return reason ? { block: true, reason } : undefined;
+      },
       toolExecution: "sequential"
-    }
+    },
+    options.toolLoopLimiter.abortController.signal
   );
   const resultPromise = stream.result();
 
@@ -742,7 +842,7 @@ async function runAgentLoopAttempt(options: {
 
   return {
     delayedEvents,
-    messages: await resultPromise
+    messages: applyToolLoopLimitToMessages(await resultPromise, options.toolLoopLimiter)
   };
 }
 
@@ -1027,6 +1127,7 @@ export async function runAgentTurn(options: RunAgentTurnOptions): Promise<RunAge
   let inputMessages: AgentMessage[] = [userMessage];
   let acceptedTurnMessages: AgentMessage[] = [];
   let newMessages: AgentMessage[] = [];
+  const toolLoopLimiter = createAgentToolLoopLimiter(MAX_AGENT_TOOL_LOOPS_PER_TURN);
 
   for (let attempt = 0; attempt <= TRANSIENT_MODEL_RETRY_ATTEMPTS; attempt += 1) {
     const attemptResult = await runAgentLoopAttempt({
@@ -1034,7 +1135,8 @@ export async function runAgentTurn(options: RunAgentTurnOptions): Promise<RunAge
       context: { ...options.context, messages: contextMessages },
       tools,
       model: options.model,
-      onEvent: options.onEvent
+      onEvent: options.onEvent,
+      toolLoopLimiter
     });
     const failedAssistant = getFailedAssistantMessage(attemptResult.messages);
     const shouldRetry =
@@ -1042,7 +1144,10 @@ export async function runAgentTurn(options: RunAgentTurnOptions): Promise<RunAge
       isTransientModelFailure(failedAssistant);
 
     if (!shouldRetry) {
-      await flushAgentEvents(attemptResult.delayedEvents, options.onEvent);
+      await flushAgentEvents(
+        applyToolLoopLimitToDelayedEvents(attemptResult.delayedEvents, toolLoopLimiter),
+        options.onEvent
+      );
       newMessages = [...acceptedTurnMessages, ...attemptResult.messages];
       break;
     }
