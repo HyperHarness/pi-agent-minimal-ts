@@ -1,4 +1,4 @@
-import { readFile, realpath } from "node:fs/promises";
+import { readFile, readdir, realpath, stat } from "node:fs/promises";
 import path from "node:path";
 import { Type, type Static } from "@mariozechner/pi-ai";
 import type { AgentTool, AgentToolUpdateCallback } from "@mariozechner/pi-agent-core";
@@ -82,7 +82,26 @@ const getTimeParameters = Type.Object({
 });
 
 const readFileParameters = Type.Object({
-  path: Type.String({ description: "Relative UTF-8 text file path inside the workspace." })
+  path: Type.String({ description: "UTF-8 text file path inside the workspace. Relative paths and workspace-absolute paths are accepted." })
+});
+
+const listFilesParameters = Type.Object({
+  path: Type.String({
+    description:
+      "Directory or file path inside the workspace to inspect. Relative paths and workspace-absolute paths are accepted."
+  }),
+  maxDepth: Type.Optional(
+    Type.Integer({
+      description: "Maximum recursive directory depth to list. Defaults to 2.",
+      minimum: 0
+    })
+  ),
+  maxEntries: Type.Optional(
+    Type.Integer({
+      description: "Maximum number of entries to return. Defaults to 200.",
+      minimum: 1
+    })
+  )
 });
 
 const webSearchParameters = Type.Object({
@@ -484,6 +503,7 @@ const wikiHealthFixParameters = Type.Object({
 
 type GetTimeParameters = Static<typeof getTimeParameters>;
 type ReadFileParameters = Static<typeof readFileParameters>;
+type ListFilesParameters = Static<typeof listFilesParameters>;
 type WebSearchParameters = Static<typeof webSearchParameters>;
 type FetchUrlParameters = Static<typeof fetchUrlParameters>;
 type FetchPaperWebpageParameters = Static<typeof fetchPaperWebpageParameters>;
@@ -528,12 +548,10 @@ async function resolveWorkspacePath(workspaceDir: string, requestedPath: string)
     throw new Error("Path is required.");
   }
 
-  if (path.isAbsolute(requestedPath)) {
-    throw new Error("Absolute paths are not allowed.");
-  }
-
   const resolvedWorkspaceDir = path.resolve(workspaceDir);
-  const resolvedPath = path.resolve(resolvedWorkspaceDir, requestedPath);
+  const resolvedPath = path.isAbsolute(requestedPath)
+    ? path.resolve(requestedPath)
+    : path.resolve(resolvedWorkspaceDir, requestedPath);
   assertPathInsideDirectory(resolvedWorkspaceDir, resolvedPath);
 
   const [realWorkspaceDir, realResolvedPath] = await Promise.all([
@@ -545,8 +563,102 @@ async function resolveWorkspacePath(workspaceDir: string, requestedPath: string)
   return realResolvedPath;
 }
 
+function fileTypeFromDirent(entry: import("node:fs").Dirent): ListFilesEntry["type"] {
+  if (entry.isDirectory()) {
+    return "directory";
+  }
+  if (entry.isFile()) {
+    return "file";
+  }
+  if (entry.isSymbolicLink()) {
+    return "symlink";
+  }
+  return "other";
+}
+
+async function listWorkspaceFiles(input: {
+  workspaceDir: string;
+  requestedPath: string;
+  maxDepth: number;
+  maxEntries: number;
+}): Promise<ListFilesDetails> {
+  const resolvedWorkspaceDir = path.resolve(input.workspaceDir);
+  const resolvedPath = await resolveWorkspacePath(resolvedWorkspaceDir, input.requestedPath);
+  const rootStats = await stat(resolvedPath);
+  const entries: ListFilesEntry[] = [];
+  let truncated = false;
+
+  const pushEntry = (entryPath: string, type: ListFilesEntry["type"]) => {
+    if (entries.length >= input.maxEntries) {
+      truncated = true;
+      return false;
+    }
+
+    entries.push({
+      path: path.relative(resolvedWorkspaceDir, entryPath).split(path.sep).join("/"),
+      type
+    });
+    return true;
+  };
+
+  const visitDirectory = async (directoryPath: string, depth: number): Promise<void> => {
+    if (entries.length >= input.maxEntries) {
+      truncated = true;
+      return;
+    }
+
+    const directoryEntries = await readdir(directoryPath, { withFileTypes: true });
+    directoryEntries.sort((left, right) => {
+      if (left.isDirectory() !== right.isDirectory()) {
+        return left.isDirectory() ? -1 : 1;
+      }
+      return left.name.localeCompare(right.name);
+    });
+
+    for (const entry of directoryEntries) {
+      const entryPath = path.join(directoryPath, entry.name);
+      const type = fileTypeFromDirent(entry);
+      if (!pushEntry(entryPath, type)) {
+        return;
+      }
+      if (type === "directory" && depth < input.maxDepth) {
+        await visitDirectory(entryPath, depth + 1);
+      }
+    }
+  };
+
+  if (!rootStats.isDirectory()) {
+    pushEntry(resolvedPath, rootStats.isFile() ? "file" : "other");
+  } else {
+    await visitDirectory(resolvedPath, 0);
+  }
+
+  return {
+    path: input.requestedPath,
+    resolvedPath,
+    entries,
+    truncated,
+    maxDepth: input.maxDepth,
+    maxEntries: input.maxEntries
+  };
+}
+
 type GetTimeTool = AgentTool<typeof getTimeParameters, { timezone: string }>;
 type ReadFileTool = AgentTool<typeof readFileParameters, { path: string }>;
+type ListFilesTool = AgentTool<typeof listFilesParameters, ListFilesDetails>;
+interface ListFilesEntry {
+  path: string;
+  type: "directory" | "file" | "symlink" | "other";
+}
+
+interface ListFilesDetails {
+  path: string;
+  resolvedPath: string;
+  entries: ListFilesEntry[];
+  truncated: boolean;
+  maxDepth: number;
+  maxEntries: number;
+}
 type SearchResultPreview = {
   title: string;
   url?: string;
@@ -2020,7 +2132,8 @@ export function createTools(workspaceDir: string, dependencies: ToolDependencies
   const readFileTool: ReadFileTool = {
     name: "read_file",
     label: "Read File",
-    description: "Reads a UTF-8 text file from inside the workspace.",
+    description:
+      "Reads a UTF-8 text file from inside the workspace. Use list_files first when the user gives a directory.",
     parameters: readFileParameters,
     executionMode: "sequential",
     execute: async (_toolCallId: string, args: ReadFileParameters) => {
@@ -2030,6 +2143,30 @@ export function createTools(workspaceDir: string, dependencies: ToolDependencies
       return {
         content: [{ type: "text", text: content }],
         details: { path: args.path }
+      };
+    }
+  };
+
+  const listFilesTool: ListFilesTool = {
+    name: "list_files",
+    label: "List Files",
+    description:
+      "Lists files and directories under a workspace path. Use this before asking clarification when the user points at a local writing project directory such as paper-projects.",
+    parameters: listFilesParameters,
+    executionMode: "sequential",
+    execute: async (_toolCallId: string, args: ListFilesParameters) => {
+      const maxDepth = Math.max(0, Math.trunc(args.maxDepth ?? 2));
+      const maxEntries = Math.max(1, Math.trunc(args.maxEntries ?? 200));
+      const result = await listWorkspaceFiles({
+        workspaceDir: resolvedWorkspaceDir,
+        requestedPath: args.path,
+        maxDepth,
+        maxEntries
+      });
+
+      return {
+        content: [{ type: "text", text: JSON.stringify(result) }],
+        details: result
       };
     }
   };
@@ -3240,6 +3377,8 @@ export function createTools(workspaceDir: string, dependencies: ToolDependencies
   };
 
   const tools = [
+    listFilesTool,
+    readFileTool,
     webSearchTool,
     fetchUrlTool,
     searchPapersTool,
@@ -3262,8 +3401,7 @@ export function createTools(workspaceDir: string, dependencies: ToolDependencies
 
   if (dependencies.toolProfile === "full") {
     tools.unshift(
-      getTimeTool,
-      readFileTool
+      getTimeTool
     );
     tools.push(
       writePaperWikiSourceTool,

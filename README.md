@@ -293,6 +293,8 @@ By default the bridge starts this repository's compiled agent with `node dist/sr
 
 The default chat agent exposes a compact paper-focused tool set:
 
+- `list_files`: lists files and directories under a workspace path, including private local writing folders such as `paper-projects/`
+- `read_file`: reads a UTF-8 text file inside the workspace; relative paths and workspace-absolute paths are accepted
 - `web_search`: searches the configured provider and returns JSON text for matching results
 - `fetch_url`: fetches an HTML page and returns JSON text for the extracted content
 - `search_papers`: searches arXiv, APS/Physical Review metadata, and configured web results, merges overlapping results, and classifies supported publishers versus external sources
@@ -309,13 +311,13 @@ The default chat agent exposes a compact paper-focused tool set:
 - `wiki_lint`: reports markdown wiki structure issues across `index.md`, source summaries, and synthesis pages
 - `wiki_health_fix`: attempts health repairs such as retrying downloads, parsing downloaded records, and generating missing summaries through a clean-context summary worker when configured; reports issues that still need login or queued browser work
 
-Development and diagnostics can use `createTools(workspaceDir, { toolProfile: "full" })` to expose the complete tool set. Full mode adds `get_time`, `read_file`, `write_paper_wiki_source`, `generate_paper_wiki_summary`, `paper_wiki_relations`, `search_paper_wiki`, `list_local_papers`, `fetch_paper_webpage`, `parse_paper`, `register_manual_paper_download`, and `open_paper_page_for_login`.
+Development and diagnostics can use `createTools(workspaceDir, { toolProfile: "full" })` to expose the complete tool set. Full mode adds `get_time`, `write_paper_wiki_source`, `generate_paper_wiki_summary`, `paper_wiki_relations`, `search_paper_wiki`, `list_local_papers`, `fetch_paper_webpage`, `parse_paper`, `register_manual_paper_download`, and `open_paper_page_for_login`.
 
 For `search_papers`, concise English keyword queries still work best because the search stages include arXiv, APS/Crossref metadata, and the configured web provider.
 
 OpenDataLoader PDF installation and verification notes are in [docs/opendataloader-pdf-install.md](docs/opendataloader-pdf-install.md). Docling fallback installation notes are in [docs/docling-pdf-install.md](docs/docling-pdf-install.md). Pandoc and LaTeXML installation notes are in [docs/pandoc-latexml-install.md](docs/pandoc-latexml-install.md).
 
-In full mode, `read_file` rejects absolute paths and paths that resolve outside the workspace.
+`list_files` and `read_file` reject paths that resolve outside the workspace, including symlinks that escape the workspace.
 
 Example prompts:
 

@@ -35,6 +35,14 @@ type ReadFileTool = {
   ) => Promise<ToolResult>;
 };
 
+type ListFilesTool = {
+  execute: (
+    toolCallId: string,
+    args: { path: string; maxDepth?: number; maxEntries?: number },
+    signal: undefined,
+  ) => Promise<ToolResult>;
+};
+
 type GetTimeTool = {
   execute: (
     toolCallId: string,
@@ -359,7 +367,7 @@ type WikiHealthFixTool = {
 type CreateToolsDependencies = NonNullable<Parameters<typeof createTools>[1]>;
 
 function getReadFileTool(workspace: string): ReadFileTool {
-  const tools = createTools(workspace, { toolProfile: "full" }) as ReadonlyArray<{
+  const tools = createTools(workspace) as ReadonlyArray<{
     name: string;
     execute?: ReadFileTool["execute"];
   }>;
@@ -367,6 +375,17 @@ function getReadFileTool(workspace: string): ReadFileTool {
   assert.ok(readFileTool);
   assert.equal(typeof readFileTool.execute, "function");
   return readFileTool as ReadFileTool;
+}
+
+function getListFilesTool(workspace: string): ListFilesTool {
+  const tools = createTools(workspace) as ReadonlyArray<{
+    name: string;
+    execute?: ListFilesTool["execute"];
+  }>;
+  const listFilesTool = tools.find((tool) => tool.name === "list_files");
+  assert.ok(listFilesTool);
+  assert.equal(typeof listFilesTool.execute, "function");
+  return listFilesTool as ListFilesTool;
 }
 
 function getGetTimeTool(workspace: string): GetTimeTool {
@@ -809,16 +828,64 @@ test("read_file rejects escaping the workspace", async () => {
   }
 });
 
-test("read_file rejects absolute paths", async () => {
+test("read_file accepts workspace-absolute paths", async () => {
   const workspace = await mkdtemp(path.join(tmpdir(), "pi-agent-tools-"));
   const absolutePath = path.join(workspace, "notes.txt");
+  await writeFile(absolutePath, "absolute workspace note", "utf8");
+
+  try {
+    const readFileTool = getReadFileTool(workspace);
+    const result = await readFileTool.execute("call-3", { path: absolutePath }, undefined);
+    assert.match(result.content?.[0]?.text ?? "", /absolute workspace note/);
+  } finally {
+    await rm(workspace, { recursive: true, force: true });
+  }
+});
+
+test("read_file rejects absolute paths outside the workspace", async () => {
+  const workspace = await mkdtemp(path.join(tmpdir(), "pi-agent-tools-"));
+  const outside = await mkdtemp(path.join(tmpdir(), "pi-agent-tools-outside-"));
+  const absolutePath = path.join(outside, "secret.txt");
+  await writeFile(absolutePath, "outside secret", "utf8");
 
   try {
     const readFileTool = getReadFileTool(workspace);
     await assert.rejects(
-      () => readFileTool.execute("call-3", { path: absolutePath }, undefined),
-      /absolute paths are not allowed/i,
+      () => readFileTool.execute("call-3b", { path: absolutePath }, undefined),
+      /outside the workspace/i,
     );
+  } finally {
+    await rm(workspace, { recursive: true, force: true });
+    await rm(outside, { recursive: true, force: true });
+  }
+});
+
+test("list_files lists workspace directories from an absolute path", async () => {
+  const workspace = await mkdtemp(path.join(tmpdir(), "pi-agent-tools-"));
+  const projectDir = path.join(workspace, "paper-projects", "million-qubits");
+  await mkdir(path.join(projectDir, "notes"), { recursive: true });
+  await writeFile(path.join(projectDir, "outline.md"), "# Outline\n", "utf8");
+  await writeFile(path.join(projectDir, "notes", "evidence.md"), "# Evidence\n", "utf8");
+
+  try {
+    const listFilesTool = getListFilesTool(workspace);
+    const result = await listFilesTool.execute(
+      "call-list-1",
+      { path: path.join(workspace, "paper-projects"), maxDepth: 2 },
+      undefined,
+    );
+    const details = result.details as {
+      entries: Array<{ path: string; type: string }>;
+      truncated: boolean;
+    };
+
+    assert.equal(details.truncated, false);
+    assert.deepEqual(details.entries, [
+      { path: "paper-projects/million-qubits", type: "directory" },
+      { path: "paper-projects/million-qubits/notes", type: "directory" },
+      { path: "paper-projects/million-qubits/notes/evidence.md", type: "file" },
+      { path: "paper-projects/million-qubits/outline.md", type: "file" },
+    ]);
   } finally {
     await rm(workspace, { recursive: true, force: true });
   }
@@ -868,6 +935,8 @@ test("createTools exposes the minimal default tool set", async () => {
     const tools = createTools(workspace);
     const toolNames = tools.map((tool) => tool.name);
     assert.deepEqual(toolNames, [
+      "list_files",
+      "read_file",
       "web_search",
       "fetch_url",
       "search_papers",
@@ -917,6 +986,7 @@ test("createTools full profile exposes every built-in tool", async () => {
     const toolNames = tools.map((tool) => tool.name);
     assert.deepEqual(toolNames, [
       "get_time",
+      "list_files",
       "read_file",
       "web_search",
       "fetch_url",
@@ -1612,7 +1682,7 @@ test("register_manual_paper_download delegates resolved workspace PDF paths to t
   }
 });
 
-test("register_manual_paper_download rejects absolute or escaping PDF paths", async () => {
+test("register_manual_paper_download rejects escaping PDF paths", async () => {
   const workspace = await mkdtemp(path.join(tmpdir(), "pi-agent-tools-"));
 
   try {
@@ -1622,18 +1692,6 @@ test("register_manual_paper_download rejects absolute or escaping PDF paths", as
       },
     });
 
-    await assert.rejects(
-      () =>
-        tool.execute(
-          "tool-call-register-absolute",
-          {
-            url: "https://example.com/paper",
-            path: path.join(workspace, "manual.pdf"),
-          },
-          undefined,
-        ),
-      /absolute paths are not allowed/i,
-    );
     await assert.rejects(
       () =>
         tool.execute(
