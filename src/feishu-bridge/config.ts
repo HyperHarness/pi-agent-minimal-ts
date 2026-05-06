@@ -18,6 +18,8 @@ export interface Config {
     streamMode: 'card' | 'text' | 'card_to_text';
     replyToMessage: boolean;
     replyInThread: boolean;
+    sendDownloadedPdf: boolean;
+    maxPdfUploadMb: number;
   };
   pi: {
     command: string;
@@ -208,6 +210,8 @@ export function loadConfig(cwd: string = process.cwd()): Config {
       streamMode: parseStreamMode(process.env.FEISHU_STREAM_MODE),
       replyToMessage: parseBoolean(process.env.FEISHU_REPLY_TO_MESSAGE, true),
       replyInThread: parseBoolean(process.env.FEISHU_REPLY_IN_THREAD, false),
+      sendDownloadedPdf: parseBoolean(process.env.FEISHU_SEND_DOWNLOADED_PDF, true),
+      maxPdfUploadMb: parseNumber(process.env.FEISHU_MAX_PDF_UPLOAD_MB, 30),
     },
     pi: {
       command: process.env.PI_COMMAND || process.execPath,

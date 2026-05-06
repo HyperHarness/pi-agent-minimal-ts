@@ -244,6 +244,58 @@ test("handleExtensionHostMessage registers supported publisher PDFs using canoni
   }
 });
 
+test("handleExtensionHostMessage registers PDF bytes fetched by the extension background worker", async () => {
+  const workspaceDir = await createWorkspaceDir();
+  const articleUrl = "https://www.nature.com/articles/s41586-019-1666-5";
+  const pdfText = "%PDF-1.7\nnature bytes\n";
+
+  try {
+    const response = await handleExtensionHostMessage({
+      workspaceDir,
+      now: () => new Date("2026-04-25T10:31:00.000Z"),
+      message: {
+        type: "register_download_bytes",
+        jobId: "job-nature-bytes",
+        articleUrl,
+        source: "nature",
+        pdfUrl: "https://www.nature.com/articles/s41586-019-1666-5.pdf",
+        pdfFileName: "nature-s41586-019-1666-5.pdf",
+        pdfBase64: Buffer.from(pdfText, "utf8").toString("base64"),
+        title: "Nature Paper"
+      }
+    });
+
+    const expectedDownloadPath = resolvePaperPdfPath({
+      workspaceDir,
+      source: "nature",
+      canonicalId: "s41586-019-1666-5"
+    });
+    const expectedRecordPath = resolvePaperRecordPath({
+      workspaceDir,
+      source: "nature",
+      canonicalId: "s41586-019-1666-5",
+      articleUrl
+    });
+    const expectedSha256 = createHash("sha256").update(Buffer.from(pdfText, "utf8")).digest("hex");
+
+    assert.deepEqual(response, {
+      type: "registered",
+      jobId: "job-nature-bytes",
+      articleUrl,
+      downloadPath: expectedDownloadPath,
+      recordPath: expectedRecordPath,
+      fileSha256: expectedSha256,
+      title: "Nature Paper"
+    });
+    assert.equal(await readFile(expectedDownloadPath, "utf8"), pdfText);
+    const events = await readPaperDownloadJobEvents({ workspaceDir });
+    assert.equal(events.at(-1)?.status, "downloaded");
+    assert.equal(events.at(-1)?.downloadPath, expectedDownloadPath);
+  } finally {
+    await rm(workspaceDir, { recursive: true, force: true });
+  }
+});
+
 test("handleExtensionHostMessage replaces compatible publisher fallback records with derived PDF URLs", async () => {
   const workspaceDir = await createWorkspaceDir();
   const articleUrl = "https://www.nature.com/articles/s41586-019-1666-5";

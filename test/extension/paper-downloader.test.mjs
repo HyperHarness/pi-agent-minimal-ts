@@ -65,8 +65,15 @@ function createFakeChrome(options = {}) {
       if (message.type === "poll_jobs") {
         return { type: "jobs", jobs: options.jobs ?? [] };
       }
-      if (message.type === "register_download") {
-        return { type: "registered", jobId: message.jobId };
+      if (message.type === "register_download" || message.type === "register_download_bytes") {
+        return {
+          type: "registered",
+          jobId: message.jobId,
+          articleUrl: message.articleUrl,
+          downloadPath: message.downloadPath ?? `knowledge-base/raw/pdfs/${message.pdfFileName ?? "paper.pdf"}`,
+          recordPath: "knowledge-base/records/paper.json",
+          fileSha256: "abc123"
+        };
       }
       return { type: "status_ack", jobId: message.jobId, status: message.status };
     });
@@ -173,16 +180,28 @@ function createFakeChrome(options = {}) {
     downloadedRequests,
     nativeMessages,
     alarmCreates,
-    storage
+    storage,
+    fetchImpl: options.fetchImpl
   };
 }
 
 async function importBackground(fakeChrome) {
   globalThis.chrome = fakeChrome.chrome;
+  if (fakeChrome.fetchImpl) {
+    globalThis.fetch = fakeChrome.fetchImpl;
+  }
   await import(
     `${pathToFileURL(path.join(extensionDir, "background.js")).href}?case=${Date.now()}-${Math.random()}`
   );
   await flushAsyncWork();
+}
+
+function createPdfFetch(pdfBytes = "%PDF-1.4\n% test pdf\n") {
+  return async (url, init) =>
+    new Response(Buffer.from(pdfBytes), {
+      status: 200,
+      headers: { "content-type": "application/pdf" }
+    });
 }
 
 function messagesOf(fakeChrome, type) {
@@ -432,7 +451,7 @@ test("manifest declares required MV3 extension shell fields", async () => {
 
   assert.equal(manifest.manifest_version, 3);
   assert.equal(manifest.name, "Pi Agent Paper Downloader");
-  assert.equal(manifest.version, "0.1.19");
+  assert.equal(manifest.version, "0.1.20");
 
   for (const permission of [
     "activeTab",
@@ -489,6 +508,7 @@ test("background automatic download registration payload includes pdfUrl and clo
   };
   const fakeChrome = createFakeChrome({
     jobs: [job],
+    fetchImpl: createPdfFetch(),
     downloadItems: {
       501: {
         id: 501,
@@ -509,13 +529,10 @@ test("background automatic download registration payload includes pdfUrl and clo
     { tab: { id: 100 } }
   );
   await flushAsyncWork();
-  fakeChrome.events.onChanged.emit({ id: 501, state: { current: "complete" } });
-  await flushAsyncWork();
 
-  assert.equal(fakeChrome.downloadedRequests[0].url, "https://www.nature.com/articles/s41586-019-1666-5.pdf");
-  assert.equal(fakeChrome.downloadedRequests[0].filename, "pi-agent-papers/nature-s41586-019-1666-5.pdf");
-  assert.equal(fakeChrome.downloadedRequests[0].saveAs, false);
-  assert.equal(messagesOf(fakeChrome, "register_download")[0].pdfUrl, "https://www.nature.com/articles/s41586-019-1666-5.pdf");
+  assert.deepEqual(fakeChrome.downloadedRequests, []);
+  assert.equal(messagesOf(fakeChrome, "register_download_bytes")[0].pdfUrl, "https://www.nature.com/articles/s41586-019-1666-5.pdf");
+  assert.equal(messagesOf(fakeChrome, "register_download_bytes")[0].pdfFileName, "nature-s41586-019-1666-5.pdf");
   assert.deepEqual(fakeChrome.removedTabs, [100]);
   assert.deepEqual(fakeChrome.storage.piAgentPaperDownloaderState, {
     jobs: {},
@@ -660,6 +677,16 @@ test("background gates publisher PDF downloads on complete webpage snapshot qual
           }
         };
       }
+      if (message.type === "register_download_bytes") {
+        return {
+          type: "registered",
+          jobId: message.jobId,
+          articleUrl: message.articleUrl,
+          downloadPath: `knowledge-base/raw/pdfs/${message.pdfFileName}`,
+          recordPath: "knowledge-base/records/nature.json",
+          fileSha256: "abc123"
+        };
+      }
       return { type: "status_ack", jobId: message.jobId, status: message.status };
     }
   });
@@ -737,6 +764,7 @@ test("background starts publisher PDF download after good webpage snapshot quali
   const pdfUrl = "https://www.nature.com/articles/s41586-019-1666-5.pdf";
   const fakeChrome = createFakeChrome({
     jobs: [job],
+    fetchImpl: createPdfFetch(),
     downloadItems: {
       501: {
         id: 501,
@@ -768,6 +796,16 @@ test("background starts publisher PDF download after good webpage snapshot quali
           }
         };
       }
+      if (message.type === "register_download_bytes") {
+        return {
+          type: "registered",
+          jobId: message.jobId,
+          articleUrl: message.articleUrl,
+          downloadPath: `knowledge-base/raw/pdfs/${message.pdfFileName}`,
+          recordPath: "knowledge-base/records/nature.json",
+          fileSha256: "abc123"
+        };
+      }
       return { type: "status_ack", jobId: message.jobId, status: message.status };
     }
   });
@@ -785,18 +823,13 @@ test("background starts publisher PDF download after good webpage snapshot quali
   await flushAsyncWork();
 
   assert.deepEqual(fakeChrome.downloadedRequests, [
-    {
-      url: pdfUrl,
-      filename: "pi-agent-papers/nature-s41586-019-1666-5.pdf",
-      conflictAction: "uniquify",
-      saveAs: false
-    }
   ]);
+  assert.equal(messagesOf(fakeChrome, "register_download_bytes")[0].pdfUrl, pdfUrl);
   assert.equal(statusMessagesOf(fakeChrome, "webpage_snapshot_ready").length, 1);
   assert.equal(statusMessagesOf(fakeChrome, "automatic_download_started").length, 1);
 });
 
-test("background uses downloads API with a default filename for publisher PDF downloads", async () => {
+test("background falls back to downloads API with a default filename when background fetch fails", async () => {
   const job = {
     jobId: "job-aps-tab-download",
     articleUrl: "https://journals.aps.org/prapplied/abstract/10.1103/4ssz-6ctb",
@@ -806,6 +839,9 @@ test("background uses downloads API with a default filename for publisher PDF do
   const pdfUrl = "https://journals.aps.org/prapplied/pdf/10.1103/4ssz-6ctb";
   const fakeChrome = createFakeChrome({
     jobs: [job],
+    fetchImpl: async () => {
+      throw new Error("fetch blocked");
+    },
     tabMessageHandler: () => ({ ok: true }),
     downloadId: 601,
     downloadItems: {
@@ -854,7 +890,7 @@ test("background uses downloads API with a default filename for publisher PDF do
   assert.deepEqual(fakeChrome.removedTabs, [100]);
 });
 
-test("background opens Science pages for manual download and monitors the result", async () => {
+test("background fetches Science PDF bytes without manual download", async () => {
   const job = {
     jobId: "job-science-manual",
     articleUrl: "https://www.science.org/doi/10.1126/science.adz8659",
@@ -864,6 +900,7 @@ test("background opens Science pages for manual download and monitors the result
   const pdfUrl = "https://www.science.org/doi/epdf/10.1126/science.adz8659";
   const fakeChrome = createFakeChrome({
     jobs: [job],
+    fetchImpl: createPdfFetch(),
     downloadItems: {
       602: {
         id: 602,
@@ -890,22 +927,8 @@ test("background opens Science pages for manual download and monitors the result
   assert.deepEqual(fakeChrome.sentTabMessages, []);
   assert.deepEqual(fakeChrome.downloadedRequests, []);
   assert.equal(statusMessagesOf(fakeChrome, "pdf_candidate_found").length, 1);
-  assert.equal(statusMessagesOf(fakeChrome, "awaiting_user_manual_download").length, 1);
-  assert.equal(fakeChrome.storage.piAgentPaperDownloaderState.jobs[job.jobId].pdfUrl, pdfUrl);
-
-  fakeChrome.events.onCreated.emit({
-    id: 602,
-    tabId: 100,
-    filename: "C:\\Downloads\\science-paper.pdf",
-    url: pdfUrl,
-    mime: "application/pdf"
-  });
-  await flushAsyncWork();
-  fakeChrome.events.onChanged.emit({ id: 602, state: { current: "complete" } });
-  await flushAsyncWork();
-
-  assert.equal(statusMessagesOf(fakeChrome, "manual_download_observed").length, 1);
-  assert.equal(messagesOf(fakeChrome, "register_download")[0].pdfUrl, pdfUrl);
+  assert.equal(statusMessagesOf(fakeChrome, "awaiting_user_manual_download").length, 0);
+  assert.equal(messagesOf(fakeChrome, "register_download_bytes")[0].pdfUrl, pdfUrl);
   assert.deepEqual(fakeChrome.removedTabs, [100]);
 });
 
@@ -918,6 +941,24 @@ test("background associates Science manual downloads by publisher URL when tab m
   const pdfUrl = "https://www.science.org/doi/epdf/10.1126/science.adz8659";
   const fakeChrome = createFakeChrome({
     jobs: [job],
+    fetchImpl: createPdfFetch(),
+    nativeHandler(message) {
+      if (message.type === "poll_jobs") {
+        return { type: "jobs", jobs: [job] };
+      }
+      if (message.type === "register_download_bytes") {
+        return {
+          type: "error",
+          jobId: message.jobId,
+          code: "manual_login_required",
+          message: "Science returned a reader page instead of PDF bytes."
+        };
+      }
+      if (message.type === "register_download") {
+        return { type: "registered", jobId: message.jobId, articleUrl: message.articleUrl, downloadPath: message.downloadPath, recordPath: "knowledge-base/records/science.json", fileSha256: "abc123" };
+      }
+      return { type: "status_ack", jobId: message.jobId, status: message.status };
+    },
     downloadItems: {
       603: {
         id: 603,
@@ -964,6 +1005,7 @@ test("background starts automatic download for external direct PDF jobs", async 
   };
   const fakeChrome = createFakeChrome({
     jobs: [job],
+    fetchImpl: createPdfFetch(),
     downloadItems: {
       501: {
         id: 501,
@@ -975,28 +1017,16 @@ test("background starts automatic download for external direct PDF jobs", async 
   });
 
   await importBackground(fakeChrome);
+  await flushAsyncWork();
+  await flushAsyncWork();
 
   assert.deepEqual(fakeChrome.createdTabs.map((tab) => tab.url), [job.articleUrl]);
-  assert.deepEqual(fakeChrome.downloadedRequests, [
-    {
-      url: job.articleUrl,
-      filename: "pi-agent-papers/external-paper.pdf",
-      conflictAction: "uniquify",
-      saveAs: false
-    }
-  ]);
+  assert.deepEqual(fakeChrome.downloadedRequests, []);
   assert.equal(statusMessagesOf(fakeChrome, "pdf_candidate_found").length, 1);
   assert.equal(statusMessagesOf(fakeChrome, "automatic_download_started").length, 1);
-  assert.deepEqual(fakeChrome.storage.piAgentPaperDownloaderState.downloads["501"], {
-    jobId: job.jobId,
-    articleUrl: job.articleUrl,
-    source: "external",
-    title: "External PDF",
-    tabId: 100,
-    autoClose: undefined,
-    pdfUrl: job.articleUrl,
-    filename: "pi-agent-papers/external-paper.pdf"
-  });
+  assert.equal(messagesOf(fakeChrome, "register_download_bytes")[0].pdfUrl, job.articleUrl);
+  assert.equal(fakeChrome.storage.piAgentPaperDownloaderState.downloads["501"], undefined);
+  assert.deepEqual(fakeChrome.removedTabs, [100]);
 });
 
 test("background puts external non-PDF jobs into manual mode", async () => {

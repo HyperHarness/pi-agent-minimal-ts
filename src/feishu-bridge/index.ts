@@ -1,3 +1,5 @@
+import { createReadStream } from 'node:fs';
+import { stat } from 'node:fs/promises';
 import * as Lark from '@larksuiteoapi/node-sdk';
 import { log } from './colors.js';
 import { loadConfig } from './config.js';
@@ -19,6 +21,15 @@ import { detectBotMention } from './feishu/mention-detection.js';
 import { resolveSenderName } from './feishu/sender-name.js';
 import { StreamUpdater } from './feishu/stream-updater.js';
 import { sendReplyWithRetry } from './feishu/reply-sender.js';
+import { splitLongTextForFeishu } from './feishu/long-message.js';
+import {
+  extractDownloadedPdfAttachment,
+  extractPdfAttachmentsFromText,
+  extractQueuedPdfDeliveryJob,
+  resolveDownloadedPdfAttachmentsForQueuedJobs,
+  type DownloadedPdfAttachment,
+  type QueuedPdfDeliveryJob,
+} from './feishu/pdf-delivery.js';
 import { ChatMemoryStore } from './memory/chat-memory.js';
 import { buildMemoryDebugLines } from './memory/debug.js';
 import { extractDurableGroupFacts, extractDurableUserFacts } from './memory/extractors.js';
@@ -341,6 +352,121 @@ async function sendTextMessage(
   return response.data?.message_id;
 }
 
+async function sendTextMessageChunks(
+  client: Lark.Client,
+  chatId: string,
+  chunks: string[],
+  replyToMessageId?: string,
+): Promise<string | undefined> {
+  let firstMessageId: string | undefined;
+
+  for (const chunk of chunks) {
+    const messageId = await sendTextMessage(client, chatId, chunk, replyToMessageId);
+    firstMessageId ??= messageId;
+  }
+
+  return firstMessageId;
+}
+
+async function uploadPdfFile(client: Lark.Client, attachment: DownloadedPdfAttachment): Promise<string> {
+  const response = await client.im.v1.file.create({
+    data: {
+      file_type: 'pdf',
+      file_name: attachment.fileName,
+      file: createReadStream(attachment.path),
+    },
+  });
+
+  if (!response?.file_key) {
+    throw new Error('飞书文件上传未返回 file_key');
+  }
+
+  return response.file_key;
+}
+
+async function sendFileMessage(
+  client: Lark.Client,
+  chatId: string,
+  fileKey: string,
+  replyToMessageId?: string,
+): Promise<string | undefined> {
+  const content = JSON.stringify({ file_key: fileKey });
+
+  if (config.feishu.replyToMessage && replyToMessageId) {
+    const replyResult = await sendReplyWithRetry({
+      messageId: replyToMessageId,
+      msgType: 'file',
+      content,
+      replyInThread: config.feishu.replyInThread,
+      reply: (payload) => client.im.v1.message.reply(payload),
+    });
+
+    if (replyResult.messageId) {
+      return replyResult.messageId;
+    }
+
+    if (!replyResult.fallbackToCreate) {
+      log.warn(`回复 PDF 文件消息状态未明，跳过回退新建消息以避免重复: ${replyResult.detail || 'unknown error'}`);
+      return undefined;
+    }
+
+    log.warn(`回复 PDF 文件消息失败，回退到新建消息: ${replyResult.detail || 'unknown error'}`);
+  }
+
+  const response = await client.im.v1.message.create({
+    params: {
+      receive_id_type: 'chat_id',
+    },
+    data: {
+      receive_id: chatId,
+      msg_type: 'file',
+      content,
+    },
+  });
+
+  return response.data?.message_id;
+}
+
+async function sendDownloadedPdfAttachments(
+  client: Lark.Client,
+  chatId: string,
+  attachments: DownloadedPdfAttachment[],
+  replyToMessageId?: string,
+): Promise<void> {
+  if (!config.feishu.sendDownloadedPdf || attachments.length === 0) {
+    return;
+  }
+
+  const maxBytes = config.feishu.maxPdfUploadMb * 1024 * 1024;
+  for (const attachment of attachments) {
+    try {
+      const info = await stat(attachment.path);
+      if (!info.isFile()) {
+        log.warn(`PDF 文件发送跳过，路径不是文件: ${attachment.path}`);
+        continue;
+      }
+
+      if (info.size > maxBytes) {
+        await sendTextMessage(
+          client,
+          chatId,
+          `PDF 文件超过飞书上传限制，未发送：${attachment.fileName} (${Math.ceil(info.size / 1024 / 1024)} MB > ${config.feishu.maxPdfUploadMb} MB)`,
+          replyToMessageId,
+        );
+        continue;
+      }
+
+      const fileKey = await uploadPdfFile(client, attachment);
+      await sendFileMessage(client, chatId, fileKey, replyToMessageId);
+      log.feishu(`PDF 文件已发送: ${attachment.fileName}`);
+    } catch (error) {
+      const message = error instanceof Error ? error.message : String(error);
+      log.warn(`PDF 文件发送失败 ${attachment.fileName}: ${message}`);
+      await sendTextMessage(client, chatId, `PDF 文件发送失败：${attachment.fileName} (${message})`, replyToMessageId).catch(() => {});
+    }
+  }
+}
+
 async function patchTextMessage(client: Lark.Client, messageId: string, text: string): Promise<void> {
   await patchTextOnExistingMessage(client, messageId, text);
 }
@@ -528,6 +654,11 @@ async function sendErrorMessage(
 function buildErrorText(message: string): string {
   return message;
 }
+
+function buildLongReplyNotice(chunkCount: number): string {
+  return `回答较长，已拆分为 ${chunkCount} 段文本发送。`;
+}
+
 function saveLongTermMemory(message: ParsedIncomingMessage): void {
   if (!config.memory.longTermEnabled) {
     return;
@@ -654,22 +785,45 @@ async function processMessage(client: Lark.Client, message: ParsedIncomingMessag
   });
 
   const pi = await piClientPromise;
+  const downloadedPdfAttachments = new Map<string, DownloadedPdfAttachment>();
+  const queuedPdfDeliveryJobs = new Map<string, QueuedPdfDeliveryJob>();
+  const collectDownloadedPdfAttachment = (event: PiEvent): void => {
+    if (!config.feishu.sendDownloadedPdf) {
+      return;
+    }
+
+    const attachment = extractDownloadedPdfAttachment(event, process.cwd());
+    if (attachment) {
+      downloadedPdfAttachments.set(attachment.path, attachment);
+    }
+    const queuedJob = extractQueuedPdfDeliveryJob(event);
+    if (queuedJob) {
+      queuedPdfDeliveryJobs.set(queuedJob.jobId, queuedJob);
+    }
+  };
+  pi.on('event', collectDownloadedPdfAttachment);
 
   try {
     const agentStartedAt = Date.now();
     log.pi(
       `prompt:start chat=${message.chatId} stored_history_turns=${history.length} prompt_history_turns=${promptHistory.length}`,
     );
-    const agentResult = await runAgentWithWebSearch({
-      initialWebContext: webContext,
-      maxSearchSteps: config.web.enabled ? maxAgentWebSearchSteps : 0,
-      buildPrompt: buildPromptForWebContext,
-      promptAgent: async (prompt: string) => pi.prompt(prompt),
-      search: async (query: string) => runSearchAndFormat(query, 'agent'),
-      onSearchRequest: async (query: string) => {
-        log.info(`Agent主动请求追加联网搜索: ${buildSearchQuery(query)}`);
-      },
-    });
+    const agentResult = await (async () => {
+      try {
+        return await runAgentWithWebSearch({
+          initialWebContext: webContext,
+          maxSearchSteps: config.web.enabled ? maxAgentWebSearchSteps : 0,
+          buildPrompt: buildPromptForWebContext,
+          promptAgent: async (prompt: string) => pi.prompt(prompt),
+          search: async (query: string) => runSearchAndFormat(query, 'agent'),
+          onSearchRequest: async (query: string) => {
+            log.info(`Agent主动请求追加联网搜索: ${buildSearchQuery(query)}`);
+          },
+        });
+      } finally {
+        pi.off('event', collectDownloadedPdfAttachment);
+      }
+    })();
     const finalResponse = agentResult.finalResponse;
     log.pi(
       `prompt:end chat=${message.chatId} duration_ms=${Date.now() - agentStartedAt} response_chars=${finalResponse.length} search_queries=${agentResult.searchQueries.length}`,
@@ -677,6 +831,8 @@ async function processMessage(client: Lark.Client, message: ParsedIncomingMessag
     webContext = agentResult.webContext;
     const finalAsText = isTextFinalMode();
     await updater.complete(finalResponse);
+    const finalTextChunks = splitLongTextForFeishu(finalResponse, config.feishu.maxReplyChars);
+    const finalReplyIsChunked = finalTextChunks.length > 1;
 
     const finalCardContent = buildStreamingCardContent({
       senderName: message.senderName,
@@ -685,31 +841,87 @@ async function processMessage(client: Lark.Client, message: ParsedIncomingMessag
     });
 
     if (!replyMessageId) {
-      if (finalAsText) {
-        await sendTextMessage(client, message.chatId, finalResponse, replyTargetMessageId);
+      if (finalAsText || finalReplyIsChunked) {
+        await sendTextMessageChunks(client, message.chatId, finalTextChunks, replyTargetMessageId);
       } else {
         await sendCardMessage(client, message.chatId, finalCardContent, replyTargetMessageId);
       }
     } else {
-      try {
-        if (isTextStreamMode()) {
-          await patchTextMessage(client, replyMessageId, finalResponse);
-        } else if (isCardToTextMode()) {
-          await sendTextMessage(client, message.chatId, finalResponse, replyTargetMessageId);
+      if (isTextStreamMode()) {
+        if (finalReplyIsChunked) {
+          try {
+            await patchTextMessage(client, replyMessageId, finalTextChunks[0]);
+          } catch (error) {
+            log.warn(`最终消息更新失败，改为发送新消息: ${error instanceof Error ? error.message : String(error)}`);
+            await sendTextMessage(client, message.chatId, finalTextChunks[0], replyTargetMessageId);
+          }
+          await sendTextMessageChunks(client, message.chatId, finalTextChunks.slice(1), replyTargetMessageId);
         } else {
-          await patchStreamingMessage(client, replyMessageId, message.senderName, finalResponse, true);
+          try {
+            await patchTextMessage(client, replyMessageId, finalResponse);
+          } catch (error) {
+            log.warn(`最终消息更新失败，改为发送新消息: ${error instanceof Error ? error.message : String(error)}`);
+            await sendTextMessage(client, message.chatId, finalResponse, replyTargetMessageId);
+          }
         }
-      } catch (error) {
-        log.warn(`最终消息更新失败，改为发送新消息: ${error instanceof Error ? error.message : String(error)}`);
-        if (isCardToTextMode()) {
-          await sendTextMessage(client, message.chatId, finalResponse, replyTargetMessageId);
-        } else if (finalAsText) {
-          await sendTextMessage(client, message.chatId, finalResponse, replyTargetMessageId);
-        } else {
-          await sendCardMessage(client, message.chatId, finalCardContent, replyTargetMessageId);
+      } else if (isCardToTextMode()) {
+        await sendTextMessageChunks(client, message.chatId, finalTextChunks, replyTargetMessageId);
+      } else if (finalReplyIsChunked) {
+        try {
+          await patchStreamingMessage(
+            client,
+            replyMessageId,
+            message.senderName,
+            buildLongReplyNotice(finalTextChunks.length),
+            true,
+          );
+        } catch (error) {
+          log.warn(`最终消息更新失败，改为发送新消息: ${error instanceof Error ? error.message : String(error)}`);
+          await sendCardMessage(
+            client,
+            message.chatId,
+            buildStreamingCardContent({
+              senderName: message.senderName,
+              answer: buildLongReplyNotice(finalTextChunks.length),
+              isFinal: true,
+            }),
+            replyTargetMessageId,
+          );
+        }
+        await sendTextMessageChunks(client, message.chatId, finalTextChunks, replyTargetMessageId);
+      } else {
+        try {
+          await patchStreamingMessage(client, replyMessageId, message.senderName, finalResponse, true);
+        } catch (error) {
+          log.warn(`最终消息更新失败，改为发送新消息: ${error instanceof Error ? error.message : String(error)}`);
+          if (finalAsText) {
+            await patchTextMessage(client, replyMessageId, finalResponse);
+          } else {
+            await sendCardMessage(client, message.chatId, finalCardContent, replyTargetMessageId);
+          }
         }
       }
     }
+
+    for (const attachment of await resolveDownloadedPdfAttachmentsForQueuedJobs(
+      process.cwd(),
+      Array.from(queuedPdfDeliveryJobs.values()),
+    )) {
+      downloadedPdfAttachments.set(attachment.path, attachment);
+    }
+    for (const attachment of extractPdfAttachmentsFromText(finalResponse, process.cwd())) {
+      downloadedPdfAttachments.set(attachment.path, attachment);
+    }
+    if (queuedPdfDeliveryJobs.size > 0 && downloadedPdfAttachments.size === 0) {
+      log.warn(`PDF 文件发送跳过：${queuedPdfDeliveryJobs.size} 个扩展下载任务尚未完成。`);
+    }
+
+    await sendDownloadedPdfAttachments(
+      client,
+      message.chatId,
+      Array.from(downloadedPdfAttachments.values()),
+      replyTargetMessageId,
+    );
 
     const now = new Date().toISOString();
     memory.appendTurn(message.chatId, {

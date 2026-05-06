@@ -56,6 +56,16 @@ export type ExtensionHostMessage =
       title?: string;
     }
   | {
+      type: "register_download_bytes";
+      jobId: string;
+      articleUrl: string;
+      source: PaperSource;
+      pdfBase64: string;
+      pdfUrl?: string;
+      pdfFileName?: string;
+      title?: string;
+    }
+  | {
       type: "register_webpage_snapshot";
       jobId: string;
       articleUrl: string;
@@ -347,6 +357,17 @@ export function parseExtensionHostMessage(value: unknown): ExtensionHostMessage 
       source: parsePaperSource(record, "source"),
       downloadPath: parseRequiredString(record, "downloadPath"),
       ...parseOptionalFields(record, ["title", "pdfUrl"])
+    };
+  }
+
+  if (type === "register_download_bytes") {
+    return {
+      type,
+      jobId: parseRequiredString(record, "jobId"),
+      articleUrl: parseRequiredString(record, "articleUrl"),
+      source: parsePaperSource(record, "source"),
+      pdfBase64: parseRequiredString(record, "pdfBase64"),
+      ...parseOptionalFields(record, ["title", "pdfUrl", "pdfFileName"])
     };
   }
 

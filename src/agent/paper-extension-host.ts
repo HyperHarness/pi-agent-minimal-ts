@@ -252,13 +252,18 @@ async function resolveRecordForExtensionMessage(input: {
 
 async function registerDownloadedPaper(options: {
   workspaceDir: string;
-  message: Extract<ExtensionHostMessage, { type: "register_download" }>;
+  message: Extract<ExtensionHostMessage, { type: "register_download" | "register_download_bytes" }>;
   recordedAt: string;
 }): Promise<ExtensionHostResponse> {
+  const downloadPath =
+    options.message.type === "register_download"
+      ? options.message.downloadPath
+      : options.message.pdfFileName ?? options.message.pdfUrl ?? options.message.articleUrl;
+
   if (
     options.message.source === "science" &&
     isScienceSupplementDownload({
-      downloadPath: options.message.downloadPath,
+      downloadPath,
       pdfUrl: options.message.pdfUrl
     })
   ) {
@@ -271,19 +276,27 @@ async function registerDownloadedPaper(options: {
 
   let pdfBytes: Buffer;
   try {
-    pdfBytes = await readDownloadedFile(options.message.downloadPath);
+    pdfBytes =
+      options.message.type === "register_download_bytes"
+        ? decodeDownloadedPdfBase64(options.message.pdfBase64)
+        : await readDownloadedFile(options.message.downloadPath);
   } catch (error) {
     return registrationError({
       jobId: options.message.jobId,
       code: "read_failed",
-      message: error instanceof Error ? error.message : "Unable to read downloaded file."
+      message:
+        error instanceof Error
+          ? error.message
+          : options.message.type === "register_download_bytes"
+            ? "Unable to decode downloaded PDF bytes."
+            : "Unable to read downloaded file."
     });
   }
 
   if (!pdfBytes.subarray(0, PDF_SIGNATURE.byteLength).equals(PDF_SIGNATURE)) {
     if (isSupportedPublisherHtmlDownload({
       source: options.message.source,
-      downloadPath: options.message.downloadPath,
+      downloadPath,
       bytes: pdfBytes
     })) {
       return registrationError({
@@ -347,6 +360,10 @@ async function readDownloadedFile(downloadPath: string): Promise<Buffer> {
     : new Error(`Unable to read downloaded file at ${downloadPath}.`);
 }
 
+function decodeDownloadedPdfBase64(pdfBase64: string): Buffer {
+  return Buffer.from(pdfBase64, "base64");
+}
+
 export function resolveDownloadPathCandidates(downloadPath: string): string[] {
   const candidates = [downloadPath];
 
@@ -371,7 +388,7 @@ export function resolveDownloadPathCandidates(downloadPath: string): string[] {
 
 async function registerExternalDownload(options: {
   workspaceDir: string;
-  message: Extract<ExtensionHostMessage, { type: "register_download" }>;
+  message: Extract<ExtensionHostMessage, { type: "register_download" | "register_download_bytes" }>;
   recordedAt: string;
   pdfBytes: Buffer;
 }): Promise<ExtensionHostResponse> {
@@ -437,7 +454,7 @@ async function registerExternalDownload(options: {
 
 async function registerSupportedPublisherDownload(options: {
   workspaceDir: string;
-  message: Extract<ExtensionHostMessage, { type: "register_download" }>;
+  message: Extract<ExtensionHostMessage, { type: "register_download" | "register_download_bytes" }>;
   source: SupportedPaperSource;
   recordedAt: string;
   pdfBytes: Buffer;
@@ -649,7 +666,7 @@ function derivePublisherPdfUrl(options: {
 
 async function appendDownloadedJobEvent(options: {
   workspaceDir: string;
-  message: Extract<ExtensionHostMessage, { type: "register_download" }>;
+  message: Extract<ExtensionHostMessage, { type: "register_download" | "register_download_bytes" }>;
   recordedAt: string;
   downloadPath: string;
   recordPath: string;

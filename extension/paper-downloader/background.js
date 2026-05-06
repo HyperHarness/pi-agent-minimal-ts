@@ -458,6 +458,66 @@ function buildDefaultDownloadFilename(job, pdfUrl) {
   return "pi-agent-papers/" + stem + ".pdf";
 }
 
+function filenameFromDownloadFilename(downloadFilename) {
+  return String(downloadFilename || "").split(/[\\/]/).pop() || "paper.pdf";
+}
+
+async function registerFetchedPdfDownload(job, pdfUrl, filename) {
+  if (typeof fetch !== "function") {
+    return false;
+  }
+
+  try {
+    const response = await fetch(pdfUrl, { credentials: "include" });
+    if (!response.ok) {
+      throw new Error(`HTTP ${response.status} ${response.statusText || ""}`.trim());
+    }
+
+    const pdfBase64 = arrayBufferToBase64(await response.arrayBuffer());
+    const nativeResponse = await sendNativeMessage({
+      type: "register_download_bytes",
+      jobId: job.jobId,
+      articleUrl: job.articleUrl,
+      source: job.source,
+      pdfBase64,
+      pdfUrl,
+      pdfFileName: filenameFromDownloadFilename(filename),
+      ...(job.title ? { title: job.title } : {})
+    });
+
+    if (nativeResponse && nativeResponse.type === "registered") {
+      await reportJobStatus(job, "downloaded", "Registered PDF fetched by the extension background worker.");
+      jobsById.delete(job.jobId);
+      if (typeof job.tabId === "number") {
+        jobsByTabId.delete(job.tabId);
+      }
+      await persistState();
+      await closeCompletedJobTab(job);
+      return true;
+    }
+
+    if (nativeResponse && nativeResponse.type === "error") {
+      const message = nativeResponse.message || "Fetched PDF could not be registered by the native host.";
+      if (nativeResponse.code === "manual_login_required") {
+        await reportJobStatus(job, "awaiting_user_manual_download", message);
+        job.manualDownloadMode = true;
+      } else {
+        await reportJobStatus(job, "automatic_download_failed", message);
+      }
+      await persistState();
+      return true;
+    }
+
+    throw new Error("Native host did not acknowledge fetched PDF registration.");
+  } catch (error) {
+    console.warn(
+      "Pi Agent background PDF fetch failed; falling back to Chrome downloads API.",
+      error
+    );
+    return false;
+  }
+}
+
 async function startAutomaticDownload(job, pdfUrl) {
   if (job.automaticDownloadAttempted) {
     return;
@@ -470,6 +530,15 @@ async function startAutomaticDownload(job, pdfUrl) {
 
   try {
     var filename = buildDefaultDownloadFilename(job, pdfUrl);
+    await reportJobStatus(
+      job,
+      "automatic_download_started",
+      "Started automatic PDF fetch with browser credentials."
+    );
+    if (await registerFetchedPdfDownload(job, pdfUrl, filename)) {
+      return;
+    }
+
     const downloadId = await chrome.downloads.download({
       url: pdfUrl,
       filename,
@@ -487,11 +556,6 @@ async function startAutomaticDownload(job, pdfUrl) {
       filename
     });
     await persistState();
-    await reportJobStatus(
-      job,
-      "automatic_download_started",
-      "Started automatic PDF download with a default filename."
-    );
   } catch (error) {
     await reportJobStatus(
       job,
@@ -616,11 +680,6 @@ async function handlePaperPageClassified(message, sender) {
     }
 
     if (message.pdfUrl) {
-      if (job.source === "science") {
-        await enterPublisherManualDownloadMode(job, message.pdfUrl);
-        return;
-      }
-
       await startAutomaticDownload(job, message.pdfUrl);
       return;
     }

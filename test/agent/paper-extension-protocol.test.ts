@@ -27,6 +27,30 @@ test("parseExtensionHostMessage accepts register_download messages", () => {
   });
 });
 
+test("parseExtensionHostMessage accepts register_download_bytes messages", () => {
+  const message = parseExtensionHostMessage({
+    type: "register_download_bytes",
+    jobId: "job-123",
+    articleUrl: "https://www.science.org/doi/10.1126/science.adz8659",
+    source: "science",
+    pdfBase64: "JVBERi0xLjQK",
+    pdfUrl: "https://www.science.org/doi/epdf/10.1126/science.adz8659",
+    pdfFileName: "science-adz8659.pdf",
+    title: "Science Paper"
+  });
+
+  assert.deepEqual(message, {
+    type: "register_download_bytes",
+    jobId: "job-123",
+    articleUrl: "https://www.science.org/doi/10.1126/science.adz8659",
+    source: "science",
+    pdfBase64: "JVBERi0xLjQK",
+    pdfUrl: "https://www.science.org/doi/epdf/10.1126/science.adz8659",
+    pdfFileName: "science-adz8659.pdf",
+    title: "Science Paper"
+  });
+});
+
 test("parseExtensionHostMessage accepts register_webpage_snapshot messages", () => {
   const message = parseExtensionHostMessage({
     type: "register_webpage_snapshot",

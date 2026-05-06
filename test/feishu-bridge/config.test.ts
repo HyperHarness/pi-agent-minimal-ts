@@ -119,6 +119,38 @@ test('loadConfig can include agent messages in prompt history when explicitly en
   );
 });
 
+test('loadConfig sends downloaded PDFs to Feishu by default', () => {
+  withEnv(
+    {
+      FEISHU_APP_ID: 'cli-test-app',
+      FEISHU_APP_SECRET: 'cli-test-secret',
+    },
+    () => {
+      const config = loadConfig(makeTempDir());
+
+      assert.equal(config.feishu.sendDownloadedPdf, true);
+      assert.equal(config.feishu.maxPdfUploadMb, 30);
+    },
+  );
+});
+
+test('loadConfig controls downloaded PDF delivery to Feishu', () => {
+  withEnv(
+    {
+      FEISHU_APP_ID: 'cli-test-app',
+      FEISHU_APP_SECRET: 'cli-test-secret',
+      FEISHU_SEND_DOWNLOADED_PDF: 'true',
+      FEISHU_MAX_PDF_UPLOAD_MB: '12',
+    },
+    () => {
+      const config = loadConfig(makeTempDir());
+
+      assert.equal(config.feishu.sendDownloadedPdf, true);
+      assert.equal(config.feishu.maxPdfUploadMb, 12);
+    },
+  );
+});
+
 test('loadConfig defaults the bridge to this repository agent RPC entrypoint', () => {
   const cwd = makeTempDir();
   withEnv(
