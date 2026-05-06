@@ -40,6 +40,13 @@ import { buildPiClientOptionsForMessage, getPiClientKey } from './pi-session.js'
 import { startPiClientWithRetry } from './pi-client-retry.js';
 import { buildSearchQuery, formatWebResults, searchWeb } from './web/search.js';
 import { createPerKeyQueue } from './chat-queue.js';
+import {
+  autoCommitPaperGitChanges,
+  capturePaperGitSnapshot,
+  parsePaperGitCommand,
+  runPaperGitCommand,
+  type PaperGitSnapshot,
+} from './paper-git.js';
 import type { ParsedIncomingMessage } from './types.js';
 
 const config = loadConfig();
@@ -651,6 +658,49 @@ async function sendErrorMessage(
   await patchCardMessage(client, messageId, buildErrorCardContent(errorText));
 }
 
+async function sendBridgeCommandResult(
+  client: Lark.Client,
+  chatId: string,
+  senderName: string,
+  text: string,
+  replyMessageId?: string,
+  replyToMessageId?: string,
+): Promise<void> {
+  const chunks = splitLongTextForFeishu(text, config.feishu.maxReplyChars);
+  if (!replyMessageId) {
+    await sendTextMessageChunks(client, chatId, chunks, replyToMessageId);
+    return;
+  }
+
+  if (isTextStreamMode()) {
+    try {
+      await patchTextMessage(client, replyMessageId, chunks[0] ?? text);
+    } catch (error) {
+      log.warn(`桥接命令结果更新失败，改为发送新消息: ${error instanceof Error ? error.message : String(error)}`);
+      await sendTextMessage(client, chatId, chunks[0] ?? text, replyToMessageId);
+    }
+    if (chunks.length > 1) {
+      await sendTextMessageChunks(client, chatId, chunks.slice(1), replyToMessageId);
+    }
+    return;
+  }
+
+  if (isCardToTextMode()) {
+    await sendTextMessageChunks(client, chatId, chunks, replyToMessageId);
+    return;
+  }
+
+  try {
+    await patchStreamingMessage(client, replyMessageId, senderName, chunks[0] ?? text, true);
+  } catch (error) {
+    log.warn(`桥接命令卡片更新失败，改为发送文本消息: ${error instanceof Error ? error.message : String(error)}`);
+    await sendTextMessage(client, chatId, chunks[0] ?? text, replyToMessageId);
+  }
+  if (chunks.length > 1) {
+    await sendTextMessageChunks(client, chatId, chunks.slice(1), replyToMessageId);
+  }
+}
+
 function buildErrorText(message: string): string {
   return message;
 }
@@ -702,6 +752,46 @@ async function processMessage(client: Lark.Client, message: ParsedIncomingMessag
 
   const replyTargetMessageId = resolveReplyToMessageId(message.messageId, message.isDirectMessage);
   const replyMessageId = await sendThinkingMessage(client, message.chatId, message.senderName, replyTargetMessageId);
+  const paperGitCommand = parsePaperGitCommand(message.text);
+  if (paperGitCommand) {
+    try {
+      const result = await runPaperGitCommand(config.paperWorkspace, paperGitCommand);
+      await sendBridgeCommandResult(
+        client,
+        message.chatId,
+        message.senderName,
+        result.text,
+        replyMessageId,
+        replyTargetMessageId,
+      );
+      const now = new Date().toISOString();
+      memory.appendTurn(message.chatId, {
+        role: 'user',
+        text: message.text,
+        timestamp: now,
+        senderId: message.senderId,
+        senderName: message.senderName,
+      });
+      memory.appendTurn(message.chatId, {
+        role: 'assistant',
+        text: result.text,
+        timestamp: now,
+      });
+      log.feishu(`论文 Git 命令完成 message=${message.messageId}`);
+    } catch (error) {
+      const errorText = `论文 Git 命令失败：${error instanceof Error ? error.message : String(error)}`;
+      log.warn(errorText);
+      await sendBridgeCommandResult(
+        client,
+        message.chatId,
+        message.senderName,
+        errorText,
+        replyMessageId,
+        replyTargetMessageId,
+      );
+    }
+    return;
+  }
 
   const history = memory.getTurns(message.chatId);
   const promptHistory = config.memory.includeAgentMessagesInHistory
@@ -785,6 +875,15 @@ async function processMessage(client: Lark.Client, message: ParsedIncomingMessag
   });
 
   const pi = await piClientPromise;
+  let paperGitSnapshot: PaperGitSnapshot = { enabled: false };
+  try {
+    paperGitSnapshot = await capturePaperGitSnapshot(config.paperWorkspace);
+    if (paperGitSnapshot.enabled && paperGitSnapshot.status?.trim()) {
+      log.warn('论文 Git 自动提交将跳过：agent 回合开始前工作区已有未提交改动。');
+    }
+  } catch (error) {
+    log.warn(`论文 Git 自动提交快照失败，将跳过自动提交: ${error instanceof Error ? error.message : String(error)}`);
+  }
   const downloadedPdfAttachments = new Map<string, DownloadedPdfAttachment>();
   const queuedPdfDeliveryJobs = new Map<string, QueuedPdfDeliveryJob>();
   const collectDownloadedPdfAttachment = (event: PiEvent): void => {
@@ -922,6 +1021,34 @@ async function processMessage(client: Lark.Client, message: ParsedIncomingMessag
       Array.from(downloadedPdfAttachments.values()),
       replyTargetMessageId,
     );
+
+    try {
+      const autoGitResult = await autoCommitPaperGitChanges(config.paperWorkspace, paperGitSnapshot, message.text);
+      if (autoGitResult.text) {
+        await sendBridgeCommandResult(
+          client,
+          message.chatId,
+          message.senderName,
+          autoGitResult.text,
+          undefined,
+          replyTargetMessageId,
+        );
+        log.feishu(
+          `论文 Git 自动处理完成 commit=${autoGitResult.didCommit ? 'yes' : 'no'} push=${autoGitResult.didPush ? 'yes' : 'no'}`,
+        );
+      }
+    } catch (error) {
+      const errorText = `论文 Git 自动提交失败：${error instanceof Error ? error.message : String(error)}`;
+      log.warn(errorText);
+      await sendBridgeCommandResult(
+        client,
+        message.chatId,
+        message.senderName,
+        errorText,
+        undefined,
+        replyTargetMessageId,
+      );
+    }
 
     const now = new Date().toISOString();
     memory.appendTurn(message.chatId, {

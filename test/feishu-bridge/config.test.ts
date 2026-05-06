@@ -151,6 +151,30 @@ test('loadConfig controls downloaded PDF delivery to Feishu', () => {
   );
 });
 
+test('loadConfig reads paper Git workspace settings', () => {
+  const cwd = makeTempDir();
+  withEnv(
+    {
+      FEISHU_APP_ID: 'cli-test-app',
+      FEISHU_APP_SECRET: 'cli-test-secret',
+      BRIDGE_PAPER_WORKSPACE_DIR: 'paper-projects/current-paper',
+      BRIDGE_PAPER_GIT_ENABLED: 'false',
+      BRIDGE_PAPER_GIT_MAX_OUTPUT_CHARS: '1234',
+      BRIDGE_PAPER_GIT_AUTO_COMMIT: 'true',
+      BRIDGE_PAPER_GIT_AUTO_PUSH: 'true',
+    },
+    () => {
+      const config = loadConfig(cwd);
+
+      assert.equal(config.paperWorkspace.gitEnabled, false);
+      assert.equal(config.paperWorkspace.dir, path.join(cwd, 'paper-projects', 'current-paper'));
+      assert.equal(config.paperWorkspace.maxGitOutputChars, 1234);
+      assert.equal(config.paperWorkspace.autoCommitEnabled, true);
+      assert.equal(config.paperWorkspace.autoPushEnabled, true);
+    },
+  );
+});
+
 test('loadConfig defaults the bridge to this repository agent RPC entrypoint', () => {
   const cwd = makeTempDir();
   withEnv(

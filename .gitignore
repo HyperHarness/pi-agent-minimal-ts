@@ -8,5 +8,6 @@ dist/
 .codex
 downloads/
 knowledge-base/
+paper-projects/
 scripts/paper-extension-host.cmd
 scripts/paper-extension-host.exe

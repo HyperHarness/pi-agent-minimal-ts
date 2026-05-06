@@ -41,6 +41,13 @@ export interface Config {
   bridge: {
     promptInstruction?: string;
   };
+  paperWorkspace: {
+    gitEnabled: boolean;
+    dir?: string;
+    maxGitOutputChars: number;
+    autoCommitEnabled: boolean;
+    autoPushEnabled: boolean;
+  };
   web: {
     enabled: boolean;
     maxResults: number;
@@ -183,6 +190,13 @@ function getDefaultAgentEntry(cwd: string): string {
   return process.env.PI_AGENT_ENTRY || path.join(cwd, 'dist', 'src', 'pi-agent.js');
 }
 
+function resolveOptionalPath(cwd: string, value: string | undefined): string | undefined {
+  if (!value?.trim()) {
+    return undefined;
+  }
+  return path.isAbsolute(value) ? path.normalize(value) : path.resolve(cwd, value);
+}
+
 export function loadConfig(cwd: string = process.cwd()): Config {
   readEnvFile(cwd);
 
@@ -232,6 +246,13 @@ export function loadConfig(cwd: string = process.cwd()): Config {
     },
     bridge: {
       promptInstruction: process.env.BRIDGE_PROMPT_INSTRUCTION,
+    },
+    paperWorkspace: {
+      gitEnabled: parseBoolean(process.env.BRIDGE_PAPER_GIT_ENABLED, true),
+      dir: resolveOptionalPath(cwd, process.env.BRIDGE_PAPER_WORKSPACE_DIR),
+      maxGitOutputChars: parseNumber(process.env.BRIDGE_PAPER_GIT_MAX_OUTPUT_CHARS, 6000),
+      autoCommitEnabled: parseBoolean(process.env.BRIDGE_PAPER_GIT_AUTO_COMMIT, false),
+      autoPushEnabled: parseBoolean(process.env.BRIDGE_PAPER_GIT_AUTO_PUSH, false),
     },
     web: {
       enabled: parseBoolean(process.env.BRIDGE_WEB_SEARCH_ENABLED, true),
