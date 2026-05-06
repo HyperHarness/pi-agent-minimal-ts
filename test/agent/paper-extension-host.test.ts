@@ -884,6 +884,42 @@ test("handleExtensionHostMessage classifies publisher HTML downloads as manual l
   }
 });
 
+test("handleExtensionHostMessage classifies Science license-denied HTML downloads explicitly", async () => {
+  const workspaceDir = await createWorkspaceDir();
+  const htmlPath = path.join(workspaceDir, "inbox", "science.ado6285.htm");
+
+  try {
+    await mkdir(path.dirname(htmlPath), { recursive: true });
+    await writeFile(
+      htmlPath,
+      "<!doctype html><html><body>Your license does not permit this publication to be downloaded.</body></html>",
+      "utf8"
+    );
+
+    assert.deepEqual(
+      await handleExtensionHostMessage({
+        workspaceDir,
+        message: {
+          type: "register_download",
+          jobId: "job-science-license",
+          articleUrl: "https://www.science.org/doi/10.1126/science.ado6285",
+          source: "science",
+          downloadPath: htmlPath
+        }
+      }),
+      {
+        type: "error",
+        jobId: "job-science-license",
+        code: "publisher_license_not_permitted",
+        message:
+          "Science reports that the current license does not permit this publication to be downloaded. The article webpage may still be readable, but the publisher PDF cannot be downloaded with the current account or institutional license."
+      }
+    );
+  } finally {
+    await rm(workspaceDir, { recursive: true, force: true });
+  }
+});
+
 test("handleExtensionHostMessage returns structured errors for post-read registration failures", async () => {
   const workspaceDir = await createWorkspaceDir();
   const articleUrl = "https://example.com/unwritable-paper";

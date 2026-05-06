@@ -299,13 +299,14 @@ async function fetchWebpageAssets(candidates) {
   return assets;
 }
 
-async function reportJobStatus(job, status, message) {
+async function reportJobStatus(job, status, message, failureCode) {
   return sendNativeMessage({
     type: "job_status",
     jobId: job.jobId,
     status,
     articleUrl: job.articleUrl,
     source: job.source,
+    ...(failureCode ? { failureCode } : {}),
     ...(message ? { message } : {})
   });
 }
@@ -502,7 +503,7 @@ async function registerFetchedPdfDownload(job, pdfUrl, filename) {
         await reportJobStatus(job, "awaiting_user_manual_download", message);
         job.manualDownloadMode = true;
       } else {
-        await reportJobStatus(job, "automatic_download_failed", message);
+        await reportJobStatus(job, "automatic_download_failed", message, nativeResponse.code);
       }
       await persistState();
       return true;
@@ -900,7 +901,7 @@ async function registerCompletedDownload(downloadId) {
           await reportJobStatus(job, "awaiting_user_manual_download", message);
           job.manualDownloadMode = true;
         } else {
-          await reportJobStatus(job, "automatic_download_failed", message);
+          await reportJobStatus(job, "automatic_download_failed", message, response.code);
         }
       }
       await persistState();

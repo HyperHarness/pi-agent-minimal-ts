@@ -10,6 +10,7 @@ import {
   readPaperSection,
   searchPaperText
 } from "../../src/agent/paper-reader/paper-reader.js";
+import { savePaperWebPageParse } from "../../src/agent/paper-reader/engines/webpage.js";
 import {
   searchPaperWiki,
   writePaperWikiPage,
@@ -23,7 +24,6 @@ import {
 } from "../../src/agent/paper-reader/quality.js";
 import { PaperReaderError, type ParsedPaperDocument } from "../../src/agent/paper-reader/types.js";
 import { parsePaperWebPageHtml } from "../../src/agent/paper-webpage-fetch.js";
-import { savePaperWebPageParse } from "../../src/agent/paper-reader/engines/webpage.js";
 
 async function createWorkspace(): Promise<string> {
   const workspace = await mkdtemp(path.join(os.tmpdir(), "pi-paper-reader-"));
@@ -685,7 +685,49 @@ test("parsePaper resolves downloaded paper records", async () => {
     assert.equal(result.paperKey, "arxiv-2401.01234");
     const inspection = await inspectPaper({ workspaceDir: workspace, paperKey: result.paperKey });
     assert.equal(inspection.source?.canonicalId, "2401.01234");
+    assert.equal(inspection.localPdf.hasPdf, true);
+    assert.equal(inspection.localPdf.path, pdfPath);
     assert.equal(inspection.parses.length, 1);
+    assert.equal(inspection.parses[0]?.sourceKind, "pdf");
+    assert.equal(inspection.parses[0]?.sourceSha256, result.pdfSha256);
+  } finally {
+    await rm(workspace, { recursive: true, force: true });
+  }
+});
+
+test("inspectPaper distinguishes webpage parses from downloaded PDFs", async () => {
+  const workspace = await createWorkspace();
+  try {
+    const result = await savePaperWebPageParse({
+      workspaceDir: workspace,
+      extraction: {
+        url: "https://www.science.org/doi/10.1126/sciadv.adp6388",
+        title: "High-performance fault-tolerant quantum computing with many-hypercube codes",
+        markdown: "# Abstract\n\nFull publisher webpage text.",
+        metadata: {
+          authors: []
+        },
+        access: {
+          status: "full_text",
+          signals: []
+        },
+        stats: {
+          chars: 38,
+          wordsApprox: 5,
+          navigationLinesRemoved: 0,
+          extractedFrom: "article"
+        }
+      }
+    });
+
+    const inspection = await inspectPaper({ workspaceDir: workspace, paperKey: result.paperKey });
+
+    assert.equal(inspection.paperKey, "science-10.1126-sciadv.adp6388");
+    assert.equal(inspection.localPdf.hasPdf, false);
+    assert.equal(inspection.localPdf.path, undefined);
+    assert.equal(inspection.parses[0]?.engine, "webpage");
+    assert.equal(inspection.parses[0]?.sourceKind, "webpage");
+    assert.equal(inspection.parses[0]?.sourceSha256, result.pdfSha256);
   } finally {
     await rm(workspace, { recursive: true, force: true });
   }

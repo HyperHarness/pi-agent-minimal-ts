@@ -996,6 +996,61 @@ test("background associates Science manual downloads by publisher URL when tab m
   assert.equal(messagesOf(fakeChrome, "register_download")[0].pdfUrl, pdfUrl);
 });
 
+test("background records Science license-denied PDF responses as automatic download failures", async () => {
+  const job = {
+    jobId: "job-science-license-denied",
+    articleUrl: "https://www.science.org/doi/10.1126/science.ado6285",
+    source: "science"
+  };
+  const pdfUrl = "https://www.science.org/doi/epdf/10.1126/science.ado6285";
+  const fakeChrome = createFakeChrome({
+    jobs: [job],
+    fetchImpl: async () =>
+      new Response(
+        Buffer.from(
+          "<!doctype html><html><body>Your license does not permit this publication to be downloaded.</body></html>"
+        ),
+        {
+          status: 200,
+          headers: { "content-type": "text/html" }
+        }
+      ),
+    nativeHandler(message) {
+      if (message.type === "poll_jobs") {
+        return { type: "jobs", jobs: [job] };
+      }
+      if (message.type === "register_download_bytes") {
+        return {
+          type: "error",
+          jobId: message.jobId,
+          code: "publisher_license_not_permitted",
+          message:
+            "Science reports that the current license does not permit this publication to be downloaded. The article webpage may still be readable, but the publisher PDF cannot be downloaded with the current account or institutional license."
+        };
+      }
+      return { type: "status_ack", jobId: message.jobId, status: message.status };
+    }
+  });
+
+  await importBackground(fakeChrome);
+  fakeChrome.events.onMessage.emit(
+    {
+      type: "paper_page_classified",
+      status: "page_classified",
+      pdfUrl
+    },
+    { tab: { id: 100 } }
+  );
+  await flushAsyncWork();
+
+  const failed = statusMessagesOf(fakeChrome, "automatic_download_failed");
+  assert.equal(failed.length, 1);
+  assert.equal(failed[0].failureCode, "publisher_license_not_permitted");
+  assert.match(failed[0].message, /license does not permit this publication to be downloaded/);
+  assert.equal(statusMessagesOf(fakeChrome, "awaiting_user_manual_download").length, 0);
+  assert.equal(fakeChrome.storage.piAgentPaperDownloaderState.jobs[job.jobId].manualDownloadMode, undefined);
+});
+
 test("background starts automatic download for external direct PDF jobs", async () => {
   const job = {
     jobId: "job-external-pdf",
@@ -1106,6 +1161,7 @@ test("background keeps tab open when native host does not register completed dow
       articleUrl: "https://www.science.org/doi/10.1126/science.adz8659",
       source: "science",
       status: "automatic_download_failed",
+      failureCode: "not_pdf",
       message: "Not a PDF."
     }
   ]);

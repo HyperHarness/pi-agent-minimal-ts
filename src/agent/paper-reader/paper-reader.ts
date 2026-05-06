@@ -1,5 +1,5 @@
 import path from "node:path";
-import { readFile } from "node:fs/promises";
+import { access, readFile } from "node:fs/promises";
 import { createPaperChunks } from "./chunks.js";
 import { parseWithDocling } from "./engines/docling.js";
 import { parseWithOpenDataLoader } from "./engines/opendataloader.js";
@@ -410,8 +410,11 @@ async function readParseSummary(input: {
     const document = JSON.parse(documentText) as ParsedPaperDocument;
     const storedQuality = JSON.parse(qualityText) as PaperParseQualityReport;
     const quality = refreshStoredQuality(document, storedQuality);
+    const sourceKind = input.engine === "webpage" ? "webpage" : "pdf";
     return {
       engine: input.engine,
+      sourceKind,
+      sourceSha256: document.pdfSha256,
       pdfSha256: document.pdfSha256,
       createdAt: document.createdAt,
       markdownPath: path.relative(input.workspaceDir, artifacts.markdownPath),
@@ -423,6 +426,26 @@ async function readParseSummary(input: {
     };
   } catch {
     return undefined;
+  }
+}
+
+async function sourcePdfExists(input: {
+  workspaceDir: string;
+  source: Awaited<ReturnType<typeof readPaperSourceByKey>>;
+}): Promise<boolean> {
+  const source = input.source;
+  if (!source?.pdfPath) {
+    return false;
+  }
+
+  const pdfPath = path.isAbsolute(source.pdfPath)
+    ? source.pdfPath
+    : path.resolve(input.workspaceDir, source.pdfPath);
+  try {
+    await access(pdfPath);
+    return true;
+  } catch {
+    return false;
   }
 }
 
@@ -457,6 +480,11 @@ export async function inspectPaper(options: InspectPaperOptions): Promise<PaperI
   return {
     paperKey,
     ...(source ? { source } : {}),
+    localPdf: {
+      hasPdf: await sourcePdfExists({ workspaceDir: options.workspaceDir, source }),
+      ...(source?.pdfPath ? { path: source.pdfPath } : {}),
+      ...(source?.pdfSha256 ? { sha256: source.pdfSha256 } : {})
+    },
     parses
   };
 }

@@ -81,6 +81,7 @@ export type ExtensionHostMessage =
       status: ExtensionJobStatus;
       articleUrl: string;
       source?: PaperSource;
+      failureCode?: string;
       message?: string;
     };
 
@@ -390,7 +391,7 @@ export function parseExtensionHostMessage(value: unknown): ExtensionHostMessage 
       status: parseExtensionJobStatus(record, "status"),
       articleUrl: parseRequiredString(record, "articleUrl"),
       ...parseOptionalPaperSourceField(record, "source"),
-      ...parseOptionalFields(record, ["message"])
+      ...parseOptionalFields(record, ["failureCode", "message"])
     };
   }
 

@@ -10,6 +10,7 @@ import {
   createPaperExtensionJob,
   createQueuedPaperExtensionBridge
 } from "../../src/agent/paper-extension-bridge.js";
+import { appendPaperDownloadJobEvent } from "../../src/agent/paper-download-jobs.js";
 import {
   resolveExternalPaperPdfPath,
   resolvePaperPdfPath,
@@ -389,6 +390,47 @@ test("downloadPaper returns extension_unavailable when the bridge fails and fall
       failure: {
         code: "extension_unavailable",
         message: "native host unavailable"
+      }
+    });
+  } finally {
+    await rm(workspaceDir, { recursive: true, force: true });
+  }
+});
+
+test("downloadPaper preserves prior publisher license-denied failures from extension jobs", async () => {
+  const workspaceDir = await mkdtemp(path.join(os.tmpdir(), "paper-manager-extension-"));
+  const articleUrl = "https://www.science.org/doi/10.1126/science.ado6285";
+  const message =
+    "Science reports that the current license does not permit this publication to be downloaded. The article webpage may still be readable, but the publisher PDF cannot be downloaded with the current account or institutional license.";
+
+  try {
+    await appendPaperDownloadJobEvent({
+      workspaceDir,
+      event: {
+        jobId: "job-science-license",
+        recordedAt: "2026-05-06T05:00:00.000Z",
+        status: "automatic_download_failed",
+        articleUrl,
+        source: "science",
+        failureCode: "publisher_license_not_permitted",
+        message
+      }
+    });
+
+    const result = await downloadPaper({
+      workspaceDir,
+      url: articleUrl,
+      title: "Beyond-classical computation in quantum simulation",
+      searchArxivImpl: async () => []
+    });
+
+    assert.deepEqual(result, {
+      status: "extension_unavailable",
+      source: "science",
+      articleUrl,
+      failure: {
+        code: "publisher_license_not_permitted",
+        message
       }
     });
   } finally {

@@ -23,6 +23,7 @@ export interface PaperDownloadJobEvent {
   parsePath?: string;
   qualityPath?: string;
   chunksPath?: string;
+  failureCode?: string;
   message?: string;
 }
 
@@ -153,6 +154,7 @@ function parsePaperDownloadJobEvent(value: unknown): PaperDownloadJobEvent | nul
       "parsePath",
       "qualityPath",
       "chunksPath",
+      "failureCode",
       "message"
     ]),
     ...parseOptionalBooleanField(record, "autoClose"),

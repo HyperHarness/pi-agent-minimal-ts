@@ -2267,7 +2267,7 @@ export function createTools(workspaceDir: string, dependencies: ToolDependencies
     name: "inspect_paper",
     label: "Inspect Paper",
     description:
-      "Inspects parsed paper artifacts, including available parser engines, parse quality, and section previews. It does not return the full paper body.",
+      "Inspects parsed paper artifacts, available parser engines, parse quality, localPdf presence, and section previews. A webpage parse is not proof that a PDF was downloaded; check localPdf.hasPdf and parse sourceKind before answering PDF-download questions.",
     parameters: inspectPaperParameters,
     executionMode: "sequential",
     execute: async (_toolCallId: string, args: InspectPaperParameters) => {

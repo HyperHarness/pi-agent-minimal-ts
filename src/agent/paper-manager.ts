@@ -668,6 +668,7 @@ function formatExtensionBridgeFailure(error: unknown): string {
 function toExtensionUnavailablePaperResult(input: {
   source: SupportedPaperSource | "external";
   articleUrl: string;
+  failureCode?: string;
   error?: unknown;
 }): PaperDownloadResult {
   return {
@@ -675,7 +676,7 @@ function toExtensionUnavailablePaperResult(input: {
     source: input.source,
     articleUrl: input.articleUrl,
     failure: {
-      code: "extension_unavailable",
+      code: input.failureCode ?? "extension_unavailable",
       message: formatExtensionBridgeFailure(input.error)
     }
   };
@@ -716,7 +717,7 @@ async function findPriorExtensionDownloadFailure(options: {
     }
 
     return {
-      code: "extension_download_failed",
+      code: matchingJob.failureCode ?? "extension_download_failed",
       message: matchingJob.message ?? "The browser extension downloaded a file that was not a valid PDF."
     };
   } catch {
@@ -1618,6 +1619,7 @@ export async function downloadPaper(options: DownloadPaperOptions): Promise<Pape
     return toExtensionUnavailablePaperResult({
       source: classification.source,
       articleUrl: classification.articleUrl,
+      failureCode: priorExtensionFailure.code,
       error: priorExtensionFailure.message
     });
   }

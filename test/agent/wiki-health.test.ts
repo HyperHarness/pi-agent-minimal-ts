@@ -231,6 +231,53 @@ test("checkWikiHealth accepts ready webpage reading when PDF parsing failed late
   }
 });
 
+test("checkWikiHealth reports publisher webpage-only parses as not PDF-downloaded", async () => {
+  const workspace = await createWorkspace();
+
+  try {
+    const paperKey = "science-10.1126-sciadv.adp6388";
+    const paperDir = path.join(workspace, "knowledge-base", "wiki", "sources", paperKey);
+    const parseDir = path.join(paperDir, "parses", "webpage");
+    await writeJson(path.join(paperDir, "source.json"), {
+      paperKey,
+      source: "science",
+      canonicalId: "10.1126/sciadv.adp6388",
+      articleUrl: "https://www.science.org/doi/10.1126/sciadv.adp6388",
+      title: "High-performance fault-tolerant quantum computing with many-hypercube codes"
+    });
+    await writeText(path.join(parseDir, "document.md"), "# Abstract\n\nFull Science Advances webpage text.");
+    await writeJson(path.join(parseDir, "parse.json"), {
+      paperKey,
+      engine: "webpage",
+      pdfSha256: "webpage-snapshot-sha"
+    });
+    await writeJson(path.join(parseDir, "quality.json"), {
+      status: "good",
+      score: 1,
+      pages: 1,
+      totalTextLength: 66597,
+      emptyPageCount: 0,
+      headingCount: 12,
+      tableCount: 0,
+      figureOrCaptionCount: 10,
+      warnings: []
+    });
+    await writeText(path.join(paperDir, "chunks", "webpage.jsonl"), "{\"id\":\"chunk-1\"}\n");
+
+    const result = await checkWikiHealth({ workspaceDir: workspace });
+
+    assert.equal(result.summary.needs_download, 1);
+    assert.ok(result.issues.some((issue) =>
+      issue.kind === "needs_download" &&
+      issue.paperKey === paperKey &&
+      issue.reason.includes("Webpage parsing is not a successful PDF download")
+    ));
+    assert.equal(result.summary.summary_missing, 1);
+  } finally {
+    await rm(workspace, { recursive: true, force: true });
+  }
+});
+
 test("checkWikiHealth does not report an old low-quality parse when a good parse is available", async () => {
   const workspace = await createWorkspace();
 
@@ -409,7 +456,7 @@ test("checkWikiHealth treats accepted publisher-pending records as non-actionabl
   }
 });
 
-test("checkWikiHealth treats a good webpage parse as usable even when PDF authorization failed", async () => {
+test("checkWikiHealth treats a good webpage parse as readable but not PDF-downloaded", async () => {
   const workspace = await createWorkspace();
 
   try {
@@ -457,7 +504,7 @@ test("checkWikiHealth treats a good webpage parse as usable even when PDF author
     const result = await checkWikiHealth({ workspaceDir: workspace });
 
     assert.equal(result.summary.needs_authorization, 0);
-    assert.equal(result.summary.needs_download, 0);
+    assert.equal(result.summary.needs_download, 1);
     assert.equal(result.summary.low_quality, 0);
     assert.equal(result.summary.summary_missing, 1);
   } finally {

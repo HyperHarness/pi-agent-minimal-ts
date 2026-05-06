@@ -103,8 +103,15 @@ export interface PaperParseResult {
 export interface PaperInspectionResult {
   paperKey: string;
   source?: PaperReaderSource;
+  localPdf: {
+    hasPdf: boolean;
+    path?: string;
+    sha256?: string;
+  };
   parses: Array<{
     engine: ConcretePaperParseEngine;
+    sourceKind: "pdf" | "webpage";
+    sourceSha256: string;
     pdfSha256: string;
     createdAt: string;
     markdownPath: string;

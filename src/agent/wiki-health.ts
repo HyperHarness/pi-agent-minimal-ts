@@ -233,6 +233,14 @@ function recordIsPublisherPending(record: PaperRecord | undefined): boolean {
   return record?.status === "publisher_pending";
 }
 
+function entryIsSupportedPublisher(entry: LocalPaperEntry): boolean {
+  return entry.source === "science" || entry.source === "nature" || entry.source === "aps";
+}
+
+function entryHasOnlyWebpageReading(entry: LocalPaperEntry): boolean {
+  return entry.hasParsedArtifacts && entry.parses.every((parse) => parse.engine === "webpage");
+}
+
 function parseIsLowQuality(parse: LocalPaperParseSummary, threshold: number): boolean {
   return (
     parse.status === "poor" ||
@@ -313,6 +321,22 @@ export async function checkWikiHealth(options: WikiHealthOptions): Promise<WikiH
         entry.status === "downloaded"
           ? "Record is downloaded, but the referenced PDF is missing."
           : `Record status is ${entry.status ?? "unknown"}, not downloaded.`
+      ));
+    }
+
+    if (
+      !usesPreprintFallback &&
+      !isPublisherPending &&
+      !needsAuthorization &&
+      entryIsSupportedPublisher(entry) &&
+      entryHasOnlyWebpageReading(entry) &&
+      !pdfExists
+    ) {
+      issues.push(baseIssue(
+        entry,
+        "needs_download",
+        "medium",
+        "Publisher webpage parsing artifacts exist, but no local PDF file has been downloaded. Webpage parsing is not a successful PDF download."
       ));
     }
 

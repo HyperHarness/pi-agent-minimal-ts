@@ -110,6 +110,7 @@ export async function handleExtensionHostMessage(options: {
         status: message.status,
         articleUrl: message.articleUrl,
         ...(message.source ? { source: message.source } : {}),
+        ...(message.failureCode ? { failureCode: message.failureCode } : {}),
         ...(message.message ? { message: message.message } : {})
       }
     });
@@ -299,6 +300,19 @@ async function registerDownloadedPaper(options: {
       downloadPath,
       bytes: pdfBytes
     })) {
+      if (isPublisherLicenseDownloadDenied({
+        source: options.message.source,
+        bytes: pdfBytes
+      })) {
+        return registrationError({
+          jobId: options.message.jobId,
+          code: "publisher_license_not_permitted",
+          message:
+            `${formatPublisherSource(options.message.source)} reports that the current license does not permit this publication to be downloaded. ` +
+            "The article webpage may still be readable, but the publisher PDF cannot be downloaded with the current account or institutional license."
+        });
+      }
+
       return registrationError({
         jobId: options.message.jobId,
         code: "manual_login_required",
@@ -896,6 +910,40 @@ function isSupportedPublisherHtmlDownload(input: {
     prefix.includes("<html") ||
     prefix.includes("<head") ||
     prefix.includes("<body")
+  );
+}
+
+function normalizeHtmlText(bytes: Buffer): string {
+  return bytes
+    .subarray(0, 128 * 1024)
+    .toString("utf8")
+    .replace(/<script[\s\S]*?<\/script>/gi, " ")
+    .replace(/<style[\s\S]*?<\/style>/gi, " ")
+    .replace(/<[^>]+>/g, " ")
+    .replace(/&nbsp;/gi, " ")
+    .replace(/&amp;/gi, "&")
+    .replace(/&#39;|&apos;/gi, "'")
+    .replace(/&quot;/gi, '"')
+    .replace(/\s+/g, " ")
+    .trim()
+    .toLowerCase();
+}
+
+function isPublisherLicenseDownloadDenied(input: {
+  source: string;
+  bytes: Buffer;
+}): boolean {
+  if (input.source !== "science") {
+    return false;
+  }
+
+  const text = normalizeHtmlText(input.bytes);
+  return (
+    text.includes("your license does not permit this publication to be downloaded") ||
+    (
+      text.includes("license does not permit") &&
+      text.includes("publication to be downloaded")
+    )
   );
 }
 

@@ -2120,6 +2120,9 @@ test("inspect_paper delegates to the injected paper reader dependency and return
     const tool = getInspectPaperTool(workspace, {
       inspectPaper: async (options) => ({
         paperKey: options.paperKey ?? "arxiv-2406.06015",
+        localPdf: {
+          hasPdf: false,
+        },
         parses: [],
       }),
     });
@@ -2130,6 +2133,9 @@ test("inspect_paper delegates to the injected paper reader dependency and return
 
     assert.deepEqual(result.details, {
       paperKey: "arxiv-2406.06015",
+      localPdf: {
+        hasPdf: false,
+      },
       parses: [],
     });
   } finally {
