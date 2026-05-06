@@ -721,7 +721,7 @@ function isCompatiblePublisherPdfUrl(options: {
 
   try {
     const parsedUrl = new URL(options.pdfUrl);
-    const match = parsedUrl.pathname.match(/^\/doi\/epdf\/(.+)$/i);
+    const match = parsedUrl.pathname.match(/^\/doi\/(?:epdf|pdf)\/(.+)$/i);
     return safeDecodeURIComponent(match?.[1] ?? "").replace(/\.pdf$/i, "") === options.canonicalId;
   } catch {
     return false;
@@ -757,8 +757,8 @@ function derivePublisherPdfUrl(options: {
       return undefined;
     }
 
-    parsedUrl.pathname = `/doi/epdf/${match[1]}`;
-    parsedUrl.search = "";
+    parsedUrl.pathname = `/doi/pdf/${match[1]}`;
+    parsedUrl.search = "?download=true";
     parsedUrl.hash = "";
     return parsedUrl.toString();
   }

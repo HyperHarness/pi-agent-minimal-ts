@@ -7,8 +7,8 @@
         return null;
       }
 
-      parsed.pathname = "/doi/epdf/" + match[1];
-      parsed.search = "";
+      parsed.pathname = "/doi/pdf/" + match[1];
+      parsed.search = "?download=true";
       parsed.hash = "";
       return parsed.toString();
     } catch (error) {

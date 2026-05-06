@@ -248,7 +248,7 @@ function isCompatibleDownloadedPaperRecord(record: DownloadedPaperRecord): boole
 
   try {
     const pdfUrl = new URL(record.pdfUrl);
-    const pdfDoiMatch = pdfUrl.pathname.match(/^\/doi\/epdf\/(.+)$/i);
+    const pdfDoiMatch = pdfUrl.pathname.match(/^\/doi\/(?:epdf|pdf)\/(.+)$/i);
     return decodeURIComponent(pdfDoiMatch?.[1] ?? "").replace(/\.pdf$/i, "") === record.canonicalId;
   } catch {
     return false;

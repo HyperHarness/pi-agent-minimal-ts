@@ -434,6 +434,44 @@ test("handleExtensionHostMessage replaces compatible publisher fallback records 
   }
 });
 
+test("handleExtensionHostMessage derives Science direct PDF download URLs", async () => {
+  const workspaceDir = await createWorkspaceDir();
+  const articleUrl = "https://www.science.org/doi/10.1126/sciadv.adp6388";
+  const sourcePdfPath = path.join(workspaceDir, "inbox", "science-advances.pdf");
+
+  try {
+    await writePdf(sourcePdfPath, "%PDF-1.7\nscience advances pdf\n");
+
+    const response = await handleExtensionHostMessage({
+      workspaceDir,
+      now: () => new Date("2026-05-06T10:30:00.000Z"),
+      message: {
+        type: "register_download",
+        jobId: "job-science-advances-manual",
+        articleUrl,
+        source: "science",
+        downloadPath: sourcePdfPath
+      }
+    });
+
+    assert.equal(response.type, "registered");
+    const match = await findDownloadedPaperRecord({
+      workspaceDir,
+      source: "science",
+      canonicalId: "10.1126/sciadv.adp6388",
+      articleUrl
+    });
+
+    assert.equal(match?.record.status, "downloaded");
+    assert.equal(
+      match?.record.pdfUrl,
+      "https://www.science.org/doi/pdf/10.1126/sciadv.adp6388?download=true"
+    );
+  } finally {
+    await rm(workspaceDir, { recursive: true, force: true });
+  }
+});
+
 test("handleExtensionHostMessage reuses compatible downloaded publisher PDF URLs when the message omits one", async () => {
   const workspaceDir = await createWorkspaceDir();
   const articleUrl = "https://www.science.org/doi/10.1126/science.adz8659";

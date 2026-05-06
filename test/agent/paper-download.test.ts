@@ -221,7 +221,7 @@ test("downloadPaperPdf returns output metadata for a successful download", async
   assert.equal(result.publisher, "science");
   assert.equal(result.articleUrl, "https://www.science.org/doi/10.1126/science.adz8659");
   assert.equal(result.finalArticleUrl, "https://www.science.org/doi/10.1126/science.adz8659");
-  assert.equal(result.finalPdfUrl, "https://www.science.org/doi/epdf/10.1126/science.adz8659");
+  assert.equal(result.finalPdfUrl, "https://www.science.org/doi/pdf/10.1126/science.adz8659?download=true");
   assert.equal(downloadedUrl, result.finalPdfUrl);
   assert.equal(downloadedPath, expectedPath);
 });
@@ -250,8 +250,8 @@ test("downloadPaperPdf derives the Science article PDF URL when only supplement 
       }
     });
 
-    assert.equal(result.finalPdfUrl, "https://www.science.org/doi/epdf/10.1126/science.adz8659");
-    assert.equal(downloadedUrl, "https://www.science.org/doi/epdf/10.1126/science.adz8659");
+    assert.equal(result.finalPdfUrl, "https://www.science.org/doi/pdf/10.1126/science.adz8659?download=true");
+    assert.equal(downloadedUrl, "https://www.science.org/doi/pdf/10.1126/science.adz8659?download=true");
   } finally {
     await rm(workspaceDir, { recursive: true, force: true });
   }

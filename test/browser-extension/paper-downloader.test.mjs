@@ -427,7 +427,15 @@ test("publisher helpers extract Nature, Science, and APS PDF candidates", () => 
       ),
       baseUrl: "https://www.science.org/doi/10.1126/science.adz8659"
     }),
-    "https://www.science.org/doi/epdf/10.1126/science.adz8659"
+    "https://www.science.org/doi/pdf/10.1126/science.adz8659?download=true"
+  );
+
+  assert.equal(
+    findSciencePdfCandidate({
+      document: doc("<main>No PDF link</main>"),
+      baseUrl: "https://www.science.org/doi/epdf/10.1126/sciadv.adp6388"
+    }),
+    "https://www.science.org/doi/pdf/10.1126/sciadv.adp6388?download=true"
   );
 
   assert.equal(
@@ -452,7 +460,7 @@ test("manifest declares required MV3 extension shell fields", async () => {
 
   assert.equal(manifest.manifest_version, 3);
   assert.equal(manifest.name, "Pi Agent Paper Downloader");
-  assert.equal(manifest.version, "0.1.20");
+  assert.equal(manifest.version, "0.1.21");
 
   for (const permission of [
     "activeTab",

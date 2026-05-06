@@ -36,7 +36,17 @@ test("resolvePdfPathFromHtml returns a science PDF link from a landing page snip
     </body></html>
   `);
 
-  assert.equal(pdfPath, "/doi/epdf/10.1126/science.adz8659");
+  assert.equal(pdfPath, "/doi/pdf/10.1126/science.adz8659?download=true");
+});
+
+test("resolvePdfPathFromHtml keeps Science direct download links", () => {
+  const pdfPath = resolvePdfPathFromHtml("science", `
+    <html><body>
+      <a href="/doi/pdf/10.1126/sciadv.adp6388?download=true">PDF</a>
+    </body></html>
+  `);
+
+  assert.equal(pdfPath, "/doi/pdf/10.1126/sciadv.adp6388?download=true");
 });
 
 test("resolvePdfPathFromHtml returns a nature PDF link from a landing page snippet", () => {

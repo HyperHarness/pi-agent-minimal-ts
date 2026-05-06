@@ -121,7 +121,7 @@ function resolveFallbackPdfPath(input: {
 }): string | null {
   if (input.publisherId === "science") {
     const doi = extractScienceDoi(input.finalArticleUrl);
-    return doi ? `/doi/epdf/${doi}` : null;
+    return doi ? `/doi/pdf/${doi}?download=true` : null;
   }
 
   if (input.publisherId !== "aps") {
