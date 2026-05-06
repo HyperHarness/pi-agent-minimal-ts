@@ -519,6 +519,7 @@ async function registerSupportedPublisherDownload(options: {
 
   const fileSha256 = createHash("sha256").update(options.pdfBytes).digest("hex");
   const title = normalizeOptionalString(options.message.title);
+  const existingReadingArtifacts = preserveExistingReadingArtifacts(existingRecord?.record);
   const recordPath = await writePaperRecord({
     workspaceDir: options.workspaceDir,
     record: {
@@ -529,8 +530,15 @@ async function registerSupportedPublisherDownload(options: {
       status: "downloaded",
       canonicalId,
       pdfUrl,
-      downloadPath
+      downloadPath,
+      ...existingReadingArtifacts
     }
+  });
+  await restoreWebpageReadingManifestFromJob({
+    workspaceDir: options.workspaceDir,
+    recordPath,
+    message: options.message,
+    recordedAt: options.recordedAt
   });
   const parseResult = await tryParseRegisteredPdf({
     workspaceDir: options.workspaceDir,
@@ -558,6 +566,109 @@ async function registerSupportedPublisherDownload(options: {
     fileSha256,
     ...(title ? { title } : {})
   };
+}
+
+function preserveExistingReadingArtifacts(record: PaperRecord | undefined): Pick<PaperRecord, "webpage" | "reading"> | {} {
+  if (!record) {
+    return {};
+  }
+
+  return {
+    ...(record.webpage ? { webpage: record.webpage } : {}),
+    ...(record.reading?.status === "ready" ? { reading: record.reading } : {})
+  };
+}
+
+async function restoreWebpageReadingManifestFromJob(input: {
+  workspaceDir: string;
+  recordPath: string;
+  message: Extract<ExtensionHostMessage, { type: "register_download" | "register_download_bytes" }>;
+  recordedAt: string;
+}): Promise<void> {
+  const events = await readPaperDownloadJobEvents({ workspaceDir: input.workspaceDir });
+  const webpageEvent = events
+    .slice()
+    .reverse()
+    .find((event) =>
+      event.jobId === input.message.jobId &&
+      event.status === "webpage_snapshot_ready" &&
+      Boolean(event.paperKey) &&
+      Boolean(event.markdownPath) &&
+      Boolean(event.parsePath) &&
+      Boolean(event.qualityPath) &&
+      Boolean(event.chunksPath)
+    );
+  if (
+    !webpageEvent?.paperKey ||
+    !webpageEvent.markdownPath ||
+    !webpageEvent.parsePath ||
+    !webpageEvent.qualityPath ||
+    !webpageEvent.chunksPath
+  ) {
+    return;
+  }
+
+  try {
+    const [parseArtifact, qualityArtifact] = await Promise.all([
+      readJsonFromPortablePath(webpageEvent.parsePath),
+      readJsonFromPortablePath(webpageEvent.qualityPath)
+    ]);
+    await updatePaperRecordParseManifest({
+      workspaceDir: input.workspaceDir,
+      recordPath: input.recordPath,
+      strategy: "webpage",
+      status: "parsed",
+      paperKey: webpageEvent.paperKey,
+      engine: readOptionalString(parseArtifact, "engine") ?? "webpage",
+      sourceSha256: readOptionalString(parseArtifact, "pdfSha256") ?? "webpage",
+      artifacts: {
+        markdownPath: webpageEvent.markdownPath,
+        parsePath: webpageEvent.parsePath,
+        qualityPath: webpageEvent.qualityPath,
+        chunksPath: webpageEvent.chunksPath
+      },
+      quality: {
+        status: readOptionalString(qualityArtifact, "status") ?? "good",
+        score: readOptionalNumber(qualityArtifact, "score") ?? 1,
+        pages: readOptionalNumber(qualityArtifact, "pages") ?? 1,
+        totalTextLength: readOptionalNumber(qualityArtifact, "totalTextLength") ?? 0,
+        warnings: readStringArray(qualityArtifact, "warnings")
+      },
+      updatedAt: webpageEvent.recordedAt || input.recordedAt
+    });
+  } catch {
+    return;
+  }
+}
+
+async function readJsonFromPortablePath(filePath: string): Promise<Record<string, unknown>> {
+  for (const candidatePath of resolveDownloadPathCandidates(filePath)) {
+    try {
+      const parsed = JSON.parse(await readFile(candidatePath, "utf8")) as unknown;
+      return typeof parsed === "object" && parsed !== null && !Array.isArray(parsed)
+        ? parsed as Record<string, unknown>
+        : {};
+    } catch {
+      continue;
+    }
+  }
+
+  throw new Error(`Unable to read JSON artifact: ${filePath}`);
+}
+
+function readOptionalString(record: Record<string, unknown>, key: string): string | undefined {
+  const value = record[key];
+  return typeof value === "string" && value.trim() ? value : undefined;
+}
+
+function readOptionalNumber(record: Record<string, unknown>, key: string): number | undefined {
+  const value = record[key];
+  return typeof value === "number" && Number.isFinite(value) ? value : undefined;
+}
+
+function readStringArray(record: Record<string, unknown>, key: string): string[] {
+  const value = record[key];
+  return Array.isArray(value) ? value.filter((item): item is string => typeof item === "string") : [];
 }
 
 function getExistingDownloadedPdfUrl(options: {

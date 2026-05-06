@@ -145,6 +145,92 @@ test("checkWikiHealth resolves WSL UNC artifact paths before reporting missing f
   }
 });
 
+test("checkWikiHealth accepts ready webpage reading when PDF parsing failed later", async () => {
+  const workspace = await createWorkspace();
+
+  try {
+    const paperKey = "nature-s41567-025-03102-5";
+    const pdfPath = path.join(workspace, "knowledge-base", "raw", "pdfs", `${paperKey}.pdf`);
+    const sourceDir = path.join(workspace, "knowledge-base", "wiki", "sources", paperKey);
+    const parseDir = path.join(sourceDir, "parses", "webpage");
+    const chunksPath = path.join(sourceDir, "chunks", "webpage.jsonl");
+    const markdownPath = path.join(parseDir, "document.md");
+    const parsePath = path.join(parseDir, "parse.json");
+    const qualityPath = path.join(parseDir, "quality.json");
+
+    await writeText(pdfPath, "%PDF-1.4\nexample\n%%EOF\n");
+    await writeText(markdownPath, "# Abstract\n\nFull Nature webpage text.");
+    await writeJson(parsePath, {
+      paperKey,
+      engine: "webpage"
+    });
+    await writeJson(qualityPath, {
+      status: "good",
+      score: 1,
+      pages: 1,
+      totalTextLength: 39982,
+      warnings: []
+    });
+    await writeText(chunksPath, "{\"id\":\"chunk-1\"}\n");
+    await writeJson(path.join(sourceDir, "source.json"), {
+      paperKey,
+      source: "nature",
+      canonicalId: "s41567-025-03102-5",
+      articleUrl: "https://www.nature.com/articles/s41567-025-03102-5",
+      pdfPath
+    });
+    await writeJson(path.join(workspace, "knowledge-base", "records", `${paperKey}.json`), {
+      source: "nature",
+      articleUrl: "https://www.nature.com/articles/s41567-025-03102-5",
+      recordedAt: "2026-05-06T02:51:40.161Z",
+      handlingMethod: "browser_extension",
+      status: "downloaded",
+      canonicalId: "s41567-025-03102-5",
+      downloadPath: pdfPath,
+      reading: {
+        status: "ready",
+        updatedAt: "2026-05-06T02:51:32.244Z",
+        preferredSource: "webpage",
+        paperKey,
+        markdownPath,
+        parsePath,
+        qualityPath,
+        chunksPath
+      },
+      webpage: {
+        status: "parsed",
+        updatedAt: "2026-05-06T02:51:32.244Z",
+        paperKey,
+        engine: "webpage",
+        markdownPath,
+        parsePath,
+        qualityPath,
+        chunksPath,
+        quality: {
+          status: "good",
+          score: 1,
+          pages: 1,
+          totalTextLength: 39982,
+          warnings: []
+        }
+      },
+      parse: {
+        status: "failed",
+        updatedAt: "2026-05-06T02:51:40.177Z",
+        message: "Requested path is outside the workspace or knowledge base."
+      }
+    });
+
+    const result = await checkWikiHealth({ workspaceDir: workspace });
+
+    assert.equal(result.summary.parse_failed, 0);
+    assert.equal(result.summary.parse_missing, 0);
+    assert.ok(!result.issues.some((issue) => issue.kind === "parse_failed" && issue.paperKey === paperKey));
+  } finally {
+    await rm(workspace, { recursive: true, force: true });
+  }
+});
+
 test("checkWikiHealth does not report an old low-quality parse when a good parse is available", async () => {
   const workspace = await createWorkspace();
 

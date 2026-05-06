@@ -98,11 +98,30 @@ function getRecordIndexDir(workspaceDir: string): string {
 }
 
 function toWorkspacePath(input: { workspaceDir: string; filePath: string }): string {
-  const resolvedFilePath = path.resolve(input.filePath);
+  const normalizedFilePath = normalizePortableFilePath(input.filePath);
+  const resolvedFilePath = path.resolve(normalizedFilePath);
   const resolvedWorkspaceDir = path.resolve(input.workspaceDir);
   return isPathInsideDirectory(resolvedWorkspaceDir, resolvedFilePath)
     ? path.relative(resolvedWorkspaceDir, resolvedFilePath)
-    : input.filePath;
+    : normalizedFilePath;
+}
+
+function normalizePortableFilePath(filePath: string): string {
+  const drivePathMatch = filePath.match(/^([A-Za-z]):[\\/](.*)$/);
+  if (drivePathMatch?.[1] && drivePathMatch[2]) {
+    return path.posix.join(
+      "/mnt",
+      drivePathMatch[1].toLowerCase(),
+      ...drivePathMatch[2].split(/[\\/]+/).filter(Boolean)
+    );
+  }
+
+  const uncWslMatch = filePath.match(/^\\\\(?:wsl\.localhost|wsl\$)\\[^\\]+\\(.+)$/i);
+  if (uncWslMatch?.[1]) {
+    return path.posix.join("/", ...uncWslMatch[1].split(/[\\/]+/).filter(Boolean));
+  }
+
+  return filePath.includes("\\") ? filePath.replace(/\\/g, "/") : filePath;
 }
 
 function toQualitySummary(input: PaperRecordParseManifestInput["quality"]) {
@@ -524,16 +543,21 @@ export async function updatePaperRecordReadingFailure(input: PaperRecordReadingF
     updatedAt,
     message: input.message
   };
+  const failedReading: PaperRecordReadingManifest = {
+    status: "failed",
+    updatedAt,
+    preferredSource: input.strategy,
+    reason: input.message
+  };
+  const reading =
+    saved.record.reading?.status === "ready" && saved.record.reading.preferredSource !== input.strategy
+      ? saved.record.reading
+      : failedReading;
   const record: PaperRecord = {
     ...saved.record,
     updatedAt,
     ...(input.strategy === "webpage" ? { webpage: artifact } : { parse: artifact }),
-    reading: {
-      status: "failed",
-      updatedAt,
-      preferredSource: input.strategy,
-      reason: input.message
-    }
+    reading
   };
 
   await writeFile(saved.recordPath, `${JSON.stringify(record, null, 2)}\n`, "utf8");

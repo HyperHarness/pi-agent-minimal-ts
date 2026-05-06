@@ -17,6 +17,7 @@ import {
   resolvePaperPdfPath,
   resolvePaperRecordPath,
   updatePaperRecordParseManifest,
+  updatePaperRecordReadingFailure,
   writePaperRecord
 } from "../../src/agent/paper-store.js";
 import { resolvePaperLibraryPaths } from "../../src/agent/knowledge-base.js";
@@ -398,6 +399,73 @@ test("updatePaperRecordParseManifest records ready markdown artifacts in the pap
   }
 });
 
+test("updatePaperRecordReadingFailure preserves an existing ready webpage reading source", async () => {
+  const workspaceDir = await mkdtemp(path.join(os.tmpdir(), "paper-store-"));
+  const pdfPath = resolvePaperPdfPath({
+    workspaceDir,
+    source: "nature",
+    canonicalId: "s41567-025-03102-5"
+  });
+
+  try {
+    await mkdir(path.dirname(pdfPath), { recursive: true });
+    await writeFile(pdfPath, "%PDF-1.7\npaper\n", "utf8");
+    const recordPath = await writePaperRecord({
+      workspaceDir,
+      record: {
+        source: "nature",
+        articleUrl: "https://www.nature.com/articles/s41567-025-03102-5",
+        recordedAt: "2026-05-06T02:51:32.000Z",
+        handlingMethod: "browser_session",
+        status: "downloaded",
+        canonicalId: "s41567-025-03102-5",
+        pdfUrl: "https://www.nature.com/articles/s41567-025-03102-5.pdf",
+        downloadPath: pdfPath
+      }
+    });
+
+    await updatePaperRecordParseManifest({
+      workspaceDir,
+      recordPath,
+      strategy: "webpage",
+      status: "parsed",
+      paperKey: "nature-s41567-025-03102-5",
+      engine: "webpage",
+      sourceSha256: "webpage-hash",
+      artifacts: {
+        markdownPath: path.join(workspaceDir, "knowledge-base/wiki/sources/nature-s41567-025-03102-5/parses/webpage/document.md"),
+        parsePath: path.join(workspaceDir, "knowledge-base/wiki/sources/nature-s41567-025-03102-5/parses/webpage/parse.json"),
+        qualityPath: path.join(workspaceDir, "knowledge-base/wiki/sources/nature-s41567-025-03102-5/parses/webpage/quality.json"),
+        chunksPath: path.join(workspaceDir, "knowledge-base/wiki/sources/nature-s41567-025-03102-5/chunks/webpage.jsonl")
+      },
+      quality: {
+        status: "good",
+        score: 1,
+        pages: 1,
+        totalTextLength: 1200,
+        warnings: []
+      },
+      updatedAt: "2026-05-06T02:51:33.000Z"
+    });
+
+    await updatePaperRecordReadingFailure({
+      workspaceDir,
+      recordPath,
+      strategy: "pdf_parse",
+      message: "Requested path is outside the workspace or knowledge base.",
+      updatedAt: "2026-05-06T02:51:40.000Z"
+    });
+
+    const saved = await readPaperRecordByPath({ workspaceDir, recordPath });
+    assert.equal(saved?.record.parse?.status, "failed");
+    assert.equal(saved?.record.reading?.status, "ready");
+    assert.equal(saved?.record.reading?.preferredSource, "webpage");
+    assert.equal(saved?.record.reading?.paperKey, "nature-s41567-025-03102-5");
+  } finally {
+    await rm(workspaceDir, { recursive: true, force: true });
+  }
+});
+
 test("resolveExternalPaperPdfPath uses the same URL key as external records", async () => {
   const workspaceDir = await mkdtemp(path.join(os.tmpdir(), "paper-store-"));
 
@@ -491,6 +559,11 @@ test("findDownloadedPaperRecord resolves WSL UNC paths and reuses supported reco
         downloadPath: uncDownloadPath
       }
     });
+    const savedRecord = JSON.parse(await readFile(recordPath, "utf8")) as PaperRecord;
+    assert.equal(
+      savedRecord.download?.pdfPath,
+      path.join("knowledge-base", "raw", "pdfs", "aps-10.1103-4ssz-6ctb.pdf")
+    );
 
     assert.deepEqual(
       await findDownloadedPaperRecord({

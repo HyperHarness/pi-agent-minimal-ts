@@ -296,6 +296,92 @@ test("handleExtensionHostMessage registers PDF bytes fetched by the extension ba
   }
 });
 
+test("handleExtensionHostMessage restores prior webpage reading artifacts when PDF registration follows snapshot", async () => {
+  const workspaceDir = await createWorkspaceDir();
+  const articleUrl = "https://www.nature.com/articles/s41567-025-03102-5";
+  const paperKey = "nature-s41567-025-03102-5";
+  const sourceRoot = path.join(workspaceDir, "knowledge-base", "wiki", "sources", paperKey);
+  const markdownPath = path.join(sourceRoot, "parses", "webpage", "document.md");
+  const parsePath = path.join(sourceRoot, "parses", "webpage", "parse.json");
+  const qualityPath = path.join(sourceRoot, "parses", "webpage", "quality.json");
+  const chunksPath = path.join(sourceRoot, "chunks", "webpage.jsonl");
+  const pdfText = "%PDF-1.7\nshort pdf\n";
+
+  try {
+    await mkdir(path.dirname(markdownPath), { recursive: true });
+    await mkdir(path.dirname(chunksPath), { recursive: true });
+    await writeFile(markdownPath, "# Nature webpage\n\nParsed body.", "utf8");
+    await writeFile(
+      parsePath,
+      JSON.stringify({
+        paperKey,
+        engine: "webpage",
+        pdfSha256: "webpage-sha",
+        pages: 1,
+        elements: []
+      }),
+      "utf8"
+    );
+    await writeFile(
+      qualityPath,
+      JSON.stringify({
+        status: "good",
+        score: 1,
+        pages: 1,
+        totalTextLength: 1200,
+        warnings: []
+      }),
+      "utf8"
+    );
+    await writeFile(chunksPath, "", "utf8");
+    await appendPaperDownloadJobEvent({
+      workspaceDir,
+      event: {
+        jobId: "job-nature-webpage-then-pdf",
+        recordedAt: "2026-05-06T02:51:32.000Z",
+        status: "webpage_snapshot_ready",
+        articleUrl,
+        source: "nature",
+        purpose: "webpage",
+        paperKey,
+        markdownPath,
+        parsePath,
+        qualityPath,
+        chunksPath
+      }
+    });
+
+    const response = await handleExtensionHostMessage({
+      workspaceDir,
+      now: () => new Date("2026-05-06T02:51:40.000Z"),
+      message: {
+        type: "register_download_bytes",
+        jobId: "job-nature-webpage-then-pdf",
+        articleUrl,
+        source: "nature",
+        pdfUrl: `${articleUrl}.pdf`,
+        pdfBase64: Buffer.from(pdfText, "utf8").toString("base64")
+      }
+    });
+
+    assert.equal(response.type, "registered");
+    const recordPath = resolvePaperRecordPath({
+      workspaceDir,
+      source: "nature",
+      canonicalId: "s41567-025-03102-5",
+      articleUrl
+    });
+    const savedRecord = JSON.parse(await readFile(recordPath, "utf8"));
+    assert.equal(savedRecord.webpage.status, "parsed");
+    assert.equal(savedRecord.webpage.paperKey, paperKey);
+    assert.equal(savedRecord.reading.status, "ready");
+    assert.equal(savedRecord.reading.preferredSource, "webpage");
+    assert.equal(savedRecord.reading.paperKey, paperKey);
+  } finally {
+    await rm(workspaceDir, { recursive: true, force: true });
+  }
+});
+
 test("handleExtensionHostMessage replaces compatible publisher fallback records with derived PDF URLs", async () => {
   const workspaceDir = await createWorkspaceDir();
   const articleUrl = "https://www.nature.com/articles/s41586-019-1666-5";

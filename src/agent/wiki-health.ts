@@ -214,6 +214,10 @@ function recordIsQueued(record: PaperRecord | undefined): boolean {
 }
 
 function recordParseFailed(record: PaperRecord | undefined): boolean {
+  if (record?.reading?.status === "ready") {
+    return false;
+  }
+
   return (
     record?.reading?.status === "failed" ||
     record?.webpage?.status === "failed" ||
