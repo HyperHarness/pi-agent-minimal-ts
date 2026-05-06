@@ -279,6 +279,78 @@ test("checkWikiHealth reports publisher webpage-only parses as not PDF-downloade
   }
 });
 
+test("checkWikiHealth preserves Science license failures from extension history when webpage parsing exists", async () => {
+  const workspace = await createWorkspace();
+
+  try {
+    const paperKey = "science-10.1126-science.ado6285";
+    const articleUrl = "https://www.science.org/doi/10.1126/science.ado6285";
+    const paperDir = path.join(workspace, "knowledge-base", "wiki", "sources", paperKey);
+    const parseDir = path.join(paperDir, "parses", "webpage");
+    await writeJson(path.join(paperDir, "source.json"), {
+      paperKey,
+      source: "science",
+      canonicalId: "10.1126/science.ado6285",
+      articleUrl,
+      title: "Beyond-classical computation in quantum simulation"
+    });
+    await writeText(path.join(parseDir, "document.md"), "# Abstract\n\nFull Science webpage text.");
+    await writeJson(path.join(parseDir, "parse.json"), {
+      paperKey,
+      engine: "webpage"
+    });
+    await writeJson(path.join(parseDir, "quality.json"), {
+      status: "good",
+      score: 1,
+      pages: 1,
+      totalTextLength: 65200,
+      emptyPageCount: 0,
+      headingCount: 16,
+      tableCount: 0,
+      figureOrCaptionCount: 5,
+      warnings: []
+    });
+    await writeText(path.join(paperDir, "chunks", "webpage.jsonl"), "{\"id\":\"chunk-1\"}\n");
+    await appendPaperDownloadJobEvent({
+      workspaceDir: workspace,
+      event: {
+        jobId: "paper-science-license",
+        recordedAt: "2026-05-06T05:07:22.400Z",
+        status: "automatic_download_failed",
+        articleUrl,
+        source: "science",
+        failureCode: "publisher_license_not_permitted",
+        message: "Science reports that the current license does not permit this publication to be downloaded. The article webpage may still be readable, but the publisher PDF cannot be downloaded with the current account or institutional license."
+      }
+    });
+    await appendPaperDownloadJobEvent({
+      workspaceDir: workspace,
+      event: {
+        jobId: "paper-science-retry",
+        recordedAt: "2026-05-06T05:49:30.833Z",
+        status: "awaiting_user_manual_download",
+        articleUrl,
+        source: "science",
+        message: "Science returned an HTML page instead of the article PDF. Log in or complete publisher verification in the browser extension tab, then retry the download."
+      }
+    });
+
+    const result = await checkWikiHealth({ workspaceDir: workspace });
+
+    assert.equal(result.summary.needs_authorization, 1);
+    assert.equal(result.summary.needs_download, 0);
+    assert.equal(result.summary.summary_missing, 1);
+    const issue = result.issues.find((candidate) =>
+      candidate.kind === "needs_authorization" && candidate.paperKey === paperKey
+    );
+    assert.ok(issue);
+    assert.equal(issue.severity, "medium");
+    assert.match(issue.reason, /current license does not permit/);
+  } finally {
+    await rm(workspace, { recursive: true, force: true });
+  }
+});
+
 test("checkWikiHealth reports Cloudflare extension handoff as user authorization", async () => {
   const workspace = await createWorkspace();
 
@@ -778,6 +850,51 @@ test("fixWikiHealth skips user-authored or user-authorized repairs with explicit
       item.issue.kind === "summary_missing" &&
       /Summary worker is not configured/i.test(item.message)
     ));
+  } finally {
+    await rm(workspace, { recursive: true, force: true });
+  }
+});
+
+test("fixWikiHealth queues browser extension jobs for authorization issues when an opener is configured", async () => {
+  const workspace = await createWorkspace();
+
+  try {
+    await writeJson(path.join(workspace, "knowledge-base", "records", "science-10.1126-sciadv.adp6388.json"), {
+      source: "science",
+      articleUrl: "https://www.science.org/doi/10.1126/sciadv.adp6388",
+      openedUrl: "https://www.science.org/doi/10.1126/sciadv.adp6388",
+      recordedAt: "2026-05-06T05:13:15.767Z",
+      handlingMethod: "browser_extension",
+      status: "manual_fallback_opened",
+      canonicalId: "10.1126/sciadv.adp6388",
+      title: "High-performance fault-tolerant quantum computing with many-hypercube codes",
+      failure: {
+        code: "manual_login_required",
+        message: "Science requires publisher verification."
+      }
+    });
+
+    const result = await fixWikiHealth({
+      workspaceDir: workspace,
+      issueKinds: ["needs_authorization"],
+      downloadPaperImpl: async (options) => {
+        assert.equal(options.url, "https://www.science.org/doi/10.1126/sciadv.adp6388");
+        assert.equal(options.title, "High-performance fault-tolerant quantum computing with many-hypercube codes");
+        return {
+          status: "extension_job_queued",
+          source: "science",
+          articleUrl: options.url as string,
+          jobId: "paper-science-login",
+          message: "Paper download and webpage snapshot job queued for the browser extension."
+        };
+      }
+    });
+
+    assert.equal(result.attempted, 1);
+    assert.equal(result.queued, 1);
+    assert.equal(result.skipped, 0);
+    assert.equal(result.results[0]?.action, "authorize");
+    assert.match(result.results[0]?.message ?? "", /Browser extension job was queued/);
   } finally {
     await rm(workspace, { recursive: true, force: true });
   }

@@ -11,7 +11,6 @@ import {
 } from "./paper-summary.js";
 import {
   readPaperDownloadJobEvents,
-  summarizePaperDownloadJobs,
   type PaperDownloadJobEvent
 } from "./paper-download-jobs.js";
 import {
@@ -191,7 +190,14 @@ function textIncludesAccessProblem(value: unknown): boolean {
   if (typeof value !== "string") {
     return false;
   }
-  return /authorization|manual[_ -]?login|login|required|access wall|access_limited|access options|credentials|cloudflare|cdn-cgi|captcha|challenge|user verification|publisher verification|verify you are human|verify article access|license does not permit/i.test(value);
+  return /authorization|manual[_ -]?login|login|required|access wall|access_limited|access options|credentials|cloudflare|cdn-cgi|captcha|challenge|user verification|publisher verification|verify you are human|verify article access|license does not permit|license[_ -]?not[_ -]?permitted|publisher_license_not_permitted|publisher pdf cannot be downloaded/i.test(value);
+}
+
+function textIncludesLicenseProblem(value: unknown): boolean {
+  if (typeof value !== "string") {
+    return false;
+  }
+  return /license does not permit|license[_ -]?not[_ -]?permitted|publisher_license_not_permitted|publisher pdf cannot be downloaded/i.test(value);
 }
 
 function recordAuthorizationReason(record: PaperRecord | undefined): string | undefined {
@@ -258,15 +264,18 @@ function normalizeArticleUrl(value: string | undefined): string | undefined {
   }
 }
 
-function findLatestJobForEntry(entry: LocalPaperEntry, jobs: PaperDownloadJobEvent[]): PaperDownloadJobEvent | undefined {
+function jobMatchesEntry(entry: LocalPaperEntry, job: PaperDownloadJobEvent): boolean {
   const articleUrl = normalizeArticleUrl(entry.articleUrl);
-  const matches = jobs.filter((job) =>
+  return Boolean(
     (job.paperKey && job.paperKey === entry.paperKey) ||
     (articleUrl && normalizeArticleUrl(job.articleUrl) === articleUrl)
   );
-  return matches.sort((left, right) =>
+}
+
+function findMatchingJobsForEntry(entry: LocalPaperEntry, jobs: PaperDownloadJobEvent[]): PaperDownloadJobEvent[] {
+  return jobs.filter((job) => jobMatchesEntry(entry, job)).sort((left, right) =>
     Date.parse(right.recordedAt) - Date.parse(left.recordedAt)
-  )[0];
+  );
 }
 
 function jobAuthorizationReason(job: PaperDownloadJobEvent | undefined): string | undefined {
@@ -284,6 +293,17 @@ function jobAuthorizationReason(job: PaperDownloadJobEvent | undefined): string 
     }
   }
   return undefined;
+}
+
+function findAccessProblemJobForEntry(
+  entry: LocalPaperEntry,
+  jobs: PaperDownloadJobEvent[]
+): PaperDownloadJobEvent | undefined {
+  const accessJobs = findMatchingJobsForEntry(entry, jobs).filter((job) => jobAuthorizationReason(job));
+  return accessJobs.find((job) =>
+    textIncludesLicenseProblem(job.failureCode) ||
+    textIncludesLicenseProblem(job.message)
+  ) ?? accessJobs[0];
 }
 
 function entryIsSupportedPublisher(entry: LocalPaperEntry): boolean {
@@ -355,12 +375,11 @@ export async function checkWikiHealth(options: WikiHealthOptions): Promise<WikiH
     status: "all",
     maxResults: Number.MAX_SAFE_INTEGER
   });
-  const jobSummaries = summarizePaperDownloadJobs(await readPaperDownloadJobEvents({ workspaceDir }));
+  const jobEvents = await readPaperDownloadJobEvents({ workspaceDir });
   const issues: WikiHealthIssue[] = [];
 
   for (const entry of localPapers.results) {
     const record = await readRecord(workspaceDir, entry);
-    const latestJob = findLatestJobForEntry(entry, jobSummaries);
     const pdfExists = await pathExists(toWorkspacePath(workspaceDir, entry.pdfPath));
     const usesPreprintFallback = recordUsesPreprintFallback(record);
     const isPublisherPending = recordIsPublisherPending(record);
@@ -369,8 +388,9 @@ export async function checkWikiHealth(options: WikiHealthOptions): Promise<WikiH
     const recordAccessReason = recordAuthorizationReason(record);
     const authorizationReason =
       (recordAccessReason && !hasUsableParsedReading ? recordAccessReason : undefined) ??
-      (!pdfExists ? jobAuthorizationReason(latestJob) : undefined);
+      (!pdfExists ? jobAuthorizationReason(findAccessProblemJobForEntry(entry, jobEvents)) : undefined);
     const needsAuthorization = Boolean(authorizationReason);
+    const authorizationSeverity: WikiHealthSeverity = hasUsableParsedReading ? "medium" : "high";
 
     if (!usesPreprintFallback && !isPublisherPending && !needsAuthorization && !hasUsableParsedReading && (entry.status !== "downloaded" || (entry.status === "downloaded" && !pdfExists))) {
       issues.push(baseIssue(
@@ -403,7 +423,7 @@ export async function checkWikiHealth(options: WikiHealthOptions): Promise<WikiH
       issues.push(baseIssue(
         entry,
         "needs_authorization",
-        "high",
+        authorizationSeverity,
         authorizationReason ?? "Record indicates login, authorization, or access-wall handling is needed."
       ));
     }
@@ -434,7 +454,7 @@ export async function checkWikiHealth(options: WikiHealthOptions): Promise<WikiH
       }
     }
 
-    if (!usesPreprintFallback && !isPublisherPending && !needsAuthorization && hasUsableParsedReading && !entry.hasWikiSummary) {
+    if (!usesPreprintFallback && !isPublisherPending && hasUsableParsedReading && !entry.hasWikiSummary) {
       issues.push(baseIssue(entry, "summary_missing", "low", "Parsed paper has no wiki source summary."));
     }
 
@@ -646,6 +666,78 @@ async function fixByDownload(input: {
   }
 }
 
+async function fixByAuthorization(input: {
+  workspaceDir: string;
+  issue: WikiHealthIssue;
+  downloadPaperImpl?: WikiHealthFixOptions["downloadPaperImpl"];
+  dryRun: boolean;
+}): Promise<WikiHealthFixItem> {
+  if (!input.issue.articleUrl) {
+    return {
+      issue: input.issue,
+      status: "skipped",
+      action: "authorize",
+      message: "Cannot open publisher login because the issue has no articleUrl."
+    };
+  }
+  if (input.dryRun) {
+    return {
+      issue: input.issue,
+      status: "skipped",
+      action: "authorize",
+      message: `Dry run: would open publisher login/download page for ${input.issue.articleUrl}.`
+    };
+  }
+  if (!input.downloadPaperImpl) {
+    return {
+      issue: input.issue,
+      status: "skipped",
+      action: "authorize",
+      message: "Cannot open publisher login automatically because no browser extension download opener is configured."
+    };
+  }
+
+  try {
+    const result = await input.downloadPaperImpl({
+      workspaceDir: input.workspaceDir,
+      url: input.issue.articleUrl,
+      ...(input.issue.title ? { title: input.issue.title } : {})
+    });
+    if (result.status === "downloaded" || result.status === "already_downloaded") {
+      return {
+        issue: input.issue,
+        status: "fixed",
+        action: "authorize",
+        message: `Download is available for ${input.issue.paperKey}.`,
+        details: result
+      };
+    }
+    if (result.status === "extension_job_queued") {
+      return {
+        issue: input.issue,
+        status: "queued",
+        action: "authorize",
+        message: "Browser extension job was queued/opened for publisher login or verification; complete it in the browser, then rerun wiki_health_fix.",
+        details: result
+      };
+    }
+    return {
+      issue: input.issue,
+      status: "skipped",
+      action: "authorize",
+      message: `Publisher login/open attempt did not queue; resulting status is ${result.status}.`,
+      details: result
+    };
+  } catch (error) {
+    return {
+      issue: input.issue,
+      status: "failed",
+      action: "authorize",
+      message: error instanceof Error ? error.message : "Publisher login/open attempt failed."
+    };
+  }
+}
+
 async function fixBySummary(input: {
   workspaceDir: string;
   issue: WikiHealthIssue;
@@ -812,7 +904,12 @@ export async function fixWikiHealth(options: WikiHealthFixOptions): Promise<Wiki
     }
 
     if (issue.kind === "needs_authorization") {
-      results.push(skippedFix(issue, "Requires user login or publisher authorization in the browser; this cannot be completed automatically."));
+      results.push(await fixByAuthorization({
+        workspaceDir,
+        issue,
+        ...(options.downloadPaperImpl ? { downloadPaperImpl: options.downloadPaperImpl } : {}),
+        dryRun: options.dryRun === true
+      }));
       continue;
     }
     if (issue.kind === "queued") {
