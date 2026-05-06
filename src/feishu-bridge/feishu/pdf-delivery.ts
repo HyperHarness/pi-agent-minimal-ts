@@ -16,6 +16,11 @@ export interface QueuedPdfDeliveryJob {
   articleUrl?: string;
 }
 
+export interface CompiledPaperPdfConfig {
+  dir?: string;
+  compiledPdfPath?: string;
+}
+
 function isRecord(value: unknown): value is Record<string, unknown> {
   return typeof value === 'object' && value !== null;
 }
@@ -129,7 +134,7 @@ export function extractPdfAttachmentsFromText(text: string, workspaceDir: string
   const patterns = [
     /\\{2,}wsl(?:\.localhost)?\\[^\s`"'<>]+?\.pdf/gi,
     /(?<![\w.-])\/(?!\/)[^\s`"'<>]+?\.pdf/gi,
-    /\bknowledge-base\/[^\s`"'<>]+?\.pdf/gi,
+    /\b(?:knowledge-base|paper-projects)\/[^\s`"'<>]+?\.pdf/gi,
   ];
 
   for (const pattern of patterns) {
@@ -153,6 +158,46 @@ export function extractPdfAttachmentsFromText(text: string, workspaceDir: string
   }
 
   return attachments;
+}
+
+export function parseCompiledPaperPdfDeliveryCommand(text: string): boolean {
+  const normalized = text
+    .replace(/^@\S+\s+/, '')
+    .replace(/\s+/g, ' ')
+    .trim();
+  if (!normalized) {
+    return false;
+  }
+
+  const mentionsPaperPdf = /(论文|paper|manuscript|main\.pdf|pdf)/i.test(normalized);
+  const asksDelivery =
+    /(发给我|发我|发送给我|发送一下|发一下|传给我|上传给我|把.+发给我|send\s+me|send.+pdf|upload.+pdf)/i.test(
+      normalized,
+    );
+  const compiledHint = /(编译后|编译好的|compiled|main\.pdf|pdf|这个论文|这篇论文)/i.test(normalized);
+
+  return mentionsPaperPdf && asksDelivery && compiledHint;
+}
+
+export function resolveCompiledPaperPdfAttachment(config: CompiledPaperPdfConfig): DownloadedPdfAttachment | null {
+  if (!config.dir) {
+    return null;
+  }
+
+  const configuredPath = config.compiledPdfPath?.trim() || 'manuscript/main.pdf';
+  const resolvedPath = path.isAbsolute(configuredPath)
+    ? path.normalize(configuredPath)
+    : path.resolve(config.dir, configuredPath);
+  if (path.extname(resolvedPath).toLowerCase() !== '.pdf') {
+    return null;
+  }
+
+  return {
+    path: resolvedPath,
+    fileName: path.basename(resolvedPath),
+    status: 'already_downloaded',
+    source: 'paper_workspace',
+  };
 }
 
 export async function resolveDownloadedPdfAttachmentsForQueuedJobs(

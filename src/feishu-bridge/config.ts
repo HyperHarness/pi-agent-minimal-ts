@@ -44,6 +44,7 @@ export interface Config {
   paperWorkspace: {
     gitEnabled: boolean;
     dir?: string;
+    compiledPdfPath: string;
     maxGitOutputChars: number;
     autoCommitEnabled: boolean;
     autoPushEnabled: boolean;
@@ -250,6 +251,7 @@ export function loadConfig(cwd: string = process.cwd()): Config {
     paperWorkspace: {
       gitEnabled: parseBoolean(process.env.BRIDGE_PAPER_GIT_ENABLED, true),
       dir: resolveOptionalPath(cwd, process.env.BRIDGE_PAPER_WORKSPACE_DIR),
+      compiledPdfPath: process.env.BRIDGE_PAPER_COMPILED_PDF_PATH || 'manuscript/main.pdf',
       maxGitOutputChars: parseNumber(process.env.BRIDGE_PAPER_GIT_MAX_OUTPUT_CHARS, 6000),
       autoCommitEnabled: parseBoolean(process.env.BRIDGE_PAPER_GIT_AUTO_COMMIT, false),
       autoPushEnabled: parseBoolean(process.env.BRIDGE_PAPER_GIT_AUTO_PUSH, false),

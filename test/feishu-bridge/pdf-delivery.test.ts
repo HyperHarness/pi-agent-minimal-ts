@@ -7,7 +7,9 @@ import {
   extractDownloadedPdfAttachment,
   extractPdfAttachmentsFromText,
   extractQueuedPdfDeliveryJob,
+  parseCompiledPaperPdfDeliveryCommand,
   resolveDownloadedPdfAttachmentsForQueuedJobs,
+  resolveCompiledPaperPdfAttachment,
 } from '../../src/feishu-bridge/feishu/pdf-delivery.js';
 
 async function createWorkspaceDir(): Promise<string> {
@@ -109,6 +111,7 @@ test('extractPdfAttachmentsFromText resolves PDF paths in final replies', () => 
     [
       '本地 PDF 路径：`\\\\wsl.localhost\\Ubuntu-24.04\\home\\ququan2\\pi-agent-minimal-ts\\knowledge-base\\raw\\pdfs\\nature-s41586-025-09061-4.pdf`',
       '备用：knowledge-base/raw/pdfs/arxiv-2401.01234.pdf',
+      '论文：paper-projects/million-superconducting-qubits/manuscript/main.pdf',
       '解析文本：knowledge-base/wiki/sources/nature/parses/webpage/document.md',
     ].join('\n'),
     '/home/ququan2/pi-agent-minimal-ts',
@@ -125,7 +128,38 @@ test('extractPdfAttachmentsFromText resolves PDF paths in final replies', () => 
       fileName: 'arxiv-2401.01234.pdf',
       status: 'already_downloaded',
     },
+    {
+      path: '/home/ququan2/pi-agent-minimal-ts/paper-projects/million-superconducting-qubits/manuscript/main.pdf',
+      fileName: 'main.pdf',
+      status: 'already_downloaded',
+    },
   ]);
+});
+
+test('parseCompiledPaperPdfDeliveryCommand recognizes compiled paper PDF send requests', () => {
+  assert.equal(parseCompiledPaperPdfDeliveryCommand('@_user_1 把编译后的论文发给我'), true);
+  assert.equal(parseCompiledPaperPdfDeliveryCommand('对，把这个论文发给我'), true);
+  assert.equal(parseCompiledPaperPdfDeliveryCommand('send me the compiled paper pdf'), true);
+  assert.equal(parseCompiledPaperPdfDeliveryCommand('论文 git status'), false);
+  assert.equal(parseCompiledPaperPdfDeliveryCommand('怎么把论文发给别人'), false);
+});
+
+test('resolveCompiledPaperPdfAttachment resolves configured paper PDF path', () => {
+  assert.deepEqual(
+    resolveCompiledPaperPdfAttachment({
+      dir: '/tmp/paper',
+      compiledPdfPath: 'output/paper.pdf',
+    }),
+    {
+      path: '/tmp/paper/output/paper.pdf',
+      fileName: 'paper.pdf',
+      status: 'already_downloaded',
+      source: 'paper_workspace',
+    },
+  );
+
+  assert.equal(resolveCompiledPaperPdfAttachment({ dir: '/tmp/paper', compiledPdfPath: 'main.tex' }), null);
+  assert.equal(resolveCompiledPaperPdfAttachment({ compiledPdfPath: 'main.pdf' }), null);
 });
 
 test('extractPdfAttachmentsFromText handles JSON-escaped WSL paths', () => {

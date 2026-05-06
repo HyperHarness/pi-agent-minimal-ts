@@ -168,9 +168,27 @@ test('loadConfig reads paper Git workspace settings', () => {
 
       assert.equal(config.paperWorkspace.gitEnabled, false);
       assert.equal(config.paperWorkspace.dir, path.join(cwd, 'paper-projects', 'current-paper'));
+      assert.equal(config.paperWorkspace.compiledPdfPath, 'manuscript/main.pdf');
       assert.equal(config.paperWorkspace.maxGitOutputChars, 1234);
       assert.equal(config.paperWorkspace.autoCommitEnabled, true);
       assert.equal(config.paperWorkspace.autoPushEnabled, true);
+    },
+  );
+});
+
+test('loadConfig reads the compiled paper PDF path', () => {
+  const cwd = makeTempDir();
+  withEnv(
+    {
+      FEISHU_APP_ID: 'cli-test-app',
+      FEISHU_APP_SECRET: 'cli-test-secret',
+      BRIDGE_PAPER_WORKSPACE_DIR: 'paper-projects/current-paper',
+      BRIDGE_PAPER_COMPILED_PDF_PATH: 'build/current.pdf',
+    },
+    () => {
+      const config = loadConfig(cwd);
+
+      assert.equal(config.paperWorkspace.compiledPdfPath, 'build/current.pdf');
     },
   );
 });

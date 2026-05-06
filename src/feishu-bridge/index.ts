@@ -26,7 +26,9 @@ import {
   extractDownloadedPdfAttachment,
   extractPdfAttachmentsFromText,
   extractQueuedPdfDeliveryJob,
+  parseCompiledPaperPdfDeliveryCommand,
   resolveDownloadedPdfAttachmentsForQueuedJobs,
+  resolveCompiledPaperPdfAttachment,
   type DownloadedPdfAttachment,
   type QueuedPdfDeliveryJob,
 } from './feishu/pdf-delivery.js';
@@ -391,6 +393,29 @@ async function uploadPdfFile(client: Lark.Client, attachment: DownloadedPdfAttac
   return response.file_key;
 }
 
+async function deliverPdfAttachment(
+  client: Lark.Client,
+  chatId: string,
+  attachment: DownloadedPdfAttachment,
+  replyToMessageId?: string,
+): Promise<string> {
+  const info = await stat(attachment.path);
+  if (!info.isFile()) {
+    throw new Error(`PDF 路径不是文件：${attachment.path}`);
+  }
+
+  if (info.size > config.feishu.maxPdfUploadMb * 1024 * 1024) {
+    throw new Error(
+      `PDF 文件超过飞书上传限制：${attachment.fileName} (${Math.ceil(info.size / 1024 / 1024)} MB > ${config.feishu.maxPdfUploadMb} MB)`,
+    );
+  }
+
+  const fileKey = await uploadPdfFile(client, attachment);
+  await sendFileMessage(client, chatId, fileKey, replyToMessageId);
+  log.feishu(`PDF 文件已发送: ${attachment.fileName}`);
+  return `已发送编译后的论文 PDF：${attachment.fileName}`;
+}
+
 async function sendFileMessage(
   client: Lark.Client,
   chatId: string,
@@ -444,28 +469,9 @@ async function sendDownloadedPdfAttachments(
     return;
   }
 
-  const maxBytes = config.feishu.maxPdfUploadMb * 1024 * 1024;
   for (const attachment of attachments) {
     try {
-      const info = await stat(attachment.path);
-      if (!info.isFile()) {
-        log.warn(`PDF 文件发送跳过，路径不是文件: ${attachment.path}`);
-        continue;
-      }
-
-      if (info.size > maxBytes) {
-        await sendTextMessage(
-          client,
-          chatId,
-          `PDF 文件超过飞书上传限制，未发送：${attachment.fileName} (${Math.ceil(info.size / 1024 / 1024)} MB > ${config.feishu.maxPdfUploadMb} MB)`,
-          replyToMessageId,
-        );
-        continue;
-      }
-
-      const fileKey = await uploadPdfFile(client, attachment);
-      await sendFileMessage(client, chatId, fileKey, replyToMessageId);
-      log.feishu(`PDF 文件已发送: ${attachment.fileName}`);
+      await deliverPdfAttachment(client, chatId, attachment, replyToMessageId);
     } catch (error) {
       const message = error instanceof Error ? error.message : String(error);
       log.warn(`PDF 文件发送失败 ${attachment.fileName}: ${message}`);
@@ -780,6 +786,54 @@ async function processMessage(client: Lark.Client, message: ParsedIncomingMessag
       log.feishu(`论文 Git 命令完成 message=${message.messageId}`);
     } catch (error) {
       const errorText = `论文 Git 命令失败：${error instanceof Error ? error.message : String(error)}`;
+      log.warn(errorText);
+      await sendBridgeCommandResult(
+        client,
+        message.chatId,
+        message.senderName,
+        errorText,
+        replyMessageId,
+        replyTargetMessageId,
+      );
+    }
+    return;
+  }
+
+  if (parseCompiledPaperPdfDeliveryCommand(message.text)) {
+    let resultText = '';
+    try {
+      const attachment = resolveCompiledPaperPdfAttachment(config.paperWorkspace);
+      if (!attachment) {
+        resultText = config.paperWorkspace.dir
+          ? '编译后的论文 PDF 路径未配置为 PDF 文件。请检查 BRIDGE_PAPER_COMPILED_PDF_PATH。'
+          : '论文工作区未配置。请设置 BRIDGE_PAPER_WORKSPACE_DIR。';
+      } else {
+        resultText = await deliverPdfAttachment(client, message.chatId, attachment, replyTargetMessageId);
+      }
+      await sendBridgeCommandResult(
+        client,
+        message.chatId,
+        message.senderName,
+        resultText,
+        replyMessageId,
+        replyTargetMessageId,
+      );
+      const now = new Date().toISOString();
+      memory.appendTurn(message.chatId, {
+        role: 'user',
+        text: message.text,
+        timestamp: now,
+        senderId: message.senderId,
+        senderName: message.senderName,
+      });
+      memory.appendTurn(message.chatId, {
+        role: 'assistant',
+        text: resultText,
+        timestamp: now,
+      });
+      log.feishu(`编译后论文 PDF 发送命令完成 message=${message.messageId}`);
+    } catch (error) {
+      const errorText = `编译后论文 PDF 发送失败：${error instanceof Error ? error.message : String(error)}`;
       log.warn(errorText);
       await sendBridgeCommandResult(
         client,
