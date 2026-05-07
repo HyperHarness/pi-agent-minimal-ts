@@ -172,6 +172,37 @@ test('loadConfig reads paper Git workspace settings', () => {
       assert.equal(config.paperWorkspace.maxGitOutputChars, 1234);
       assert.equal(config.paperWorkspace.autoCommitEnabled, true);
       assert.equal(config.paperWorkspace.autoPushEnabled, true);
+      assert.equal(config.managedRepos.paper.label, '论文');
+      assert.equal(config.managedRepos.paper.gitEnabled, false);
+      assert.equal(config.managedRepos.paper.dir, path.join(cwd, 'paper-projects', 'current-paper'));
+      assert.equal(config.managedRepos.paper.autoCommitEnabled, true);
+      assert.equal(config.managedRepos.paper.autoPushEnabled, true);
+    },
+  );
+});
+
+test('loadConfig reads design managed repo settings', () => {
+  const cwd = makeTempDir();
+  withEnv(
+    {
+      FEISHU_APP_ID: 'cli-test-app',
+      FEISHU_APP_SECRET: 'cli-test-secret',
+      BRIDGE_DESIGN_WORKSPACE_DIR: 'design-workspaces/minimal-demo',
+      BRIDGE_DESIGN_GIT_ENABLED: 'true',
+      BRIDGE_DESIGN_GIT_MAX_OUTPUT_CHARS: '4321',
+      BRIDGE_DESIGN_GIT_AUTO_COMMIT: 'true',
+      BRIDGE_DESIGN_GIT_AUTO_PUSH: 'false',
+    },
+    () => {
+      const config = loadConfig(cwd);
+
+      assert.equal(config.managedRepos.design.label, '设计');
+      assert.equal(config.managedRepos.design.gitEnabled, true);
+      assert.equal(config.managedRepos.design.dir, path.join(cwd, 'design-workspaces', 'minimal-demo'));
+      assert.equal(config.managedRepos.design.maxGitOutputChars, 4321);
+      assert.equal(config.managedRepos.design.autoCommitEnabled, true);
+      assert.equal(config.managedRepos.design.autoPushEnabled, false);
+      assert.equal(config.managedRepos.wiki.gitEnabled, false);
     },
   );
 });

@@ -5,7 +5,9 @@ import { promisify } from 'node:util';
 
 const execFileAsync = promisify(execFile);
 
-export interface PaperGitConfig {
+export interface ManagedRepoConfig {
+  key?: string;
+  label?: string;
   gitEnabled: boolean;
   dir?: string;
   maxGitOutputChars: number;
@@ -13,78 +15,106 @@ export interface PaperGitConfig {
   autoPushEnabled?: boolean;
 }
 
-export type PaperGitAction = 'status' | 'diff' | 'log' | 'commit';
+export type ManagedRepoConfigs = Record<string, ManagedRepoConfig>;
 
-export interface PaperGitCommand {
-  action: PaperGitAction;
+export type RepoGitAction = 'status' | 'diff' | 'log' | 'commit' | 'push';
+
+export interface ManagedRepoCommand {
+  repoKey: string;
+  action: RepoGitAction;
   message?: string;
 }
 
-export interface PaperGitResult {
+export interface ManagedRepoResult {
   handled: true;
   text: string;
 }
 
-export interface PaperGitSnapshot {
+export interface ManagedRepoSnapshot {
   enabled: boolean;
+  repoKey?: string;
+  label?: string;
   workspaceDir?: string;
   status?: string;
   reason?: string;
 }
 
-export interface AutoPaperGitResult {
+export interface AutoManagedRepoResult {
   didCommit: boolean;
   didPush: boolean;
+  repoKey?: string;
   text?: string;
 }
 
-export interface PaperGitDependencies {
+export interface ManagedRepoDependencies {
   runGit?: (cwd: string, args: string[]) => Promise<string>;
 }
 
-const COMMAND_PREFIXES = [/^论文\s*git\b/i, /^paper\s+git\b/i, /^\/paper\s+git\b/i];
 const FEISHU_MENTION_PLACEHOLDER = /@_user_[A-Za-z0-9_-]+/g;
+const REPO_KEY_PATTERN = '[A-Za-z0-9_-]+';
 
 function stripFeishuMentionPlaceholders(text: string): string {
   return text.replace(FEISHU_MENTION_PLACEHOLDER, ' ').replace(/\s+/g, ' ').trim();
 }
 
-function stripCommandPrefix(text: string): string | null {
-  const trimmed = stripFeishuMentionPlaceholders(text);
-  for (const prefix of COMMAND_PREFIXES) {
-    const match = trimmed.match(prefix);
-    if (match) {
-      return trimmed.slice(match[0].length).trim();
-    }
+function normalizeRepoKey(value: string): string {
+  return value.trim().toLowerCase();
+}
+
+function labelForRepo(config: ManagedRepoConfig, fallbackKey = 'repo'): string {
+  return config.label?.trim() || config.key?.trim() || fallbackKey;
+}
+
+function parseAction(value: string): RepoGitAction | null {
+  const action = value.trim().toLowerCase();
+  if (action === 'status' || action === '状态') {
+    return 'status';
+  }
+  if (action === 'diff' || action === '差异' || action === '改动') {
+    return 'diff';
+  }
+  if (action === 'log' || action === '日志' || action === '历史') {
+    return 'log';
+  }
+  if (action === 'commit' || action === '提交') {
+    return 'commit';
+  }
+  if (action === 'push' || action === '推送') {
+    return 'push';
   }
   return null;
 }
 
-export function parsePaperGitCommand(text: string): PaperGitCommand | null {
-  const body = stripCommandPrefix(text);
-  if (body === null) {
-    return null;
+export function parseManagedRepoCommand(text: string): ManagedRepoCommand | null {
+  const trimmed = stripFeishuMentionPlaceholders(text);
+  const actionFirst = trimmed.match(new RegExp(`^/?repo\\s+(\\S+)\\s+(${REPO_KEY_PATTERN})(?:\\s+(.+))?$`, 'is'));
+  if (actionFirst) {
+    const action = parseAction(actionFirst[1]);
+    if (action) {
+      const repoKey = normalizeRepoKey(actionFirst[2]);
+      if (action === 'commit') {
+        const message = stripFeishuMentionPlaceholders(actionFirst[3] ?? '');
+        return message ? { repoKey, action, message } : { repoKey, action: 'status', message: 'usage' };
+      }
+      return { repoKey, action };
+    }
   }
 
-  if (!body || /^(status|状态)$/i.test(body)) {
-    return { action: 'status' };
-  }
-  if (/^(diff|差异|改动)(\s|$)/i.test(body)) {
-    return { action: 'diff' };
-  }
-  if (/^(log|日志|历史)(\s|$)/i.test(body)) {
-    return { action: 'log' };
+  const repoFirst = trimmed.match(new RegExp(`^/?repo\\s+(${REPO_KEY_PATTERN})\\s+(\\S+)(?:\\s+(.+))?$`, 'is'));
+  if (repoFirst) {
+    const action = parseAction(repoFirst[2]);
+    if (!action) {
+      return { repoKey: normalizeRepoKey(repoFirst[1]), action: 'status', message: 'usage' };
+    }
+    const repoKey = normalizeRepoKey(repoFirst[1]);
+    if (action === 'commit') {
+      const message = stripFeishuMentionPlaceholders(repoFirst[3] ?? '');
+      return message ? { repoKey, action, message } : { repoKey, action: 'status', message: 'usage' };
+    }
+    return { repoKey, action };
   }
 
-  const commitMatch = body.match(/^(?:commit|提交)\s+(.+)$/is);
-  if (commitMatch?.[1]?.trim()) {
-    return { action: 'commit', message: stripFeishuMentionPlaceholders(commitMatch[1]) };
-  }
-
-  return {
-    action: 'status',
-    message: 'usage',
-  };
+  return null;
 }
 
 function truncateOutput(text: string, maxChars: number): string {
@@ -100,13 +130,17 @@ function formatCodeBlock(value: string): string {
 }
 
 async function assertGitWorkspace(
-  workspaceDir: string,
+  config: ManagedRepoConfig,
   runGitImpl: (cwd: string, args: string[]) => Promise<string>,
 ): Promise<string> {
-  const resolvedDir = path.resolve(workspaceDir);
+  if (!config.dir) {
+    throw new Error(`${labelForRepo(config)} Git 工作区未配置。`);
+  }
+
+  const resolvedDir = path.resolve(config.dir);
   const info = await stat(resolvedDir);
   if (!info.isDirectory()) {
-    throw new Error(`论文工作区不是目录：${resolvedDir}`);
+    throw new Error(`${labelForRepo(config)} Git 工作区不是目录：${resolvedDir}`);
   }
 
   const realWorkspaceDir = await realpath(resolvedDir);
@@ -134,10 +168,10 @@ async function runGit(cwd: string, args: string[]): Promise<string> {
   }
 }
 
-function validateCommitMessage(message: string | undefined): string {
+function validateCommitMessage(message: string | undefined, noun = 'repo'): string {
   const cleaned = message?.trim();
   if (!cleaned) {
-    throw new Error('提交需要 commit message，例如：论文 git commit 更新引言结构');
+    throw new Error(`提交需要 commit message，例如：repo commit ${noun} 更新说明`);
   }
   if (cleaned.length > 200) {
     throw new Error('commit message 过长，请控制在 200 字符以内。');
@@ -148,72 +182,107 @@ function validateCommitMessage(message: string | undefined): string {
   return cleaned;
 }
 
-function usageText(): string {
+function usageText(configs?: ManagedRepoConfigs): string {
+  const repoKeys = configs && Object.keys(configs).length > 0
+    ? Object.keys(configs).sort().join(', ')
+    : 'paper, design';
   return [
-    '可用论文 Git 命令：',
-    '- 论文 git status',
-    '- 论文 git diff',
-    '- 论文 git log',
-    '- 论文 git commit 更新说明',
+    '可用 Repo Git 命令：',
+    '- repo status paper',
+    '- repo diff design',
+    '- repo log paper',
+    '- repo commit design 更新说明',
+    '- repo push design',
+    `已知 repo：${repoKeys}`,
   ].join('\n');
 }
 
-function buildAutoCommitMessage(prompt: string): string {
+function buildAutoCommitMessage(prompt: string, config: ManagedRepoConfig): string {
   const compacted = stripFeishuMentionPlaceholders(prompt);
   const suffix = compacted ? compacted.slice(0, 120) : 'Feishu agent update';
-  return validateCommitMessage(`Auto paper update: ${suffix}`);
+  const noun = (config.key ?? labelForRepo(config, 'repo')).toLowerCase().replace(/\s+/g, '-');
+  return validateCommitMessage(`Auto ${noun} update: ${suffix}`, config.key ?? 'repo');
 }
 
-export async function capturePaperGitSnapshot(
-  config: PaperGitConfig,
-  dependencies: PaperGitDependencies = {},
-): Promise<PaperGitSnapshot> {
+function resolveManagedRepoConfig(configs: ManagedRepoConfigs, repoKey: string): ManagedRepoConfig | undefined {
+  const normalized = normalizeRepoKey(repoKey);
+  const config = configs[normalized];
+  if (!config) {
+    return undefined;
+  }
+  return { ...config, key: config.key ?? normalized };
+}
+
+export async function captureManagedRepoSnapshot(
+  config: ManagedRepoConfig,
+  dependencies: ManagedRepoDependencies = {},
+): Promise<ManagedRepoSnapshot> {
+  const label = labelForRepo(config);
   if (!config.gitEnabled) {
-    return { enabled: false, reason: '论文 Git 管理未启用。' };
+    return { enabled: false, repoKey: config.key, label, reason: `${label} Git 管理未启用。` };
   }
   if (!config.autoCommitEnabled) {
-    return { enabled: false, reason: '论文 Git 自动提交未启用。' };
+    return { enabled: false, repoKey: config.key, label, reason: `${label} Git 自动提交未启用。` };
   }
   if (!config.dir) {
-    return { enabled: false, reason: '论文 Git 工作区未配置。' };
+    return { enabled: false, repoKey: config.key, label, reason: `${label} Git 工作区未配置。` };
   }
 
   const runGitImpl = dependencies.runGit ?? runGit;
-  const workspaceDir = await assertGitWorkspace(config.dir, runGitImpl);
+  const workspaceDir = await assertGitWorkspace(config, runGitImpl);
   const status = await runGitImpl(workspaceDir, ['status', '--porcelain']);
   return {
     enabled: true,
+    repoKey: config.key,
+    label,
     workspaceDir,
     status,
   };
 }
 
-export async function autoCommitPaperGitChanges(
-  config: PaperGitConfig,
-  snapshot: PaperGitSnapshot,
+export async function captureManagedRepoSnapshots(
+  configs: ManagedRepoConfigs,
+  dependencies: ManagedRepoDependencies = {},
+): Promise<ManagedRepoSnapshot[]> {
+  const snapshots: ManagedRepoSnapshot[] = [];
+  for (const [repoKey, rawConfig] of Object.entries(configs)) {
+    const config = { ...rawConfig, key: rawConfig.key ?? repoKey };
+    if (!config.autoCommitEnabled) {
+      continue;
+    }
+    snapshots.push(await captureManagedRepoSnapshot(config, dependencies));
+  }
+  return snapshots;
+}
+
+export async function autoCommitManagedRepoChanges(
+  config: ManagedRepoConfig,
+  snapshot: ManagedRepoSnapshot,
   prompt: string,
-  dependencies: PaperGitDependencies = {},
-): Promise<AutoPaperGitResult> {
+  dependencies: ManagedRepoDependencies = {},
+): Promise<AutoManagedRepoResult> {
   if (!snapshot.enabled || !snapshot.workspaceDir) {
-    return { didCommit: false, didPush: false };
+    return { didCommit: false, didPush: false, repoKey: snapshot.repoKey };
   }
 
   const runGitImpl = dependencies.runGit ?? runGit;
   const maxChars = Math.max(1000, config.maxGitOutputChars);
+  const label = labelForRepo(config, snapshot.label ?? snapshot.repoKey ?? 'repo');
   if (snapshot.status?.trim()) {
     return {
       didCommit: false,
       didPush: false,
-      text: '论文 Git 自动提交跳过：agent 回合开始前工作区已有未提交改动，请先手动检查或提交。',
+      repoKey: snapshot.repoKey,
+      text: `${label} Git 自动提交跳过：agent 回合开始前工作区已有未提交改动，请先手动检查或提交。`,
     };
   }
 
   const afterStatus = await runGitImpl(snapshot.workspaceDir, ['status', '--porcelain']);
   if (!afterStatus.trim()) {
-    return { didCommit: false, didPush: false };
+    return { didCommit: false, didPush: false, repoKey: snapshot.repoKey };
   }
 
-  const commitMessage = buildAutoCommitMessage(prompt);
+  const commitMessage = buildAutoCommitMessage(prompt, config);
   await runGitImpl(snapshot.workspaceDir, ['add', '-A']);
   const commitOutput = await runGitImpl(snapshot.workspaceDir, ['commit', '-m', commitMessage]);
   let didPush = false;
@@ -229,7 +298,7 @@ export async function autoCommitPaperGitChanges(
   }
 
   const lines = [
-    config.autoPushEnabled && didPush ? '论文 Git 已自动提交并推送。' : '论文 Git 已自动提交，未自动推送。',
+    config.autoPushEnabled && didPush ? `${label} Git 已自动提交并推送。` : `${label} Git 已自动提交，未自动推送。`,
     formatCodeBlock(truncateOutput(commitOutput, maxChars)),
   ];
   if (pushOutput.trim()) {
@@ -242,49 +311,85 @@ export async function autoCommitPaperGitChanges(
   return {
     didCommit: true,
     didPush,
+    repoKey: snapshot.repoKey,
     text: lines.join('\n'),
   };
 }
 
-export async function runPaperGitCommand(
-  config: PaperGitConfig,
-  command: PaperGitCommand,
-  dependencies: PaperGitDependencies = {},
-): Promise<PaperGitResult> {
-  if (command.message === 'usage') {
-    return { handled: true, text: usageText() };
+export async function autoCommitManagedRepos(
+  configs: ManagedRepoConfigs,
+  snapshots: ManagedRepoSnapshot[],
+  prompt: string,
+  dependencies: ManagedRepoDependencies = {},
+): Promise<AutoManagedRepoResult[]> {
+  const results: AutoManagedRepoResult[] = [];
+  for (const snapshot of snapshots) {
+    if (!snapshot.repoKey) {
+      continue;
+    }
+    const config = resolveManagedRepoConfig(configs, snapshot.repoKey);
+    if (!config) {
+      continue;
+    }
+    results.push(await autoCommitManagedRepoChanges(config, snapshot, prompt, dependencies));
   }
+  return results;
+}
+
+export async function runManagedRepoCommand(
+  configs: ManagedRepoConfigs,
+  command: ManagedRepoCommand,
+  dependencies: ManagedRepoDependencies = {},
+): Promise<ManagedRepoResult> {
+  if (command.message === 'usage') {
+    return { handled: true, text: usageText(configs) };
+  }
+
+  const config = resolveManagedRepoConfig(configs, command.repoKey);
+  if (!config) {
+    return {
+      handled: true,
+      text: `未知 repo：${command.repoKey}\n\n${usageText(configs)}`,
+    };
+  }
+
+  const label = labelForRepo(config, command.repoKey);
   if (!config.gitEnabled) {
-    return { handled: true, text: '论文 Git 管理未启用：BRIDGE_PAPER_GIT_ENABLED=false。' };
+    return { handled: true, text: `${label} Git 管理未启用。` };
   }
   if (!config.dir) {
-    return { handled: true, text: '论文 Git 工作区未配置。请设置 BRIDGE_PAPER_WORKSPACE_DIR。' };
+    return { handled: true, text: `${label} Git 工作区未配置。` };
   }
 
   const runGitImpl = dependencies.runGit ?? runGit;
-  const workspaceDir = await assertGitWorkspace(config.dir, runGitImpl);
+  const workspaceDir = await assertGitWorkspace(config, runGitImpl);
   const maxChars = Math.max(1000, config.maxGitOutputChars);
 
   if (command.action === 'status') {
     const output = await runGitImpl(workspaceDir, ['status', '--short', '--branch']);
-    return { handled: true, text: `论文 Git 状态：\n${formatCodeBlock(truncateOutput(output, maxChars))}` };
+    return { handled: true, text: `${label} Git 状态：\n${formatCodeBlock(truncateOutput(output, maxChars))}` };
   }
 
   if (command.action === 'diff') {
     const output = await runGitImpl(workspaceDir, ['diff', '--stat']);
     const detail = output || '当前没有未提交 diff。';
-    return { handled: true, text: `论文 Git 改动摘要：\n${formatCodeBlock(truncateOutput(detail, maxChars))}` };
+    return { handled: true, text: `${label} Git 改动摘要：\n${formatCodeBlock(truncateOutput(detail, maxChars))}` };
   }
 
   if (command.action === 'log') {
     const output = await runGitImpl(workspaceDir, ['log', '--oneline', '-n', '8']);
-    return { handled: true, text: `论文 Git 最近提交：\n${formatCodeBlock(truncateOutput(output, maxChars))}` };
+    return { handled: true, text: `${label} Git 最近提交：\n${formatCodeBlock(truncateOutput(output, maxChars))}` };
   }
 
-  const commitMessage = validateCommitMessage(command.message);
+  if (command.action === 'push') {
+    const output = await runGitImpl(workspaceDir, ['push']);
+    return { handled: true, text: `${label} Git 推送完成：\n${formatCodeBlock(truncateOutput(output, maxChars))}` };
+  }
+
+  const commitMessage = validateCommitMessage(command.message, command.repoKey);
   const beforeStatus = await runGitImpl(workspaceDir, ['status', '--porcelain']);
   if (!beforeStatus.trim()) {
-    return { handled: true, text: '论文 Git 工作区没有可提交的改动。' };
+    return { handled: true, text: `${label} Git 工作区没有可提交的改动。` };
   }
 
   await runGitImpl(workspaceDir, ['add', '-A']);
@@ -293,7 +398,7 @@ export async function runPaperGitCommand(
   return {
     handled: true,
     text: [
-      '论文 Git 提交完成。',
+      `${label} Git 提交完成。`,
       formatCodeBlock(truncateOutput(commitOutput, maxChars)),
       '当前状态：',
       formatCodeBlock(truncateOutput(afterStatus, maxChars)),

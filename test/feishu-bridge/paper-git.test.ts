@@ -4,49 +4,129 @@ import { mkdtemp, rm } from 'node:fs/promises';
 import os from 'node:os';
 import path from 'node:path';
 import {
-  autoCommitPaperGitChanges,
-  capturePaperGitSnapshot,
-  parsePaperGitCommand,
-  runPaperGitCommand,
+  autoCommitManagedRepoChanges,
+  captureManagedRepoSnapshot,
+  parseManagedRepoCommand,
+  runManagedRepoCommand,
 } from '../../src/feishu-bridge/paper-git.js';
 
-test('parsePaperGitCommand recognizes bridge paper git commands', () => {
-  assert.deepEqual(parsePaperGitCommand('论文 git status'), { action: 'status' });
-  assert.deepEqual(parsePaperGitCommand('论文git状态'), { action: 'status' });
-  assert.deepEqual(parsePaperGitCommand('/paper git diff'), { action: 'diff' });
-  assert.deepEqual(parsePaperGitCommand('paper git log'), { action: 'log' });
-  assert.deepEqual(parsePaperGitCommand('论文 git commit 更新引言'), {
+test('parseManagedRepoCommand recognizes generic repo commands', () => {
+  assert.deepEqual(parseManagedRepoCommand('repo status paper'), { repoKey: 'paper', action: 'status' });
+  assert.deepEqual(parseManagedRepoCommand('repo paper status'), { repoKey: 'paper', action: 'status' });
+  assert.deepEqual(parseManagedRepoCommand('/repo diff design'), { repoKey: 'design', action: 'diff' });
+  assert.deepEqual(parseManagedRepoCommand('repo commit design 添加频率规划 demo'), {
+    repoKey: 'design',
     action: 'commit',
-    message: '更新引言',
+    message: '添加频率规划 demo',
   });
-  assert.deepEqual(parsePaperGitCommand('@_user_1 论文 git commit 更新引言'), {
-    action: 'commit',
-    message: '更新引言',
-  });
-  assert.deepEqual(parsePaperGitCommand('论文 git commit @_user_1 更新引言'), {
-    action: 'commit',
-    message: '更新引言',
-  });
-  assert.equal(parsePaperGitCommand('请 wiki agent 修改论文'), null);
+  assert.deepEqual(parseManagedRepoCommand('repo push design'), { repoKey: 'design', action: 'push' });
+  assert.equal(parseManagedRepoCommand('设计 git status'), null);
+  assert.equal(parseManagedRepoCommand('论文 git status'), null);
+  assert.equal(parseManagedRepoCommand('请 wiki agent 修改论文'), null);
 });
 
-test('runPaperGitCommand reports unconfigured workspace without starting git', async () => {
+test('runManagedRepoCommand returns design status with the configured workspace', async () => {
+  const workspaceDir = await mkdtemp(path.join(os.tmpdir(), 'design-git-workspace-'));
+  try {
+    const calls: string[][] = [];
+    const result = await runManagedRepoCommand(
+      {
+        design: {
+          key: 'design',
+          label: '设计',
+          gitEnabled: true,
+          dir: workspaceDir,
+          maxGitOutputChars: 6000,
+        },
+      },
+      { repoKey: 'design', action: 'status' },
+      {
+        runGit: async (_cwd, args) => {
+          calls.push(args);
+          return args[0] === 'status' ? '## main\n M src/frequency_plan.py' : workspaceDir;
+        },
+      },
+    );
+
+    assert.match(result.text, /设计 Git 状态/);
+    assert.match(result.text, /M src\/frequency_plan\.py/);
+    assert.deepEqual(calls, [
+      ['rev-parse', '--show-toplevel'],
+      ['status', '--short', '--branch'],
+    ]);
+  } finally {
+    await rm(workspaceDir, { recursive: true, force: true });
+  }
+});
+
+test('runManagedRepoCommand pushes a managed repo through controlled git args', async () => {
+  const workspaceDir = await mkdtemp(path.join(os.tmpdir(), 'design-git-workspace-'));
+  try {
+    const calls: string[][] = [];
+    const result = await runManagedRepoCommand(
+      {
+        design: {
+          key: 'design',
+          label: '设计',
+          gitEnabled: true,
+          dir: workspaceDir,
+          maxGitOutputChars: 6000,
+        },
+      },
+      { repoKey: 'design', action: 'push' },
+      {
+        runGit: async (_cwd, args) => {
+          calls.push(args);
+          return args[0] === 'push' ? 'pushed' : workspaceDir;
+        },
+      },
+    );
+
+    assert.match(result.text, /设计 Git 推送完成/);
+    assert.deepEqual(calls, [
+      ['rev-parse', '--show-toplevel'],
+      ['push'],
+    ]);
+  } finally {
+    await rm(workspaceDir, { recursive: true, force: true });
+  }
+});
+
+test('runManagedRepoCommand reports unconfigured paper workspace without starting git', async () => {
   assert.deepEqual(
-    await runPaperGitCommand({ gitEnabled: true, maxGitOutputChars: 6000 }, { action: 'status' }),
+    await runManagedRepoCommand(
+      {
+        paper: {
+          key: 'paper',
+          label: '论文',
+          gitEnabled: true,
+          maxGitOutputChars: 6000,
+        },
+      },
+      { repoKey: 'paper', action: 'status' },
+    ),
     {
       handled: true,
-      text: '论文 Git 工作区未配置。请设置 BRIDGE_PAPER_WORKSPACE_DIR。',
+      text: '论文 Git 工作区未配置。',
     },
   );
 });
 
-test('runPaperGitCommand returns status with the configured workspace', async () => {
+test('runManagedRepoCommand returns paper status with the configured workspace', async () => {
   const workspaceDir = await mkdtemp(path.join(os.tmpdir(), 'paper-git-workspace-'));
   try {
     const calls: string[][] = [];
-    const result = await runPaperGitCommand(
-      { gitEnabled: true, dir: workspaceDir, maxGitOutputChars: 6000 },
-      { action: 'status' },
+    const result = await runManagedRepoCommand(
+      {
+        paper: {
+          key: 'paper',
+          label: '论文',
+          gitEnabled: true,
+          dir: workspaceDir,
+          maxGitOutputChars: 6000,
+        },
+      },
+      { repoKey: 'paper', action: 'status' },
       {
         runGit: async (_cwd, args) => {
           calls.push(args);
@@ -66,13 +146,21 @@ test('runPaperGitCommand returns status with the configured workspace', async ()
   }
 });
 
-test('runPaperGitCommand commits all workspace changes through controlled git args', async () => {
+test('runManagedRepoCommand commits all paper workspace changes through controlled git args', async () => {
   const workspaceDir = await mkdtemp(path.join(os.tmpdir(), 'paper-git-workspace-'));
   try {
     const calls: string[][] = [];
-    const commit = await runPaperGitCommand(
-      { gitEnabled: true, dir: workspaceDir, maxGitOutputChars: 6000 },
-      { action: 'commit', message: '初始化论文草稿' },
+    const commit = await runManagedRepoCommand(
+      {
+        paper: {
+          key: 'paper',
+          label: '论文',
+          gitEnabled: true,
+          dir: workspaceDir,
+          maxGitOutputChars: 6000,
+        },
+      },
+      { repoKey: 'paper', action: 'commit', message: '初始化论文草稿' },
       {
         runGit: async (_cwd, args) => {
           calls.push(args);
@@ -104,9 +192,11 @@ test('runPaperGitCommand commits all workspace changes through controlled git ar
   }
 });
 
-test('capturePaperGitSnapshot is disabled until auto commit is enabled', async () => {
+test('captureManagedRepoSnapshot is disabled until auto commit is enabled', async () => {
   assert.deepEqual(
-    await capturePaperGitSnapshot({
+    await captureManagedRepoSnapshot({
+      key: 'paper',
+      label: '论文',
       gitEnabled: true,
       dir: '/not/used',
       maxGitOutputChars: 6000,
@@ -114,23 +204,28 @@ test('capturePaperGitSnapshot is disabled until auto commit is enabled', async (
     }),
     {
       enabled: false,
+      repoKey: 'paper',
+      label: '论文',
       reason: '论文 Git 自动提交未启用。',
     },
   );
 });
 
-test('autoCommitPaperGitChanges commits and pushes when a clean snapshot becomes dirty', async () => {
+test('autoCommitManagedRepoChanges commits and pushes when a clean paper snapshot becomes dirty', async () => {
   const workspaceDir = await mkdtemp(path.join(os.tmpdir(), 'paper-git-workspace-'));
   try {
     const calls: string[][] = [];
-    const snapshot = await capturePaperGitSnapshot(
-      {
-        gitEnabled: true,
-        dir: workspaceDir,
-        maxGitOutputChars: 6000,
-        autoCommitEnabled: true,
-        autoPushEnabled: true,
-      },
+    const config = {
+      key: 'paper',
+      label: '论文',
+      gitEnabled: true,
+      dir: workspaceDir,
+      maxGitOutputChars: 6000,
+      autoCommitEnabled: true,
+      autoPushEnabled: true,
+    };
+    const snapshot = await captureManagedRepoSnapshot(
+      config,
       {
         runGit: async (_cwd, args) => {
           calls.push(args);
@@ -139,14 +234,8 @@ test('autoCommitPaperGitChanges commits and pushes when a clean snapshot becomes
       },
     );
 
-    const result = await autoCommitPaperGitChanges(
-      {
-        gitEnabled: true,
-        dir: workspaceDir,
-        maxGitOutputChars: 6000,
-        autoCommitEnabled: true,
-        autoPushEnabled: true,
-      },
+    const result = await autoCommitManagedRepoChanges(
+      config,
       snapshot,
       '@_user_1 请修改论文引言',
       {
@@ -182,9 +271,64 @@ test('autoCommitPaperGitChanges commits and pushes when a clean snapshot becomes
   }
 });
 
-test('autoCommitPaperGitChanges skips when the paper repo was dirty before the agent turn', async () => {
-  const result = await autoCommitPaperGitChanges(
+test('autoCommitManagedRepoChanges uses repo-specific labels and commit messages', async () => {
+  const workspaceDir = await mkdtemp(path.join(os.tmpdir(), 'design-git-workspace-'));
+  try {
+    const calls: string[][] = [];
+    const config = {
+      key: 'design',
+      label: '设计',
+      gitEnabled: true,
+      dir: workspaceDir,
+      maxGitOutputChars: 6000,
+      autoCommitEnabled: true,
+      autoPushEnabled: false,
+    };
+    const snapshot = await captureManagedRepoSnapshot(config, {
+      runGit: async (_cwd, args) => {
+        calls.push(args);
+        return '';
+      },
+    });
+
+    const result = await autoCommitManagedRepoChanges(
+      config,
+      snapshot,
+      '@_user_1 请增加 frequency planning demo',
+      {
+        runGit: async (_cwd, args) => {
+          calls.push(args);
+          if (args[0] === 'status') {
+            return ' M src/frequency_plan.py';
+          }
+          if (args[0] === 'commit') {
+            return '[main 3456789] Auto design update: 请增加 frequency planning demo';
+          }
+          return '';
+        },
+      },
+    );
+
+    assert.equal(result.didCommit, true);
+    assert.equal(result.didPush, false);
+    assert.match(result.text ?? '', /设计 Git 已自动提交/);
+    assert.deepEqual(calls, [
+      ['rev-parse', '--show-toplevel'],
+      ['status', '--porcelain'],
+      ['status', '--porcelain'],
+      ['add', '-A'],
+      ['commit', '-m', 'Auto design update: 请增加 frequency planning demo'],
+    ]);
+  } finally {
+    await rm(workspaceDir, { recursive: true, force: true });
+  }
+});
+
+test('autoCommitManagedRepoChanges skips when the paper repo was dirty before the agent turn', async () => {
+  const result = await autoCommitManagedRepoChanges(
     {
+      key: 'paper',
+      label: '论文',
       gitEnabled: true,
       dir: '/not/used',
       maxGitOutputChars: 6000,

@@ -49,6 +49,15 @@ export interface Config {
     autoCommitEnabled: boolean;
     autoPushEnabled: boolean;
   };
+  managedRepos: Record<string, {
+    key: string;
+    label: string;
+    gitEnabled: boolean;
+    dir?: string;
+    maxGitOutputChars: number;
+    autoCommitEnabled: boolean;
+    autoPushEnabled: boolean;
+  }>;
   web: {
     enabled: boolean;
     maxResults: number;
@@ -209,6 +218,46 @@ export function loadConfig(cwd: string = process.cwd()): Config {
   const piBaseUrl = validateUrl(getPiBaseUrl(), 'PI_BASE_URL/OPENAI_BASE_URL');
   const openAiApiKey = validateHeaderValue(getEnvVar('OPENAI_API_KEY'), 'OPENAI_API_KEY');
 
+  const paperWorkspace = {
+    gitEnabled: parseBoolean(process.env.BRIDGE_PAPER_GIT_ENABLED, true),
+    dir: resolveOptionalPath(cwd, process.env.BRIDGE_PAPER_WORKSPACE_DIR),
+    compiledPdfPath: process.env.BRIDGE_PAPER_COMPILED_PDF_PATH || 'manuscript/main.pdf',
+    maxGitOutputChars: parseNumber(process.env.BRIDGE_PAPER_GIT_MAX_OUTPUT_CHARS, 6000),
+    autoCommitEnabled: parseBoolean(process.env.BRIDGE_PAPER_GIT_AUTO_COMMIT, false),
+    autoPushEnabled: parseBoolean(process.env.BRIDGE_PAPER_GIT_AUTO_PUSH, false),
+  };
+  const designRepo = {
+    key: 'design',
+    label: '设计',
+    gitEnabled: parseBoolean(process.env.BRIDGE_DESIGN_GIT_ENABLED, true),
+    dir: resolveOptionalPath(cwd, process.env.BRIDGE_DESIGN_WORKSPACE_DIR),
+    maxGitOutputChars: parseNumber(process.env.BRIDGE_DESIGN_GIT_MAX_OUTPUT_CHARS, 6000),
+    autoCommitEnabled: parseBoolean(process.env.BRIDGE_DESIGN_GIT_AUTO_COMMIT, false),
+    autoPushEnabled: parseBoolean(process.env.BRIDGE_DESIGN_GIT_AUTO_PUSH, false),
+  };
+  const wikiRepo = {
+    key: 'wiki',
+    label: 'Wiki',
+    gitEnabled: parseBoolean(process.env.BRIDGE_WIKI_GIT_ENABLED, false),
+    dir: resolveOptionalPath(cwd, process.env.BRIDGE_WIKI_WORKSPACE_DIR),
+    maxGitOutputChars: parseNumber(process.env.BRIDGE_WIKI_GIT_MAX_OUTPUT_CHARS, 6000),
+    autoCommitEnabled: parseBoolean(process.env.BRIDGE_WIKI_GIT_AUTO_COMMIT, false),
+    autoPushEnabled: parseBoolean(process.env.BRIDGE_WIKI_GIT_AUTO_PUSH, false),
+  };
+  const managedRepos = {
+    paper: {
+      key: 'paper',
+      label: '论文',
+      gitEnabled: paperWorkspace.gitEnabled,
+      dir: paperWorkspace.dir,
+      maxGitOutputChars: paperWorkspace.maxGitOutputChars,
+      autoCommitEnabled: paperWorkspace.autoCommitEnabled,
+      autoPushEnabled: paperWorkspace.autoPushEnabled,
+    },
+    design: designRepo,
+    wiki: wikiRepo,
+  };
+
   return {
     feishu: {
       appId,
@@ -248,14 +297,8 @@ export function loadConfig(cwd: string = process.cwd()): Config {
     bridge: {
       promptInstruction: process.env.BRIDGE_PROMPT_INSTRUCTION,
     },
-    paperWorkspace: {
-      gitEnabled: parseBoolean(process.env.BRIDGE_PAPER_GIT_ENABLED, true),
-      dir: resolveOptionalPath(cwd, process.env.BRIDGE_PAPER_WORKSPACE_DIR),
-      compiledPdfPath: process.env.BRIDGE_PAPER_COMPILED_PDF_PATH || 'manuscript/main.pdf',
-      maxGitOutputChars: parseNumber(process.env.BRIDGE_PAPER_GIT_MAX_OUTPUT_CHARS, 6000),
-      autoCommitEnabled: parseBoolean(process.env.BRIDGE_PAPER_GIT_AUTO_COMMIT, false),
-      autoPushEnabled: parseBoolean(process.env.BRIDGE_PAPER_GIT_AUTO_PUSH, false),
-    },
+    paperWorkspace,
+    managedRepos,
     web: {
       enabled: parseBoolean(process.env.BRIDGE_WEB_SEARCH_ENABLED, true),
       maxResults: parseNumber(process.env.BRIDGE_WEB_SEARCH_MAX_RESULTS, 5),

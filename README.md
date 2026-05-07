@@ -306,6 +306,8 @@ npm run feishu-bridge
 
 By default the bridge starts this repository's compiled agent with `node dist/src/pi-agent.js --mode rpc`. Set `PI_COMMAND` only if you want to target another compatible agent process.
 
+Bridge-side repository management is handled as a shared managed-repo service rather than by individual agents. Use commands such as `repo status paper`, `repo commit design 更新说明`, and `repo push design`. Configure paper, design, and optional wiki repositories with `BRIDGE_PAPER_WORKSPACE_DIR`, `BRIDGE_DESIGN_WORKSPACE_DIR`, and `BRIDGE_WIKI_WORKSPACE_DIR`. Agents should produce code or artifacts in their workspaces, while the bridge repo manager handles status, commit, and push operations.
+
 ## Built-in Tools
 
 The default chat agent exposes a compact paper-focused tool set:
@@ -331,13 +333,14 @@ The default chat agent exposes a compact paper-focused tool set:
 - `wiki_lint`: reports markdown wiki structure issues across `index.md`, source summaries, and synthesis pages
 - `wiki_health_fix`: attempts health repairs such as retrying downloads, parsing downloaded records, and generating missing summaries through a clean-context summary worker when configured; reports issues that still need login or queued browser work
 
-Development and diagnostics can use `createTools(workspaceDir, { toolProfile: "full" })` to expose the complete tool set. Full mode adds `get_time`, `write_paper_wiki_source`, `generate_paper_wiki_summary`, `paper_wiki_relations`, `search_paper_wiki`, `list_local_papers`, `fetch_paper_webpage`, `parse_paper`, `register_manual_paper_download`, and `open_paper_page_for_login`.
+Development and diagnostics can use `createTools(workspaceDir, { toolProfile: "full" })` to expose the complete tool set. Full mode adds `get_time`, `write_paper_wiki_source`, `generate_paper_wiki_summary`, `paper_wiki_relations`, `search_paper_wiki`, `write_design_artifact`, `list_local_papers`, `fetch_paper_webpage`, `parse_paper`, `register_manual_paper_download`, and `open_paper_page_for_login`.
 
 Agent or benchmark harnesses that need stricter separation can use `createToolsForBoundary(workspaceDir, role)`. It keeps the public `default` / `full` profiles unchanged while exposing role-specific tool surfaces:
 
 - `wiki-agent`: local wiki search, page construction, alias management, wiki health/lint, and local paper search; it does not expose web search, paper download, or summary generation, and disables external evidence acquisition inside `build_wiki_page`
 - `paper-download-subagent`: paper search/download, browser/manual fallback, webpage capture, parsing, and health repair; it does not expose wiki page or source-summary writers
 - `wiki-evidence-worker`: builds and maintains the wiki evidence layer through `generate_paper_wiki_summary`, `write_paper_wiki_source`, and relation maintenance; it does not expose paper download or synthesis page tools
+- `design-subagent`: minimal chip-design reasoning surface; it reads local wiki evidence and local paper metadata, then writes structured design artifacts under `knowledge-base/design-records/`; it does not expose web search, paper download, wiki page writes, source-summary generation, or arbitrary file writes
 - `paper-writing-worker`: manuscript file reading/writing, LaTeX compilation, local wiki retrieval, and wiki-grounded Q&A for drafting scientific papers from the wiki evidence layer; it does not expose web search, paper download, source-summary generation, or wiki page writes
 
 Recommended division of labor:
@@ -347,16 +350,17 @@ Recommended division of labor:
 | `wiki-agent` | Main coordinator for durable knowledge growth: decide needed pages, inspect wiki gaps, request evidence expansion, and maintain wiki structure | `wiki/sources`, `wiki/pages`, local paper metadata | `wiki/pages` through `build_wiki_page` and alias pages through `merge_wiki_aliases` | Direct web search, paper download, source-summary generation in benchmark/boundary mode |
 | `paper-download-subagent` | Literature ingestion: search papers, download or queue publisher/browser work, register manual PDFs, capture webpages, parse downloaded records, and repair acquisition health | paper search results, records, raw PDFs/webpages, parse artifacts | `knowledge-base/records`, `knowledge-base/raw`, parse artifacts, extension job state | `wiki/pages` writes or source-summary authoring |
 | `wiki-evidence-worker` | Build and maintain wiki evidence artifacts. Source-summary mode converts parsed papers into `wiki/sources`; page-synthesis mode turns fixed source evidence into a page draft for benchmarkable construction | parsed paper artifacts, local paper metadata, existing source summaries, or a fixed evidence package from the harness | `wiki/sources/<paper-key>.md`, `related_papers` fields, or page draft output returned to the caller | paper download, external search, or autonomous evidence acquisition |
+| `design-subagent` | Minimal design slice for the paper: convert a chip-design request plus wiki evidence into a design record, verification report, failure record, or benchmark candidate | `wiki/sources`, `wiki/pages`, local paper metadata through retrieval tools | `knowledge-base/design-records/{design-records,verification-reports,failures,benchmark-cases}/*.md` through `write_design_artifact` | paper download, web search, wiki page construction, source-summary generation, arbitrary file writes |
 | `paper-writing-worker` | Draft and revise scientific manuscripts using the wiki as the reference/evidence layer | manuscript files, `wiki/sources`, `wiki/pages`, wiki-grounded Q&A results | manuscript project files, compiled LaTeX outputs | paper download, source-summary generation, wiki page construction, or web search |
 
 The intended workflow boundary is:
 
 ```text
-paper-download-subagent -> wiki-evidence-worker -> wiki-agent -> paper-writing-worker
-records/raw/parses      -> wiki/sources/*.md     -> wiki/pages/*.md -> manuscript files
+paper-download-subagent -> wiki-evidence-worker -> wiki-agent -> design-subagent -> wiki-agent -> paper-writing-worker
+records/raw/parses      -> wiki/sources/*.md     -> wiki/pages/*.md -> design records  -> curated wiki -> manuscript files
 ```
 
-For model benchmarks, run the wiki evidence page-synthesis mode as a tool-free worker over fixed `wiki/sources` fixtures. Use `paper-writing-worker` when the goal is a manuscript draft or revision, so paper writing consumes the wiki instead of mutating the wiki knowledge layer.
+For model benchmarks, run the wiki evidence page-synthesis mode as a tool-free worker over fixed `wiki/sources` fixtures. Use `design-subagent` for the narrow reference-implementation slice where wiki evidence becomes a design proposal, verification/failure report, or benchmark candidate. Use `paper-writing-worker` when the goal is a manuscript draft or revision, so paper writing consumes the wiki and design artifacts instead of mutating the wiki knowledge layer.
 
 For `search_papers`, concise English keyword queries still work best because the search stages include arXiv, APS/Crossref metadata, and the configured web provider.
 

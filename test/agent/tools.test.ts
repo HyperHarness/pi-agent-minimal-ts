@@ -51,6 +51,22 @@ type WriteFileTool = {
   ) => Promise<ToolResult>;
 };
 
+type WriteDesignArtifactTool = {
+  execute: (
+    toolCallId: string,
+    args: {
+      artifactType: "design_record" | "verification_report" | "failure_record" | "benchmark_case";
+      title: string;
+      artifactKey?: string;
+      status?: "proposed" | "source-supported" | "tool-verified" | "expert-approved" | "assumed" | "unsupported" | "failed";
+      contentMarkdown: string;
+      relatedWikiPages?: string[];
+      sourceKeys?: string[];
+    },
+    signal: undefined,
+  ) => Promise<ToolResult>;
+};
+
 type ReplaceFileTextTool = {
   execute: (
     toolCallId: string,
@@ -446,6 +462,17 @@ function getWriteFileTool(workspace: string): WriteFileTool {
   assert.ok(writeFileTool);
   assert.equal(typeof writeFileTool.execute, "function");
   return writeFileTool as WriteFileTool;
+}
+
+function getWriteDesignArtifactTool(workspace: string): WriteDesignArtifactTool {
+  const tools = createTools(workspace, { toolProfile: "full" }) as ReadonlyArray<{
+    name: string;
+    execute?: WriteDesignArtifactTool["execute"];
+  }>;
+  const writeDesignArtifactTool = tools.find((tool) => tool.name === "write_design_artifact");
+  assert.ok(writeDesignArtifactTool);
+  assert.equal(typeof writeDesignArtifactTool.execute, "function");
+  return writeDesignArtifactTool as WriteDesignArtifactTool;
 }
 
 function getReplaceFileTextTool(workspace: string): ReplaceFileTextTool {
@@ -1009,6 +1036,45 @@ test("write_file rejects synthesis wiki page writes", async () => {
   }
 });
 
+test("write_design_artifact writes design subagent records under knowledge-base/design-records", async () => {
+  const workspace = await mkdtemp(path.join(tmpdir(), "pi-agent-tools-"));
+
+  try {
+    const writeDesignArtifactTool = getWriteDesignArtifactTool(workspace);
+    const result = await writeDesignArtifactTool.execute(
+      "call-write-design-artifact",
+      {
+        artifactType: "failure_record",
+        title: "Frequency Collision Attempt",
+        artifactKey: "freq collision attempt",
+        status: "failed",
+        contentMarkdown:
+          "## Design Goal\nAvoid fixed-frequency transmon collisions.\n\n## Reusable Lesson\nEscalate unresolved spectator collisions to solver-backed planning.\n",
+        relatedWikiPages: ["frequency-allocation"],
+        sourceKeys: ["aps-10.1103-PhysRevResearch.4.023079"],
+      },
+      undefined,
+    );
+
+    const expectedPath = "knowledge-base/design-records/failures/freq-collision-attempt.md";
+    const artifact = await readFile(path.join(workspace, expectedPath), "utf8");
+    assert.match(artifact, /^---\ntype: failure_record\n/m);
+    assert.match(artifact, /status: failed/);
+    assert.match(artifact, /related_wiki_pages:\n  - "frequency-allocation"/);
+    assert.match(artifact, /source_keys:\n  - "aps-10\.1103-PhysRevResearch\.4\.023079"/);
+    assert.match(artifact, /# Frequency Collision Attempt/);
+    assert.match(artifact, /Escalate unresolved spectator collisions/);
+    assert.deepEqual(result.details, {
+      artifactType: "failure_record",
+      path: expectedPath,
+      bytes: Buffer.byteLength(artifact, "utf8"),
+      title: "Frequency Collision Attempt",
+    });
+  } finally {
+    await rm(workspace, { recursive: true, force: true });
+  }
+});
+
 test("replace_file_text replaces a unique exact block", async () => {
   const workspace = await mkdtemp(path.join(tmpdir(), "pi-agent-tools-"));
   const target = path.join(workspace, "manuscript.tex");
@@ -1379,6 +1445,7 @@ test("createTools full profile exposes every built-in tool", async () => {
       "generate_paper_wiki_summary",
       "paper_wiki_relations",
       "search_paper_wiki",
+      "write_design_artifact",
       "list_local_papers",
       "fetch_paper_webpage",
       "register_manual_paper_download",
@@ -1415,6 +1482,16 @@ test("createToolsForBoundary exposes isolated wiki and worker tool surfaces", as
     assert.ok(evidenceTools.some((tool) => tool.name === "write_paper_wiki_source"));
     assert.ok(!evidenceTools.some((tool) => tool.name === "download_paper"));
     assert.ok(!evidenceTools.some((tool) => tool.name === "build_wiki_page"));
+
+    const designTools = createToolsForBoundary(workspace, "design-subagent");
+    assert.deepEqual(designTools.map((tool) => tool.name), getToolBoundaryToolNames("design-subagent"));
+    assert.ok(designTools.some((tool) => tool.name === "answer_paper_wiki_question"));
+    assert.ok(designTools.some((tool) => tool.name === "search_paper_wiki"));
+    assert.ok(designTools.some((tool) => tool.name === "write_design_artifact"));
+    assert.ok(!designTools.some((tool) => tool.name === "download_paper"));
+    assert.ok(!designTools.some((tool) => tool.name === "web_search"));
+    assert.ok(!designTools.some((tool) => tool.name === "build_wiki_page"));
+    assert.ok(!designTools.some((tool) => tool.name === "write_paper_wiki_source"));
 
     const writingTools = createToolsForBoundary(workspace, "paper-writing-worker");
     assert.deepEqual(writingTools.map((tool) => tool.name), getToolBoundaryToolNames("paper-writing-worker"));

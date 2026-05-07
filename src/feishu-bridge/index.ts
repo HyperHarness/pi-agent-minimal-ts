@@ -44,11 +44,11 @@ import { startPiClientWithRetry } from './pi-client-retry.js';
 import { buildSearchQuery, formatWebResults, searchWeb } from './web/search.js';
 import { createPerKeyQueue } from './chat-queue.js';
 import {
-  autoCommitPaperGitChanges,
-  capturePaperGitSnapshot,
-  parsePaperGitCommand,
-  runPaperGitCommand,
-  type PaperGitSnapshot,
+  autoCommitManagedRepos,
+  captureManagedRepoSnapshots,
+  parseManagedRepoCommand,
+  runManagedRepoCommand,
+  type ManagedRepoSnapshot,
 } from './paper-git.js';
 import type { ParsedIncomingMessage } from './types.js';
 
@@ -759,10 +759,10 @@ async function processMessage(client: Lark.Client, message: ParsedIncomingMessag
 
   const replyTargetMessageId = resolveReplyToMessageId(message.messageId, message.isDirectMessage);
   const replyMessageId = await sendThinkingMessage(client, message.chatId, message.senderName, replyTargetMessageId);
-  const paperGitCommand = parsePaperGitCommand(message.text);
-  if (paperGitCommand) {
+  const repoCommand = parseManagedRepoCommand(message.text);
+  if (repoCommand) {
     try {
-      const result = await runPaperGitCommand(config.paperWorkspace, paperGitCommand);
+      const result = await runManagedRepoCommand(config.managedRepos, repoCommand);
       await sendBridgeCommandResult(
         client,
         message.chatId,
@@ -784,9 +784,9 @@ async function processMessage(client: Lark.Client, message: ParsedIncomingMessag
         text: result.text,
         timestamp: now,
       });
-      log.feishu(`论文 Git 命令完成 message=${message.messageId}`);
+      log.feishu(`Repo Git 命令完成 repo=${repoCommand.repoKey} message=${message.messageId}`);
     } catch (error) {
-      const errorText = `论文 Git 命令失败：${error instanceof Error ? error.message : String(error)}`;
+      const errorText = `Repo Git 命令失败：${error instanceof Error ? error.message : String(error)}`;
       log.warn(errorText);
       await sendBridgeCommandResult(
         client,
@@ -930,14 +930,16 @@ async function processMessage(client: Lark.Client, message: ParsedIncomingMessag
   });
 
   const pi = await piClientPromise;
-  let paperGitSnapshot: PaperGitSnapshot = { enabled: false };
+  let repoSnapshots: ManagedRepoSnapshot[] = [];
   try {
-    paperGitSnapshot = await capturePaperGitSnapshot(config.paperWorkspace);
-    if (paperGitSnapshot.enabled && paperGitSnapshot.status?.trim()) {
-      log.warn('论文 Git 自动提交将跳过：agent 回合开始前工作区已有未提交改动。');
+    repoSnapshots = await captureManagedRepoSnapshots(config.managedRepos);
+    for (const snapshot of repoSnapshots) {
+      if (snapshot.enabled && snapshot.status?.trim()) {
+        log.warn(`${snapshot.label ?? snapshot.repoKey ?? 'Repo'} Git 自动提交将跳过：agent 回合开始前工作区已有未提交改动。`);
+      }
     }
   } catch (error) {
-    log.warn(`论文 Git 自动提交快照失败，将跳过自动提交: ${error instanceof Error ? error.message : String(error)}`);
+    log.warn(`Repo Git 自动提交快照失败，将跳过自动提交: ${error instanceof Error ? error.message : String(error)}`);
   }
   const downloadedPdfAttachments = new Map<string, DownloadedPdfAttachment>();
   const queuedPdfDeliveryJobs = new Map<string, QueuedPdfDeliveryJob>();
@@ -1090,8 +1092,11 @@ async function processMessage(client: Lark.Client, message: ParsedIncomingMessag
     );
 
     try {
-      const autoGitResult = await autoCommitPaperGitChanges(config.paperWorkspace, paperGitSnapshot, message.text);
-      if (autoGitResult.text) {
+      const autoGitResults = await autoCommitManagedRepos(config.managedRepos, repoSnapshots, message.text);
+      for (const autoGitResult of autoGitResults) {
+        if (!autoGitResult.text) {
+          continue;
+        }
         await sendBridgeCommandResult(
           client,
           message.chatId,
@@ -1101,11 +1106,11 @@ async function processMessage(client: Lark.Client, message: ParsedIncomingMessag
           replyTargetMessageId,
         );
         log.feishu(
-          `论文 Git 自动处理完成 commit=${autoGitResult.didCommit ? 'yes' : 'no'} push=${autoGitResult.didPush ? 'yes' : 'no'}`,
+          `Repo Git 自动处理完成 repo=${autoGitResult.repoKey ?? 'unknown'} commit=${autoGitResult.didCommit ? 'yes' : 'no'} push=${autoGitResult.didPush ? 'yes' : 'no'}`,
         );
       }
     } catch (error) {
-      const errorText = `论文 Git 自动提交失败：${error instanceof Error ? error.message : String(error)}`;
+      const errorText = `Repo Git 自动提交失败：${error instanceof Error ? error.message : String(error)}`;
       log.warn(errorText);
       await sendBridgeCommandResult(
         client,
