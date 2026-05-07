@@ -19,6 +19,14 @@ test('parsePaperGitCommand recognizes bridge paper git commands', () => {
     action: 'commit',
     message: '更新引言',
   });
+  assert.deepEqual(parsePaperGitCommand('@_user_1 论文 git commit 更新引言'), {
+    action: 'commit',
+    message: '更新引言',
+  });
+  assert.deepEqual(parsePaperGitCommand('论文 git commit @_user_1 更新引言'), {
+    action: 'commit',
+    message: '更新引言',
+  });
   assert.equal(parsePaperGitCommand('请 wiki agent 修改论文'), null);
 });
 
@@ -140,7 +148,7 @@ test('autoCommitPaperGitChanges commits and pushes when a clean snapshot becomes
         autoPushEnabled: true,
       },
       snapshot,
-      '请修改论文引言',
+      '@_user_1 请修改论文引言',
       {
         runGit: async (_cwd, args) => {
           calls.push(args);

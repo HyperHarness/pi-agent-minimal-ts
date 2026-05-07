@@ -1,7 +1,7 @@
 import test from "node:test";
 import assert from "node:assert/strict";
 import { createHash } from "node:crypto";
-import { mkdtemp, mkdir, readFile, rm, symlink, writeFile } from "node:fs/promises";
+import { chmod, mkdtemp, mkdir, readFile, rm, symlink, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import path from "node:path";
 import { PaperDownloadError } from "../../src/agent/paper-download.js";
@@ -39,6 +39,38 @@ type ListFilesTool = {
   execute: (
     toolCallId: string,
     args: { path: string; maxDepth?: number; maxEntries?: number },
+    signal: undefined,
+  ) => Promise<ToolResult>;
+};
+
+type WriteFileTool = {
+  execute: (
+    toolCallId: string,
+    args: { path: string; content: string },
+    signal: undefined,
+  ) => Promise<ToolResult>;
+};
+
+type ReplaceFileTextTool = {
+  execute: (
+    toolCallId: string,
+    args: { path: string; search: string; replacement: string; replaceAll?: boolean },
+    signal: undefined,
+  ) => Promise<ToolResult>;
+};
+
+type DeleteFileTool = {
+  execute: (
+    toolCallId: string,
+    args: { path: string },
+    signal: undefined,
+  ) => Promise<ToolResult>;
+};
+
+type CompileLatexTool = {
+  execute: (
+    toolCallId: string,
+    args: { texPath: string; runBibtex?: boolean; maxOutputChars?: number },
     signal: undefined,
   ) => Promise<ToolResult>;
 };
@@ -387,6 +419,50 @@ function getListFilesTool(workspace: string): ListFilesTool {
   assert.ok(listFilesTool);
   assert.equal(typeof listFilesTool.execute, "function");
   return listFilesTool as ListFilesTool;
+}
+
+function getWriteFileTool(workspace: string): WriteFileTool {
+  const tools = createTools(workspace) as ReadonlyArray<{
+    name: string;
+    execute?: WriteFileTool["execute"];
+  }>;
+  const writeFileTool = tools.find((tool) => tool.name === "write_file");
+  assert.ok(writeFileTool);
+  assert.equal(typeof writeFileTool.execute, "function");
+  return writeFileTool as WriteFileTool;
+}
+
+function getReplaceFileTextTool(workspace: string): ReplaceFileTextTool {
+  const tools = createTools(workspace) as ReadonlyArray<{
+    name: string;
+    execute?: ReplaceFileTextTool["execute"];
+  }>;
+  const replaceFileTextTool = tools.find((tool) => tool.name === "replace_file_text");
+  assert.ok(replaceFileTextTool);
+  assert.equal(typeof replaceFileTextTool.execute, "function");
+  return replaceFileTextTool as ReplaceFileTextTool;
+}
+
+function getDeleteFileTool(workspace: string): DeleteFileTool {
+  const tools = createTools(workspace) as ReadonlyArray<{
+    name: string;
+    execute?: DeleteFileTool["execute"];
+  }>;
+  const deleteFileTool = tools.find((tool) => tool.name === "delete_file");
+  assert.ok(deleteFileTool);
+  assert.equal(typeof deleteFileTool.execute, "function");
+  return deleteFileTool as DeleteFileTool;
+}
+
+function getCompileLatexTool(workspace: string): CompileLatexTool {
+  const tools = createTools(workspace) as ReadonlyArray<{
+    name: string;
+    execute?: CompileLatexTool["execute"];
+  }>;
+  const compileLatexTool = tools.find((tool) => tool.name === "compile_latex");
+  assert.ok(compileLatexTool);
+  assert.equal(typeof compileLatexTool.execute, "function");
+  return compileLatexTool as CompileLatexTool;
 }
 
 function getGetTimeTool(workspace: string): GetTimeTool {
@@ -843,6 +919,157 @@ test("read_file accepts workspace-absolute paths", async () => {
   }
 });
 
+test("write_file creates and overwrites workspace text files", async () => {
+  const workspace = await mkdtemp(path.join(tmpdir(), "pi-agent-tools-"));
+
+  try {
+    const writeFileTool = getWriteFileTool(workspace);
+    const result = await writeFileTool.execute(
+      "call-write-1",
+      { path: "paper-projects/current/abstract.md", content: "# Abstract\nUpdated draft.\n" },
+      undefined,
+    );
+
+    assert.equal(await readFile(path.join(workspace, "paper-projects/current/abstract.md"), "utf8"), "# Abstract\nUpdated draft.\n");
+    assert.deepEqual(result.details, {
+      path: "paper-projects/current/abstract.md",
+      bytes: Buffer.byteLength("# Abstract\nUpdated draft.\n", "utf8"),
+    });
+  } finally {
+    await rm(workspace, { recursive: true, force: true });
+  }
+});
+
+test("write_file rejects absolute paths outside the workspace", async () => {
+  const workspace = await mkdtemp(path.join(tmpdir(), "pi-agent-tools-"));
+  const outside = await mkdtemp(path.join(tmpdir(), "pi-agent-tools-outside-"));
+
+  try {
+    const writeFileTool = getWriteFileTool(workspace);
+    await assert.rejects(
+      () => writeFileTool.execute("call-write-2", { path: path.join(outside, "secret.txt"), content: "secret" }, undefined),
+      /outside the workspace/i,
+    );
+  } finally {
+    await rm(workspace, { recursive: true, force: true });
+    await rm(outside, { recursive: true, force: true });
+  }
+});
+
+test("replace_file_text replaces a unique exact block", async () => {
+  const workspace = await mkdtemp(path.join(tmpdir(), "pi-agent-tools-"));
+  const target = path.join(workspace, "manuscript.tex");
+  await writeFile(target, "Before\nOld focus\nAfter\n", "utf8");
+
+  try {
+    const replaceFileTextTool = getReplaceFileTextTool(workspace);
+    const result = await replaceFileTextTool.execute(
+      "call-replace-1",
+      { path: "manuscript.tex", search: "Old focus", replacement: "New chip-design focus" },
+      undefined,
+    );
+
+    assert.equal(await readFile(target, "utf8"), "Before\nNew chip-design focus\nAfter\n");
+    assert.deepEqual(result.details, {
+      path: "manuscript.tex",
+      replacements: 1,
+      bytes: Buffer.byteLength("Before\nNew chip-design focus\nAfter\n", "utf8"),
+    });
+  } finally {
+    await rm(workspace, { recursive: true, force: true });
+  }
+});
+
+test("replace_file_text requires a unique block unless replaceAll is true", async () => {
+  const workspace = await mkdtemp(path.join(tmpdir(), "pi-agent-tools-"));
+  const target = path.join(workspace, "outline.md");
+  await writeFile(target, "roadmap\nroadmap\n", "utf8");
+
+  try {
+    const replaceFileTextTool = getReplaceFileTextTool(workspace);
+    await assert.rejects(
+      () => replaceFileTextTool.execute(
+        "call-replace-2",
+        { path: "outline.md", search: "roadmap", replacement: "layout" },
+        undefined,
+      ),
+      /occurs 2 times/i,
+    );
+
+    await replaceFileTextTool.execute(
+      "call-replace-3",
+      { path: "outline.md", search: "roadmap", replacement: "layout", replaceAll: true },
+      undefined,
+    );
+    assert.equal(await readFile(target, "utf8"), "layout\nlayout\n");
+  } finally {
+    await rm(workspace, { recursive: true, force: true });
+  }
+});
+
+test("delete_file deletes text and LaTeX files inside the workspace", async () => {
+  const workspace = await mkdtemp(path.join(tmpdir(), "pi-agent-tools-"));
+  const texPath = path.join(workspace, "paper-projects/current/obsolete.tex");
+  const mdPath = path.join(workspace, "paper-projects/current/notes/old.md");
+  await mkdir(path.dirname(texPath), { recursive: true });
+  await mkdir(path.dirname(mdPath), { recursive: true });
+  await writeFile(texPath, "\\section{Old}\n", "utf8");
+  await writeFile(mdPath, "# Old note\n", "utf8");
+
+  try {
+    const deleteFileTool = getDeleteFileTool(workspace);
+    const texResult = await deleteFileTool.execute(
+      "call-delete-1",
+      { path: "paper-projects/current/obsolete.tex" },
+      undefined,
+    );
+    const mdResult = await deleteFileTool.execute(
+      "call-delete-2",
+      { path: path.join(workspace, "paper-projects/current/notes/old.md") },
+      undefined,
+    );
+
+    await assert.rejects(() => readFile(texPath, "utf8"), /ENOENT/);
+    await assert.rejects(() => readFile(mdPath, "utf8"), /ENOENT/);
+    assert.deepEqual(texResult.details, {
+      path: "paper-projects/current/obsolete.tex",
+      bytes: Buffer.byteLength("\\section{Old}\n", "utf8"),
+    });
+    assert.deepEqual(mdResult.details, {
+      path: "paper-projects/current/notes/old.md",
+      bytes: Buffer.byteLength("# Old note\n", "utf8"),
+    });
+  } finally {
+    await rm(workspace, { recursive: true, force: true });
+  }
+});
+
+test("delete_file rejects directories, binary-looking files, and .git paths", async () => {
+  const workspace = await mkdtemp(path.join(tmpdir(), "pi-agent-tools-"));
+  await mkdir(path.join(workspace, "paper-projects/current"), { recursive: true });
+  await mkdir(path.join(workspace, ".git/info"), { recursive: true });
+  await writeFile(path.join(workspace, "paper-projects/current/figure.pdf"), "%PDF-1.7\n", "utf8");
+  await writeFile(path.join(workspace, ".git/info/exclude"), "*.log\n", "utf8");
+
+  try {
+    const deleteFileTool = getDeleteFileTool(workspace);
+    await assert.rejects(
+      () => deleteFileTool.execute("call-delete-3", { path: "paper-projects/current" }, undefined),
+      /only deletes files/i,
+    );
+    await assert.rejects(
+      () => deleteFileTool.execute("call-delete-4", { path: "paper-projects/current/figure.pdf" }, undefined),
+      /text or LaTeX-related files/i,
+    );
+    await assert.rejects(
+      () => deleteFileTool.execute("call-delete-5", { path: ".git/info/exclude" }, undefined),
+      /\.git paths/i,
+    );
+  } finally {
+    await rm(workspace, { recursive: true, force: true });
+  }
+});
+
 test("read_file rejects absolute paths outside the workspace", async () => {
   const workspace = await mkdtemp(path.join(tmpdir(), "pi-agent-tools-"));
   const outside = await mkdtemp(path.join(tmpdir(), "pi-agent-tools-outside-"));
@@ -888,6 +1115,82 @@ test("list_files lists workspace directories from an absolute path", async () =>
       { path: "paper-projects/million-qubits/outline.md", type: "file" },
     ]);
   } finally {
+    await rm(workspace, { recursive: true, force: true });
+  }
+});
+
+test("compile_latex runs the fixed manuscript build sequence inside the workspace", async () => {
+  const workspace = await mkdtemp(path.join(tmpdir(), "pi-agent-tools-"));
+  const binDir = path.join(workspace, "bin");
+  const manuscriptDir = path.join(workspace, "paper-projects/current/manuscript");
+  await mkdir(binDir);
+  await mkdir(manuscriptDir, { recursive: true });
+  await writeFile(path.join(manuscriptDir, "main.tex"), "\\documentclass{article}\\begin{document}Hi\\end{document}\n", "utf8");
+
+  const pdflatexPath = path.join(binDir, "pdflatex");
+  const bibtexPath = path.join(binDir, "bibtex");
+  await writeFile(
+    pdflatexPath,
+    [
+      "#!/usr/bin/env node",
+      "const fs = require('node:fs');",
+      "const path = require('node:path');",
+      "const tex = process.argv[process.argv.length - 1];",
+      "const base = path.basename(tex, path.extname(tex));",
+      "fs.appendFileSync('calls.log', `pdflatex ${tex}\\n`);",
+      "fs.writeFileSync(`${base}.aux`, '\\\\relax\\n');",
+      "fs.writeFileSync(`${base}.pdf`, '%PDF-1.7\\nfake\\n');",
+      "console.log(`compiled ${tex}`);",
+    ].join("\n"),
+    "utf8",
+  );
+  await writeFile(
+    bibtexPath,
+    [
+      "#!/usr/bin/env node",
+      "const fs = require('node:fs');",
+      "fs.appendFileSync('calls.log', `bibtex ${process.argv[2]}\\n`);",
+      "fs.writeFileSync(`${process.argv[2]}.bbl`, 'fake bibliography\\n');",
+      "console.log(`bibtex ${process.argv[2]}`);",
+    ].join("\n"),
+    "utf8",
+  );
+  await chmod(pdflatexPath, 0o755);
+  await chmod(bibtexPath, 0o755);
+
+  const originalPath = process.env.PATH;
+  process.env.PATH = `${binDir}${path.delimiter}${originalPath ?? ""}`;
+
+  try {
+    const compileLatexTool = getCompileLatexTool(workspace);
+    const result = await compileLatexTool.execute(
+      "call-latex-1",
+      { texPath: "paper-projects/current/manuscript/main.tex", maxOutputChars: 4000 },
+      undefined,
+    );
+
+    assert.equal(await readFile(path.join(manuscriptDir, "calls.log"), "utf8"), [
+      "pdflatex main.tex",
+      "bibtex main",
+      "pdflatex main.tex",
+      "pdflatex main.tex",
+      "",
+    ].join("\n"));
+    assert.deepEqual(result.details, {
+      status: "compiled",
+      texPath: "paper-projects/current/manuscript/main.tex",
+      pdfPath: "paper-projects/current/manuscript/main.pdf",
+      commands: [
+        "pdflatex -interaction=nonstopmode -halt-on-error main.tex",
+        "bibtex main",
+        "pdflatex -interaction=nonstopmode -halt-on-error main.tex",
+        "pdflatex -interaction=nonstopmode -halt-on-error main.tex",
+      ],
+      output: (result.details as { output: string }).output,
+    });
+    assert.equal(await readFile(path.join(manuscriptDir, "main.pdf"), "utf8"), "%PDF-1.7\nfake\n");
+  } finally {
+    process.env.PATH = originalPath;
     await rm(workspace, { recursive: true, force: true });
   }
 });
@@ -938,6 +1241,10 @@ test("createTools exposes the minimal default tool set", async () => {
     assert.deepEqual(toolNames, [
       "list_files",
       "read_file",
+      "write_file",
+      "replace_file_text",
+      "delete_file",
+      "compile_latex",
       "web_search",
       "fetch_url",
       "search_papers",
@@ -990,6 +1297,10 @@ test("createTools full profile exposes every built-in tool", async () => {
       "get_time",
       "list_files",
       "read_file",
+      "write_file",
+      "replace_file_text",
+      "delete_file",
+      "compile_latex",
       "web_search",
       "fetch_url",
       "search_papers",

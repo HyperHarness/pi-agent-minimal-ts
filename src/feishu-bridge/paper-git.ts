@@ -43,9 +43,14 @@ export interface PaperGitDependencies {
 }
 
 const COMMAND_PREFIXES = [/^论文\s*git\b/i, /^paper\s+git\b/i, /^\/paper\s+git\b/i];
+const FEISHU_MENTION_PLACEHOLDER = /@_user_[A-Za-z0-9_-]+/g;
+
+function stripFeishuMentionPlaceholders(text: string): string {
+  return text.replace(FEISHU_MENTION_PLACEHOLDER, ' ').replace(/\s+/g, ' ').trim();
+}
 
 function stripCommandPrefix(text: string): string | null {
-  const trimmed = text.trim();
+  const trimmed = stripFeishuMentionPlaceholders(text);
   for (const prefix of COMMAND_PREFIXES) {
     const match = trimmed.match(prefix);
     if (match) {
@@ -73,7 +78,7 @@ export function parsePaperGitCommand(text: string): PaperGitCommand | null {
 
   const commitMatch = body.match(/^(?:commit|提交)\s+(.+)$/is);
   if (commitMatch?.[1]?.trim()) {
-    return { action: 'commit', message: commitMatch[1].trim() };
+    return { action: 'commit', message: stripFeishuMentionPlaceholders(commitMatch[1]) };
   }
 
   return {
@@ -154,7 +159,7 @@ function usageText(): string {
 }
 
 function buildAutoCommitMessage(prompt: string): string {
-  const compacted = prompt.replace(/\s+/g, ' ').trim();
+  const compacted = stripFeishuMentionPlaceholders(prompt);
   const suffix = compacted ? compacted.slice(0, 120) : 'Feishu agent update';
   return validateCommitMessage(`Auto paper update: ${suffix}`);
 }

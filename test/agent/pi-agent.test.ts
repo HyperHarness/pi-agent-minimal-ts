@@ -71,6 +71,9 @@ test("default system prompt requires wiki evidence for scientific questions", ()
   assert.match(DEFAULT_SYSTEM_PROMPT, /user is the research lead/i);
   assert.match(DEFAULT_SYSTEM_PROMPT, /local wiki/i);
   assert.match(DEFAULT_SYSTEM_PROMPT, /cite/i);
+  assert.match(DEFAULT_SYSTEM_PROMPT, /replace_file_text/);
+  assert.match(DEFAULT_SYSTEM_PROMPT, /delete_file/);
+  assert.match(DEFAULT_SYSTEM_PROMPT, /compile_latex/);
 });
 
 test("runAgentTurn executes a tool call and appends the resulting messages", async () => {

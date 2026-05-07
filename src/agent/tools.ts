@@ -1,5 +1,7 @@
-import { readFile, readdir, realpath, stat } from "node:fs/promises";
+import { execFile } from "node:child_process";
+import { lstat, mkdir, readFile, readdir, realpath, stat, unlink, writeFile } from "node:fs/promises";
 import path from "node:path";
+import { promisify } from "node:util";
 import { Type, type Static } from "@mariozechner/pi-ai";
 import type { AgentTool, AgentToolUpdateCallback } from "@mariozechner/pi-agent-core";
 import {
@@ -81,6 +83,8 @@ import {
 } from "./paper-store.js";
 import type { PaperRecord } from "./paper-types.js";
 
+const execFileAsync = promisify(execFile);
+
 const getTimeParameters = Type.Object({
   timezone: Type.Optional(Type.String({ description: "Optional IANA timezone name." }))
 });
@@ -105,6 +109,47 @@ const listFilesParameters = Type.Object({
       description: "Maximum number of entries to return. Defaults to 200.",
       minimum: 1
     })
+  )
+});
+
+const writeFileParameters = Type.Object({
+  path: Type.String({
+    description:
+      "UTF-8 text file path inside the workspace to create or overwrite. Relative paths and workspace-absolute paths are accepted."
+  }),
+  content: Type.String({ description: "Full UTF-8 file content to write." })
+});
+
+const replaceFileTextParameters = Type.Object({
+  path: Type.String({
+    description:
+      "UTF-8 text file path inside the workspace. Relative paths and workspace-absolute paths are accepted."
+  }),
+  search: Type.String({ description: "Exact existing text block to replace." }),
+  replacement: Type.String({ description: "Replacement text." }),
+  replaceAll: Type.Optional(
+    Type.Boolean({
+      description:
+        "Replace every occurrence. Defaults to false; when false, the search text must occur exactly once."
+    })
+  )
+});
+
+const deleteFileParameters = Type.Object({
+  path: Type.String({
+    description:
+      "Workspace-relative or workspace-absolute path to a text or LaTeX-related file to delete. Directories, .git paths, and binary files are rejected."
+  })
+});
+
+const compileLatexParameters = Type.Object({
+  texPath: Type.String({
+    description:
+      "Workspace-relative or workspace-absolute path to the main .tex file, for example paper-projects/current/manuscript/main.tex."
+  }),
+  runBibtex: Type.Optional(Type.Boolean({ description: "Run bibtex after the first pdflatex pass. Defaults to true." })),
+  maxOutputChars: Type.Optional(
+    Type.Integer({ description: "Maximum combined compiler output characters to return. Defaults to 12000.", minimum: 1000 })
   )
 });
 
@@ -534,6 +579,10 @@ const wikiHealthFixParameters = Type.Object({
 type GetTimeParameters = Static<typeof getTimeParameters>;
 type ReadFileParameters = Static<typeof readFileParameters>;
 type ListFilesParameters = Static<typeof listFilesParameters>;
+type WriteFileParameters = Static<typeof writeFileParameters>;
+type ReplaceFileTextParameters = Static<typeof replaceFileTextParameters>;
+type DeleteFileParameters = Static<typeof deleteFileParameters>;
+type CompileLatexParameters = Static<typeof compileLatexParameters>;
 type WebSearchParameters = Static<typeof webSearchParameters>;
 type FetchUrlParameters = Static<typeof fetchUrlParameters>;
 type FetchPaperWebpageParameters = Static<typeof fetchPaperWebpageParameters>;
@@ -592,6 +641,245 @@ async function resolveWorkspacePath(workspaceDir: string, requestedPath: string)
   assertPathInsideDirectory(realWorkspaceDir, realResolvedPath);
 
   return realResolvedPath;
+}
+
+async function pathExists(candidatePath: string): Promise<boolean> {
+  try {
+    await stat(candidatePath);
+    return true;
+  } catch (error) {
+    if (typeof error === "object" && error !== null && "code" in error && error.code === "ENOENT") {
+      return false;
+    }
+    throw error;
+  }
+}
+
+async function resolveWorkspaceWritablePath(workspaceDir: string, requestedPath: string): Promise<string> {
+  if (!requestedPath.trim()) {
+    throw new Error("Path is required.");
+  }
+
+  const resolvedWorkspaceDir = path.resolve(workspaceDir);
+  const resolvedPath = path.isAbsolute(requestedPath)
+    ? path.resolve(requestedPath)
+    : path.resolve(resolvedWorkspaceDir, requestedPath);
+  assertPathInsideDirectory(resolvedWorkspaceDir, resolvedPath);
+
+  const parentDir = path.dirname(resolvedPath);
+  await mkdir(parentDir, { recursive: true });
+
+  const [realWorkspaceDir, realParentDir] = await Promise.all([
+    realpath(resolvedWorkspaceDir),
+    realpath(parentDir)
+  ]);
+  assertPathInsideDirectory(realWorkspaceDir, realParentDir);
+
+  if (await pathExists(resolvedPath)) {
+    const realResolvedPath = await realpath(resolvedPath);
+    assertPathInsideDirectory(realWorkspaceDir, realResolvedPath);
+    return realResolvedPath;
+  }
+
+  return resolvedPath;
+}
+
+const DELETABLE_TEXT_FILE_EXTENSIONS = new Set([
+  ".aux",
+  ".bbl",
+  ".bib",
+  ".blg",
+  ".bst",
+  ".cls",
+  ".csv",
+  ".fdb_latexmk",
+  ".fls",
+  ".json",
+  ".jsonl",
+  ".log",
+  ".lof",
+  ".lot",
+  ".md",
+  ".nav",
+  ".out",
+  ".rst",
+  ".snm",
+  ".sty",
+  ".tex",
+  ".toc",
+  ".toml",
+  ".tsv",
+  ".txt",
+  ".vrb",
+  ".yaml",
+  ".yml"
+]);
+
+function hasGitPathSegment(candidatePath: string): boolean {
+  return candidatePath.split(path.sep).some((segment) => segment === ".git");
+}
+
+function isDeletableTextFilePath(candidatePath: string): boolean {
+  return DELETABLE_TEXT_FILE_EXTENSIONS.has(path.extname(candidatePath).toLowerCase());
+}
+
+async function resolveWorkspaceDeletableFilePath(workspaceDir: string, requestedPath: string): Promise<{
+  resolvedPath: string;
+  size: number;
+}> {
+  if (!requestedPath.trim()) {
+    throw new Error("Path is required.");
+  }
+
+  const resolvedWorkspaceDir = path.resolve(workspaceDir);
+  const resolvedPath = path.isAbsolute(requestedPath)
+    ? path.resolve(requestedPath)
+    : path.resolve(resolvedWorkspaceDir, requestedPath);
+  assertPathInsideDirectory(resolvedWorkspaceDir, resolvedPath);
+
+  const relativePath = path.relative(resolvedWorkspaceDir, resolvedPath);
+  if (hasGitPathSegment(relativePath)) {
+    throw new Error("Deleting .git paths is not allowed.");
+  }
+
+  const parentDir = path.dirname(resolvedPath);
+  const [realWorkspaceDir, realParentDir] = await Promise.all([
+    realpath(resolvedWorkspaceDir),
+    realpath(parentDir)
+  ]);
+  assertPathInsideDirectory(realWorkspaceDir, realParentDir);
+
+  const entryStats = await lstat(resolvedPath);
+  if (entryStats.isSymbolicLink()) {
+    throw new Error("delete_file does not delete symbolic links.");
+  }
+  if (!entryStats.isFile()) {
+    throw new Error("delete_file only deletes files, not directories.");
+  }
+  if (!isDeletableTextFilePath(resolvedPath)) {
+    throw new Error("delete_file only deletes text or LaTeX-related files.");
+  }
+
+  const realResolvedPath = await realpath(resolvedPath);
+  assertPathInsideDirectory(realWorkspaceDir, realResolvedPath);
+  if (hasGitPathSegment(path.relative(realWorkspaceDir, realResolvedPath))) {
+    throw new Error("Deleting .git paths is not allowed.");
+  }
+
+  return { resolvedPath: realResolvedPath, size: entryStats.size };
+}
+
+function relativeWorkspacePath(workspaceDir: string, filePath: string): string {
+  return path.relative(path.resolve(workspaceDir), filePath).split(path.sep).join("/");
+}
+
+function countOccurrences(text: string, search: string): number {
+  if (!search) {
+    return 0;
+  }
+
+  let count = 0;
+  let index = 0;
+  while (true) {
+    const nextIndex = text.indexOf(search, index);
+    if (nextIndex === -1) {
+      return count;
+    }
+    count += 1;
+    index = nextIndex + search.length;
+  }
+}
+
+function truncateOutput(text: string, maxChars: number): string {
+  if (text.length <= maxChars) {
+    return text;
+  }
+  return `${text.slice(0, Math.max(0, maxChars - 120)).trimEnd()}\n\n[output truncated to ${maxChars} chars]`;
+}
+
+async function runLatexCommand(input: {
+  command: string;
+  args: string[];
+  cwd: string;
+  maxOutputChars: number;
+}): Promise<string> {
+  const commandLine = `$ ${[input.command, ...input.args].join(" ")}`;
+  try {
+    const { stdout, stderr } = await execFileAsync(input.command, input.args, {
+      cwd: input.cwd,
+      timeout: 120000,
+      maxBuffer: Math.max(input.maxOutputChars * 2, 1024 * 1024)
+    }) as { stdout: string | Buffer; stderr: string | Buffer };
+
+    const output = [
+      commandLine,
+      stdout.toString(),
+      stderr.toString()
+    ].filter((part) => part.trim().length > 0).join("\n");
+    return truncateOutput(output, input.maxOutputChars);
+  } catch (error) {
+    const failed = error as { stdout?: string | Buffer; stderr?: string | Buffer; message?: string };
+    const output = [
+      commandLine,
+      failed.stdout?.toString() ?? "",
+      failed.stderr?.toString() ?? "",
+      failed.message ?? String(error)
+    ].filter((part) => part.trim().length > 0).join("\n");
+    throw new Error(truncateOutput(output, input.maxOutputChars));
+  }
+}
+
+async function compileLatexDocument(input: {
+  workspaceDir: string;
+  texPath: string;
+  runBibtex: boolean;
+  maxOutputChars: number;
+}): Promise<{
+  texPath: string;
+  pdfPath: string;
+  commands: string[];
+  output: string;
+}> {
+  const resolvedTexPath = await resolveWorkspacePath(input.workspaceDir, input.texPath);
+  if (path.extname(resolvedTexPath).toLowerCase() !== ".tex") {
+    throw new Error("compile_latex requires a .tex file.");
+  }
+
+  const workingDir = path.dirname(resolvedTexPath);
+  const texFile = path.basename(resolvedTexPath);
+  const baseName = path.basename(resolvedTexPath, path.extname(resolvedTexPath));
+  const pdfPath = path.join(workingDir, `${baseName}.pdf`);
+  const commands: string[] = [];
+  const outputs: string[] = [];
+  const remainingOutput = () => Math.max(1000, input.maxOutputChars - outputs.join("\n\n").length);
+
+  const runCommand = async (command: string, args: string[]) => {
+    commands.push([command, ...args].join(" "));
+    outputs.push(await runLatexCommand({
+      command,
+      args,
+      cwd: workingDir,
+      maxOutputChars: remainingOutput()
+    }));
+  };
+
+  await runCommand("pdflatex", ["-interaction=nonstopmode", "-halt-on-error", texFile]);
+  if (input.runBibtex && await pathExists(path.join(workingDir, `${baseName}.aux`))) {
+    await runCommand("bibtex", [baseName]);
+  }
+  await runCommand("pdflatex", ["-interaction=nonstopmode", "-halt-on-error", texFile]);
+  await runCommand("pdflatex", ["-interaction=nonstopmode", "-halt-on-error", texFile]);
+
+  if (!await pathExists(pdfPath)) {
+    throw new Error(`LaTeX finished without producing ${path.basename(pdfPath)}.`);
+  }
+
+  return {
+    texPath: relativeWorkspacePath(input.workspaceDir, resolvedTexPath),
+    pdfPath: relativeWorkspacePath(input.workspaceDir, pdfPath),
+    commands,
+    output: truncateOutput(outputs.join("\n\n"), input.maxOutputChars)
+  };
 }
 
 function fileTypeFromDirent(entry: import("node:fs").Dirent): ListFilesEntry["type"] {
@@ -677,6 +965,22 @@ async function listWorkspaceFiles(input: {
 type GetTimeTool = AgentTool<typeof getTimeParameters, { timezone: string }>;
 type ReadFileTool = AgentTool<typeof readFileParameters, { path: string }>;
 type ListFilesTool = AgentTool<typeof listFilesParameters, ListFilesDetails>;
+type WriteFileTool = AgentTool<typeof writeFileParameters, { path: string; bytes: number }>;
+type ReplaceFileTextTool = AgentTool<
+  typeof replaceFileTextParameters,
+  { path: string; replacements: number; bytes: number }
+>;
+type DeleteFileTool = AgentTool<typeof deleteFileParameters, { path: string; bytes: number }>;
+type CompileLatexTool = AgentTool<
+  typeof compileLatexParameters,
+  {
+    status: "compiled";
+    texPath: string;
+    pdfPath: string;
+    commands: string[];
+    output: string;
+  }
+>;
 interface ListFilesEntry {
   path: string;
   type: "directory" | "file" | "symlink" | "other";
@@ -2206,6 +2510,114 @@ export function createTools(workspaceDir: string, dependencies: ToolDependencies
     }
   };
 
+  const writeFileTool: WriteFileTool = {
+    name: "write_file",
+    label: "Write File",
+    description:
+      "Creates or overwrites a UTF-8 text file inside the workspace. Use this when the user asks you to actually edit a local writing project or manuscript file.",
+    parameters: writeFileParameters,
+    executionMode: "sequential",
+    execute: async (_toolCallId: string, args: WriteFileParameters) => {
+      const resolvedPath = await resolveWorkspaceWritablePath(resolvedWorkspaceDir, args.path);
+      await writeFile(resolvedPath, args.content, "utf8");
+      const relativePath = relativeWorkspacePath(resolvedWorkspaceDir, resolvedPath);
+
+      return {
+        content: [{ type: "text", text: `Wrote ${relativePath}.` }],
+        details: {
+          path: relativePath,
+          bytes: Buffer.byteLength(args.content, "utf8")
+        }
+      };
+    }
+  };
+
+  const replaceFileTextTool: ReplaceFileTextTool = {
+    name: "replace_file_text",
+    label: "Replace File Text",
+    description:
+      "Replaces an exact text block inside a UTF-8 workspace file. Use read_file first, then replace the smallest exact block that implements the requested manuscript edit.",
+    parameters: replaceFileTextParameters,
+    executionMode: "sequential",
+    execute: async (_toolCallId: string, args: ReplaceFileTextParameters) => {
+      if (!args.search) {
+        throw new Error("Search text is required.");
+      }
+
+      const resolvedPath = await resolveWorkspacePath(resolvedWorkspaceDir, args.path);
+      const original = await readFile(resolvedPath, "utf8");
+      const occurrences = countOccurrences(original, args.search);
+      if (occurrences === 0) {
+        throw new Error("Search text was not found in the file.");
+      }
+      if (!args.replaceAll && occurrences !== 1) {
+        throw new Error(`Search text occurs ${occurrences} times; set replaceAll=true or use a more specific block.`);
+      }
+
+      const updated = args.replaceAll
+        ? original.split(args.search).join(args.replacement)
+        : original.replace(args.search, args.replacement);
+      await writeFile(resolvedPath, updated, "utf8");
+      const relativePath = relativeWorkspacePath(resolvedWorkspaceDir, resolvedPath);
+
+      return {
+        content: [{ type: "text", text: `Replaced text in ${relativePath}.` }],
+        details: {
+          path: relativePath,
+          replacements: args.replaceAll ? occurrences : 1,
+          bytes: Buffer.byteLength(updated, "utf8")
+        }
+      };
+    }
+  };
+
+  const deleteFileTool: DeleteFileTool = {
+    name: "delete_file",
+    label: "Delete File",
+    description:
+      "Deletes a text or LaTeX-related file inside the workspace. Use this for intentional manuscript directory cleanup after inspecting the target; it rejects directories, .git paths, symlinks, and binary files.",
+    parameters: deleteFileParameters,
+    executionMode: "sequential",
+    execute: async (_toolCallId: string, args: DeleteFileParameters) => {
+      const { resolvedPath, size } = await resolveWorkspaceDeletableFilePath(resolvedWorkspaceDir, args.path);
+      await unlink(resolvedPath);
+      const relativePath = relativeWorkspacePath(resolvedWorkspaceDir, resolvedPath);
+
+      return {
+        content: [{ type: "text", text: `Deleted ${relativePath}.` }],
+        details: {
+          path: relativePath,
+          bytes: size
+        }
+      };
+    }
+  };
+
+  const compileLatexTool: CompileLatexTool = {
+    name: "compile_latex",
+    label: "Compile LaTeX",
+    description:
+      "Compiles a workspace LaTeX manuscript with pdflatex, bibtex, and two more pdflatex passes. Use this after editing a paper when the user asks for the compiled PDF.",
+    parameters: compileLatexParameters,
+    executionMode: "sequential",
+    execute: async (_toolCallId: string, args: CompileLatexParameters) => {
+      const result = await compileLatexDocument({
+        workspaceDir: resolvedWorkspaceDir,
+        texPath: args.texPath,
+        runBibtex: args.runBibtex ?? true,
+        maxOutputChars: Math.max(1000, Math.trunc(args.maxOutputChars ?? 12000))
+      });
+
+      return {
+        content: [{ type: "text", text: `Compiled ${result.pdfPath}.` }],
+        details: {
+          status: "compiled",
+          ...result
+        }
+      };
+    }
+  };
+
   const webSearchTool: WebSearchTool = {
     name: "web_search",
     label: "Web Search",
@@ -3440,6 +3852,10 @@ export function createTools(workspaceDir: string, dependencies: ToolDependencies
   const tools = [
     listFilesTool,
     readFileTool,
+    writeFileTool,
+    replaceFileTextTool,
+    deleteFileTool,
+    compileLatexTool,
     webSearchTool,
     fetchUrlTool,
     searchPapersTool,

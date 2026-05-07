@@ -89,7 +89,7 @@ function formatArgsSummary(args: unknown): string {
     return '';
   }
 
-  const fields = ['query', 'url', 'id', 'paperKey', 'topic', 'question']
+  const fields = ['query', 'url', 'id', 'path', 'texPath', 'paperKey', 'topic', 'question']
     .map((key) => {
       const value = getStringField(args, key);
       return value ? `${key}=${value}` : undefined;
