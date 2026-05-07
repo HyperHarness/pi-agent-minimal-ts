@@ -487,9 +487,10 @@ Current repo primitives already cover most of this benchmark:
 - `PaperWikiPageWorkerInput` and `PaperWikiPageWorkerOutput` are the natural worker-isolated API.
 - `build_wiki_page` already passes fixed evidence to a clean-context page worker.
 - `createToolsForBoundary(workspaceDir, "wiki-agent")` exposes the wiki-agent tool surface while disabling external evidence acquisition inside `build_wiki_page`.
-- `createToolsForBoundary(workspaceDir, "paper-download-subagent")` and `createToolsForBoundary(workspaceDir, "paper-summary-worker")` provide the separated ingestion and source-summary surfaces for non-benchmark workflows.
+- `createToolsForBoundary(workspaceDir, "paper-download-subagent")` provides the raw paper acquisition surface for non-benchmark ingestion workflows.
+- `createToolsForBoundary(workspaceDir, "wiki-evidence-worker")` provides the wiki-side evidence surface for source-summary generation and source relation maintenance.
 - `createToolsForBoundary(workspaceDir, "paper-writing-worker")` provides a paper-writing surface that can read and write manuscript files, compile LaTeX, and retrieve citeable wiki evidence without exposing download, web search, source-summary generation, or wiki page writes.
-- `createToolsForBoundary(workspaceDir, "wiki-page-worker")` returns no tools, preserving the worker-isolated benchmark contract.
+- Worker-isolated page synthesis should call the page worker directly with `PaperWikiPageWorkerInput` and no tools, preserving the benchmark contract.
 - `writePaperWikiPage` enforces at least one source citation.
 - `wiki_lint` already catches stale index entries, broken links, missing source citations, orphan pages, and concept gaps.
 - `/graph-data.json` can support graph-related derived metrics for live-wiki smoke tests.

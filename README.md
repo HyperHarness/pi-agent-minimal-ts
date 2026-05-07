@@ -337,9 +337,26 @@ Agent or benchmark harnesses that need stricter separation can use `createToolsF
 
 - `wiki-agent`: local wiki search, page construction, alias management, wiki health/lint, and local paper search; it does not expose web search, paper download, or summary generation, and disables external evidence acquisition inside `build_wiki_page`
 - `paper-download-subagent`: paper search/download, browser/manual fallback, webpage capture, parsing, and health repair; it does not expose wiki page or source-summary writers
-- `paper-summary-worker`: parsed-paper inspection/search plus `generate_paper_wiki_summary`, `write_paper_wiki_source`, and relation maintenance; it does not expose download or wiki page tools
+- `wiki-evidence-worker`: builds and maintains the wiki evidence layer through `generate_paper_wiki_summary`, `write_paper_wiki_source`, and relation maintenance; it does not expose paper download or synthesis page tools
 - `paper-writing-worker`: manuscript file reading/writing, LaTeX compilation, local wiki retrieval, and wiki-grounded Q&A for drafting scientific papers from the wiki evidence layer; it does not expose web search, paper download, source-summary generation, or wiki page writes
-- `wiki-page-worker`: no tools; benchmarked page synthesis should receive only the fixed evidence package supplied by the harness
+
+Recommended division of labor:
+
+| Role | Responsibility | Reads | Writes | Must not do |
+| --- | --- | --- | --- | --- |
+| `wiki-agent` | Main coordinator for durable knowledge growth: decide needed pages, inspect wiki gaps, request evidence expansion, and maintain wiki structure | `wiki/sources`, `wiki/pages`, local paper metadata | `wiki/pages` through `build_wiki_page` and alias pages through `merge_wiki_aliases` | Direct web search, paper download, source-summary generation in benchmark/boundary mode |
+| `paper-download-subagent` | Literature ingestion: search papers, download or queue publisher/browser work, register manual PDFs, capture webpages, parse downloaded records, and repair acquisition health | paper search results, records, raw PDFs/webpages, parse artifacts | `knowledge-base/records`, `knowledge-base/raw`, parse artifacts, extension job state | `wiki/pages` writes or source-summary authoring |
+| `wiki-evidence-worker` | Build and maintain wiki evidence artifacts. Source-summary mode converts parsed papers into `wiki/sources`; page-synthesis mode turns fixed source evidence into a page draft for benchmarkable construction | parsed paper artifacts, local paper metadata, existing source summaries, or a fixed evidence package from the harness | `wiki/sources/<paper-key>.md`, `related_papers` fields, or page draft output returned to the caller | paper download, external search, or autonomous evidence acquisition |
+| `paper-writing-worker` | Draft and revise scientific manuscripts using the wiki as the reference/evidence layer | manuscript files, `wiki/sources`, `wiki/pages`, wiki-grounded Q&A results | manuscript project files, compiled LaTeX outputs | paper download, source-summary generation, wiki page construction, or web search |
+
+The intended workflow boundary is:
+
+```text
+paper-download-subagent -> wiki-evidence-worker -> wiki-agent -> paper-writing-worker
+records/raw/parses      -> wiki/sources/*.md     -> wiki/pages/*.md -> manuscript files
+```
+
+For model benchmarks, run the wiki evidence page-synthesis mode as a tool-free worker over fixed `wiki/sources` fixtures. Use `paper-writing-worker` when the goal is a manuscript draft or revision, so paper writing consumes the wiki instead of mutating the wiki knowledge layer.
 
 For `search_papers`, concise English keyword queries still work best because the search stages include arXiv, APS/Crossref metadata, and the configured web provider.
 

@@ -1718,9 +1718,8 @@ export type ToolProfile = "default" | "full";
 export type ToolBoundaryRole =
   | "wiki-agent"
   | "paper-download-subagent"
-  | "paper-summary-worker"
-  | "paper-writing-worker"
-  | "wiki-page-worker";
+  | "wiki-evidence-worker"
+  | "paper-writing-worker";
 
 type ToolName =
   | "answer_paper_wiki_question"
@@ -1795,7 +1794,7 @@ const TOOL_BOUNDARY_NAMES: Record<ToolBoundaryRole, readonly ToolName[]> = {
     "wiki_health",
     "wiki_health_fix"
   ],
-  "paper-summary-worker": [
+  "wiki-evidence-worker": [
     "inspect_paper",
     "read_paper_section",
     "search_paper_text",
@@ -1814,8 +1813,7 @@ const TOOL_BOUNDARY_NAMES: Record<ToolBoundaryRole, readonly ToolName[]> = {
     "answer_paper_wiki_question",
     "search_paper_wiki",
     "wiki_lint"
-  ],
-  "wiki-page-worker": []
+  ]
 };
 
 export interface ToolDependencies {
@@ -4109,7 +4107,7 @@ export function createToolsForBoundary(
   const baseTools = createTools(workspaceDir, {
     ...dependencies,
     toolProfile: "full",
-    ...(role === "wiki-agent" || role === "wiki-page-worker"
+    ...(role === "wiki-agent"
       ? { allowBuildWikiPageExternalEvidence: false }
       : {})
   });

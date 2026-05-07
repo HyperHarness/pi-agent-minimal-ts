@@ -1409,12 +1409,12 @@ test("createToolsForBoundary exposes isolated wiki and worker tool surfaces", as
     assert.ok(!downloadTools.some((tool) => tool.name === "build_wiki_page"));
     assert.ok(!downloadTools.some((tool) => tool.name === "write_paper_wiki_source"));
 
-    const summaryTools = createToolsForBoundary(workspace, "paper-summary-worker");
-    assert.deepEqual(summaryTools.map((tool) => tool.name), getToolBoundaryToolNames("paper-summary-worker"));
-    assert.ok(summaryTools.some((tool) => tool.name === "generate_paper_wiki_summary"));
-    assert.ok(summaryTools.some((tool) => tool.name === "write_paper_wiki_source"));
-    assert.ok(!summaryTools.some((tool) => tool.name === "download_paper"));
-    assert.ok(!summaryTools.some((tool) => tool.name === "build_wiki_page"));
+    const evidenceTools = createToolsForBoundary(workspace, "wiki-evidence-worker");
+    assert.deepEqual(evidenceTools.map((tool) => tool.name), getToolBoundaryToolNames("wiki-evidence-worker"));
+    assert.ok(evidenceTools.some((tool) => tool.name === "generate_paper_wiki_summary"));
+    assert.ok(evidenceTools.some((tool) => tool.name === "write_paper_wiki_source"));
+    assert.ok(!evidenceTools.some((tool) => tool.name === "download_paper"));
+    assert.ok(!evidenceTools.some((tool) => tool.name === "build_wiki_page"));
 
     const writingTools = createToolsForBoundary(workspace, "paper-writing-worker");
     assert.deepEqual(writingTools.map((tool) => tool.name), getToolBoundaryToolNames("paper-writing-worker"));
@@ -1427,9 +1427,6 @@ test("createToolsForBoundary exposes isolated wiki and worker tool surfaces", as
     assert.ok(!writingTools.some((tool) => tool.name === "generate_paper_wiki_summary"));
     assert.ok(!writingTools.some((tool) => tool.name === "build_wiki_page"));
     assert.ok(!writingTools.some((tool) => tool.name === "write_paper_wiki_source"));
-
-    const pageWorkerTools = createToolsForBoundary(workspace, "wiki-page-worker");
-    assert.deepEqual(pageWorkerTools.map((tool) => tool.name), []);
   } finally {
     await rm(workspace, { recursive: true, force: true });
   }
