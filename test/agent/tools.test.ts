@@ -35,6 +35,14 @@ type ReadFileTool = {
   ) => Promise<ToolResult>;
 };
 
+type LoadPaperWritingSkillTool = {
+  execute: (
+    toolCallId: string,
+    args: { skillName?: string },
+    signal: undefined,
+  ) => Promise<ToolResult>;
+};
+
 type ListFilesTool = {
   execute: (
     toolCallId: string,
@@ -440,6 +448,17 @@ function getReadFileTool(workspace: string): ReadFileTool {
   assert.ok(readFileTool);
   assert.equal(typeof readFileTool.execute, "function");
   return readFileTool as ReadFileTool;
+}
+
+function getLoadPaperWritingSkillTool(workspace: string): LoadPaperWritingSkillTool {
+  const tools = createTools(workspace, { toolProfile: "full" }) as ReadonlyArray<{
+    name: string;
+    execute?: LoadPaperWritingSkillTool["execute"];
+  }>;
+  const tool = tools.find((candidate) => candidate.name === "load_paper_writing_skill");
+  assert.ok(tool);
+  assert.equal(typeof tool.execute, "function");
+  return tool as LoadPaperWritingSkillTool;
 }
 
 function getListFilesTool(workspace: string): ListFilesTool {
@@ -1080,6 +1099,42 @@ test("read_file accepts workspace-absolute paths", async () => {
   }
 });
 
+test("load_paper_writing_skill loads a project-local prompt module", async () => {
+  const workspace = await mkdtemp(path.join(tmpdir(), "pi-agent-tools-"));
+  const skillDir = path.join(workspace, "paper-writing-worker", "skills", "sciwrite");
+  await mkdir(skillDir, { recursive: true });
+  await writeFile(path.join(skillDir, "prompt.md"), "# SciWrite\n\nReview manuscript clarity.", "utf8");
+  await writeFile(path.join(skillDir, "ATTRIBUTION.md"), "Adapted from SciWrite.", "utf8");
+
+  try {
+    const tool = getLoadPaperWritingSkillTool(workspace);
+    const result = await tool.execute("call-skill", {}, undefined);
+    assert.equal(result.content?.[0]?.text, "# SciWrite\n\nReview manuscript clarity.");
+    assert.deepEqual(result.details, {
+      skillName: "sciwrite",
+      promptPath: "paper-writing-worker/skills/sciwrite/prompt.md",
+      attributionPath: "paper-writing-worker/skills/sciwrite/ATTRIBUTION.md",
+      bytes: Buffer.byteLength("# SciWrite\n\nReview manuscript clarity.", "utf8")
+    });
+  } finally {
+    await rm(workspace, { recursive: true, force: true });
+  }
+});
+
+test("load_paper_writing_skill rejects unsafe skill names", async () => {
+  const workspace = await mkdtemp(path.join(tmpdir(), "pi-agent-tools-"));
+
+  try {
+    const tool = getLoadPaperWritingSkillTool(workspace);
+    await assert.rejects(
+      () => tool.execute("call-skill-unsafe", { skillName: "../sciwrite" }, undefined),
+      /skill name/i,
+    );
+  } finally {
+    await rm(workspace, { recursive: true, force: true });
+  }
+});
+
 test("write_file creates and overwrites workspace text files", async () => {
   const workspace = await mkdtemp(path.join(tmpdir(), "pi-agent-tools-"));
 
@@ -1553,6 +1608,7 @@ test("createTools full profile exposes every built-in tool", async () => {
       "paper_wiki_relations",
       "search_paper_wiki",
       "write_design_artifact",
+      "load_paper_writing_skill",
       "list_local_papers",
       "fetch_paper_webpage",
       "register_manual_paper_download",
@@ -1602,6 +1658,7 @@ test("createToolsForBoundary exposes isolated wiki and worker tool surfaces", as
 
     const writingTools = createToolsForBoundary(workspace, "paper-writing-worker");
     assert.deepEqual(writingTools.map((tool) => tool.name), getToolBoundaryToolNames("paper-writing-worker"));
+    assert.ok(writingTools.some((tool) => tool.name === "load_paper_writing_skill"));
     assert.ok(writingTools.some((tool) => tool.name === "write_file"));
     assert.ok(writingTools.some((tool) => tool.name === "compile_latex"));
     assert.ok(writingTools.some((tool) => tool.name === "answer_paper_wiki_question"));

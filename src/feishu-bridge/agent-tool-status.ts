@@ -32,6 +32,7 @@ const WIKI_TOOL_LABELS: Record<string, string> = {
   list_local_papers: '列出本地论文',
   search_local_papers: '检索本地论文',
   write_design_artifact: '写入设计记录',
+  load_paper_writing_skill: '加载论文写作技能',
   wiki_health: '检查 wiki 健康状态',
   wiki_health_fix: '修复 wiki 健康问题',
 };

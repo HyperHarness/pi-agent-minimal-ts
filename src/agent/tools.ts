@@ -93,6 +93,14 @@ const getTimeParameters = Type.Object({
   timezone: Type.Optional(Type.String({ description: "Optional IANA timezone name." }))
 });
 
+const loadPaperWritingSkillParameters = Type.Object({
+  skillName: Type.Optional(
+    Type.String({
+      description: "Project-local paper-writing skill name under paper-writing-worker/skills/. Defaults to sciwrite."
+    })
+  )
+});
+
 const readFileParameters = Type.Object({
   path: Type.String({
     description: "UTF-8 text file path inside the workspace. Relative paths and workspace-absolute paths are accepted."
@@ -660,6 +668,7 @@ const wikiHealthFixParameters = Type.Object({
 });
 
 type GetTimeParameters = Static<typeof getTimeParameters>;
+type LoadPaperWritingSkillParameters = Static<typeof loadPaperWritingSkillParameters>;
 type ReadFileParameters = Static<typeof readFileParameters>;
 type ListFilesParameters = Static<typeof listFilesParameters>;
 type WriteFileParameters = Static<typeof writeFileParameters>;
@@ -1164,7 +1173,44 @@ async function readWorkspaceTextFileRange(input: {
   }
 }
 
+async function loadPaperWritingSkill(input: {
+  workspaceDir: string;
+  skillName?: string;
+}): Promise<{ prompt: string; details: PaperWritingSkillDetails }> {
+  const skillName = input.skillName?.trim() || "sciwrite";
+  if (!/^[A-Za-z0-9][A-Za-z0-9_-]*$/.test(skillName)) {
+    throw new Error("Paper-writing skill name must contain only letters, numbers, underscores, and hyphens.");
+  }
+
+  const promptPath = `paper-writing-worker/skills/${skillName}/prompt.md`;
+  const resolvedPromptPath = await resolveWorkspacePath(input.workspaceDir, promptPath);
+  const promptStats = await stat(resolvedPromptPath);
+  if (!promptStats.isFile()) {
+    throw new Error(`Paper-writing skill prompt is not a file: ${promptPath}`);
+  }
+
+  const attributionPath = `paper-writing-worker/skills/${skillName}/ATTRIBUTION.md`;
+  const resolvedAttributionPath = path.resolve(input.workspaceDir, attributionPath);
+  const hasAttribution = await pathExists(resolvedAttributionPath);
+  if (hasAttribution) {
+    const realWorkspaceDir = await realpath(input.workspaceDir);
+    const realAttributionPath = await realpath(resolvedAttributionPath);
+    assertPathInsideDirectory(realWorkspaceDir, realAttributionPath);
+  }
+
+  return {
+    prompt: await readFile(resolvedPromptPath, "utf8"),
+    details: {
+      skillName,
+      promptPath,
+      ...(hasAttribution ? { attributionPath } : {}),
+      bytes: promptStats.size
+    }
+  };
+}
+
 type GetTimeTool = AgentTool<typeof getTimeParameters, { timezone: string }>;
+type LoadPaperWritingSkillTool = AgentTool<typeof loadPaperWritingSkillParameters, PaperWritingSkillDetails>;
 type ReadFileTool = AgentTool<typeof readFileParameters, ReadFileDetails>;
 type ListFilesTool = AgentTool<typeof listFilesParameters, ListFilesDetails>;
 type WriteFileTool = AgentTool<typeof writeFileParameters, { path: string; bytes: number }>;
@@ -1930,6 +1976,7 @@ type ToolName =
   | "inspect_paper"
   | "list_files"
   | "list_local_papers"
+  | "load_paper_writing_skill"
   | "merge_wiki_aliases"
   | "open_paper_page_for_login"
   | "paper_wiki_relations"
@@ -2004,6 +2051,7 @@ const TOOL_BOUNDARY_NAMES: Record<ToolBoundaryRole, readonly ToolName[]> = {
     "write_design_artifact"
   ],
   "paper-writing-worker": [
+    "load_paper_writing_skill",
     "list_files",
     "read_file",
     "write_file",
@@ -2058,6 +2106,13 @@ interface ToolSetMetadata {
 export type AgentTools = AgentTool<any>[] & ToolSetMetadata;
 
 type ToolProgress = PaperSummaryProgress | WikiHealthFixProgress | ResearchWorkflowProgress;
+
+interface PaperWritingSkillDetails {
+  skillName: string;
+  promptPath: string;
+  attributionPath?: string;
+  bytes: number;
+}
 
 function emitToolProgress(
   onUpdate: AgentToolUpdateCallback<any> | undefined,
@@ -2797,6 +2852,26 @@ export function createTools(workspaceDir: string, dependencies: ToolDependencies
       return {
         content: [{ type: "text", text: formatter.format(new Date()) }],
         details: { timezone }
+      };
+    }
+  };
+
+  const loadPaperWritingSkillTool: LoadPaperWritingSkillTool = {
+    name: "load_paper_writing_skill",
+    label: "Load Paper Writing Skill",
+    description:
+      "Loads a project-local paper-writing-worker prompt module, such as sciwrite, from paper-writing-worker/skills/<skillName>/prompt.md. Use this before manuscript writing-quality review or prose cleanup.",
+    parameters: loadPaperWritingSkillParameters,
+    executionMode: "sequential",
+    execute: async (_toolCallId: string, args: LoadPaperWritingSkillParameters) => {
+      const result = await loadPaperWritingSkill({
+        workspaceDir: resolvedWorkspaceDir,
+        skillName: args.skillName
+      });
+
+      return {
+        content: [{ type: "text", text: result.prompt }],
+        details: result.details
       };
     }
   };
@@ -4292,6 +4367,7 @@ export function createTools(workspaceDir: string, dependencies: ToolDependencies
       paperWikiRelationsTool,
       searchPaperWikiTool,
       writeDesignArtifactTool,
+      loadPaperWritingSkillTool,
       listLocalPapersTool,
       fetchPaperWebpageTool,
       registerManualPaperDownloadTool,

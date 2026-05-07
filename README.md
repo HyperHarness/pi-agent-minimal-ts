@@ -265,7 +265,8 @@ The key distinction is that `wiki/sources/*.md` are evidence summaries for indiv
 ### Design And Paper-Writing Tools
 
 - `write_design_artifact`: full-mode / design-subagent tool that writes structured design records, verification reports, failure records, and benchmark cases under `knowledge-base/design-records/`
-- paper-writing-worker tools: manuscript file reading/writing, LaTeX compilation, local wiki retrieval, and wiki-grounded Q&A
+- `load_paper_writing_skill`: full-mode / paper-writing-worker tool that loads project-local writing prompt modules such as `paper-writing-worker/skills/sciwrite/prompt.md`
+- paper-writing-worker tools: project-local writing skill loading, manuscript file reading/writing, LaTeX compilation, local wiki retrieval, and wiki-grounded Q&A
 - `get_time`: full-mode diagnostic tool for checking the current local time
 
 The design subagent records design reasoning and verification artifacts. The wiki agent later curates stable lessons from those artifacts into durable wiki pages.
@@ -282,7 +283,7 @@ Design code should live under `design-projects/`, usually in a project-specific 
 | `paper-download-subagent` | literature acquisition | search/download, browser/manual fallback, webpage capture, parsing, health repair | wiki page writes, source-summary authoring |
 | `wiki-evidence-worker` | evidence construction | source summaries, relation maintenance, fixed-evidence page draft output | paper download, external search, autonomous acquisition |
 | `design-subagent` | minimal chip-design reasoning | local wiki/paper retrieval, `write_design_artifact` | web search, paper download, wiki page writes, arbitrary file writes |
-| `paper-writing-worker` | manuscript writing | manuscript read/write, LaTeX compile, wiki retrieval/Q&A | paper download, source-summary generation, wiki page construction, web search |
+| `paper-writing-worker` | manuscript writing | project-local writing skills, manuscript read/write, LaTeX compile, wiki retrieval/Q&A | paper download, source-summary generation, wiki page construction, web search |
 
 Use the boundary APIs in benchmarks so each model is evaluated under the same tool surface.
 
