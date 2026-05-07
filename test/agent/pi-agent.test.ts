@@ -1085,6 +1085,46 @@ test("createReplEventHandler prints tool progress updates", () => {
   );
 });
 
+test("createReplEventHandler prints file tool paths in start lines only", () => {
+  const handlerFactory = (
+    piAgent as {
+      createReplEventHandler?: (output: NodeJS.WriteStream) => (event: AgentEvent) => void;
+    }
+  ).createReplEventHandler;
+  assert.equal(typeof handlerFactory, "function");
+
+  const writes: string[] = [];
+  const output: { write: (chunk: string | Uint8Array) => boolean } = {
+    write: (chunk) => {
+      writes.push(typeof chunk === "string" ? chunk : Buffer.from(chunk).toString("utf8"));
+      return true;
+    }
+  };
+  const handleEvent = handlerFactory!(output as NodeJS.WriteStream);
+
+  handleEvent({
+    type: "tool_execution_start",
+    toolName: "write_file",
+    toolCallId: "call-write",
+    args: { path: "paper-projects/main.tex", content: "..." }
+  } as AgentEvent);
+  handleEvent({
+    type: "tool_execution_end",
+    toolName: "write_file",
+    toolCallId: "call-write",
+    isError: false,
+    result: {
+      content: [{ type: "text", text: "Wrote paper-projects/main.tex." }],
+      details: { path: "paper-projects/main.tex", bytes: 1234 }
+    }
+  } as AgentEvent);
+
+  const outputText = writes.join("");
+  assert.match(outputText, /\[tool:start\] write_file path=paper-projects\/main\.tex/);
+  assert.match(outputText, /\[tool:end\] write_file ok\n/);
+  assert.doesNotMatch(outputText, /\[tool:end\] write_file ok .*path=/);
+});
+
 test("parseCliArgs accepts --base-url", () => {
   const parseCliArgs = (
     piAgent as {

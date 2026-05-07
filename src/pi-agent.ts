@@ -148,6 +148,46 @@ function compactOutputText(value: unknown, maxLength = 180): string | null {
     : compacted;
 }
 
+function formatToolFieldValue(value: unknown, maxLength = 180): string | null {
+  if (typeof value === "number" || typeof value === "boolean") {
+    return String(value);
+  }
+
+  return compactOutputText(value, maxLength);
+}
+
+function formatToolFields(record: Record<string, unknown> | undefined, fields: readonly string[]): string {
+  if (!record) {
+    return "";
+  }
+
+  const entries = fields.flatMap((field) => {
+    const value = formatToolFieldValue(record[field]);
+    return value ? [`${field}=${value}`] : [];
+  });
+
+  return entries.length > 0 ? ` ${entries.join(" ")}` : "";
+}
+
+function formatToolStartSummary(event: Extract<AgentEvent, { type: "tool_execution_start" }>): string {
+  const args = isRecord(event.args) ? event.args : undefined;
+  if (
+    event.toolName === "read_file" ||
+    event.toolName === "write_file" ||
+    event.toolName === "replace_file_text" ||
+    event.toolName === "delete_file" ||
+    event.toolName === "list_files"
+  ) {
+    return formatToolFields(args, ["path"]);
+  }
+
+  if (event.toolName === "compile_latex") {
+    return formatToolFields(args, ["texPath"]);
+  }
+
+  return "";
+}
+
 function formatSearchToolDetails(details: unknown): string | null {
   if (!isRecord(details)) {
     return null;
@@ -628,7 +668,7 @@ export function createReplEventHandler(output: NodeJS.WriteStream): AgentMessage
         isStreamingAssistantText = false;
       }
 
-      output.write(`[tool:start] ${event.toolName}\n`);
+      output.write(`[tool:start] ${event.toolName}${formatToolStartSummary(event)}\n`);
       return;
     }
 
