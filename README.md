@@ -172,7 +172,22 @@ knowledge-base/
 
 Use `download_paper` first to close the download loop and generate the preferred Markdown source under `wiki/sources/<paper-key>/parses/<engine>/document.md`. After reading and grounding the summary against the parsed text, use `write_paper_wiki_source` to save the final LLM-authored source page as `wiki/sources/<paper-key>.md`. Full mode also exposes `generate_paper_wiki_summary`, which builds a bounded evidence package from parsed Markdown, includes local related-paper candidates by default, and sends it to a clean-context summary worker before optionally writing the source page. `paper_wiki_relations` suggests related local papers and can write confirmed `related_papers` links into a source summary. Use `answer_research_question` for professional paper or topic Q&A; it checks local wiki evidence first, then searches/downloads/parses/summarizes external papers only when the local wiki is insufficient. Use `bootstrap_wiki_page_evidence` when a page does not exist yet: it generates seed queries, searches source summaries, expands through tags and related papers, searches parsed fallback text, and can generate missing source summaries. Use `build_wiki_page` when a question should become durable knowledge: it bootstraps source-summary evidence first, falls back to evidence-first research acquisition when needed, asks a clean-context page worker to synthesize the supplied wiki evidence, then writes `wiki/pages/<page-key>.md` with citations back to source summaries. Use `merge_wiki_aliases` for acronyms, plural forms, and duplicate concept names that should point to an existing canonical page instead of using generic file-write tools. Use `answer_paper_wiki_question` for local-wiki-only evidence checks, and `search_paper_wiki` in full mode for direct retrieval over both source summaries and synthesis pages. Use `wiki_lint` to check the markdown wiki structure: stale `index.md` entries, broken wiki links, missing source citations, orphan synthesis pages, and repeated source tags that should become durable topic pages.
 
-For browser-based local viewing and the concept graph, use `npm run wiki:web`; operational details for another agent are in [docs/wiki-web-graph.md](docs/wiki-web-graph.md).
+### Local wiki web viewer
+
+Use this command from the repository root to browse the local wiki and concept graph in a browser:
+
+```sh
+npm run wiki:web
+```
+
+Then open:
+
+```text
+http://localhost:4177/
+http://localhost:4177/graph
+```
+
+The viewer reads `knowledge-base/wiki` by default. To serve another wiki directory or port, set `PI_WIKI_DIR` or `WIKI_PORT` before running the command. Operational details for another agent are in [docs/wiki-web-graph.md](docs/wiki-web-graph.md).
 
 ## Search And Fetch Configuration
 

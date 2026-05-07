@@ -9,8 +9,10 @@ Use this when the user wants a browser-based view of the WSL-native wiki, especi
 The source of truth is the WSL wiki directory:
 
 ```text
-/home/ququan2/pi-agent-minimal-ts/knowledge-base/wiki
+knowledge-base/wiki
 ```
+
+All paths in this document are relative to the repository root unless an environment variable explicitly says otherwise.
 
 The viewer is a small Node.js HTTP server:
 
@@ -25,7 +27,6 @@ It reads the wiki directly from WSL. It does not copy files to Windows, does not
 Run from the repository root:
 
 ```sh
-cd /home/ququan2/pi-agent-minimal-ts
 npm run wiki:web
 ```
 
@@ -33,7 +34,7 @@ Expected startup output:
 
 ```text
 Wiki web viewer: http://127.0.0.1:4177
-Serving: /home/ququan2/pi-agent-minimal-ts/knowledge-base/wiki
+Serving: <repo-root>/knowledge-base/wiki
 ```
 
 Open these URLs from the Windows browser:
@@ -138,7 +139,7 @@ Default settings:
 ```text
 WIKI_HOST=127.0.0.1
 WIKI_PORT=4177
-PI_WIKI_DIR=/home/ququan2/pi-agent-minimal-ts/knowledge-base/wiki
+PI_WIKI_DIR=<repo-root>/knowledge-base/wiki
 ```
 
 Override them only when needed:
@@ -196,7 +197,7 @@ Use `--noproxy '*'` because proxy environment variables can interfere with loopb
 Check that durable pages exist:
 
 ```sh
-find /home/ququan2/pi-agent-minimal-ts/knowledge-base/wiki/pages -maxdepth 1 -type f -name '*.md' | wc -l
+find knowledge-base/wiki/pages -maxdepth 1 -type f -name '*.md' | wc -l
 ```
 
 Check graph data directly:
