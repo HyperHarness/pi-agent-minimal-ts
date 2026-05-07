@@ -1635,6 +1635,7 @@ test("createToolsForBoundary exposes isolated wiki and worker tool surfaces", as
 
     const downloadTools = createToolsForBoundary(workspace, "paper-download-subagent");
     assert.deepEqual(downloadTools.map((tool) => tool.name), getToolBoundaryToolNames("paper-download-subagent"));
+    assert.ok(downloadTools.some((tool) => tool.name === "get_time"));
     assert.ok(downloadTools.some((tool) => tool.name === "download_paper"));
     assert.ok(downloadTools.some((tool) => tool.name === "parse_paper"));
     assert.ok(!downloadTools.some((tool) => tool.name === "build_wiki_page"));

@@ -2024,6 +2024,7 @@ const TOOL_BOUNDARY_NAMES: Record<ToolBoundaryRole, readonly ToolName[]> = {
     "wiki_lint"
   ],
   "paper-download-subagent": [
+    "get_time",
     "web_search",
     "fetch_url",
     "search_papers",

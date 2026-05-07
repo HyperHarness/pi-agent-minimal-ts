@@ -108,6 +108,8 @@ test("router worker system prompts describe isolated responsibilities", () => {
   assert.match(wikiPrompt as string, /source-summary/);
   assert.match(downloadPrompt as string, /paper-download-subagent/);
   assert.match(downloadPrompt as string, /download_paper/);
+  assert.match(downloadPrompt as string, /get_time first/);
+  assert.match(downloadPrompt as string, /past N years/);
   assert.match(designPrompt as string, /design-subagent/);
   assert.match(designPrompt as string, /write_design_artifact/);
 });
