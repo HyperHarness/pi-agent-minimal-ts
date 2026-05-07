@@ -11,6 +11,7 @@ This repository is a practical agent harness for literature ingestion, local wik
 - exposes a Feishu long-connection bridge with streaming replies and per-chat memory
 - searches, downloads, parses, summarizes, and indexes papers into a local knowledge base
 - builds durable wiki pages from fixed evidence rather than one-off answers
+- provides `design-projects/` as the recommended code workspace root for design subagent projects
 - manages paper/design/wiki Git repositories through a bridge-side repo manager
 - exposes isolated worker tool surfaces for wiki, evidence, download, design, and paper-writing workflows
 
@@ -57,6 +58,8 @@ The repo manager is a bridge-side service, not an LLM tool and not a worker. It 
 - `repo push design`
 
 Configured repositories are `paper`, `design`, and optional `wiki`. The paper repository is configured with `BRIDGE_PAPER_WORKSPACE_DIR`; design and wiki use `BRIDGE_DESIGN_WORKSPACE_DIR` and `BRIDGE_WIKI_WORKSPACE_DIR`.
+
+The recommended design workspace root is `design-projects/`. For the first chip-design workspace, point `BRIDGE_DESIGN_WORKSPACE_DIR` at `design-projects/superconducting-qubit-chip`. Keep executable design code there, and keep durable conclusions or failure records in `knowledge-base/design-records/`.
 
 Automatic commit/push is still supported. When `BRIDGE_PAPER_GIT_AUTO_COMMIT=true`, the bridge snapshots the paper repo before an agent turn. If the repo was clean and the agent leaves changes, the bridge runs `git add -A` and commits with an `Auto paper update: ...` message. If `BRIDGE_PAPER_GIT_AUTO_PUSH=true`, it also pushes. If the repo was already dirty before the turn, automatic commit is skipped to avoid mixing user edits with agent edits.
 
@@ -267,6 +270,8 @@ The key distinction is that `wiki/sources/*.md` are evidence summaries for indiv
 
 The design subagent records design reasoning and verification artifacts. The wiki agent later curates stable lessons from those artifacts into durable wiki pages.
 
+Design code should live under `design-projects/`, usually in a project-specific directory such as `design-projects/superconducting-qubit-chip/`. The current design-subagent boundary only exposes `write_design_artifact`; adding direct code-writing tools for design projects should be a deliberate follow-up change.
+
 ### Tool Profiles And Worker Boundaries
 
 | Surface | Purpose | Exposes | Does not expose |
@@ -303,6 +308,30 @@ knowledge-base/
     manifests/
     assets/
     state/
+```
+
+## Design Project Layout
+
+Design code workspaces live outside the knowledge base:
+
+```text
+design-projects/
+  README.md
+  superconducting-qubit-chip/
+    README.md
+    pyproject.toml
+    src/pi_chip_design/
+```
+
+Use `design-projects/` for executable design code, Python package modules, simulations, generated-layout scripts, and project-local tests. Use `knowledge-base/design-records/` for structured design evidence that should feed the data flywheel back into the wiki.
+
+The initial design workspace is the `pi_chip_design` Python package under `design-projects/superconducting-qubit-chip/`. It should hold reusable layout-generation and verification code, with layout families added under `src/pi_chip_design/layouts/`. Its local development setup is:
+
+```sh
+cd design-projects/superconducting-qubit-chip
+python3 -m venv .venv
+source .venv/bin/activate
+python -m pip install -e ".[dev]"
 ```
 
 Recommended paper-to-wiki path:
