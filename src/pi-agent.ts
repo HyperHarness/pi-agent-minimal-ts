@@ -66,6 +66,14 @@ export const WIKI_EVIDENCE_WORKER_SYSTEM_PROMPT = [
   "Ground every substantive evidence statement in paper keys, source paths, or retrieved local snippets."
 ].join(" ");
 
+export const PAPER_DOWNLOAD_SUBAGENT_SYSTEM_PROMPT = [
+  "You are the paper-download-subagent for this project. You operate in a clean context with a restricted literature-acquisition tool surface.",
+  "You own paper search, web lookup, paper download, browser/manual fallback, webpage capture, parsing, and citation-metadata refresh.",
+  "For broad requests such as finding or downloading the latest papers on a topic, search first, select clearly relevant papers, then download or queue them with download_paper.",
+  "Do not write wiki pages, create source summaries, edit manuscripts, or write design artifacts. Hand parsed papers and acquisition status back to the main wiki agent or wiki-evidence-worker.",
+  "When a download is queued, blocked, needs authorization, or needs manual browser action, report the exact status and next action."
+].join(" ");
+
 export const DESIGN_SUBAGENT_SYSTEM_PROMPT = [
   "You are the design-subagent for this project. You operate in a clean context with a restricted chip-design reasoning tool surface.",
   "Use local wiki and paper evidence before writing design artifacts. Keep design outputs as structured design records, verification reports, failure records, or benchmark cases.",
@@ -73,7 +81,7 @@ export const DESIGN_SUBAGENT_SYSTEM_PROMPT = [
   "When evidence is insufficient for a design conclusion, write a bounded uncertainty or failure record instead of inventing a design result."
 ].join(" ");
 
-type RoutedWorkerRole = "paper-writing-worker" | "wiki-evidence-worker" | "design-subagent";
+type RoutedWorkerRole = "paper-writing-worker" | "paper-download-subagent" | "wiki-evidence-worker" | "design-subagent";
 
 export interface RoutedWorkerPrompt {
   role: RoutedWorkerRole;
@@ -94,7 +102,7 @@ export interface WorkerHandoff {
   toolsUsed: string[];
   failedTools: string[];
   finalResponse: string;
-  nextSuggestedOwner: "wiki-agent" | "paper-writing-worker" | "wiki-evidence-worker" | "design-subagent";
+  nextSuggestedOwner: "wiki-agent" | "paper-writing-worker" | "paper-download-subagent" | "wiki-evidence-worker" | "design-subagent";
 }
 const contextWorkspaceDirs = new WeakMap<AgentContext, string>();
 const TRANSIENT_MODEL_RETRY_ATTEMPTS = 5;
@@ -1050,6 +1058,17 @@ export function routeChatPromptToWorker(text: string): RoutedWorkerPrompt | null
       /^\/?paper-writing-worker\s+([\s\S]+)$/i,
       /^\/?论文写作\s+([\s\S]+)$/i
     ]) ??
+    matchExplicitWorkerRoute(trimmed, "paper-download-subagent", [
+      /^\/?paper\s+(?:download|search|acquire)\s+([\s\S]+)$/i,
+      /^\/?(?:download|search)\s+papers?\s+([\s\S]+)$/i,
+      /^\/?paper-download-subagent\s+([\s\S]+)$/i,
+      /^\/?论文下载\s+([\s\S]+)$/i,
+      /^\/?文献下载\s+([\s\S]+)$/i,
+      /^\/?论文检索\s+([\s\S]+)$/i,
+      /^\/?文献检索\s+([\s\S]+)$/i,
+      /^\/?搜索论文\s+([\s\S]+)$/i,
+      /^\/?检索论文\s+([\s\S]+)$/i
+    ]) ??
     matchExplicitWorkerRoute(trimmed, "wiki-evidence-worker", [
       /^\/?wiki\s+evidence\s+([\s\S]+)$/i,
       /^\/?evidence\s+([\s\S]+)$/i,
@@ -1075,6 +1094,13 @@ export function routeChatPromptToWorker(text: string): RoutedWorkerPrompt | null
     return { role: "paper-writing-worker", instruction: trimmed, reason: "intent" };
   }
 
+  const paperDownloadIntent =
+    /(论文|文献|paper|papers?|article|articles?|arxiv|doi|超导量子芯片|quantum chip|qubit chip)/i.test(trimmed) &&
+    /(下载|获取|检索|搜索|查找|找|最新|download|search|find|fetch|acquire|latest|recent|newest)/i.test(trimmed);
+  if (paperDownloadIntent) {
+    return { role: "paper-download-subagent", instruction: trimmed, reason: "intent" };
+  }
+
   const wikiEvidenceIntent =
     /(文献|论文|paper|source summaries?|wiki evidence|证据|来源摘要|source summary)/i.test(trimmed) &&
     /(总结|整理|提取|归纳|关系|关联|证据|summary|summarize|relation|relations|ingest|evidence)/i.test(trimmed);
@@ -1095,6 +1121,9 @@ export function routeChatPromptToWorker(text: string): RoutedWorkerPrompt | null
 function systemPromptForWorker(role: RoutedWorkerRole): string {
   if (role === "paper-writing-worker") {
     return PAPER_WRITING_WORKER_SYSTEM_PROMPT;
+  }
+  if (role === "paper-download-subagent") {
+    return PAPER_DOWNLOAD_SUBAGENT_SYSTEM_PROMPT;
   }
   if (role === "wiki-evidence-worker") {
     return WIKI_EVIDENCE_WORKER_SYSTEM_PROMPT;
@@ -1134,6 +1163,12 @@ function extractWorkerHandoffPaths(
 
   if (toolName === "compile_latex") {
     addString(handoff.artifacts, details.pdfPath);
+    return;
+  }
+
+  if (toolName === "download_paper" || toolName === "parse_paper" || toolName === "register_manual_paper_download") {
+    addString(handoff.artifacts, firstString(details.recordPath, details.path, details.pdfPath));
+    addString(handoff.sourcePaths, firstString(details.sourcePath, details.recordPath));
     return;
   }
 

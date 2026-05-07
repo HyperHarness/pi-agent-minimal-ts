@@ -98,11 +98,16 @@ test("paper writing worker system prompt keeps manuscript edits in the worker bo
 
 test("router worker system prompts describe isolated responsibilities", () => {
   const wikiPrompt = (piAgent as { WIKI_EVIDENCE_WORKER_SYSTEM_PROMPT?: string }).WIKI_EVIDENCE_WORKER_SYSTEM_PROMPT;
+  const downloadPrompt = (piAgent as { PAPER_DOWNLOAD_SUBAGENT_SYSTEM_PROMPT?: string })
+    .PAPER_DOWNLOAD_SUBAGENT_SYSTEM_PROMPT;
   const designPrompt = (piAgent as { DESIGN_SUBAGENT_SYSTEM_PROMPT?: string }).DESIGN_SUBAGENT_SYSTEM_PROMPT;
   assert.equal(typeof wikiPrompt, "string");
+  assert.equal(typeof downloadPrompt, "string");
   assert.equal(typeof designPrompt, "string");
   assert.match(wikiPrompt as string, /wiki-evidence-worker/);
   assert.match(wikiPrompt as string, /source-summary/);
+  assert.match(downloadPrompt as string, /paper-download-subagent/);
+  assert.match(downloadPrompt as string, /download_paper/);
   assert.match(designPrompt as string, /design-subagent/);
   assert.match(designPrompt as string, /write_design_artifact/);
 });
@@ -805,7 +810,7 @@ test("runSessionPrompt routes paper write commands to the paper-writing worker b
   const routeChatPromptToWorker = (
     piAgent as {
       routeChatPromptToWorker?: (text: string) => {
-        role: "paper-writing-worker" | "wiki-evidence-worker" | "design-subagent";
+        role: "paper-writing-worker" | "paper-download-subagent" | "wiki-evidence-worker" | "design-subagent";
         instruction: string;
         reason: "explicit" | "intent";
       } | null;
@@ -820,6 +825,16 @@ test("runSessionPrompt routes paper write commands to the paper-writing worker b
     role: "wiki-evidence-worker",
     instruction: "summarize local papers",
     reason: "explicit"
+  });
+  assert.deepEqual(routeChatPromptToWorker!("paper download latest superconducting qubit chip design papers"), {
+    role: "paper-download-subagent",
+    instruction: "latest superconducting qubit chip design papers",
+    reason: "explicit"
+  });
+  assert.deepEqual(routeChatPromptToWorker!("下载最新的超导量子芯片设计论文"), {
+    role: "paper-download-subagent",
+    instruction: "下载最新的超导量子芯片设计论文",
+    reason: "intent"
   });
   assert.deepEqual(routeChatPromptToWorker!("design 写一个芯片设计 failure record"), {
     role: "design-subagent",

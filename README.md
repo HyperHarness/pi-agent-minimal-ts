@@ -52,10 +52,11 @@ The bridge should not contain domain reasoning. It should route messages, collec
 The local chat/RPC runtime has a lightweight router layer before the default main-agent turn. It detects high-confidence worker intents and runs the requested turn in a clean worker context with the corresponding boundary tools:
 
 - manuscript editing or LaTeX requests -> `paper-writing-worker`
+- paper search, paper download, acquisition fallback, and citation-metadata repair requests -> `paper-download-subagent`
 - evidence construction, paper summarization, and source-summary relation requests -> `wiki-evidence-worker`
 - chip-design records, verification records, or design-failure cases -> `design-subagent`
 
-Explicit prefixes are still supported when precision matters: `paper write ...`, `wiki evidence ...`, `evidence ...`, `design ...`, `/paper-writing-worker ...`, `/wiki-evidence-worker ...`, and `/design-subagent ...`. If no worker route matches, the prompt goes to the main wiki-agent coordinator.
+Explicit prefixes are still supported when precision matters: `paper write ...`, `paper download ...`, `download paper ...`, `wiki evidence ...`, `evidence ...`, `design ...`, `/paper-writing-worker ...`, `/paper-download-subagent ...`, `/wiki-evidence-worker ...`, and `/design-subagent ...`. If no worker route matches, the prompt goes to the main wiki-agent coordinator.
 
 Worker turns do not share the main agent's full context. The router runs each worker in a clean context, streams the worker's normal reply to the user, then injects a compact structured handoff back into the main context. The handoff records the worker role, instruction, route reason, status, changed files, produced artifacts, source/page/design-record paths, tools used, failed tools, final worker response, and the next suggested owner. This keeps the main chat history continuous without copying the worker's full tool transcript into the prompt.
 
@@ -178,6 +179,7 @@ The paper-writing worker receives only the `paper-writing-worker` boundary tools
 Other explicit worker routes:
 
 ```text
+> paper download latest superconducting qubit chip design papers
 > wiki evidence 总结 arxiv-2406.06015 并维护 related_papers
 > design 为 transmon frequency allocation 写一个 failure record
 ```
