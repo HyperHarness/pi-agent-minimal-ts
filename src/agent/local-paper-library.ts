@@ -4,7 +4,13 @@ import path from "node:path";
 import { resolvePaperLibraryPaths } from "./knowledge-base.js";
 import { resolvePublisherCanonicalIdFromArticleUrl } from "./paper-download.js";
 import type { ConcretePaperParseEngine, PaperParseQualityReport, PaperReaderSource } from "./paper-reader/types.js";
-import type { PaperRecord, PaperSource, SupportedPaperSource } from "./paper-types.js";
+import type {
+  PaperCitationStatus,
+  PaperRecord,
+  PaperSource,
+  PaperSourceMetadata,
+  SupportedPaperSource
+} from "./paper-types.js";
 
 export type LocalPaperListStatus = "all" | "downloaded" | "parsed" | "summarized";
 
@@ -29,7 +35,10 @@ export interface LocalPaperEntry {
   status?: string;
   recordedAt?: string;
   recordPath?: string;
+  sourcePath?: string;
   pdfPath?: string;
+  citationStatus?: PaperCitationStatus | string;
+  missingCitationFields?: string[];
   hasPdf: boolean;
   hasParsedArtifacts: boolean;
   hasWikiSummary: boolean;
@@ -176,11 +185,27 @@ function applyRecord(entry: LocalPaperEntry, record: PaperRecord, recordPath: st
   }
 }
 
-function applySource(entry: LocalPaperEntry, source: PaperReaderSource, workspaceDir: string): void {
+function readOptionalStringArray(value: unknown): string[] | undefined {
+  if (!Array.isArray(value)) {
+    return undefined;
+  }
+  return value.filter((item): item is string => typeof item === "string" && item.trim().length > 0);
+}
+
+function applySource(
+  entry: LocalPaperEntry,
+  source: PaperReaderSource & Partial<PaperSourceMetadata>,
+  sourcePath: string,
+  workspaceDir: string
+): void {
+  const rawSource = source as unknown as Record<string, unknown>;
+  entry.sourcePath = relativeToWorkspace(workspaceDir, sourcePath);
   entry.title = entry.title ?? source.title;
   entry.source = entry.source ?? source.source;
   entry.canonicalId = entry.canonicalId ?? source.canonicalId;
   entry.articleUrl = entry.articleUrl ?? source.articleUrl;
+  entry.citationStatus = source.citationStatus ?? entry.citationStatus;
+  entry.missingCitationFields = readOptionalStringArray(rawSource.missingFields) ?? entry.missingCitationFields;
   if (source.recordPath && !entry.recordPath) {
     entry.recordPath = relativeToWorkspace(workspaceDir, source.recordPath);
   }
@@ -248,6 +273,7 @@ async function collectAcquisitions(workspaceDir: string, entries: Map<string, Lo
     }
     const entry = entries.get(paperKey) ?? createEmptyEntry(paperKey);
     applyRecord(entry, record, recordPath, workspaceDir);
+    entry.sourcePath = entry.sourcePath ?? relativeToWorkspace(workspaceDir, path.join(paths.sourceArtifactsRoot, sourceDir.name, "source.json"));
     entry.hasPdf = await pathExists(resolveKnownPdfPath(workspaceDir, entry.pdfPath));
     entries.set(paperKey, entry);
   }
@@ -267,11 +293,13 @@ async function collectParses(workspaceDir: string, entries: Map<string, LocalPap
       continue;
     }
     const paperDir = path.join(paths.sourceArtifactsRoot, sourceDir.name);
-    const source = await readJsonFile<PaperReaderSource>(path.join(paperDir, "source.json"));
+    const sourcePath = path.join(paperDir, "source.json");
+    const source = await readJsonFile<PaperReaderSource & Partial<PaperSourceMetadata>>(sourcePath);
     const paperKey = paperKeyFromSourceDirectory(sourceDir.name, source);
     const entry = entries.get(paperKey) ?? createEmptyEntry(paperKey);
+    entry.sourcePath = entry.sourcePath ?? relativeToWorkspace(workspaceDir, sourcePath);
     if (source) {
-      applySource(entry, source, workspaceDir);
+      applySource(entry, source, sourcePath, workspaceDir);
     }
 
     const parsesDir = path.join(paperDir, "parses");

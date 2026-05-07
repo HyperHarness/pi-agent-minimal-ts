@@ -111,7 +111,7 @@ export interface PaperSourceMetadata {
   readingStatus?: PaperRecordReadingStatus;
   citationStatus: PaperCitationStatus;
   missingFields: string[];
-  resolvedFrom: "acquisition";
+  resolvedFrom: "acquisition" | "local_parse" | "arxiv_api" | "crossref_api";
   sourceConfidence: "high" | "medium" | "low";
   recordedAt: string;
   updatedAt: string;

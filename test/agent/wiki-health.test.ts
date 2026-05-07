@@ -147,6 +147,51 @@ test("checkWikiHealth resolves WSL UNC artifact paths before reporting missing f
   }
 });
 
+test("checkWikiHealth reports incomplete source citation metadata", async () => {
+  const workspace = await createWorkspace();
+
+  try {
+    const paperKey = "arxiv-2401.00008";
+    await writeJson(path.join(workspace, "knowledge-base", "wiki", "sources", paperKey, "acquisition.json"), {
+      source: "arxiv",
+      articleUrl: "https://arxiv.org/abs/2401.00008",
+      recordedAt: "2026-04-28T03:30:00.000Z",
+      handlingMethod: "direct_http",
+      status: "downloaded",
+      canonicalId: "2401.00008",
+      pdfUrl: "https://arxiv.org/pdf/2401.00008.pdf",
+      downloadPath: path.join(workspace, "knowledge-base", "raw", "pdfs", "arxiv-2401.00008.pdf")
+    });
+    await writeJson(path.join(workspace, "knowledge-base", "wiki", "sources", paperKey, "source.json"), {
+      schemaVersion: 2,
+      paperKey,
+      source: "arxiv",
+      canonicalId: "2401.00008",
+      articleUrl: "https://arxiv.org/abs/2401.00008",
+      authors: [],
+      citationStatus: "incomplete",
+      missingFields: ["title", "authors", "venue"],
+      acquisitionPath: `knowledge-base/wiki/sources/${paperKey}/acquisition.json`,
+      recordPath: `knowledge-base/wiki/sources/${paperKey}/acquisition.json`,
+      downloadStatus: "downloaded",
+      resolvedFrom: "acquisition",
+      sourceConfidence: "medium",
+      recordedAt: "2026-04-28T03:30:00.000Z",
+      updatedAt: "2026-04-28T03:30:00.000Z"
+    });
+
+    const result = await checkWikiHealth({ workspaceDir: workspace });
+
+    assert.equal(result.summary.citation_incomplete, 1);
+    const issue = result.issues.find((candidate) => candidate.kind === "citation_incomplete");
+    assert.equal(issue?.paperKey, paperKey);
+    assert.deepEqual(issue?.metadata?.missingFields, ["title", "authors", "venue"]);
+    assert.match(issue?.reason ?? "", /citation metadata is incomplete/i);
+  } finally {
+    await rm(workspace, { recursive: true, force: true });
+  }
+});
+
 test("checkWikiHealth accepts ready webpage reading when PDF parsing failed later", async () => {
   const workspace = await createWorkspace();
 
@@ -850,6 +895,79 @@ test("fixWikiHealth does not enable browser fallback for missing publisher PDFs"
     assert.equal(result.fixed, 0);
     assert.equal(result.skipped, 1);
     assert.equal(result.results[0]?.action, "download");
+  } finally {
+    await rm(workspace, { recursive: true, force: true });
+  }
+});
+
+test("fixWikiHealth delegates citation metadata refresh to the paper download worker", async () => {
+  const workspace = await createWorkspace();
+
+  try {
+    const paperKey = "arxiv-2401.00009";
+    const recordPath = path.join(workspace, "knowledge-base", "wiki", "sources", paperKey, "acquisition.json");
+    const sourcePath = path.join(workspace, "knowledge-base", "wiki", "sources", paperKey, "source.json");
+    const calls: Array<{ paperKey: string; recordPath?: string; sourcePath?: string }> = [];
+    await writeJson(recordPath, {
+      source: "arxiv",
+      articleUrl: "https://arxiv.org/abs/2401.00009",
+      recordedAt: "2026-04-28T04:30:00.000Z",
+      handlingMethod: "direct_http",
+      status: "downloaded",
+      canonicalId: "2401.00009",
+      pdfUrl: "https://arxiv.org/pdf/2401.00009.pdf",
+      downloadPath: path.join(workspace, "knowledge-base", "raw", "pdfs", "arxiv-2401.00009.pdf")
+    });
+    await writeJson(sourcePath, {
+      schemaVersion: 2,
+      paperKey,
+      source: "arxiv",
+      canonicalId: "2401.00009",
+      articleUrl: "https://arxiv.org/abs/2401.00009",
+      title: "A paper with incomplete citation metadata",
+      authors: [],
+      citationStatus: "incomplete",
+      missingFields: ["authors", "venue"],
+      acquisitionPath: `knowledge-base/wiki/sources/${paperKey}/acquisition.json`,
+      recordPath: `knowledge-base/wiki/sources/${paperKey}/acquisition.json`,
+      downloadStatus: "downloaded",
+      resolvedFrom: "acquisition",
+      sourceConfidence: "medium",
+      recordedAt: "2026-04-28T04:30:00.000Z",
+      updatedAt: "2026-04-28T04:30:00.000Z"
+    });
+
+    const result = await fixWikiHealth({
+      workspaceDir: workspace,
+      issueKinds: ["citation_incomplete"],
+      paperDownloadWorker: {
+        downloadPaper: async () => {
+          throw new Error("citation metadata refresh must not download the PDF");
+        },
+        refreshSourceMetadata: async (options) => {
+          calls.push({
+            paperKey: options.paperKey,
+            recordPath: options.recordPath,
+            sourcePath: options.sourcePath
+          });
+          return {
+            status: "refreshed",
+            sourcePath: options.sourcePath,
+            citationStatus: "complete",
+            missingFields: [],
+            message: "Citation metadata refreshed by paper-download-subagent."
+          };
+        }
+      }
+    });
+
+    assert.equal(calls.length, 1);
+    assert.equal(calls[0]?.paperKey, paperKey);
+    assert.equal(calls[0]?.recordPath, `knowledge-base/wiki/sources/${paperKey}/acquisition.json`);
+    assert.equal(calls[0]?.sourcePath, `knowledge-base/wiki/sources/${paperKey}/source.json`);
+    assert.equal(result.attempted, 1);
+    assert.equal(result.fixed, 1);
+    assert.equal(result.results[0]?.action, "metadata_refresh");
   } finally {
     await rm(workspace, { recursive: true, force: true });
   }

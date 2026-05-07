@@ -74,7 +74,12 @@ import {
   blockPaperDownload,
   type PaperBlockReasonCode
 } from "./paper-blocklist.js";
-import { checkWikiHealth, fixWikiHealth, type WikiHealthFixProgress } from "./wiki-health.js";
+import {
+  checkWikiHealth,
+  fixWikiHealth,
+  type PaperDownloadWorker,
+  type WikiHealthFixProgress
+} from "./wiki-health.js";
 import {
   readPaperRecord,
   readPaperRecordByPath,
@@ -646,7 +651,8 @@ const wikiHealthIssueKindParameters = Type.Union([
   Type.Literal("low_quality"),
   Type.Literal("summary_missing"),
   Type.Literal("missing_artifact"),
-  Type.Literal("download_blocked")
+  Type.Literal("download_blocked"),
+  Type.Literal("citation_incomplete")
 ]);
 
 const wikiHealthFixParameters = Type.Object({
@@ -1621,6 +1627,8 @@ function compactWikiHealthFixContent(result: Awaited<ReturnType<typeof fixWikiHe
       ...(details && typeof details.message === "string" ? { detailMessage: compactPreviewText(details.message, 240) } : {}),
       ...(details && isRecord(details.source) && typeof details.source.sourcePath === "string"
         ? { sourcePath: details.source.sourcePath }
+        : details && typeof details.sourcePath === "string"
+          ? { sourcePath: details.sourcePath }
         : {})
     };
   });
@@ -2089,6 +2097,7 @@ export interface ToolDependencies {
   searchLocalPapers?: typeof searchLocalPapers;
   checkWikiHealth?: typeof checkWikiHealth;
   fixWikiHealth?: typeof fixWikiHealth;
+  paperDownloadWorker?: PaperDownloadWorker;
   openPaperPageForLogin?: OpenPaperPageForLoginDependency;
   browserSessionFactory?: ReturnType<typeof resolveDefaultPaperBrowserSessionFactory>;
   paperBrowserManagerClient?: PaperBrowserManagerClient;
@@ -4269,7 +4278,7 @@ export function createTools(workspaceDir: string, dependencies: ToolDependencies
     name: "wiki_health",
     label: "Wiki Health",
     description:
-      "Diagnoses local paper knowledge-base health across acquisition files, downloads, authorization state, parse quality, wiki summaries, and missing artifacts.",
+      "Diagnoses local paper knowledge-base health across acquisition files, downloads, authorization state, parse quality, source citation metadata, wiki summaries, and missing artifacts.",
     parameters: wikiHealthParameters,
     execute: async (_toolCallId: string, args: WikiHealthParameters) => {
       const result = await checkWikiHealthImpl({
@@ -4291,7 +4300,7 @@ export function createTools(workspaceDir: string, dependencies: ToolDependencies
     name: "wiki_health_fix",
     label: "Wiki Health Fix",
     description:
-      "Attempts wiki health repairs, such as retrying downloads, parsing downloaded papers, and generating missing summaries through the wiki-evidence-worker summary pass; reports why unresolved issues need user action.",
+      "Attempts wiki health repairs. Download and citation-metadata repairs go through the paper-download-subagent boundary, parsing repairs update ingestion artifacts, and missing summaries go through the wiki-evidence-worker summary pass; reports why unresolved issues need user action.",
     parameters: wikiHealthFixParameters,
     execute: async (
       _toolCallId: string,
@@ -4315,6 +4324,9 @@ export function createTools(workspaceDir: string, dependencies: ToolDependencies
                   extensionBridge: dependencies.extensionBridge
                 })
             }
+          : {}),
+        ...(dependencies.paperDownloadWorker
+          ? { paperDownloadWorker: dependencies.paperDownloadWorker }
           : {}),
         ...(dependencies.paperSummaryWorker ? { paperSummaryWorker: dependencies.paperSummaryWorker } : {}),
         generatePaperWikiSummaryImpl,

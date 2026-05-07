@@ -430,6 +430,7 @@ type WikiHealthFixTool = {
         | "summary_missing"
         | "missing_artifact"
         | "download_blocked"
+        | "citation_incomplete"
       >;
       dryRun?: boolean;
     },
@@ -4095,6 +4096,7 @@ test("wiki_health delegates to the injected health checker dependency", async ()
           summary_missing: 0,
           missing_artifact: 0,
           download_blocked: 0,
+          citation_incomplete: 0,
         },
         issues: [
           {
@@ -4142,6 +4144,7 @@ test("wiki_health_fix delegates to the injected health fixer dependency", async 
             summary_missing: 0,
             missing_artifact: 0,
             download_blocked: 0,
+            citation_incomplete: 0,
           },
           issues: [
             {

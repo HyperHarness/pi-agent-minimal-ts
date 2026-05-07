@@ -13,6 +13,7 @@ import type {
   PaperSourceMetadata,
   PaperSource
 } from "./paper-types.js";
+import type { ParsedPaperDocument } from "./paper-reader/types.js";
 
 type DownloadedPaperRecord = Extract<PaperRecord, { status: "downloaded" }>;
 type FindDownloadedPaperRecordInput =
@@ -461,6 +462,42 @@ function getArxivYear(arxivId: string | undefined): number | undefined {
   return year >= 91 ? 1900 + year : 2000 + year;
 }
 
+function getApsVenueFromDoi(doi: string | undefined): string | undefined {
+  const suffix = doi?.trim().replace(/^10\.1103\//i, "");
+  const journalCode = suffix?.match(/^([A-Za-z]+)\.\d+\./)?.[1];
+  if (!journalCode) {
+    return undefined;
+  }
+
+  const venues = new Map<string, string>([
+    ["PhysRevLett", "Phys. Rev. Lett."],
+    ["PhysRevA", "Phys. Rev. A"],
+    ["PhysRevB", "Phys. Rev. B"],
+    ["PhysRevC", "Phys. Rev. C"],
+    ["PhysRevD", "Phys. Rev. D"],
+    ["PhysRevE", "Phys. Rev. E"],
+    ["PhysRevX", "Phys. Rev. X"],
+    ["PhysRevApplied", "Phys. Rev. Applied"],
+    ["PhysRevResearch", "Phys. Rev. Research"],
+    ["PhysRevMaterials", "Phys. Rev. Materials"],
+    ["RevModPhys", "Rev. Mod. Phys."],
+    ["PRXQuantum", "PRX Quantum"]
+  ]);
+  return venues.get(journalCode);
+}
+
+function getVenueFromArticleUrl(articleUrl: string): string | undefined {
+  try {
+    const hostname = new URL(articleUrl).hostname.replace(/^www\./i, "").toLowerCase();
+    if (hostname === "quantum-journal.org") {
+      return "Quantum";
+    }
+  } catch {
+    return undefined;
+  }
+  return undefined;
+}
+
 function getMissingCitationFields(input: {
   title?: string;
   authors: string[];
@@ -512,23 +549,365 @@ async function readExistingPaperSourceMetadata(sourcePath: string): Promise<Part
   }
 }
 
+type PaperSourceMetadataPatch = Partial<Pick<PaperSourceMetadata, "title" | "authors" | "year" | "venue" | "doi" | "arxivId">> & {
+  resolvedFrom: PaperSourceMetadata["resolvedFrom"];
+};
+
+function decodeXml(text: string): string {
+  return text
+    .replace(/&lt;/g, "<")
+    .replace(/&gt;/g, ">")
+    .replace(/&amp;/g, "&")
+    .replace(/&quot;/g, '"')
+    .replace(/&#39;/g, "'");
+}
+
+function normalizeText(value: string | undefined): string {
+  return decodeXml(value ?? "").replace(/\s+/g, " ").trim();
+}
+
+function resolveWorkspaceArtifactPath(input: { workspaceDir: string; filePath: string }): string {
+  const normalizedFilePath = normalizePortableFilePath(input.filePath);
+  return path.isAbsolute(normalizedFilePath)
+    ? path.resolve(normalizedFilePath)
+    : path.resolve(input.workspaceDir, normalizedFilePath);
+}
+
+function getRecordReadingParsePath(record: PaperRecord): string | undefined {
+  return record.reading?.parsePath ?? record.webpage?.parsePath ?? record.parse?.parsePath;
+}
+
+async function readParsedPaperDocument(input: {
+  workspaceDir: string;
+  record: PaperRecord;
+}): Promise<ParsedPaperDocument | undefined> {
+  const parsePath = getRecordReadingParsePath(input.record);
+  if (!parsePath) {
+    return undefined;
+  }
+
+  try {
+    return JSON.parse(
+      await readFile(resolveWorkspaceArtifactPath({ workspaceDir: input.workspaceDir, filePath: parsePath }), "utf8")
+    ) as ParsedPaperDocument;
+  } catch {
+    return undefined;
+  }
+}
+
+function cleanAuthorLine(value: string): string {
+  return normalizeText(value)
+    .replace(/\b(?:PDF|Share|CITATIONS|Abstract)\b.*$/i, "")
+    .replace(/\b[A-Z0-9._%+-]+@[A-Z0-9.-]+\.[A-Z]{2,}\b/gi, "")
+    .replace(/\([^)]*contributed equally[^)]*\)/gi, "")
+    .replace(/\^\s*\d+(?:\s*,\s*\d+)*/g, "")
+    .replace(/(?<=[A-Za-z.])\d+(?:,\d+)*/g, "")
+    .replace(/\s+/g, " ")
+    .trim();
+}
+
+function splitAuthorLine(value: string): string[] {
+  const cleaned = cleanAuthorLine(value);
+  if (
+    !cleaned ||
+    /\b(?:access|published|doi|abstract|keywords?|references?|copyright|download|supplementary)\b/i.test(cleaned)
+  ) {
+    return [];
+  }
+
+  return cleaned
+    .replace(/\s+and\s+/gi, ", ")
+    .split(/\s*,\s*/)
+    .map((author) => author.replace(/\s+/g, " ").trim())
+    .filter((author) =>
+      author.length > 2 &&
+      /\p{L}/u.test(author) &&
+      !/^\d+$/.test(author) &&
+      !/\b(?:university|institute|laboratory|department|division|center|centre|usa|china|japan|germany|france)\b/i.test(author)
+    );
+}
+
+function findParsedAuthorLine(input: { document: ParsedPaperDocument; title?: string }): string | undefined {
+  const texts = input.document.elements
+    .slice(0, 40)
+    .map((element) => normalizeText(element.text))
+    .filter(Boolean);
+  const normalizedTitle = normalizeText(input.title ?? input.document.title).toLowerCase();
+  const titleIndex = normalizedTitle
+    ? texts.findIndex((text) => text.toLowerCase() === normalizedTitle)
+    : -1;
+  const candidates = titleIndex >= 0 ? texts.slice(titleIndex + 1, titleIndex + 5) : texts.slice(0, 8);
+  return candidates.find((text) => splitAuthorLine(text).length > 0);
+}
+
+function extractDoiFromParsedText(texts: string[]): string | undefined {
+  const joined = texts.slice(0, 80).join(" ");
+  return joined.match(/\b10\.\d{4,9}\/[^\s<>"']+/i)?.[0]?.replace(/[).,;]+$/, "");
+}
+
+function extractYearFromParsedText(texts: string[], arxivId?: string): number | undefined {
+  for (const text of texts.slice(0, 80)) {
+    const published = text.match(/\bPublished\b.*?\b(19\d{2}|20\d{2})\b/i);
+    if (published?.[1]) {
+      return Number(published[1]);
+    }
+  }
+  const arxivYear = getArxivYear(arxivId);
+  if (typeof arxivYear === "number") {
+    return arxivYear;
+  }
+  const firstYear = texts.slice(0, 20).join(" ").match(/\b(19\d{2}|20\d{2})\b/);
+  return firstYear?.[1] ? Number(firstYear[1]) : undefined;
+}
+
+function extractVenueFromParsedText(input: {
+  texts: string[];
+  source: PaperSource;
+  arxivId?: string;
+}): string | undefined {
+  if (input.source === "arxiv" || input.arxivId) {
+    return "arXiv";
+  }
+
+  for (const text of input.texts.slice(0, 80)) {
+    const apsMatch = text.match(/^\s*((?:Phys\. Rev\.|Physical Review|PRX Quantum|Rev\. Mod\. Phys\.)[A-Za-z .]*)\s+\d+.*?\bPublished\b/i);
+    if (apsMatch?.[1]) {
+      return normalizeText(apsMatch[1]);
+    }
+    const natureMatch = text.match(/\b(Nature(?: [A-Z][A-Za-z]+)*|npj Quantum Information|Communications Physics)\b/);
+    if (natureMatch?.[1]) {
+      return normalizeText(natureMatch[1]);
+    }
+  }
+  return undefined;
+}
+
+async function readLocalParseCitationMetadata(input: {
+  workspaceDir: string;
+  record: PaperRecord;
+  arxivId?: string;
+}): Promise<PaperSourceMetadataPatch | undefined> {
+  const document = await readParsedPaperDocument(input);
+  if (!document) {
+    return undefined;
+  }
+
+  const title = normalizeText(document.title);
+  const authorLine = findParsedAuthorLine({ document, title });
+  const authors = authorLine ? splitAuthorLine(authorLine) : [];
+  const texts = document.elements.map((element) => normalizeText(element.text)).filter(Boolean);
+  const year = extractYearFromParsedText(texts, input.arxivId);
+  const venue = extractVenueFromParsedText({ texts, source: input.record.source, arxivId: input.arxivId });
+  const doi = extractDoiFromParsedText(texts);
+
+  if (!title && authors.length === 0 && typeof year !== "number" && !venue && !doi) {
+    return undefined;
+  }
+
+  return {
+    resolvedFrom: "local_parse",
+    ...(title ? { title } : {}),
+    ...(authors.length > 0 ? { authors } : {}),
+    ...(typeof year === "number" ? { year } : {}),
+    ...(venue ? { venue } : {}),
+    ...(doi ? { doi } : {})
+  };
+}
+
+async function readArxivApiCitationMetadata(input: {
+  arxivId: string;
+  fetchImpl: typeof fetch;
+}): Promise<PaperSourceMetadataPatch | undefined> {
+  try {
+    const endpoint = new URL("https://export.arxiv.org/api/query");
+    endpoint.searchParams.set("id_list", input.arxivId);
+    endpoint.searchParams.set("max_results", "1");
+    const response = await input.fetchImpl(endpoint);
+    if (!response.ok) {
+      return undefined;
+    }
+    const entry = (await response.text()).match(/<entry>([\s\S]*?)<\/entry>/i)?.[1];
+    if (!entry) {
+      return undefined;
+    }
+    const getFirstTag = (tagName: string) =>
+      normalizeText(entry.match(new RegExp(`<${tagName}>([\\s\\S]*?)</${tagName}>`, "i"))?.[1]);
+    const authors = Array.from(entry.matchAll(/<author>[\s\S]*?<name>([\s\S]*?)<\/name>[\s\S]*?<\/author>/gi), (match) =>
+      normalizeText(match[1])
+    ).filter(Boolean);
+    const publishedYear = getFirstTag("published").match(/\b(19\d{2}|20\d{2})\b/)?.[1];
+    return {
+      resolvedFrom: "arxiv_api",
+      title: getFirstTag("title"),
+      authors,
+      ...(publishedYear ? { year: Number(publishedYear) } : {}),
+      venue: "arXiv",
+      arxivId: input.arxivId
+    };
+  } catch {
+    return undefined;
+  }
+}
+
+function formatCrossrefAuthors(value: unknown): string[] {
+  if (!Array.isArray(value)) {
+    return [];
+  }
+
+  return value.flatMap((author) => {
+    if (!author || typeof author !== "object") {
+      return [];
+    }
+    const record = author as Record<string, unknown>;
+    if (typeof record.name === "string" && record.name.trim()) {
+      return [record.name.trim()];
+    }
+    const parts = [record.given, record.family].flatMap((part) =>
+      typeof part === "string" && part.trim() ? [part.trim()] : []
+    );
+    return parts.length > 0 ? [parts.join(" ")] : [];
+  });
+}
+
+function extractCrossrefYear(value: unknown): number | undefined {
+  if (!value || typeof value !== "object" || !("date-parts" in value)) {
+    return undefined;
+  }
+  const dateParts = (value as { "date-parts"?: unknown })["date-parts"];
+  if (!Array.isArray(dateParts) || !Array.isArray(dateParts[0])) {
+    return undefined;
+  }
+  const year = dateParts[0][0];
+  return typeof year === "number" ? year : undefined;
+}
+
+async function readCrossrefCitationMetadata(input: {
+  doi: string;
+  fetchImpl: typeof fetch;
+}): Promise<PaperSourceMetadataPatch | undefined> {
+  try {
+    const response = await input.fetchImpl(`https://api.crossref.org/works/${encodeURIComponent(input.doi)}`);
+    if (!response.ok) {
+      return undefined;
+    }
+    const message = ((await response.json()) as { message?: Record<string, unknown> }).message;
+    if (!message) {
+      return undefined;
+    }
+    const titles = Array.isArray(message.title) ? message.title : [];
+    const venues = Array.isArray(message["container-title"]) ? message["container-title"] : [];
+    const title = typeof titles[0] === "string" ? normalizeText(titles[0]) : undefined;
+    const venue = typeof venues[0] === "string" ? normalizeText(venues[0]) : undefined;
+    const doi = typeof message.DOI === "string" && message.DOI.trim() ? message.DOI.trim() : input.doi;
+    const year =
+      extractCrossrefYear(message.published) ??
+      extractCrossrefYear(message["published-print"]) ??
+      extractCrossrefYear(message["published-online"]) ??
+      extractCrossrefYear(message.created);
+    return {
+      resolvedFrom: "crossref_api",
+      ...(title ? { title } : {}),
+      authors: formatCrossrefAuthors(message.author),
+      ...(typeof year === "number" ? { year } : {}),
+      ...(venue ? { venue } : {}),
+      doi
+    };
+  } catch {
+    return undefined;
+  }
+}
+
+async function readRemoteCitationMetadata(input: {
+  doi?: string;
+  arxivId?: string;
+  fetchImpl?: typeof fetch;
+}): Promise<PaperSourceMetadataPatch | undefined> {
+  const fetchImpl = input.fetchImpl ?? globalThis.fetch?.bind(globalThis);
+  if (!fetchImpl) {
+    return undefined;
+  }
+  if (input.arxivId) {
+    return readArxivApiCitationMetadata({ arxivId: input.arxivId, fetchImpl });
+  }
+  if (input.doi) {
+    return readCrossrefCitationMetadata({ doi: input.doi, fetchImpl });
+  }
+  return undefined;
+}
+
+function completeString(value: string | undefined, ...fallbacks: Array<string | undefined>): string | undefined {
+  if (typeof value === "string" && value.trim()) {
+    return value.trim();
+  }
+  for (const fallback of fallbacks) {
+    if (typeof fallback === "string" && fallback.trim()) {
+      return fallback.trim();
+    }
+  }
+  return undefined;
+}
+
+function completeAuthors(authors: string[], ...fallbacks: Array<string[] | undefined>): string[] {
+  if (authors.length > 0) {
+    return authors;
+  }
+  for (const fallback of fallbacks) {
+    const normalized = Array.isArray(fallback)
+      ? fallback.filter((author): author is string => typeof author === "string" && author.trim().length > 0)
+      : [];
+    if (normalized.length > 0) {
+      return normalized;
+    }
+  }
+  return [];
+}
+
 export async function writePaperSourceMetadataForRecord(input: {
   workspaceDir: string;
   record: PaperRecord;
   recordPath: string;
+  enrichCitationMetadata?: boolean;
+  fetchImpl?: typeof fetch;
 }): Promise<string> {
   const sourcePath = resolvePaperSourcePathFromRecordPath(input.recordPath);
   const existing = await readExistingPaperSourceMetadata(sourcePath);
   const acquisitionPath = toWorkspacePath({ workspaceDir: input.workspaceDir, filePath: input.recordPath });
-  const doi = getRecordDoi(input.record) ?? existing?.doi;
-  const arxivId = getRecordArxivId(input.record) ?? existing?.arxivId;
-  const title = readRecordString(input.record, "title") ?? existing?.title;
-  const authors = Array.isArray(existing?.authors)
+  const baseDoi = getRecordDoi(input.record) ?? existing?.doi;
+  const baseArxivId = getRecordArxivId(input.record) ?? existing?.arxivId;
+  const localParseMetadata = await readLocalParseCitationMetadata({
+    workspaceDir: input.workspaceDir,
+    record: input.record,
+    ...(baseArxivId ? { arxivId: baseArxivId } : {})
+  });
+  const remoteMetadata = input.enrichCitationMetadata
+    ? await readRemoteCitationMetadata({
+        ...(baseDoi ? { doi: baseDoi } : {}),
+        ...(baseArxivId ? { arxivId: baseArxivId } : {}),
+        ...(input.fetchImpl ? { fetchImpl: input.fetchImpl } : {})
+      })
+    : undefined;
+  const title = completeString(readRecordString(input.record, "title"), existing?.title, localParseMetadata?.title, remoteMetadata?.title);
+  const authors = completeAuthors(
+    Array.isArray(existing?.authors)
     ? existing.authors.filter((author): author is string => typeof author === "string" && author.trim().length > 0)
-    : [];
-  const year = typeof existing?.year === "number" ? existing.year : getArxivYear(arxivId);
-  const venue = typeof existing?.venue === "string" && existing.venue.trim() ? existing.venue.trim() : undefined;
+    : [],
+    localParseMetadata?.authors,
+    remoteMetadata?.authors
+  );
+  const year = typeof existing?.year === "number"
+    ? existing.year
+    : localParseMetadata?.year ?? remoteMetadata?.year ?? getArxivYear(baseArxivId);
+  const venue = completeString(
+    existing?.venue,
+    localParseMetadata?.venue,
+    remoteMetadata?.venue,
+    getApsVenueFromDoi(baseDoi),
+    getVenueFromArticleUrl(input.record.articleUrl),
+    baseArxivId ? "arXiv" : undefined
+  );
   const publisher = getRecordPublisher(input.record.source) ?? existing?.publisher;
+  const doi = baseDoi ?? localParseMetadata?.doi ?? remoteMetadata?.doi;
+  const arxivId = baseArxivId ?? remoteMetadata?.arxivId;
   const missingFields = getMissingCitationFields({
     title,
     authors,
@@ -540,6 +919,11 @@ export async function writePaperSourceMetadataForRecord(input: {
   });
   const pdfUrl = getRecordPdfUrl(input.record);
   const downloadPath = getRecordDownloadPath(input.record);
+  const resolvedFrom = missingFields.length === 0 && remoteMetadata
+    ? remoteMetadata.resolvedFrom
+    : missingFields.length === 0 && localParseMetadata
+      ? localParseMetadata.resolvedFrom
+      : "acquisition";
   const sourceMetadata: PaperSourceMetadata = {
     ...existing,
     schemaVersion: 2,
@@ -564,7 +948,7 @@ export async function writePaperSourceMetadataForRecord(input: {
     ...(input.record.reading?.status ? { readingStatus: input.record.reading.status } : {}),
     citationStatus: missingFields.length === 0 ? "complete" : "incomplete",
     missingFields,
-    resolvedFrom: "acquisition",
+    resolvedFrom,
     sourceConfidence: getSourceConfidence({ record: input.record, title, doi, arxivId }),
     recordedAt: input.record.recordedAt,
     updatedAt: input.record.updatedAt ?? input.record.recordedAt,

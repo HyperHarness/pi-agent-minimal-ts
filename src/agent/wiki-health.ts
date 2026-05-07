@@ -15,14 +15,15 @@ import {
 } from "./paper-download-jobs.js";
 import {
   updatePaperRecordParseManifest,
-  updatePaperRecordReadingFailure
+  updatePaperRecordReadingFailure,
+  writePaperSourceMetadataForRecord
 } from "./paper-store.js";
 import {
   derivePaperKeyForBlocklist,
   findBlockedPaperDownload,
   type PaperBlocklistEntry
 } from "./paper-blocklist.js";
-import type { PaperRecord, PaperSource } from "./paper-types.js";
+import type { PaperCitationStatus, PaperRecord, PaperSource, PaperSourceMetadata } from "./paper-types.js";
 import type { PaperParseResult } from "./paper-reader/types.js";
 
 export type WikiHealthIssueKind =
@@ -34,7 +35,8 @@ export type WikiHealthIssueKind =
   | "low_quality"
   | "summary_missing"
   | "missing_artifact"
-  | "download_blocked";
+  | "download_blocked"
+  | "citation_incomplete";
 
 export type WikiHealthSeverity = "high" | "medium" | "low";
 
@@ -49,6 +51,11 @@ export interface WikiHealthIssue {
   recordPath?: string;
   reason: string;
   paths?: string[];
+  metadata?: {
+    sourcePath?: string;
+    citationStatus?: PaperCitationStatus | string;
+    missingFields: string[];
+  };
   quality?: {
     engine: string;
     status?: string;
@@ -84,6 +91,7 @@ export interface WikiHealthFixItem {
 export interface WikiHealthFixOptions extends WikiHealthOptions {
   issueKinds?: WikiHealthIssueKind[];
   dryRun?: boolean;
+  paperDownloadWorker?: PaperDownloadWorker;
   downloadPaperImpl?: (options: DownloadPaperOptions) => Promise<Awaited<ReturnType<typeof downloadPaper>>>;
   parsePaperImpl?: (options: ParsePaperOptions) => Promise<PaperParseResult>;
   generatePaperWikiSummaryImpl?: (
@@ -124,6 +132,28 @@ export interface WikiHealthFixResult {
   results: WikiHealthFixItem[];
 }
 
+export interface PaperDownloadWorkerMetadataRefreshOptions {
+  workspaceDir: string;
+  paperKey: string;
+  recordPath?: string;
+  sourcePath?: string;
+  articleUrl?: string;
+  title?: string;
+}
+
+export interface PaperDownloadWorkerMetadataRefreshResult {
+  status: "refreshed" | "skipped";
+  message: string;
+  sourcePath?: string;
+  citationStatus?: PaperCitationStatus | string;
+  missingFields?: string[];
+}
+
+export interface PaperDownloadWorker {
+  downloadPaper(options: DownloadPaperOptions): Promise<Awaited<ReturnType<typeof downloadPaper>>>;
+  refreshSourceMetadata(options: PaperDownloadWorkerMetadataRefreshOptions): Promise<PaperDownloadWorkerMetadataRefreshResult>;
+}
+
 const ISSUE_KINDS: WikiHealthIssueKind[] = [
   "needs_download",
   "needs_authorization",
@@ -133,7 +163,8 @@ const ISSUE_KINDS: WikiHealthIssueKind[] = [
   "low_quality",
   "summary_missing",
   "missing_artifact",
-  "download_blocked"
+  "download_blocked",
+  "citation_incomplete"
 ];
 
 const DEFAULT_MAX_ITEMS = 20;
@@ -194,6 +225,44 @@ function baseIssue(
     ...(entry.articleUrl ? { articleUrl: entry.articleUrl } : {}),
     ...(entry.recordPath ? { recordPath: entry.recordPath } : {}),
     reason
+  };
+}
+
+function missingCitationFields(entry: LocalPaperEntry, sourceExists: boolean): string[] {
+  if (!sourceExists) {
+    return ["source.json"];
+  }
+  const fields = entry.missingCitationFields?.filter((field) => field.trim().length > 0) ?? [];
+  if (fields.length > 0) {
+    return fields;
+  }
+  return entry.citationStatus === "incomplete" ? ["unknown"] : [];
+}
+
+async function citationIssueForEntry(workspaceDir: string, entry: LocalPaperEntry): Promise<WikiHealthIssue | undefined> {
+  if (!entry.sourcePath) {
+    return undefined;
+  }
+  const sourceExists = await pathExists(toWorkspacePath(workspaceDir, entry.sourcePath));
+  const fields = missingCitationFields(entry, sourceExists);
+  if (fields.length === 0 && entry.citationStatus !== "incomplete") {
+    return undefined;
+  }
+  return {
+    ...baseIssue(
+      entry,
+      "citation_incomplete",
+      "medium",
+      sourceExists
+        ? `Source citation metadata is incomplete; missing fields: ${fields.join(", ")}.`
+        : "Source citation metadata file is missing next to the acquisition record."
+    ),
+    ...(sourceExists ? {} : { paths: [entry.sourcePath] }),
+    metadata: {
+      sourcePath: entry.sourcePath,
+      ...(entry.citationStatus ? { citationStatus: entry.citationStatus } : {}),
+      missingFields: fields
+    }
   };
 }
 
@@ -403,7 +472,8 @@ function summarizeActions(issues: WikiHealthIssue[]): string[] {
     ["parse_missing", "Parse downloaded papers that do not yet have reading artifacts."],
     ["summary_missing", "Write wiki source summaries for parsed papers without a summary page."],
     ["missing_artifact", "Repair or regenerate acquisition files that point at missing files."],
-    ["download_blocked", "No repair needed for download-blocklisted papers unless the paper is removed from the local download blocklist."]
+    ["download_blocked", "No repair needed for download-blocklisted papers unless the paper is removed from the local download blocklist."],
+    ["citation_incomplete", "Refresh source citation metadata through the paper-download-subagent metadata pass."]
   ].flatMap(([kind, text]) => {
     const count = counts.get(kind as WikiHealthIssueKind) ?? 0;
     return count > 0 ? [`${count}: ${text}`] : [];
@@ -426,6 +496,7 @@ export async function checkWikiHealth(options: WikiHealthOptions): Promise<WikiH
     const entryIssues: WikiHealthIssue[] = [];
     const blocked = await findBlockedEntry(workspaceDir, entry);
     const record = await readRecord(workspaceDir, entry);
+    const citationIssue = await citationIssueForEntry(workspaceDir, entry);
     const pdfExists = await pathExists(toWorkspacePath(workspaceDir, entry.pdfPath));
     const usesPreprintFallback = recordUsesPreprintFallback(record);
     const isPublisherPending = recordIsPublisherPending(record);
@@ -512,6 +583,10 @@ export async function checkWikiHealth(options: WikiHealthOptions): Promise<WikiH
           paths: missingPaths
         });
       }
+    }
+
+    if (citationIssue) {
+      entryIssues.push(citationIssue);
     }
 
     const blockedDownloadIssues = entryIssues.filter((issue) => DOWNLOAD_BLOCKABLE_ISSUE_KINDS.has(issue.kind));
@@ -650,7 +725,7 @@ async function fixByParsing(input: {
 async function fixByDownload(input: {
   workspaceDir: string;
   issue: WikiHealthIssue;
-  downloadPaperImpl: NonNullable<WikiHealthFixOptions["downloadPaperImpl"]>;
+  paperDownloadWorker: PaperDownloadWorker;
   dryRun: boolean;
   blockedByAuthorization: boolean;
 }): Promise<WikiHealthFixItem> {
@@ -680,7 +755,7 @@ async function fixByDownload(input: {
   }
 
   try {
-    const result = await input.downloadPaperImpl({
+    const result = await input.paperDownloadWorker.downloadPaper({
       workspaceDir: input.workspaceDir,
       url: input.issue.articleUrl,
       ...(input.issue.title ? { title: input.issue.title } : {})
@@ -720,10 +795,57 @@ async function fixByDownload(input: {
   }
 }
 
+async function fixByCitationMetadata(input: {
+  workspaceDir: string;
+  issue: WikiHealthIssue;
+  paperDownloadWorker: PaperDownloadWorker;
+  dryRun: boolean;
+}): Promise<WikiHealthFixItem> {
+  if (input.dryRun) {
+    return {
+      issue: input.issue,
+      status: "skipped",
+      action: "metadata_refresh",
+      message: `Dry run: would refresh source citation metadata for ${input.issue.paperKey} through the paper-download-subagent.`
+    };
+  }
+
+  try {
+    const result = await input.paperDownloadWorker.refreshSourceMetadata({
+      workspaceDir: input.workspaceDir,
+      paperKey: input.issue.paperKey,
+      ...(input.issue.recordPath ? { recordPath: input.issue.recordPath } : {}),
+      ...(input.issue.metadata?.sourcePath ? { sourcePath: input.issue.metadata.sourcePath } : {}),
+      ...(input.issue.articleUrl ? { articleUrl: input.issue.articleUrl } : {}),
+      ...(input.issue.title ? { title: input.issue.title } : {})
+    });
+    const isComplete = result.citationStatus === "complete" || (result.missingFields?.length ?? 0) === 0;
+    return {
+      issue: input.issue,
+      status: result.status === "refreshed" && isComplete ? "fixed" : "skipped",
+      action: "metadata_refresh",
+      message: result.message,
+      details: {
+        status: result.status,
+        ...(result.sourcePath ? { sourcePath: result.sourcePath } : {}),
+        ...(result.citationStatus ? { citationStatus: result.citationStatus } : {}),
+        ...(result.missingFields ? { missingFields: result.missingFields } : {})
+      }
+    };
+  } catch (error) {
+    return {
+      issue: input.issue,
+      status: "failed",
+      action: "metadata_refresh",
+      message: error instanceof Error ? error.message : "Source citation metadata refresh failed."
+    };
+  }
+}
+
 async function fixByAuthorization(input: {
   workspaceDir: string;
   issue: WikiHealthIssue;
-  downloadPaperImpl?: WikiHealthFixOptions["downloadPaperImpl"];
+  paperDownloadWorker?: PaperDownloadWorker;
   dryRun: boolean;
 }): Promise<WikiHealthFixItem> {
   if (!input.issue.articleUrl) {
@@ -742,7 +864,7 @@ async function fixByAuthorization(input: {
       message: `Dry run: would open publisher login/download page for ${input.issue.articleUrl}.`
     };
   }
-  if (!input.downloadPaperImpl) {
+  if (!input.paperDownloadWorker) {
     return {
       issue: input.issue,
       status: "skipped",
@@ -752,7 +874,7 @@ async function fixByAuthorization(input: {
   }
 
   try {
-    const result = await input.downloadPaperImpl({
+    const result = await input.paperDownloadWorker.downloadPaper({
       workspaceDir: input.workspaceDir,
       url: input.issue.articleUrl,
       ...(input.issue.title ? { title: input.issue.title } : {})
@@ -896,9 +1018,58 @@ function skippedFix(issue: WikiHealthIssue, message: string): WikiHealthFixItem 
   };
 }
 
+async function readSourceMetadata(sourcePath: string): Promise<Partial<PaperSourceMetadata> | undefined> {
+  try {
+    return JSON.parse(await readFile(sourcePath, "utf8")) as Partial<PaperSourceMetadata>;
+  } catch {
+    return undefined;
+  }
+}
+
+function createDefaultPaperDownloadWorker(input: {
+  downloadPaperImpl: NonNullable<WikiHealthFixOptions["downloadPaperImpl"]>;
+}): PaperDownloadWorker {
+  return {
+    downloadPaper: input.downloadPaperImpl,
+    refreshSourceMetadata: async (options) => {
+      if (!options.recordPath) {
+        return {
+          status: "skipped",
+          message: "Cannot refresh source citation metadata because the issue has no acquisition recordPath."
+        };
+      }
+      const recordPath = toWorkspacePath(options.workspaceDir, options.recordPath) ?? options.recordPath;
+      const record = JSON.parse(await readFile(recordPath, "utf8")) as PaperRecord;
+      const sourcePath = await writePaperSourceMetadataForRecord({
+        workspaceDir: options.workspaceDir,
+        record,
+        recordPath,
+        enrichCitationMetadata: true
+      });
+      const source = await readSourceMetadata(sourcePath);
+      const missingFields = Array.isArray(source?.missingFields)
+        ? source.missingFields.filter((field): field is string => typeof field === "string" && field.trim().length > 0)
+        : [];
+      const citationStatus = source?.citationStatus;
+      return {
+        status: "refreshed",
+        sourcePath,
+        ...(citationStatus ? { citationStatus } : {}),
+        missingFields,
+        message: missingFields.length === 0
+          ? `Source citation metadata was refreshed from ${source?.resolvedFrom ?? "available metadata"}.`
+          : `Source citation metadata was refreshed from available metadata, but still misses: ${missingFields.join(", ")}.`
+      };
+    }
+  };
+}
+
 export async function fixWikiHealth(options: WikiHealthFixOptions): Promise<WikiHealthFixResult> {
   const workspaceDir = path.resolve(options.workspaceDir);
   const threshold = options.lowQualityScoreThreshold ?? DEFAULT_LOW_QUALITY_SCORE_THRESHOLD;
+  const paperDownloadWorker =
+    options.paperDownloadWorker ??
+    createDefaultPaperDownloadWorker({ downloadPaperImpl: options.downloadPaperImpl ?? downloadPaper });
   await options.onProgress?.({
     stage: "checking_health",
     message: "Checking wiki health before repair."
@@ -950,9 +1121,19 @@ export async function fixWikiHealth(options: WikiHealthFixOptions): Promise<Wiki
       results.push(await fixByDownload({
         workspaceDir,
         issue,
-        downloadPaperImpl: options.downloadPaperImpl ?? downloadPaper,
+        paperDownloadWorker,
         dryRun: options.dryRun === true,
         blockedByAuthorization: authorizationBlocked.has(identity)
+      }));
+      continue;
+    }
+
+    if (issue.kind === "citation_incomplete") {
+      results.push(await fixByCitationMetadata({
+        workspaceDir,
+        issue,
+        paperDownloadWorker,
+        dryRun: options.dryRun === true
       }));
       continue;
     }
@@ -961,7 +1142,7 @@ export async function fixWikiHealth(options: WikiHealthFixOptions): Promise<Wiki
       results.push(await fixByAuthorization({
         workspaceDir,
         issue,
-        ...(options.downloadPaperImpl ? { downloadPaperImpl: options.downloadPaperImpl } : {}),
+        paperDownloadWorker,
         dryRun: options.dryRun === true
       }));
       continue;

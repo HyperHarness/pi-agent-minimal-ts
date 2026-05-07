@@ -405,7 +405,8 @@ test("paper source metadata derives arXiv ids and preserves manually enriched fi
     const initial = JSON.parse(await readFile(sourcePath, "utf8"));
     assert.equal(initial.arxivId, "2401.01234");
     assert.equal(initial.year, 2024);
-    assert.deepEqual(initial.missingFields, ["title", "authors", "venue"]);
+    assert.equal(initial.venue, "arXiv");
+    assert.deepEqual(initial.missingFields, ["title", "authors"]);
 
     await writeFile(sourcePath, `${JSON.stringify({
       ...initial,
@@ -488,6 +489,109 @@ test("updatePaperRecordParseManifest records ready markdown artifacts in the pap
     assert.equal(saved?.record.reading?.status, "ready");
     assert.equal(saved?.record.reading?.preferredSource, "webpage");
     assert.equal(saved?.record.reading?.markdownPath, "knowledge-base/wiki/sources/arxiv-2401.01234/parses/webpage/document.md");
+  } finally {
+    await rm(workspaceDir, { recursive: true, force: true });
+  }
+});
+
+test("updatePaperRecordParseManifest backfills citation metadata from local parse artifacts", async () => {
+  const workspaceDir = await mkdtemp(path.join(os.tmpdir(), "paper-store-"));
+  const pdfPath = resolvePaperPdfPath({
+    workspaceDir,
+    source: "aps",
+    canonicalId: "10.1103/PhysRevA.111.012619"
+  });
+  const parsePath = path.join(
+    workspaceDir,
+    "knowledge-base/wiki/sources/aps-10.1103-PhysRevA.111.012619/parses/webpage/parse.json"
+  );
+
+  try {
+    await mkdir(path.dirname(pdfPath), { recursive: true });
+    await mkdir(path.dirname(parsePath), { recursive: true });
+    await writeFile(pdfPath, "%PDF-1.7\npaper\n", "utf8");
+    await writeFile(parsePath, `${JSON.stringify({
+      paperKey: "aps-10.1103-PhysRevA.111.012619",
+      engine: "webpage",
+      pdfSha256: "webpage-hash",
+      createdAt: "2026-04-25T10:01:00.000Z",
+      title: "Efficient frequency allocation for superconducting quantum processors using improved optimization techniques",
+      pages: 1,
+      elements: [
+        {
+          id: "webpage-00001",
+          type: "heading",
+          text: "Efficient frequency allocation for superconducting quantum processors using improved optimization techniques",
+          page: 1,
+          headingLevel: 1
+        },
+        {
+          id: "webpage-00002",
+          type: "paragraph",
+          text: "Zewen Zhang ^1,2, Pranav Gokhale ^3, and Jeffrey M. Larson ^1",
+          page: 1
+        },
+        {
+          id: "webpage-00003",
+          type: "paragraph",
+          text: "Phys. Rev. A 111, 012619 - Published 17 January, 2025",
+          page: 1
+        },
+        {
+          id: "webpage-00004",
+          type: "paragraph",
+          text: "https://doi.org/10.1103/PhysRevA.111.012619",
+          page: 1
+        }
+      ],
+      sections: []
+    }, null, 2)}\n`, "utf8");
+    const recordPath = await writePaperRecord({
+      workspaceDir,
+      record: {
+        source: "aps",
+        articleUrl: "https://link.aps.org/doi/10.1103/PhysRevA.111.012619",
+        recordedAt: "2026-04-25T10:00:00.000Z",
+        handlingMethod: "browser_session",
+        status: "downloaded",
+        canonicalId: "10.1103/PhysRevA.111.012619",
+        pdfUrl: "https://journals.aps.org/pra/pdf/10.1103/PhysRevA.111.012619",
+        downloadPath: pdfPath
+      }
+    });
+
+    await updatePaperRecordParseManifest({
+      workspaceDir,
+      recordPath,
+      strategy: "webpage",
+      status: "parsed",
+      paperKey: "aps-10.1103-PhysRevA.111.012619",
+      engine: "webpage",
+      sourceSha256: "webpage-hash",
+      artifacts: {
+        markdownPath: path.join(workspaceDir, "knowledge-base/wiki/sources/aps-10.1103-PhysRevA.111.012619/parses/webpage/document.md"),
+        parsePath,
+        qualityPath: path.join(workspaceDir, "knowledge-base/wiki/sources/aps-10.1103-PhysRevA.111.012619/parses/webpage/quality.json"),
+        chunksPath: path.join(workspaceDir, "knowledge-base/wiki/sources/aps-10.1103-PhysRevA.111.012619/chunks/webpage.jsonl")
+      },
+      quality: {
+        status: "good",
+        score: 1,
+        pages: 1,
+        totalTextLength: 1200,
+        warnings: []
+      },
+      updatedAt: "2026-04-25T10:01:00.000Z"
+    });
+
+    const sourcePath = path.join(path.dirname(recordPath), "source.json");
+    const source = JSON.parse(await readFile(sourcePath, "utf8"));
+    assert.deepEqual(source.authors, ["Zewen Zhang", "Pranav Gokhale", "Jeffrey M. Larson"]);
+    assert.equal(source.year, 2025);
+    assert.equal(source.venue, "Phys. Rev. A");
+    assert.equal(source.citationStatus, "complete");
+    assert.deepEqual(source.missingFields, []);
+    assert.equal(source.resolvedFrom, "local_parse");
   } finally {
     await rm(workspaceDir, { recursive: true, force: true });
   }

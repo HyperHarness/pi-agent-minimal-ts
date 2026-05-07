@@ -297,8 +297,8 @@ The key distinction is that `wiki/sources/*.md` are evidence summaries for indiv
 
 ### Wiki Maintenance Tools
 
-- `wiki_health`: reports acquisition state, downloads, authorization state, parse quality, missing summaries, and missing artifacts
-- `wiki_health_fix`: retries or repairs supported health issues such as downloads, parsing, and missing summaries
+- `wiki_health`: reports acquisition state, downloads, authorization state, parse quality, incomplete `source.json` citation metadata, missing summaries, and missing artifacts
+- `wiki_health_fix`: orchestrates supported repairs. Download and citation-metadata repairs go through the paper-download-subagent boundary; citation refresh first reuses local parse artifacts, then uses arXiv/Crossref metadata when an identifier is available. Parsing stays in the ingestion path; missing summaries go through the `wiki-evidence-worker` summary pass.
 - `wiki_lint`: checks wiki structure, stale index entries, broken links, missing citations, orphan pages, and repeated tags that should become pages
 
 ### Wiki Evidence Tools
@@ -327,7 +327,7 @@ Design code should live under `design-projects/`, usually in a project-specific 
 | `default` | normal chat agent | compact file, web, paper, wiki, health tools | full diagnostics and raw source writers |
 | `full` | development and diagnostics | all default tools plus raw paper/wiki/design utilities | no extra filesystem escape permissions |
 | `wiki-agent` | durable knowledge coordinator | local wiki search, page construction, aliases, wiki health/lint, local paper search | web search, paper download, source-summary generation |
-| `paper-download-subagent` | literature acquisition | search/download, browser/manual fallback, webpage capture, parsing, health repair | wiki page writes, source-summary authoring |
+| `paper-download-subagent` | literature acquisition | search/download, browser/manual fallback, webpage capture, local-parse/arXiv/Crossref citation metadata refresh, parsing, health repair | wiki page writes, source-summary authoring |
 | `wiki-evidence-worker` | evidence construction | source summaries, relation maintenance, fixed-evidence page draft output | paper download, external search, autonomous acquisition |
 | `design-subagent` | minimal chip-design reasoning | local wiki/paper retrieval, `write_design_artifact` | web search, paper download, wiki page writes, arbitrary file writes |
 | `paper-writing-worker` | manuscript writing | project-local writing skills, manuscript read/write, LaTeX compile, wiki retrieval/Q&A | paper download, source-summary generation, wiki page construction, web search |
