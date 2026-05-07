@@ -22,6 +22,7 @@ import { resolveSenderName } from './feishu/sender-name.js';
 import { StreamUpdater } from './feishu/stream-updater.js';
 import { sendReplyWithRetry } from './feishu/reply-sender.js';
 import { splitLongTextForFeishu } from './feishu/long-message.js';
+import { buildAgentToolProgressText, formatAgentToolStatus, type AgentToolStatus } from './agent-tool-status.js';
 import {
   extractDownloadedPdfAttachment,
   extractPdfAttachmentsFromText,
@@ -940,6 +941,7 @@ async function processMessage(client: Lark.Client, message: ParsedIncomingMessag
   }
   const downloadedPdfAttachments = new Map<string, DownloadedPdfAttachment>();
   const queuedPdfDeliveryJobs = new Map<string, QueuedPdfDeliveryJob>();
+  const visibleToolStatuses: AgentToolStatus[] = [];
   const collectDownloadedPdfAttachment = (event: PiEvent): void => {
     if (!config.feishu.sendDownloadedPdf) {
       return;
@@ -954,7 +956,17 @@ async function processMessage(client: Lark.Client, message: ParsedIncomingMessag
       queuedPdfDeliveryJobs.set(queuedJob.jobId, queuedJob);
     }
   };
+  const updateAgentToolProgressCard = (event: PiEvent): void => {
+    const status = formatAgentToolStatus(event);
+    if (!status) {
+      return;
+    }
+
+    visibleToolStatuses.push(status);
+    updater.push(buildAgentToolProgressText(visibleToolStatuses));
+  };
   pi.on('event', collectDownloadedPdfAttachment);
+  pi.on('event', updateAgentToolProgressCard);
 
   try {
     const agentStartedAt = Date.now();
@@ -975,6 +987,7 @@ async function processMessage(client: Lark.Client, message: ParsedIncomingMessag
         });
       } finally {
         pi.off('event', collectDownloadedPdfAttachment);
+        pi.off('event', updateAgentToolProgressCard);
       }
     })();
     const finalResponse = agentResult.finalResponse;
