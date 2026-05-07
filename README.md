@@ -25,7 +25,7 @@ Feishu bridge / CLI / RPC
         v
 main chat agent / wiki-agent coordinator
         |
-        +--> paper-download-subagent  -> records, PDFs, webpages, parses
+        +--> paper-download-subagent  -> acquisition files, PDFs, webpages, parses
         +--> wiki-evidence-worker     -> wiki/sources/*.md and fixed-evidence page drafts
         +--> wiki-agent               -> wiki/pages/*.md and aliases
         +--> design-subagent          -> knowledge-base/design-records/*.md
@@ -89,7 +89,7 @@ The intended workflow is:
 
 ```text
 paper-download-subagent -> wiki-evidence-worker -> wiki-agent -> design-subagent -> wiki-agent -> paper-writing-worker
-records/raw/parses      -> wiki/sources/*.md + page drafts -> wiki/pages/*.md -> design records  -> curated wiki -> manuscript files
+acquisition/raw/parses  -> wiki/sources/*.md + page drafts -> wiki/pages/*.md -> design records  -> curated wiki -> manuscript files
 ```
 
 For model benchmarks, give workers fixed `wiki/sources` fixtures and evaluate page synthesis without allowing autonomous evidence acquisition.
@@ -275,8 +275,8 @@ Publisher and external URLs use the browser extension bridge by default when con
 - `read_paper_section`: reads bounded text by section id or page range
 - `search_paper_text`: searches inside a parsed paper and returns snippets with page, section, and element metadata
 - `parse_paper`: full-mode tool for parsing a downloaded PDF or webpage artifact
-- `list_local_papers`: full-mode listing of local paper records and parsed artifacts
-- `search_local_papers`: searches local records, parsed Markdown, and wiki summaries
+- `list_local_papers`: full-mode listing of local paper acquisition files and parsed artifacts
+- `search_local_papers`: searches local acquisition files, parsed Markdown, and wiki summaries
 
 ### Wiki And Research Tools
 
@@ -297,7 +297,7 @@ The key distinction is that `wiki/sources/*.md` are evidence summaries for indiv
 
 ### Wiki Maintenance Tools
 
-- `wiki_health`: reports records, downloads, authorization state, parse quality, missing summaries, and missing artifacts
+- `wiki_health`: reports acquisition state, downloads, authorization state, parse quality, missing summaries, and missing artifacts
 - `wiki_health_fix`: retries or repairs supported health issues such as downloads, parsing, and missing summaries
 - `wiki_lint`: checks wiki structure, stale index entries, broken links, missing citations, orphan pages, and repeated tags that should become pages
 
@@ -341,7 +341,6 @@ By default the local knowledge base lives in `knowledge-base/`, which is gitigno
 ```text
 knowledge-base/
   raw/pdfs/                         # original PDFs
-  records/                          # download records
   design-records/
     design-records/
     verification-reports/
@@ -351,7 +350,11 @@ knowledge-base/
     index.md                        # knowledge-entry catalog over pages/
     log.md                          # page operation log
     sources/<paper-key>.md          # LLM-authored paper source summary
-    sources/<paper-key>/            # parsed markdown, JSON, quality, chunks
+    sources/<paper-key>/
+      source.json                   # identity and citation metadata
+      acquisition.json              # download, access, parse, and reading state
+      parses/                       # parsed markdown, JSON, and quality reports
+      chunks/                       # searchable reading chunks
     pages/                          # durable cross-paper topic pages
     manifests/
     assets/

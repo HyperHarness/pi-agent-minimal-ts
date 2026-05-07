@@ -322,12 +322,7 @@ test("download_paper allows legacy fallback when usePlaywrightPaperFallback is e
       canonicalId: "10.1103/PhysRevLett.134.090601",
       articleUrl,
       fallbackUrl: articleUrl,
-      recordPath: path.join(
-        workspace,
-        "knowledge-base",
-        "records",
-        "aps-10.1103-PhysRevLett.134.090601.json",
-      ),
+      recordPath: path.join(workspace, "knowledge-base", "wiki", "sources", "aps-10.1103-PhysRevLett.134.090601", "acquisition.json"),
       failure: {
         code: "manual_login_required",
         message: "APS requires manual verification.",

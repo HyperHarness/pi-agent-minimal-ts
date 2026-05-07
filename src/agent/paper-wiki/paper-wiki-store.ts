@@ -81,7 +81,7 @@ Source summaries are citeable evidence under [sources/](sources/). Promote repea
 
 const INITIAL_LOG = `# Paper LLM Wiki Log
 
-This log tracks durable synthesis-page operations under \`pages/\`. Paper downloads are tracked in \`../records/\`; source-summary evidence under \`sources/\` is not logged here.
+This log tracks durable synthesis-page operations under \`pages/\`. Paper downloads are tracked in per-source \`sources/<paperKey>/acquisition.json\` files; source-summary evidence under \`sources/\` is not logged here.
 `;
 
 export async function ensurePaperWikiScaffold(workspaceDir: string): Promise<void> {

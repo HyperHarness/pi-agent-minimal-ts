@@ -73,7 +73,7 @@ test('extractDownloadedPdfAttachment ignores queued or non-PDF results', () => {
         result: {
           details: {
             status: 'downloaded',
-            path: 'knowledge-base/records/arxiv-2401.01234.json',
+            path: 'knowledge-base/wiki/sources/arxiv-2401.01234/acquisition.json',
           },
         },
       },

@@ -71,7 +71,7 @@ function createFakeChrome(options = {}) {
           jobId: message.jobId,
           articleUrl: message.articleUrl,
           downloadPath: message.downloadPath ?? `knowledge-base/raw/pdfs/${message.pdfFileName ?? "paper.pdf"}`,
-          recordPath: "knowledge-base/records/paper.json",
+          recordPath: "knowledge-base/wiki/sources/paper/acquisition.json",
           fileSha256: "abc123"
         };
       }
@@ -692,7 +692,7 @@ test("background gates publisher PDF downloads on complete webpage snapshot qual
           jobId: message.jobId,
           articleUrl: message.articleUrl,
           downloadPath: `knowledge-base/raw/pdfs/${message.pdfFileName}`,
-          recordPath: "knowledge-base/records/nature.json",
+          recordPath: "knowledge-base/wiki/sources/nature/acquisition.json",
           fileSha256: "abc123"
         };
       }
@@ -811,7 +811,7 @@ test("background starts publisher PDF download after good webpage snapshot quali
           jobId: message.jobId,
           articleUrl: message.articleUrl,
           downloadPath: `knowledge-base/raw/pdfs/${message.pdfFileName}`,
-          recordPath: "knowledge-base/records/nature.json",
+          recordPath: "knowledge-base/wiki/sources/nature/acquisition.json",
           fileSha256: "abc123"
         };
       }
@@ -964,7 +964,7 @@ test("background associates Science manual downloads by publisher URL when tab m
         };
       }
       if (message.type === "register_download") {
-        return { type: "registered", jobId: message.jobId, articleUrl: message.articleUrl, downloadPath: message.downloadPath, recordPath: "knowledge-base/records/science.json", fileSha256: "abc123" };
+        return { type: "registered", jobId: message.jobId, articleUrl: message.articleUrl, downloadPath: message.downloadPath, recordPath: "knowledge-base/wiki/sources/science/acquisition.json", fileSha256: "abc123" };
       }
       return { type: "status_ack", jobId: message.jobId, status: message.status };
     },

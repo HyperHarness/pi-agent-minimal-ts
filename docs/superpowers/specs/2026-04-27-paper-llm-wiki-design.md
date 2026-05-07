@@ -15,8 +15,6 @@ knowledge-base/
   raw/
     pdfs/
       <paper-key>.pdf
-  records/
-    <paper-key>.json
   wiki/
     index.md
     log.md
@@ -24,6 +22,7 @@ knowledge-base/
       <paper-key>.md
       <paper-key>/
         source.json
+        acquisition.json
         parses/
           <engine>/
             parse.json
@@ -45,7 +44,7 @@ knowledge-base/
 - `wiki/pages/`: future synthesis pages across multiple papers, such as topic pages, comparisons, and evolving claims.
 - `wiki/manifests/`: future machine-readable provenance for final source summaries.
 - `index.md`: knowledge-entry navigation for `wiki/pages/`; source summaries remain a citeable evidence layer and should not be expanded into a downloaded-paper list here.
-- `log.md`: chronological append-only audit trail for knowledge-page operations under `wiki/pages/`; downloads are tracked in `knowledge-base/records/`, and source-summary evidence changes should not be logged here.
+- `log.md`: chronological append-only audit trail for knowledge-page operations under `wiki/pages/`; downloads are tracked in per-source `knowledge-base/wiki/sources/<paperKey>/acquisition.json` files, and source-summary evidence changes should not be logged here.
 - Workflow and schema conventions live in `src/`, tests, and this design document rather than a runtime `wiki/schema.md` file.
 
 ## Tool Flow

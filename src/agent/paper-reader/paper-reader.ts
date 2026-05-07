@@ -493,6 +493,12 @@ function isPaperSource(value: string | undefined): value is PaperSource {
     value === "external";
 }
 
+function paperKeyFromAcquisitionPath(recordPath: string): string {
+  return path.basename(recordPath) === "acquisition.json"
+    ? path.basename(path.dirname(recordPath))
+    : path.basename(recordPath, ".json");
+}
+
 async function readRecordForSource(input: {
   workspaceDir: string;
   source: Awaited<ReturnType<typeof readPaperSourceByKey>>;
@@ -566,7 +572,7 @@ async function resolvePaperKeyFromExtensionJob(input: {
       recordPath: job.recordPath
     });
     if (saved) {
-      return path.basename(saved.recordPath, ".json");
+      return paperKeyFromAcquisitionPath(saved.recordPath);
     }
   }
   return undefined;

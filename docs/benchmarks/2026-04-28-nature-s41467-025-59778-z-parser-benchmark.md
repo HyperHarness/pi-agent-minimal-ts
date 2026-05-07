@@ -8,7 +8,7 @@ Benchmark article:
 - DOI: 10.1038/s41467-025-59778-z
 - Article URL: https://www.nature.com/articles/s41467-025-59778-z
 - Local PDF: `knowledge-base/raw/pdfs/nature-s41467-025-59778-z.pdf`
-- Record: `knowledge-base/records/nature-s41467-025-59778-z.json`
+- Record: `knowledge-base/wiki/sources/nature-s41467-025-59778-z/acquisition.json`
 - Raw benchmark JSON: `/tmp/pi-agent-benchmarks/nature-s41467-025-59778-z-parser-benchmark.json`
 
 ## Scope

@@ -124,7 +124,7 @@ node --input-type=module -e '
 import { parsePaper, searchPaperText } from "./dist/src/index.js";
 const parsed = await parsePaper({
   workspaceDir: process.cwd(),
-  recordPath: "knowledge-base/records/nature-s41467-025-59778-z.json",
+  recordPath: "knowledge-base/wiki/sources/nature-s41467-025-59778-z/acquisition.json",
   engine: "docling",
   force: true
 });

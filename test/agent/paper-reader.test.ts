@@ -28,7 +28,6 @@ import { appendPaperDownloadJobEvent } from "../../src/agent/paper-download-jobs
 
 async function createWorkspace(): Promise<string> {
   const workspace = await mkdtemp(path.join(os.tmpdir(), "pi-paper-reader-"));
-  await mkdir(path.join(workspace, "knowledge-base", "records"), { recursive: true });
   return workspace;
 }
 
@@ -37,6 +36,11 @@ async function writePdf(workspace: string, filename: string, text: string): Prom
   await mkdir(path.dirname(pdfPath), { recursive: true });
   await writeFile(pdfPath, `%PDF-1.4\n${text}\n%%EOF\n`, "utf8");
   return pdfPath;
+}
+
+async function writeJson(filePath: string, value: unknown): Promise<void> {
+  await mkdir(path.dirname(filePath), { recursive: true });
+  await writeFile(filePath, `${JSON.stringify(value, null, 2)}\n`, "utf8");
 }
 
 async function writePdfWithFlateTextStream(workspace: string, filename: string): Promise<string> {
@@ -222,6 +226,23 @@ test("parsePaper writes reading artifacts and reuses a same-hash cache", async (
       "arxiv-2406.06015.pdf",
       "Abstract superconducting qubits introduction methods results conclusion"
     );
+    const sourcePath = path.join(workspace, "knowledge-base", "wiki", "sources", "arxiv-2406.06015", "source.json");
+    await writeJson(sourcePath, {
+      schemaVersion: 2,
+      paperKey: "arxiv-2406.06015",
+      source: "arxiv",
+      canonicalId: "2406.06015",
+      articleUrl: "https://arxiv.org/abs/2406.06015",
+      title: "Preserved source metadata",
+      authors: ["Ada Lovelace"],
+      year: 2024,
+      venue: "arXiv",
+      arxivId: "2406.06015",
+      citationStatus: "complete",
+      missingFields: [],
+      acquisitionPath: "knowledge-base/wiki/sources/arxiv-2406.06015/acquisition.json",
+      recordPath: "knowledge-base/wiki/sources/arxiv-2406.06015/acquisition.json"
+    });
 
     const first = await parsePaper({
       workspaceDir: workspace,
@@ -246,6 +267,10 @@ test("parsePaper writes reading artifacts and reuses a same-hash cache", async (
       elements: Array<{ text: string }>;
     };
     assert.match(parseJson.elements.map((element) => element.text).join("\n"), /superconducting qubits/);
+    const sourceJson = JSON.parse(await readFile(sourcePath, "utf8"));
+    assert.deepEqual(sourceJson.authors, ["Ada Lovelace"]);
+    assert.equal(sourceJson.citationStatus, "complete");
+    assert.equal(sourceJson.pdfSha256, first.pdfSha256);
   } finally {
     await rm(workspace, { recursive: true, force: true });
   }
@@ -665,7 +690,8 @@ test("parsePaper resolves downloaded paper records", async () => {
   const workspace = await createWorkspace();
   try {
     const pdfPath = await writePdf(workspace, "arxiv-2401.01234.pdf", "record backed paper");
-    const recordPath = path.join(workspace, "knowledge-base", "records", "arxiv-2401.01234.json");
+    const recordPath = path.join(workspace, "knowledge-base", "wiki", "sources", "arxiv-2401.01234", "acquisition.json");
+    await mkdir(path.dirname(recordPath), { recursive: true });
     await writeFile(recordPath, `${JSON.stringify({
       source: "arxiv",
       articleUrl: "https://arxiv.org/abs/2401.01234",
@@ -760,7 +786,8 @@ test("inspectPaper resolves extension job ids and finds PDFs registered after we
     });
     const pdfPath = await writePdf(workspace, "aps-10.1103-nv7d-k3wr.pdf", "aps downloaded pdf");
     const uncPdfPath = `\\\\wsl.localhost\\Ubuntu-24.04\\${pdfPath.slice(1).split(path.sep).join("\\")}`;
-    const recordPath = path.join(workspace, "knowledge-base", "records", "aps-10.1103-nv7d-k3wr.json");
+    const recordPath = path.join(workspace, "knowledge-base", "wiki", "sources", "aps-10.1103-nv7d-k3wr", "acquisition.json");
+    await mkdir(path.dirname(recordPath), { recursive: true });
     await writeFile(recordPath, `${JSON.stringify({
       source: "aps",
       articleUrl: "https://journals.aps.org/prl/abstract/10.1103/nv7d-k3wr",
@@ -811,7 +838,8 @@ test("parsePaper tex-source uses LaTeXML HTML followed by pandoc markdown", asyn
   const workspace = await createWorkspace();
   try {
     const pdfPath = await writePdf(workspace, "arxiv-2507.09690.pdf", "tex source companion pdf");
-    const recordPath = path.join(workspace, "knowledge-base", "records", "arxiv-2507.09690.json");
+    const recordPath = path.join(workspace, "knowledge-base", "wiki", "sources", "arxiv-2507.09690", "acquisition.json");
+    await mkdir(path.dirname(recordPath), { recursive: true });
     await writeFile(recordPath, `${JSON.stringify({
       source: "arxiv",
       articleUrl: "https://arxiv.org/abs/2507.09690",
@@ -884,7 +912,8 @@ test("paper reading tools resolve bare publisher canonical ids to parsed paper k
       "nature-s41467-025-63214-7.pdf",
       "Abstract localized statistics decoding for quantum low-density parity-check codes"
     );
-    const recordPath = path.join(workspace, "knowledge-base", "records", "nature-s41467-025-63214-7.json");
+    const recordPath = path.join(workspace, "knowledge-base", "wiki", "sources", "nature-s41467-025-63214-7", "acquisition.json");
+    await mkdir(path.dirname(recordPath), { recursive: true });
     await writeFile(recordPath, `${JSON.stringify({
       source: "nature",
       articleUrl: "https://www.nature.com/articles/s41467-025-63214-7",
@@ -938,7 +967,8 @@ test("readPaperSection prefers a good PDF parse over an incomplete publisher web
       "nature-s41534-026-01233-y.pdf",
       "Introduction PDF full text Methods Results Discussion Conclusion ".repeat(80)
     );
-    const recordPath = path.join(workspace, "knowledge-base", "records", "nature-s41534-026-01233-y.json");
+    const recordPath = path.join(workspace, "knowledge-base", "wiki", "sources", "nature-s41534-026-01233-y", "acquisition.json");
+    await mkdir(path.dirname(recordPath), { recursive: true });
     await writeFile(recordPath, `${JSON.stringify({
       source: "nature",
       articleUrl: "https://www.nature.com/articles/s41534-026-01233-y",

@@ -398,11 +398,11 @@ function summarizeActions(issues: WikiHealthIssue[]): string[] {
     ["needs_authorization", "Open/login through the paper browser or extension, then retry the affected downloads."],
     ["needs_download", "Retry or manually import papers that have no usable downloaded artifact."],
     ["queued", "Process queued browser-extension jobs before judging download or parse health."],
-    ["parse_failed", "Re-run parsing or switch parser engines for failed records."],
+    ["parse_failed", "Re-run parsing or switch parser engines for failed acquisitions."],
     ["low_quality", "Inspect low-quality parses and prefer webpage/TeX/Docling alternatives where available."],
     ["parse_missing", "Parse downloaded papers that do not yet have reading artifacts."],
     ["summary_missing", "Write wiki source summaries for parsed papers without a summary page."],
-    ["missing_artifact", "Repair or regenerate records that point at missing files."],
+    ["missing_artifact", "Repair or regenerate acquisition files that point at missing files."],
     ["download_blocked", "No repair needed for download-blocklisted papers unless the paper is removed from the local download blocklist."]
   ].flatMap(([kind, text]) => {
     const count = counts.get(kind as WikiHealthIssueKind) ?? 0;

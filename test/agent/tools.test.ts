@@ -2560,12 +2560,7 @@ test("download_paper uses the injected paper manager client for supported-publis
       canonicalId: "10.1126/science.adz8659",
       articleUrl: "https://www.science.org/doi/10.1126/science.adz8659",
       fallbackUrl: "https://www.science.org/doi/10.1126/science.adz8659",
-      recordPath: path.join(
-        workspace,
-        "knowledge-base",
-        "records",
-        "science-10.1126-science.adz8659.json",
-      ),
+      recordPath: path.join(workspace, "knowledge-base", "wiki", "sources", "science-10.1126-science.adz8659", "acquisition.json"),
       failure: {
         code: "manual_login_required",
         message: "The browser session needs manual login or verification for this publisher.",
@@ -2630,12 +2625,7 @@ test("download_paper opens manual fallback when the manager client download is n
       canonicalId: "10.1126/science.adz8659",
       articleUrl,
       fallbackUrl: articleUrl,
-      recordPath: path.join(
-        workspace,
-        "knowledge-base",
-        "records",
-        "science-10.1126-science.adz8659.json",
-      ),
+      recordPath: path.join(workspace, "knowledge-base", "wiki", "sources", "science-10.1126-science.adz8659", "acquisition.json"),
       failure: {
         code: "download_failed",
         message: "Downloaded file is not a valid PDF.",
@@ -2688,12 +2678,7 @@ test("download_paper opens manual fallback when the manager client returns a cod
       canonicalId: "10.1103/PhysRevLett.134.090601",
       articleUrl,
       fallbackUrl: articleUrl,
-      recordPath: path.join(
-        workspace,
-        "knowledge-base",
-        "records",
-        "aps-10.1103-PhysRevLett.134.090601.json",
-      ),
+      recordPath: path.join(workspace, "knowledge-base", "wiki", "sources", "aps-10.1103-PhysRevLett.134.090601", "acquisition.json"),
       failure: {
         code: "download_failed",
         message: "Timed out waiting for PDF download.",
@@ -2754,12 +2739,7 @@ test("download_paper opens manual fallback when canonicalId cannot be derived fr
       canonicalId: fallbackCanonicalId,
       articleUrl,
       fallbackUrl: articleUrl,
-      recordPath: path.join(
-        workspace,
-        "knowledge-base",
-        "records",
-        `science-${fallbackCanonicalId}.json`,
-      ),
+      recordPath: path.join(workspace, "knowledge-base", "wiki", "sources", `science-${fallbackCanonicalId}`, "acquisition.json"),
       failure: {
         code: "download_failed",
         message: "Unable to resolve a canonical paper identifier from the publisher article URL.",
@@ -3395,7 +3375,7 @@ test("answer_research_question stops after local wiki evidence is found", async 
 
 test("answer_research_question can download, parse, summarize, and refresh wiki evidence", async () => {
   const workspace = await mkdtemp(path.join(tmpdir(), "pi-agent-tools-"));
-  const recordPath = path.join(workspace, "knowledge-base", "records", "arxiv-2601.00425.json");
+  const recordPath = path.join(workspace, "knowledge-base", "wiki", "sources", "arxiv-2601.00425", "acquisition.json");
   const pdfPath = path.join(workspace, "knowledge-base", "raw", "pdfs", "arxiv-2601.00425.pdf");
   let wikiSearchCalls = 0;
 

@@ -274,7 +274,7 @@ test("parseExtensionHostResponse accepts registered responses", () => {
     jobId: "job-123",
     articleUrl: "https://example.com/paper",
     downloadPath: "knowledge-base/raw/pdfs/external-paper.pdf",
-    recordPath: "knowledge-base/records/external-paper.json",
+    recordPath: "knowledge-base/wiki/sources/external-paper/acquisition.json",
     fileSha256: "abc123",
     title: "External Paper"
   });
@@ -284,7 +284,7 @@ test("parseExtensionHostResponse accepts registered responses", () => {
     jobId: "job-123",
     articleUrl: "https://example.com/paper",
     downloadPath: "knowledge-base/raw/pdfs/external-paper.pdf",
-    recordPath: "knowledge-base/records/external-paper.json",
+    recordPath: "knowledge-base/wiki/sources/external-paper/acquisition.json",
     fileSha256: "abc123",
     title: "External Paper"
   });

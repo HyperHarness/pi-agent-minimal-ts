@@ -620,7 +620,7 @@ const listLocalPapersParameters = Type.Object({
 const searchLocalPapersParameters = Type.Object({
   query: Type.String({
     description:
-      "Keyword query to search across local paper records, LLM source summaries, and parsed markdown."
+      "Keyword query to search across local paper acquisition files, LLM source summaries, and parsed markdown."
   }),
   maxResults: Type.Optional(Type.Integer({ description: "Maximum local paper matches to return.", minimum: 1 }))
 });
@@ -663,7 +663,7 @@ const wikiHealthFixParameters = Type.Object({
     description: "Optional issue kinds to repair or explain. Defaults to all reported issue kinds."
   })),
   dryRun: Type.Optional(Type.Boolean({
-    description: "Report intended repairs without changing records or retrying downloads."
+    description: "Report intended repairs without changing acquisition files or retrying downloads."
   }))
 });
 
@@ -4228,7 +4228,7 @@ export function createTools(workspaceDir: string, dependencies: ToolDependencies
     name: "list_local_papers",
     label: "List Local Papers",
     description:
-      "Lists papers already known in the local knowledge base across records, raw PDFs, parsed artifacts, and LLM source summaries.",
+      "Lists papers already known in the local knowledge base across acquisition files, raw PDFs, parsed artifacts, and LLM source summaries.",
     parameters: listLocalPapersParameters,
     execute: async (_toolCallId: string, args: ListLocalPapersParameters) => {
       const result = await listLocalPapersImpl({
@@ -4249,7 +4249,7 @@ export function createTools(workspaceDir: string, dependencies: ToolDependencies
     name: "search_local_papers",
     label: "Search Local Papers",
     description:
-      "Searches across the local knowledge base, including download records, LLM source summaries, and parsed markdown for all downloaded or parsed papers.",
+      "Searches across the local knowledge base, including acquisition files, LLM source summaries, and parsed markdown for all downloaded or parsed papers.",
     parameters: searchLocalPapersParameters,
     execute: async (_toolCallId: string, args: SearchLocalPapersParameters) => {
       const result = await searchLocalPapersImpl({
@@ -4269,7 +4269,7 @@ export function createTools(workspaceDir: string, dependencies: ToolDependencies
     name: "wiki_health",
     label: "Wiki Health",
     description:
-      "Diagnoses local paper knowledge-base health across records, downloads, authorization state, parse quality, wiki summaries, and missing artifacts.",
+      "Diagnoses local paper knowledge-base health across acquisition files, downloads, authorization state, parse quality, wiki summaries, and missing artifacts.",
     parameters: wikiHealthParameters,
     execute: async (_toolCallId: string, args: WikiHealthParameters) => {
       const result = await checkWikiHealthImpl({

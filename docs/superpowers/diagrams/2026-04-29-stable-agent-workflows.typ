@@ -67,7 +67,7 @@
     node("Search or URL", "search_papers or a direct article / arXiv URL", fill: blue),
     node("Download / Queue", "download_paper uses arXiv direct paths or extension bridge for publishers", fill: amber),
     node("Parse / Webpage capture", "Preferred readable source: webpage / TeX / PDF parser artifacts", fill: green),
-    node("Record state", "knowledge-base/records plus raw PDFs and parse manifests", fill: gray),
+    node("Acquisition state", "wiki/sources/<paperKey>/acquisition.json plus raw PDFs and parse manifests", fill: gray),
     node("Ready for reading", "inspect_paper, read_paper_section, search_paper_text", fill: violet),
     labels: ("select", "acquire", "persist", "read"),
   )

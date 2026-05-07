@@ -15,8 +15,10 @@ import {
   readPaperRecordByPath,
   resolveExternalPaperPdfPath,
   resolvePaperPdfPath,
+  resolvePaperSourcePath,
   resolvePaperRecordPath,
   updatePaperRecordParseManifest,
+  updatePaperRecordQueuedReading,
   updatePaperRecordReadingFailure,
   writePaperRecord
 } from "../../src/agent/paper-store.js";
@@ -113,7 +115,7 @@ const manualFallbackResult = {
   canonicalId: "10.1126/science.adz8659",
   articleUrl: "https://www.science.org/doi/10.1126/science.adz8659",
   fallbackUrl: "https://www.science.org/doi/10.1126/science.adz8659",
-  recordPath: "knowledge-base/records/science-10.1126-science.adz8659.json",
+  recordPath: "knowledge-base/wiki/sources/science-10.1126-science.adz8659/acquisition.json",
   failure: {
     code: "PAYWALL",
     message: "Opened article in browser."
@@ -209,7 +211,7 @@ test("knowledge base paths can be moved outside the code workspace", async () =>
         canonicalId: "2401.01234",
         articleUrl: "https://arxiv.org/abs/2401.01234"
       }),
-      path.join(libraryDir, "records", "arxiv-2401.01234.json")
+      path.join(libraryDir, "wiki", "sources", "arxiv-2401.01234", "acquisition.json")
     );
   } finally {
     if (previousLibraryDir === undefined) {
@@ -245,12 +247,7 @@ test("resolvePaperRecordPath uses canonical ids for supported sources and hostna
         canonicalId: "10.1126/science.adz8659",
         articleUrl: "https://www.science.org/doi/10.1126/science.adz8659"
       }),
-      path.join(
-        workspaceDir,
-        "knowledge-base",
-        "records",
-        "science-10.1126-science.adz8659.json"
-      )
+      path.join(workspaceDir, "knowledge-base", "wiki", "sources", "science-10.1126-science.adz8659", "acquisition.json")
     );
 
     const externalRecordPath = resolvePaperRecordPath({
@@ -260,10 +257,10 @@ test("resolvePaperRecordPath uses canonical ids for supported sources and hostna
     });
 
     assert.equal(
-      externalRecordPath.startsWith(path.join(workspaceDir, "knowledge-base", "records")),
+      externalRecordPath.startsWith(path.join(workspaceDir, "knowledge-base", "wiki", "sources")),
       true
     );
-    assert.equal(path.basename(externalRecordPath).startsWith("external-example.com-"), true);
+    assert.equal(path.basename(path.dirname(externalRecordPath)).startsWith("external-example.com-"), true);
   } finally {
     await rm(workspaceDir, { recursive: true, force: true });
   }
@@ -282,7 +279,7 @@ test("resolvePaperRecordPath rejects canonical ids that sanitize to an empty fil
   );
 });
 
-test("writePaperRecord persists external_opened records under knowledge-base/records", async () => {
+test("writePaperRecord persists external_opened records under the source acquisition file", async () => {
   const workspaceDir = await mkdtemp(path.join(os.tmpdir(), "paper-store-"));
 
   try {
@@ -300,8 +297,8 @@ test("writePaperRecord persists external_opened records under knowledge-base/rec
 
     const saved = JSON.parse(await readFile(recordPath, "utf8"));
 
-    assert.equal(recordPath.startsWith(path.join(workspaceDir, "knowledge-base", "records")), true);
-    assert.equal(path.basename(recordPath).startsWith("external-example.com-"), true);
+    assert.equal(recordPath.startsWith(path.join(workspaceDir, "knowledge-base", "wiki", "sources")), true);
+    assert.equal(path.basename(path.dirname(recordPath)).startsWith("external-example.com-"), true);
     assert.equal(saved.status, "external_opened");
     assert.equal(saved.source, "external");
   } finally {
@@ -322,18 +319,115 @@ test("writePaperRecord persists supported source records with pretty-printed fai
 
     assert.equal(
       recordPath,
-      path.join(
-        workspaceDir,
-        "knowledge-base",
-        "records",
-        "science-10.1126-science.adz8659.json"
-      )
+      path.join(workspaceDir, "knowledge-base", "wiki", "sources", "science-10.1126-science.adz8659", "acquisition.json")
     );
     assert.match(saved, /\n  "failure": \{\n    "code": "PAYWALL",\n    "message": "Browser session required\."\n  \},\n/);
     const savedRecord = JSON.parse(saved);
     assert.deepEqual(stripRecordManifest(savedRecord), manualFallbackPaperRecord);
     assert.equal(savedRecord.download.status, "manual_fallback_opened");
     assert.equal(savedRecord.reading.status, "not_ready");
+  } finally {
+    await rm(workspaceDir, { recursive: true, force: true });
+  }
+});
+
+test("writePaperRecord merges citation metadata into source.json next to acquisition state", async () => {
+  const workspaceDir = await mkdtemp(path.join(os.tmpdir(), "paper-store-"));
+
+  try {
+    const recordPath = await writePaperRecord({
+      workspaceDir,
+      record: {
+        source: "science",
+        canonicalId: "10.1126/science.adz8659",
+        articleUrl: "https://www.science.org/doi/10.1126/science.adz8659",
+        openedUrl: "https://www.science.org/doi/10.1126/science.adz8659",
+        recordedAt: "2026-04-23T14:00:00.000Z",
+        handlingMethod: "browser_session",
+        status: "manual_fallback_opened",
+        title: "A Science Paper",
+        failure: {
+          code: "PAYWALL",
+          message: "Browser session required."
+        }
+      }
+    });
+    const sourcePath = resolvePaperSourcePath({
+      workspaceDir,
+      source: "science",
+      canonicalId: "10.1126/science.adz8659",
+      articleUrl: "https://www.science.org/doi/10.1126/science.adz8659"
+    });
+    const source = JSON.parse(await readFile(sourcePath, "utf8"));
+
+    assert.equal(sourcePath, path.join(path.dirname(recordPath), "source.json"));
+    assert.equal(source.schemaVersion, 2);
+    assert.equal(source.paperKey, "science-10.1126-science.adz8659");
+    assert.equal(source.source, "science");
+    assert.equal(source.title, "A Science Paper");
+    assert.equal(source.doi, "10.1126/science.adz8659");
+    assert.equal(source.publisher, "American Association for the Advancement of Science");
+    assert.equal(source.downloadStatus, "manual_fallback_opened");
+    assert.equal(source.citationStatus, "incomplete");
+    assert.deepEqual(source.missingFields, ["authors", "year", "venue"]);
+    assert.equal(source.acquisitionPath, "knowledge-base/wiki/sources/science-10.1126-science.adz8659/acquisition.json");
+    assert.equal(source.recordPath, "knowledge-base/wiki/sources/science-10.1126-science.adz8659/acquisition.json");
+  } finally {
+    await rm(workspaceDir, { recursive: true, force: true });
+  }
+});
+
+test("paper source metadata derives arXiv ids and preserves manually enriched fields on record updates", async () => {
+  const workspaceDir = await mkdtemp(path.join(os.tmpdir(), "paper-store-"));
+  const pdfPath = resolvePaperPdfPath({
+    workspaceDir,
+    source: "arxiv",
+    canonicalId: "2401.01234"
+  });
+
+  try {
+    await mkdir(path.dirname(pdfPath), { recursive: true });
+    await writeFile(pdfPath, "%PDF-1.7\npaper\n", "utf8");
+    const recordPath = await writePaperRecord({
+      workspaceDir,
+      record: {
+        source: "arxiv",
+        articleUrl: "https://arxiv.org/abs/2401.01234",
+        recordedAt: "2026-04-25T10:00:00.000Z",
+        handlingMethod: "direct_http",
+        status: "downloaded",
+        canonicalId: "2401.01234",
+        pdfUrl: "https://arxiv.org/pdf/2401.01234.pdf",
+        downloadPath: pdfPath
+      }
+    });
+    const sourcePath = path.join(path.dirname(recordPath), "source.json");
+    const initial = JSON.parse(await readFile(sourcePath, "utf8"));
+    assert.equal(initial.arxivId, "2401.01234");
+    assert.equal(initial.year, 2024);
+    assert.deepEqual(initial.missingFields, ["title", "authors", "venue"]);
+
+    await writeFile(sourcePath, `${JSON.stringify({
+      ...initial,
+      title: "Preserved Title",
+      authors: ["Ada Lovelace"],
+      venue: "arXiv"
+    }, null, 2)}\n`, "utf8");
+
+    await updatePaperRecordQueuedReading({
+      workspaceDir,
+      recordPath,
+      strategy: "webpage",
+      message: "Queued webpage parse.",
+      updatedAt: "2026-04-25T10:01:00.000Z"
+    });
+    const updated = JSON.parse(await readFile(sourcePath, "utf8"));
+    assert.equal(updated.title, "Preserved Title");
+    assert.deepEqual(updated.authors, ["Ada Lovelace"]);
+    assert.equal(updated.venue, "arXiv");
+    assert.equal(updated.readingStatus, "queued");
+    assert.equal(updated.citationStatus, "complete");
+    assert.deepEqual(updated.missingFields, []);
   } finally {
     await rm(workspaceDir, { recursive: true, force: true });
   }
@@ -473,7 +567,7 @@ test("resolveExternalPaperPdfPath uses the same URL key as external records", as
     const articleUrl = "https://example.com/paper";
     assert.equal(
       path.basename(resolveExternalPaperPdfPath({ workspaceDir, articleUrl })).replace(/\.pdf$/, ".json"),
-      path.basename(resolvePaperRecordPath({ workspaceDir, source: "external", articleUrl }))
+      `${path.basename(path.dirname(resolvePaperRecordPath({ workspaceDir, source: "external", articleUrl })))}.json`
     );
   } finally {
     await rm(workspaceDir, { recursive: true, force: true });

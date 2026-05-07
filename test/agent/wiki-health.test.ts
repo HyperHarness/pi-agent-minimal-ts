@@ -26,7 +26,7 @@ test("checkWikiHealth reports records that need download, authorization, parsing
   const workspace = await createWorkspace();
 
   try {
-    await writeJson(path.join(workspace, "knowledge-base", "records", "nature-s41586-024-00001-y.json"), {
+    await writeJson(path.join(workspace, "knowledge-base", "wiki", "sources", "nature-s41586-024-00001-y", "acquisition.json"), {
       source: "nature",
       articleUrl: "https://www.nature.com/articles/s41586-024-00001-y",
       openedUrl: "https://www.nature.com/articles/s41586-024-00001-y",
@@ -41,7 +41,7 @@ test("checkWikiHealth reports records that need download, authorization, parsing
     });
 
     const missingPdfPath = path.join(workspace, "knowledge-base", "raw", "pdfs", "arxiv-2401.00001.pdf");
-    await writeJson(path.join(workspace, "knowledge-base", "records", "arxiv-2401.00001.json"), {
+    await writeJson(path.join(workspace, "knowledge-base", "wiki", "sources", "arxiv-2401.00001", "acquisition.json"), {
       source: "arxiv",
       articleUrl: "https://arxiv.org/abs/2401.00001",
       recordedAt: "2026-04-28T01:00:00.000Z",
@@ -54,7 +54,7 @@ test("checkWikiHealth reports records that need download, authorization, parsing
 
     const pdfPath = path.join(workspace, "knowledge-base", "raw", "pdfs", "arxiv-2401.00002.pdf");
     await writeText(pdfPath, "%PDF-1.4\nexample\n%%EOF\n");
-    await writeJson(path.join(workspace, "knowledge-base", "records", "arxiv-2401.00002.json"), {
+    await writeJson(path.join(workspace, "knowledge-base", "wiki", "sources", "arxiv-2401.00002", "acquisition.json"), {
       source: "arxiv",
       articleUrl: "https://arxiv.org/abs/2401.00002",
       recordedAt: "2026-04-28T02:00:00.000Z",
@@ -126,7 +126,7 @@ test("checkWikiHealth resolves WSL UNC artifact paths before reporting missing f
     const pdfPath = path.join(workspace, "knowledge-base", "raw", "pdfs", "arxiv-2401.00003.pdf");
     await writeText(pdfPath, "%PDF-1.4\nexample\n%%EOF\n");
     const uncPdfPath = `\\\\wsl.localhost\\Ubuntu-24.04\\${pdfPath.slice(1).split(path.sep).join("\\")}`;
-    await writeJson(path.join(workspace, "knowledge-base", "records", "arxiv-2401.00003.json"), {
+    await writeJson(path.join(workspace, "knowledge-base", "wiki", "sources", "arxiv-2401.00003", "acquisition.json"), {
       source: "arxiv",
       articleUrl: "https://arxiv.org/abs/2401.00003",
       recordedAt: "2026-04-28T03:00:00.000Z",
@@ -181,7 +181,7 @@ test("checkWikiHealth accepts ready webpage reading when PDF parsing failed late
       articleUrl: "https://www.nature.com/articles/s41567-025-03102-5",
       pdfPath
     });
-    await writeJson(path.join(workspace, "knowledge-base", "records", `${paperKey}.json`), {
+    await writeJson(path.join(workspace, "knowledge-base", "wiki", "sources", paperKey, "acquisition.json"), {
       source: "nature",
       articleUrl: "https://www.nature.com/articles/s41567-025-03102-5",
       recordedAt: "2026-05-06T02:51:40.161Z",
@@ -515,7 +515,7 @@ test("checkWikiHealth treats publisher accepted-paper arXiv fallback records as 
 
   try {
     const arxivPdfPath = path.join(workspace, "knowledge-base", "raw", "pdfs", "arxiv-2601.01234.pdf");
-    const arxivRecordPath = path.join(workspace, "knowledge-base", "records", "arxiv-2601.01234.json");
+    const arxivRecordPath = path.join(workspace, "knowledge-base", "wiki", "sources", "arxiv-2601.01234", "acquisition.json");
     await writeText(arxivPdfPath, "%PDF-1.4\nexample\n%%EOF\n");
     await writeJson(arxivRecordPath, {
       source: "arxiv",
@@ -527,7 +527,7 @@ test("checkWikiHealth treats publisher accepted-paper arXiv fallback records as 
       pdfUrl: "https://arxiv.org/pdf/2601.01234.pdf",
       downloadPath: arxivPdfPath
     });
-    await writeJson(path.join(workspace, "knowledge-base", "records", "aps-10.1103-k3d5-v43c.json"), {
+    await writeJson(path.join(workspace, "knowledge-base", "wiki", "sources", "aps-10.1103-k3d5-v43c", "acquisition.json"), {
       source: "aps",
       articleUrl: "https://journals.aps.org/prapplied/accepted/10.1103/k3d5-v43c",
       recordedAt: "2026-04-28T04:01:00.000Z",
@@ -592,7 +592,7 @@ test("checkWikiHealth treats accepted publisher-pending records as non-actionabl
   const workspace = await createWorkspace();
 
   try {
-    await writeJson(path.join(workspace, "knowledge-base", "records", "aps-10.1103-rp4w-3n7l.json"), {
+    await writeJson(path.join(workspace, "knowledge-base", "wiki", "sources", "aps-10.1103-rp4w-3n7l", "acquisition.json"), {
       source: "aps",
       articleUrl: "https://journals.aps.org/prapplied/accepted/10.1103/rp4w-3n7l",
       recordedAt: "2026-04-28T04:01:00.000Z",
@@ -648,7 +648,7 @@ test("checkWikiHealth treats a good webpage parse as readable but not PDF-downlo
   const workspace = await createWorkspace();
 
   try {
-    await writeJson(path.join(workspace, "knowledge-base", "records", "nature-s41567-022-01591-2.json"), {
+    await writeJson(path.join(workspace, "knowledge-base", "wiki", "sources", "nature-s41567-022-01591-2", "acquisition.json"), {
       source: "nature",
       articleUrl: "https://www.nature.com/articles/s41567-022-01591-2",
       openedUrl: "https://www.nature.com/articles/s41567-022-01591-2",
@@ -705,7 +705,7 @@ test("fixWikiHealth parses missing downloaded records and updates the record man
 
   try {
     const pdfPath = path.join(workspace, "knowledge-base", "raw", "pdfs", "arxiv-2401.00004.pdf");
-    const recordPath = path.join(workspace, "knowledge-base", "records", "arxiv-2401.00004.json");
+    const recordPath = path.join(workspace, "knowledge-base", "wiki", "sources", "arxiv-2401.00004", "acquisition.json");
     await writeText(pdfPath, "%PDF-1.4\nexample\n%%EOF\n");
     await writeJson(recordPath, {
       source: "arxiv",
@@ -774,7 +774,7 @@ test("fixWikiHealth parses missing downloaded records and updates the record man
       workspaceDir: workspace,
       issueKinds: ["parse_missing"],
       parsePaperImpl: async (options) => {
-        assert.equal(options.recordPath, "knowledge-base/records/arxiv-2401.00004.json");
+        assert.equal(options.recordPath, "knowledge-base/wiki/sources/arxiv-2401.00004/acquisition.json");
         assert.equal(options.force, undefined);
         return parseResult;
       }
@@ -859,7 +859,7 @@ test("fixWikiHealth skips user-authored or user-authorized repairs with explicit
   const workspace = await createWorkspace();
 
   try {
-    await writeJson(path.join(workspace, "knowledge-base", "records", "nature-s41586-024-00005-y.json"), {
+    await writeJson(path.join(workspace, "knowledge-base", "wiki", "sources", "nature-s41586-024-00005-y", "acquisition.json"), {
       source: "nature",
       articleUrl: "https://www.nature.com/articles/s41586-024-00005-y",
       openedUrl: "https://www.nature.com/articles/s41586-024-00005-y",
@@ -933,7 +933,7 @@ test("fixWikiHealth queues browser extension jobs for authorization issues when 
   const workspace = await createWorkspace();
 
   try {
-    await writeJson(path.join(workspace, "knowledge-base", "records", "science-10.1126-sciadv.adp6388.json"), {
+    await writeJson(path.join(workspace, "knowledge-base", "wiki", "sources", "science-10.1126-sciadv.adp6388", "acquisition.json"), {
       source: "science",
       articleUrl: "https://www.science.org/doi/10.1126/sciadv.adp6388",
       openedUrl: "https://www.science.org/doi/10.1126/sciadv.adp6388",

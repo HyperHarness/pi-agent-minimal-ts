@@ -5,7 +5,6 @@ export interface PaperLibraryPaths {
   libraryRoot: string;
   rawRoot: string;
   rawPdfRoot: string;
-  recordsRoot: string;
   wikiRoot: string;
   sourceArtifactsRoot: string;
   sourcesRoot: string;
@@ -37,7 +36,6 @@ export function resolvePaperLibraryPaths(workspaceDir: string): PaperLibraryPath
     libraryRoot,
     rawRoot,
     rawPdfRoot: path.join(rawRoot, "pdfs"),
-    recordsRoot: path.join(libraryRoot, "records"),
     wikiRoot,
     sourcesRoot: path.join(wikiRoot, "sources"),
     sourceArtifactsRoot: path.join(wikiRoot, "sources"),

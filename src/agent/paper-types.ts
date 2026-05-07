@@ -74,6 +74,50 @@ export interface PaperRecordManifest {
   reading?: PaperRecordReadingManifest;
 }
 
+export type PaperCitationStatus = "complete" | "incomplete";
+
+export interface PaperSourcePreprintFallback {
+  arxivId: string;
+  articleUrl: string;
+  pdfUrl: string;
+  acquisitionPath: string;
+  downloadPath: string;
+  status: "downloaded" | "already_downloaded";
+}
+
+export interface PaperSourceMetadata {
+  schemaVersion: 2;
+  paperKey: string;
+  source: PaperSource;
+  canonicalId?: string;
+  title?: string;
+  authors: string[];
+  year?: number;
+  venue?: string;
+  publisher?: string;
+  doi?: string;
+  arxivId?: string;
+  articleUrl: string;
+  createdAt?: string;
+  pdfUrl?: string;
+  pdfPath?: string;
+  pdfSha256?: string;
+  downloadPath?: string;
+  acquisitionPath: string;
+  recordPath: string;
+  bibPath?: string;
+  cslPath?: string;
+  downloadStatus: PaperRecord["status"];
+  readingStatus?: PaperRecordReadingStatus;
+  citationStatus: PaperCitationStatus;
+  missingFields: string[];
+  resolvedFrom: "acquisition";
+  sourceConfidence: "high" | "medium" | "low";
+  recordedAt: string;
+  updatedAt: string;
+  preprintFallback?: PaperSourcePreprintFallback;
+}
+
 export interface PaperRecordPreprintFallback {
   source: "arxiv";
   canonicalId: string;
@@ -191,6 +235,7 @@ type ManualFallbackPaperRecord = {
   handlingMethod: "browser_session";
   status: "manual_fallback_opened";
   canonicalId: string;
+  title?: string;
   failure: PaperFailure;
   pdfUrl?: never;
   downloadPath?: never;

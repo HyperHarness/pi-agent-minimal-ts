@@ -11,7 +11,6 @@ import {
 
 async function createWorkspace(): Promise<string> {
   const workspace = await mkdtemp(path.join(os.tmpdir(), "pi-paper-summary-"));
-  await mkdir(path.join(workspace, "knowledge-base", "records"), { recursive: true });
   return workspace;
 }
 

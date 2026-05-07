@@ -351,7 +351,7 @@ test("downloadPaper uses a local exact-title arXiv preprint before live arXiv se
   try {
     await mkdir(path.dirname(arxivPdfPath), { recursive: true });
     await writeFile(arxivPdfPath, "%PDF-1.4\nexample\n%%EOF\n", "utf8");
-    await writeJson(path.join(workspaceDir, "knowledge-base", "records", "arxiv-1709.06678.json"), {
+    await writeJson(path.join(workspaceDir, "knowledge-base", "wiki", "sources", "arxiv-1709.06678", "acquisition.json"), {
       source: "arxiv",
       articleUrl: "https://arxiv.org/abs/1709.06678",
       recordedAt: "2026-05-03T01:35:27.669Z",
@@ -392,7 +392,7 @@ test("downloadPaper uses a local exact-title arXiv preprint before live arXiv se
     assert.equal(result.publisherFallback?.canonicalId, "10.1126/science.aao4309");
 
     const scienceRecord = JSON.parse(
-      await readFile(path.join(workspaceDir, "knowledge-base", "records", "science-10.1126-science.aao4309.json"), "utf8")
+      await readFile(path.join(workspaceDir, "knowledge-base", "wiki", "sources", "science-10.1126-science.aao4309", "acquisition.json"), "utf8")
     ) as { status?: string; preprint?: { canonicalId?: string } };
     assert.equal(scienceRecord.status, "preprint_fallback");
     assert.equal(scienceRecord.preprint?.canonicalId, "1709.06678");
@@ -594,12 +594,7 @@ test("downloadPaper forceManualOpen bypasses the extension bridge for supported 
       canonicalId: "10.1103/PhysRevLett.134.090601",
       articleUrl,
       fallbackUrl: `${articleUrl}?manual=1`,
-      recordPath: path.join(
-        workspaceDir,
-        "knowledge-base",
-        "records",
-        "aps-10.1103-PhysRevLett.134.090601.json"
-      ),
+      recordPath: path.join(workspaceDir, "knowledge-base", "wiki", "sources", "aps-10.1103-PhysRevLett.134.090601", "acquisition.json"),
       failure: {
         code: "recent_cloudflare_block",
         message: "Skipping automatic APS download because Cloudflare recently blocked APS access."

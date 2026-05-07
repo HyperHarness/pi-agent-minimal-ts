@@ -108,10 +108,6 @@ function createSnippet(text: string, query: string, maxLength = 320): string {
   return `${start > 0 ? "... " : ""}${compact.slice(start, end)}${end < compact.length ? " ..." : ""}`;
 }
 
-function recordPaperKey(record: PaperRecord, recordPath: string): string {
-  return path.basename(recordPath, ".json");
-}
-
 function sanitizePaperKey(value: string): string {
   return value
     .trim()
@@ -231,25 +227,25 @@ function resolveKnownPdfPath(workspaceDir: string, pdfPath: string | undefined):
   return path.isAbsolute(normalizedPdfPath) ? normalizedPdfPath : path.resolve(workspaceDir, normalizedPdfPath);
 }
 
-async function collectRecords(workspaceDir: string, entries: Map<string, LocalPaperEntry>): Promise<void> {
+async function collectAcquisitions(workspaceDir: string, entries: Map<string, LocalPaperEntry>): Promise<void> {
   const paths = resolvePaperLibraryPaths(workspaceDir);
-  let recordFiles;
+  let sourceDirs;
   try {
-    recordFiles = await readdir(paths.recordsRoot, { withFileTypes: true });
+    sourceDirs = await readdir(paths.sourceArtifactsRoot, { withFileTypes: true });
   } catch {
     return;
   }
 
-  for (const file of recordFiles) {
-    if (!file.isFile() || !file.name.endsWith(".json")) {
+  for (const sourceDir of sourceDirs) {
+    if (!sourceDir.isDirectory()) {
       continue;
     }
-    const recordPath = path.join(paths.recordsRoot, file.name);
+    const paperKey = sanitizePaperKey(sourceDir.name);
+    const recordPath = path.join(paths.sourceArtifactsRoot, sourceDir.name, "acquisition.json");
     const record = await readJsonFile<PaperRecord>(recordPath);
     if (!record) {
       continue;
     }
-    const paperKey = recordPaperKey(record, recordPath);
     const entry = entries.get(paperKey) ?? createEmptyEntry(paperKey);
     applyRecord(entry, record, recordPath, workspaceDir);
     entry.hasPdf = await pathExists(resolveKnownPdfPath(workspaceDir, entry.pdfPath));
@@ -369,7 +365,7 @@ function metadataText(entry: LocalPaperEntry): string {
 export async function listLocalPapers(options: ListLocalPapersOptions): Promise<ListLocalPapersResult> {
   const workspaceDir = path.resolve(options.workspaceDir);
   const entries = new Map<string, LocalPaperEntry>();
-  await collectRecords(workspaceDir, entries);
+  await collectAcquisitions(workspaceDir, entries);
   await collectParses(workspaceDir, entries);
   await collectWikiSummaries(workspaceDir, entries);
 

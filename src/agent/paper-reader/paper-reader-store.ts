@@ -46,7 +46,11 @@ function sanitizePaperKey(value: string): string {
 
 function paperKeyFromRecord(record: PaperRecord, recordPath: string): string {
   if (record.source === "external") {
-    return sanitizePaperKey(path.basename(recordPath));
+    return sanitizePaperKey(
+      path.basename(recordPath) === "acquisition.json"
+        ? path.basename(path.dirname(recordPath))
+        : path.basename(recordPath)
+    );
   }
   return sanitizePaperKey(`${record.source}-${record.canonicalId}`);
 }
@@ -288,8 +292,13 @@ export async function writeParseArtifacts(input: {
     mkdir(path.dirname(artifacts.parsePath), { recursive: true }),
     mkdir(path.dirname(artifacts.chunksPath), { recursive: true })
   ]);
+  const existingSource = await readJsonFile<Record<string, unknown>>(artifacts.sourcePath);
+  const source = {
+    ...existingSource,
+    ...input.source
+  };
   await Promise.all([
-    writeFile(artifacts.sourcePath, `${JSON.stringify(input.source, null, 2)}\n`, "utf8"),
+    writeFile(artifacts.sourcePath, `${JSON.stringify(source, null, 2)}\n`, "utf8"),
     writeFile(artifacts.parsePath, `${JSON.stringify(input.document, null, 2)}\n`, "utf8"),
     writeFile(artifacts.markdownPath, `${input.markdown.trimEnd()}\n`, "utf8"),
     writeFile(artifacts.qualityPath, `${JSON.stringify(input.quality, null, 2)}\n`, "utf8"),
@@ -300,6 +309,14 @@ export async function writeParseArtifacts(input: {
     )
   ]);
   return artifacts;
+}
+
+async function readJsonFile<T>(filePath: string): Promise<T | undefined> {
+  try {
+    return JSON.parse(await readFile(filePath, "utf8")) as T;
+  } catch {
+    return undefined;
+  }
 }
 
 export async function readPaperSourceByKey(input: {

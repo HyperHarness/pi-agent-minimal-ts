@@ -10,6 +10,7 @@ import type {
   PaperRecord,
   PaperRecordArtifactManifest,
   PaperRecordReadingManifest,
+  PaperSourceMetadata,
   PaperSource
 } from "./paper-types.js";
 
@@ -93,8 +94,8 @@ function sanitizeCanonicalId(value: string): string {
   return sanitizedValue;
 }
 
-function getRecordIndexDir(workspaceDir: string): string {
-  return resolvePaperLibraryPaths(workspaceDir).recordsRoot;
+function getSourceAcquisitionRoot(workspaceDir: string): string {
+  return resolvePaperLibraryPaths(workspaceDir).sourceArtifactsRoot;
 }
 
 function toWorkspacePath(input: { workspaceDir: string; filePath: string }): string {
@@ -140,6 +141,19 @@ function getExternalRecordFilename(articleUrl: string): string {
   return `external-${hostname}-${hash}.json`;
 }
 
+export function resolvePaperRecordKey(input: {
+  source: PaperSource;
+  canonicalId?: string;
+  articleUrl: string;
+}): string {
+  if (input.source !== "external" && !input.canonicalId) {
+    throw new Error("canonicalId is required for supported paper sources.");
+  }
+  return input.source === "external"
+    ? getExternalRecordFilename(input.articleUrl).replace(/\.json$/, "")
+    : `${sanitizeFilenameComponent(input.source)}-${sanitizeCanonicalId(input.canonicalId ?? "")}`;
+}
+
 export function resolveExternalPaperPdfPath(input: {
   workspaceDir: string;
   articleUrl: string;
@@ -163,17 +177,25 @@ export function resolvePaperRecordPath(input: {
   canonicalId?: string;
   articleUrl: string;
 }): string {
-  if (input.source !== "external" && !input.canonicalId) {
-    throw new Error("canonicalId is required for supported paper sources.");
-  }
-  const canonicalId = input.canonicalId ? sanitizeCanonicalId(input.canonicalId) : undefined;
+  const paperKey = resolvePaperRecordKey({
+    source: input.source,
+    canonicalId: input.canonicalId,
+    articleUrl: input.articleUrl
+  });
+  return path.join(getSourceAcquisitionRoot(input.workspaceDir), paperKey, "acquisition.json");
+}
 
-  const filename =
-    input.source === "external"
-      ? getExternalRecordFilename(input.articleUrl)
-      : `${sanitizeFilenameComponent(input.source)}-${canonicalId}.json`;
+export function resolvePaperSourcePath(input: {
+  workspaceDir: string;
+  source: PaperSource;
+  canonicalId?: string;
+  articleUrl: string;
+}): string {
+  return path.join(path.dirname(resolvePaperRecordPath(input)), "source.json");
+}
 
-  return path.join(getRecordIndexDir(input.workspaceDir), filename);
+function resolvePaperSourcePathFromRecordPath(recordPath: string): string {
+  return path.join(path.dirname(recordPath), "source.json");
 }
 
 function resolveIndexedDownloadPath(input: {
@@ -366,11 +388,227 @@ function withInitialRecordManifest(input: {
   };
 }
 
-function assertRecordPathInsideRecords(input: { workspaceDir: string; recordPath: string }): string {
-  const recordsRoot = path.resolve(getRecordIndexDir(input.workspaceDir));
-  const recordPath = path.resolve(input.recordPath);
-  if (!isPathInsideDirectory(recordsRoot, recordPath)) {
-    throw new Error("recordPath must be inside knowledge-base/records.");
+function paperKeyFromRecordPath(recordPath: string): string {
+  return path.basename(path.dirname(recordPath));
+}
+
+function readRecordString(record: PaperRecord, key: string): string | undefined {
+  const value = (record as unknown as Record<string, unknown>)[key];
+  return typeof value === "string" && value.trim() ? value.trim() : undefined;
+}
+
+function getRecordCanonicalId(record: PaperRecord): string | undefined {
+  return "canonicalId" in record && record.canonicalId ? record.canonicalId : undefined;
+}
+
+function getRecordPdfUrl(record: PaperRecord): string | undefined {
+  if ("pdfUrl" in record && typeof record.pdfUrl === "string" && record.pdfUrl.trim()) {
+    return record.pdfUrl;
+  }
+  return record.status === "preprint_fallback" ? record.preprint.pdfUrl : undefined;
+}
+
+function getRecordDownloadPath(record: PaperRecord): string | undefined {
+  if ("downloadPath" in record && typeof record.downloadPath === "string" && record.downloadPath.trim()) {
+    return record.downloadPath;
+  }
+  return record.status === "preprint_fallback" ? record.preprint.downloadPath : undefined;
+}
+
+function getRecordPublisher(source: PaperSource): string | undefined {
+  if (source === "arxiv") {
+    return "arXiv";
+  }
+  if (source === "science") {
+    return "American Association for the Advancement of Science";
+  }
+  if (source === "nature") {
+    return "Springer Nature";
+  }
+  if (source === "aps") {
+    return "American Physical Society";
+  }
+  return undefined;
+}
+
+function getRecordDoi(record: PaperRecord): string | undefined {
+  const canonicalId = getRecordCanonicalId(record);
+  if (!canonicalId) {
+    return undefined;
+  }
+  if ((record.source === "science" || record.source === "aps") && canonicalId.startsWith("10.")) {
+    return canonicalId;
+  }
+  if (record.source === "nature" && /^s\d{5}-\d{3}-\d{5}-[a-z0-9]$/i.test(canonicalId)) {
+    return `10.1038/${canonicalId}`;
+  }
+  return undefined;
+}
+
+function getRecordArxivId(record: PaperRecord): string | undefined {
+  if (record.source === "arxiv" && record.canonicalId) {
+    return record.canonicalId;
+  }
+  return undefined;
+}
+
+function getArxivYear(arxivId: string | undefined): number | undefined {
+  const match = arxivId?.match(/^(\d{2})(\d{2})\.\d+/);
+  if (!match?.[1]) {
+    return undefined;
+  }
+  const year = Number(match[1]);
+  return year >= 91 ? 1900 + year : 2000 + year;
+}
+
+function getMissingCitationFields(input: {
+  title?: string;
+  authors: string[];
+  year?: number;
+  venue?: string;
+  doi?: string;
+  arxivId?: string;
+  articleUrl?: string;
+}): string[] {
+  const missing: string[] = [];
+  if (!input.title) {
+    missing.push("title");
+  }
+  if (input.authors.length === 0) {
+    missing.push("authors");
+  }
+  if (typeof input.year !== "number") {
+    missing.push("year");
+  }
+  if (!input.venue) {
+    missing.push("venue");
+  }
+  if (!input.doi && !input.arxivId && !input.articleUrl) {
+    missing.push("stableIdentifier");
+  }
+  return missing;
+}
+
+function getSourceConfidence(input: {
+  record: PaperRecord;
+  title?: string;
+  doi?: string;
+  arxivId?: string;
+}): PaperSourceMetadata["sourceConfidence"] {
+  if ((input.doi || input.arxivId) && input.title) {
+    return "high";
+  }
+  if (input.doi || input.arxivId || input.record.articleUrl) {
+    return "medium";
+  }
+  return "low";
+}
+
+async function readExistingPaperSourceMetadata(sourcePath: string): Promise<Partial<PaperSourceMetadata> | undefined> {
+  try {
+    return JSON.parse(await readFile(sourcePath, "utf8")) as Partial<PaperSourceMetadata>;
+  } catch {
+    return undefined;
+  }
+}
+
+export async function writePaperSourceMetadataForRecord(input: {
+  workspaceDir: string;
+  record: PaperRecord;
+  recordPath: string;
+}): Promise<string> {
+  const sourcePath = resolvePaperSourcePathFromRecordPath(input.recordPath);
+  const existing = await readExistingPaperSourceMetadata(sourcePath);
+  const acquisitionPath = toWorkspacePath({ workspaceDir: input.workspaceDir, filePath: input.recordPath });
+  const doi = getRecordDoi(input.record) ?? existing?.doi;
+  const arxivId = getRecordArxivId(input.record) ?? existing?.arxivId;
+  const title = readRecordString(input.record, "title") ?? existing?.title;
+  const authors = Array.isArray(existing?.authors)
+    ? existing.authors.filter((author): author is string => typeof author === "string" && author.trim().length > 0)
+    : [];
+  const year = typeof existing?.year === "number" ? existing.year : getArxivYear(arxivId);
+  const venue = typeof existing?.venue === "string" && existing.venue.trim() ? existing.venue.trim() : undefined;
+  const publisher = getRecordPublisher(input.record.source) ?? existing?.publisher;
+  const missingFields = getMissingCitationFields({
+    title,
+    authors,
+    year,
+    venue,
+    doi,
+    arxivId,
+    articleUrl: input.record.articleUrl
+  });
+  const pdfUrl = getRecordPdfUrl(input.record);
+  const downloadPath = getRecordDownloadPath(input.record);
+  const sourceMetadata: PaperSourceMetadata = {
+    ...existing,
+    schemaVersion: 2,
+    paperKey: paperKeyFromRecordPath(input.recordPath),
+    source: input.record.source,
+    ...(getRecordCanonicalId(input.record) ? { canonicalId: getRecordCanonicalId(input.record) } : {}),
+    ...(title ? { title } : {}),
+    authors,
+    ...(typeof year === "number" ? { year } : {}),
+    ...(venue ? { venue } : {}),
+    ...(publisher ? { publisher } : {}),
+    ...(doi ? { doi } : {}),
+    ...(arxivId ? { arxivId } : {}),
+    articleUrl: input.record.articleUrl,
+    ...(pdfUrl ? { pdfUrl } : {}),
+    ...(downloadPath ? { downloadPath: toWorkspacePath({ workspaceDir: input.workspaceDir, filePath: downloadPath }) } : {}),
+    acquisitionPath,
+    recordPath: acquisitionPath,
+    ...(existing?.bibPath ? { bibPath: existing.bibPath } : {}),
+    ...(existing?.cslPath ? { cslPath: existing.cslPath } : {}),
+    downloadStatus: input.record.status,
+    ...(input.record.reading?.status ? { readingStatus: input.record.reading.status } : {}),
+    citationStatus: missingFields.length === 0 ? "complete" : "incomplete",
+    missingFields,
+    resolvedFrom: "acquisition",
+    sourceConfidence: getSourceConfidence({ record: input.record, title, doi, arxivId }),
+    recordedAt: input.record.recordedAt,
+    updatedAt: input.record.updatedAt ?? input.record.recordedAt,
+    ...(input.record.status === "preprint_fallback" ? {
+      preprintFallback: {
+        arxivId: input.record.preprint.canonicalId,
+        articleUrl: input.record.preprint.articleUrl,
+        pdfUrl: input.record.preprint.pdfUrl,
+        acquisitionPath: toWorkspacePath({ workspaceDir: input.workspaceDir, filePath: input.record.preprint.recordPath }),
+        downloadPath: toWorkspacePath({ workspaceDir: input.workspaceDir, filePath: input.record.preprint.downloadPath }),
+        status: input.record.preprint.status
+      }
+    } : {})
+  };
+
+  await mkdir(path.dirname(sourcePath), { recursive: true });
+  await writeFile(sourcePath, `${JSON.stringify(sourceMetadata, null, 2)}\n`, "utf8");
+  return sourcePath;
+}
+
+async function writePaperRecordAndSourceMetadata(input: {
+  workspaceDir: string;
+  record: PaperRecord;
+  recordPath: string;
+}): Promise<void> {
+  await writeFile(input.recordPath, `${JSON.stringify(input.record, null, 2)}\n`, "utf8");
+  await writePaperSourceMetadataForRecord(input);
+}
+
+function resolveInputRecordPath(input: { workspaceDir: string; recordPath: string }): string {
+  const normalizedRecordPath = normalizePortableFilePath(input.recordPath);
+  return path.isAbsolute(normalizedRecordPath)
+    ? path.resolve(normalizedRecordPath)
+    : path.resolve(input.workspaceDir, normalizedRecordPath);
+}
+
+function assertRecordPathInsideAcquisitionStore(input: { workspaceDir: string; recordPath: string }): string {
+  const sourceArtifactsRoot = path.resolve(getSourceAcquisitionRoot(input.workspaceDir));
+  const recordPath = resolveInputRecordPath(input);
+  const isSourceAcquisitionPath =
+    path.basename(recordPath) === "acquisition.json" &&
+    isPathInsideDirectory(sourceArtifactsRoot, recordPath);
+  if (!isSourceAcquisitionPath) {
+    throw new Error("recordPath must be inside knowledge-base/wiki/sources/*/acquisition.json.");
   }
   return recordPath;
 }
@@ -414,7 +652,7 @@ export async function readPaperRecordByPath(input: {
   workspaceDir: string;
   recordPath: string;
 }): Promise<{ record: PaperRecord; recordPath: string } | null> {
-  const recordPath = assertRecordPathInsideRecords(input);
+  const recordPath = assertRecordPathInsideAcquisitionStore(input);
   try {
     return {
       record: JSON.parse(await readFile(recordPath, "utf8")) as PaperRecord,
@@ -477,7 +715,7 @@ export async function writePaperRecord(input: {
     articleUrl: record.articleUrl
   });
   await mkdir(path.dirname(recordPath), { recursive: true });
-  await writeFile(recordPath, `${JSON.stringify(record, null, 2)}\n`, "utf8");
+  await writePaperRecordAndSourceMetadata({ workspaceDir: input.workspaceDir, record, recordPath });
   return recordPath;
 }
 
@@ -525,7 +763,7 @@ export async function updatePaperRecordParseManifest(input: PaperRecordParseMani
     reading
   };
 
-  await writeFile(saved.recordPath, `${JSON.stringify(record, null, 2)}\n`, "utf8");
+  await writePaperRecordAndSourceMetadata({ workspaceDir: input.workspaceDir, record, recordPath: saved.recordPath });
 }
 
 export async function updatePaperRecordReadingFailure(input: PaperRecordReadingFailureInput): Promise<void> {
@@ -560,7 +798,7 @@ export async function updatePaperRecordReadingFailure(input: PaperRecordReadingF
     reading
   };
 
-  await writeFile(saved.recordPath, `${JSON.stringify(record, null, 2)}\n`, "utf8");
+  await writePaperRecordAndSourceMetadata({ workspaceDir: input.workspaceDir, record, recordPath: saved.recordPath });
 }
 
 export async function updatePaperRecordQueuedReading(input: PaperRecordQueuedReadingInput): Promise<void> {
@@ -591,5 +829,5 @@ export async function updatePaperRecordQueuedReading(input: PaperRecordQueuedRea
     }
   };
 
-  await writeFile(saved.recordPath, `${JSON.stringify(record, null, 2)}\n`, "utf8");
+  await writePaperRecordAndSourceMetadata({ workspaceDir: input.workspaceDir, record, recordPath: saved.recordPath });
 }

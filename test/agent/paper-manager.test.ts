@@ -1550,7 +1550,7 @@ test("downloadPaper still opens supported hosts for manual fallback when canonic
     assert.equal(result.articleUrl, articleUrl);
     assert.equal(result.fallbackUrl, articleUrl);
     assert.equal(result.failure.code, "manual_login_required");
-    assert.equal(path.basename(result.recordPath).startsWith("nature-www.nature.com-"), true);
+    assert.equal(path.basename(path.dirname(result.recordPath)).startsWith("nature-www.nature.com-"), true);
   } finally {
     await rm(workspaceDir, { recursive: true, force: true });
   }

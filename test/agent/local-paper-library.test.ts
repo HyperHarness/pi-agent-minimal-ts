@@ -27,7 +27,7 @@ test("listLocalPapers merges download records with parsed artifacts", async () =
   try {
     const pdfPath = path.join(workspace, "knowledge-base", "raw", "pdfs", "nature-s41534-026-01233-y.pdf");
     await writeText(pdfPath, "%PDF-1.4\nexample\n%%EOF\n");
-    await writeJson(path.join(workspace, "knowledge-base", "records", "nature-s41534-026-01233-y.json"), {
+    await writeJson(path.join(workspace, "knowledge-base", "wiki", "sources", "nature-s41534-026-01233-y", "acquisition.json"), {
       source: "nature",
       articleUrl: "https://www.nature.com/articles/s41534-026-01233-y",
       recordedAt: "2026-04-28T00:00:00.000Z",
@@ -80,7 +80,7 @@ test("listLocalPapers merges slash canonical IDs using the record filename key",
   try {
     const pdfPath = path.join(workspace, "knowledge-base", "raw", "pdfs", "aps-10.1103-PhysRevLett.125.120504.pdf");
     await writeText(pdfPath, "%PDF-1.4\nexample\n%%EOF\n");
-    await writeJson(path.join(workspace, "knowledge-base", "records", "aps-10.1103-PhysRevLett.125.120504.json"), {
+    await writeJson(path.join(workspace, "knowledge-base", "wiki", "sources", "aps-10.1103-PhysRevLett.125.120504", "acquisition.json"), {
       source: "aps",
       articleUrl: "https://journals.aps.org/prl/abstract/10.1103/PhysRevLett.125.120504",
       recordedAt: "2026-04-28T00:00:00.000Z",
@@ -125,7 +125,7 @@ test("listLocalPapers resolves WSL UNC PDF paths from download records", async (
     const pdfPath = path.join(workspace, "knowledge-base", "raw", "pdfs", "aps-10.1103-nv7d-k3wr.pdf");
     await writeText(pdfPath, "%PDF-1.4\naps paper\n%%EOF\n");
     const uncPdfPath = `\\\\wsl.localhost\\Ubuntu-24.04\\${pdfPath.slice(1).split(path.sep).join("\\")}`;
-    await writeJson(path.join(workspace, "knowledge-base", "records", "aps-10.1103-nv7d-k3wr.json"), {
+    await writeJson(path.join(workspace, "knowledge-base", "wiki", "sources", "aps-10.1103-nv7d-k3wr", "acquisition.json"), {
       source: "aps",
       articleUrl: "https://journals.aps.org/prl/abstract/10.1103/nv7d-k3wr",
       recordedAt: "2026-05-06T06:04:05.776Z",
@@ -156,7 +156,7 @@ test("listLocalPapers resolves WSL UNC PDF paths from download records", async (
 test("listLocalPapers canonicalizes accepted APS webpage artifact directories", async () => {
   const workspace = await createWorkspace();
   try {
-    await writeJson(path.join(workspace, "knowledge-base", "records", "aps-10.1103-k3d5-v43c.json"), {
+    await writeJson(path.join(workspace, "knowledge-base", "wiki", "sources", "aps-10.1103-k3d5-v43c", "acquisition.json"), {
       source: "aps",
       articleUrl: "https://journals.aps.org/prapplied/accepted/10.1103/k3d5-v43c",
       recordedAt: "2026-04-28T00:00:00.000Z",
@@ -169,7 +169,7 @@ test("listLocalPapers canonicalizes accepted APS webpage artifact directories", 
         canonicalId: "2406.06015",
         articleUrl: "https://arxiv.org/abs/2406.06015",
         pdfUrl: "https://arxiv.org/pdf/2406.06015.pdf",
-        recordPath: path.join(workspace, "knowledge-base", "records", "arxiv-2406.06015.json"),
+        recordPath: path.join(workspace, "knowledge-base", "wiki", "sources", "arxiv-2406.06015", "acquisition.json"),
         downloadPath: path.join(workspace, "knowledge-base", "raw", "pdfs", "arxiv-2406.06015.pdf"),
         status: "downloaded"
       },
@@ -218,7 +218,7 @@ test("listLocalPapers reads missing titles from wiki source summaries", async ()
   try {
     const pdfPath = path.join(workspace, "knowledge-base", "raw", "pdfs", "arxiv-1709.06678.pdf");
     await writeText(pdfPath, "%PDF-1.4\nexample\n%%EOF\n");
-    await writeJson(path.join(workspace, "knowledge-base", "records", "arxiv-1709.06678.json"), {
+    await writeJson(path.join(workspace, "knowledge-base", "wiki", "sources", "arxiv-1709.06678", "acquisition.json"), {
       source: "arxiv",
       articleUrl: "https://arxiv.org/abs/1709.06678",
       recordedAt: "2026-05-03T01:35:27.669Z",
@@ -254,7 +254,7 @@ test("listLocalPapers reads missing titles from wiki source summaries", async ()
 test("searchLocalPapers searches metadata, wiki summaries, and parsed markdown", async () => {
   const workspace = await createWorkspace();
   try {
-    const recordPath = path.join(workspace, "knowledge-base", "records", "arxiv-2406.06015.json");
+    const recordPath = path.join(workspace, "knowledge-base", "wiki", "sources", "arxiv-2406.06015", "acquisition.json");
     const pdfPath = path.join(workspace, "knowledge-base", "raw", "pdfs", "arxiv-2406.06015.pdf");
     await writeText(pdfPath, "%PDF-1.4\nexample\n%%EOF\n");
     await writeJson(recordPath, {
