@@ -333,6 +333,14 @@ The default chat agent exposes a compact paper-focused tool set:
 
 Development and diagnostics can use `createTools(workspaceDir, { toolProfile: "full" })` to expose the complete tool set. Full mode adds `get_time`, `write_paper_wiki_source`, `generate_paper_wiki_summary`, `paper_wiki_relations`, `search_paper_wiki`, `list_local_papers`, `fetch_paper_webpage`, `parse_paper`, `register_manual_paper_download`, and `open_paper_page_for_login`.
 
+Agent or benchmark harnesses that need stricter separation can use `createToolsForBoundary(workspaceDir, role)`. It keeps the public `default` / `full` profiles unchanged while exposing role-specific tool surfaces:
+
+- `wiki-agent`: local wiki search, page construction, alias management, wiki health/lint, and local paper search; it does not expose web search, paper download, or summary generation, and disables external evidence acquisition inside `build_wiki_page`
+- `paper-download-subagent`: paper search/download, browser/manual fallback, webpage capture, parsing, and health repair; it does not expose wiki page or source-summary writers
+- `paper-summary-worker`: parsed-paper inspection/search plus `generate_paper_wiki_summary`, `write_paper_wiki_source`, and relation maintenance; it does not expose download or wiki page tools
+- `paper-writing-worker`: manuscript file reading/writing, LaTeX compilation, local wiki retrieval, and wiki-grounded Q&A for drafting scientific papers from the wiki evidence layer; it does not expose web search, paper download, source-summary generation, or wiki page writes
+- `wiki-page-worker`: no tools; benchmarked page synthesis should receive only the fixed evidence package supplied by the harness
+
 For `search_papers`, concise English keyword queries still work best because the search stages include arXiv, APS/Crossref metadata, and the configured web provider.
 
 OpenDataLoader PDF installation and verification notes are in [docs/opendataloader-pdf-install.md](docs/opendataloader-pdf-install.md). Docling fallback installation notes are in [docs/docling-pdf-install.md](docs/docling-pdf-install.md). Pandoc and LaTeXML installation notes are in [docs/pandoc-latexml-install.md](docs/pandoc-latexml-install.md).

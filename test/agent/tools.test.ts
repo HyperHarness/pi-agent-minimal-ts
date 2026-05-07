@@ -10,7 +10,7 @@ import type {
   PaperSearchResult
 } from "../../src/agent/paper-types.js";
 import * as agentTools from "../../src/agent/tools.js";
-import { createTools } from "../../src/agent/tools.js";
+import { createTools, createToolsForBoundary, getToolBoundaryToolNames } from "../../src/agent/tools.js";
 import {
   resolvePaperPdfPath,
   updatePaperRecordParseManifest,
@@ -1385,6 +1385,90 @@ test("createTools full profile exposes every built-in tool", async () => {
       "open_paper_page_for_login",
       "parse_paper",
     ]);
+  } finally {
+    await rm(workspace, { recursive: true, force: true });
+  }
+});
+
+test("createToolsForBoundary exposes isolated wiki and worker tool surfaces", async () => {
+  const workspace = await mkdtemp(path.join(tmpdir(), "pi-agent-tools-"));
+
+  try {
+    const wikiAgentTools = createToolsForBoundary(workspace, "wiki-agent");
+    assert.deepEqual(wikiAgentTools.map((tool) => tool.name), getToolBoundaryToolNames("wiki-agent"));
+    assert.ok(wikiAgentTools.some((tool) => tool.name === "build_wiki_page"));
+    assert.ok(wikiAgentTools.some((tool) => tool.name === "search_paper_wiki"));
+    assert.ok(!wikiAgentTools.some((tool) => tool.name === "download_paper"));
+    assert.ok(!wikiAgentTools.some((tool) => tool.name === "generate_paper_wiki_summary"));
+    assert.ok(!wikiAgentTools.some((tool) => tool.name === "web_search"));
+
+    const downloadTools = createToolsForBoundary(workspace, "paper-download-subagent");
+    assert.deepEqual(downloadTools.map((tool) => tool.name), getToolBoundaryToolNames("paper-download-subagent"));
+    assert.ok(downloadTools.some((tool) => tool.name === "download_paper"));
+    assert.ok(downloadTools.some((tool) => tool.name === "parse_paper"));
+    assert.ok(!downloadTools.some((tool) => tool.name === "build_wiki_page"));
+    assert.ok(!downloadTools.some((tool) => tool.name === "write_paper_wiki_source"));
+
+    const summaryTools = createToolsForBoundary(workspace, "paper-summary-worker");
+    assert.deepEqual(summaryTools.map((tool) => tool.name), getToolBoundaryToolNames("paper-summary-worker"));
+    assert.ok(summaryTools.some((tool) => tool.name === "generate_paper_wiki_summary"));
+    assert.ok(summaryTools.some((tool) => tool.name === "write_paper_wiki_source"));
+    assert.ok(!summaryTools.some((tool) => tool.name === "download_paper"));
+    assert.ok(!summaryTools.some((tool) => tool.name === "build_wiki_page"));
+
+    const writingTools = createToolsForBoundary(workspace, "paper-writing-worker");
+    assert.deepEqual(writingTools.map((tool) => tool.name), getToolBoundaryToolNames("paper-writing-worker"));
+    assert.ok(writingTools.some((tool) => tool.name === "write_file"));
+    assert.ok(writingTools.some((tool) => tool.name === "compile_latex"));
+    assert.ok(writingTools.some((tool) => tool.name === "answer_paper_wiki_question"));
+    assert.ok(writingTools.some((tool) => tool.name === "search_paper_wiki"));
+    assert.ok(!writingTools.some((tool) => tool.name === "download_paper"));
+    assert.ok(!writingTools.some((tool) => tool.name === "web_search"));
+    assert.ok(!writingTools.some((tool) => tool.name === "generate_paper_wiki_summary"));
+    assert.ok(!writingTools.some((tool) => tool.name === "build_wiki_page"));
+    assert.ok(!writingTools.some((tool) => tool.name === "write_paper_wiki_source"));
+
+    const pageWorkerTools = createToolsForBoundary(workspace, "wiki-page-worker");
+    assert.deepEqual(pageWorkerTools.map((tool) => tool.name), []);
+  } finally {
+    await rm(workspace, { recursive: true, force: true });
+  }
+});
+
+test("build_wiki_page can disable external evidence acquisition for wiki boundaries", async () => {
+  const workspace = await mkdtemp(path.join(tmpdir(), "pi-agent-tools-"));
+  let pageWorkerCalled = false;
+
+  try {
+    const tool = getBuildWikiPageTool(workspace, {
+      allowBuildWikiPageExternalEvidence: false,
+      searchPaperWiki: async (options) => ({
+        query: options.query,
+        results: [],
+      }),
+      paperWikiPageWorker: async () => {
+        pageWorkerCalled = true;
+        return {
+          title: "Should Not Run",
+          pageMarkdown: "## Overview\n\nNo evidence.",
+        };
+      },
+    });
+
+    const result = await tool.execute("build-page-no-external", {
+      topic: "unbacked topic",
+      pageKey: "unbacked-topic",
+    }, undefined);
+    const details = result.details as {
+      status?: string;
+      message?: string;
+      evidence?: unknown[];
+    };
+
+    assert.equal(details.status, "needs_evidence");
+    assert.match(details.message ?? "", /external evidence acquisition is disabled/);
+    assert.deepEqual(details.evidence, []);
+    assert.equal(pageWorkerCalled, false);
   } finally {
     await rm(workspace, { recursive: true, force: true });
   }
