@@ -26,7 +26,7 @@ Feishu bridge / CLI / RPC
 main chat agent / wiki-agent coordinator
         |
         +--> paper-download-subagent  -> records, PDFs, webpages, parses
-        +--> wiki-evidence-worker     -> wiki/sources/*.md
+        +--> wiki-evidence-worker     -> wiki/sources/*.md and fixed-evidence page drafts
         +--> wiki-agent               -> wiki/pages/*.md and aliases
         +--> design-subagent          -> knowledge-base/design-records/*.md
         +--> paper-writing-worker     -> manuscript project files
@@ -46,6 +46,18 @@ The Feishu bridge is the chat transport and workflow trigger. It lives under `sr
 - intercepting bridge commands such as `repo status paper` before the prompt reaches the agent
 
 The bridge should not contain domain reasoning. It should route messages, collect tool progress, and call bridge-side services.
+
+### Router Layer
+
+The local chat/RPC runtime has a lightweight router layer before the default main-agent turn. It detects high-confidence worker intents and runs the requested turn in a clean worker context with the corresponding boundary tools:
+
+- manuscript editing or LaTeX requests -> `paper-writing-worker`
+- evidence construction, paper summarization, and source-summary relation requests -> `wiki-evidence-worker`
+- chip-design records, verification records, or design-failure cases -> `design-subagent`
+
+Explicit prefixes are still supported when precision matters: `paper write ...`, `wiki evidence ...`, `evidence ...`, `design ...`, `/paper-writing-worker ...`, `/wiki-evidence-worker ...`, and `/design-subagent ...`. If no worker route matches, the prompt goes to the main wiki-agent coordinator.
+
+Worker turns do not share the main agent's full context. The router runs each worker in a clean context, streams the worker's normal reply to the user, then injects a compact structured handoff back into the main context. The handoff records the worker role, instruction, route reason, status, changed files, produced artifacts, source/page/design-record paths, tools used, failed tools, final worker response, and the next suggested owner. This keeps the main chat history continuous without copying the worker's full tool transcript into the prompt.
 
 ### Repo Manager Boundary
 
@@ -69,7 +81,7 @@ Agents and workers should produce files. The repo manager decides when those fil
 
 The wiki agent is the durable knowledge coordinator. It should decide what concepts need pages, inspect gaps, request evidence expansion, and maintain structure. In boundary mode it reads local wiki and local paper metadata, then writes synthesis pages through `build_wiki_page` and aliases through `merge_wiki_aliases`.
 
-The wiki agent should not directly download papers, run web search, or author raw source summaries in benchmark/boundary mode. Those are assigned to subagents/workers so page construction can be benchmarked under fixed evidence.
+The wiki agent should not directly download papers, run web search, or author raw source summaries in benchmark/boundary mode. Those are assigned to subagents/workers so page construction can be benchmarked under fixed evidence. Clean-context paper-summary and wiki-page-draft passes are treated as `wiki-evidence-worker` responsibilities, not separate durable worker roles.
 
 ### Evidence Flow
 
@@ -77,7 +89,7 @@ The intended workflow is:
 
 ```text
 paper-download-subagent -> wiki-evidence-worker -> wiki-agent -> design-subagent -> wiki-agent -> paper-writing-worker
-records/raw/parses      -> wiki/sources/*.md     -> wiki/pages/*.md -> design records  -> curated wiki -> manuscript files
+records/raw/parses      -> wiki/sources/*.md + page drafts -> wiki/pages/*.md -> design records  -> curated wiki -> manuscript files
 ```
 
 For model benchmarks, give workers fixed `wiki/sources` fixtures and evaluate page synthesis without allowing autonomous evidence acquisition.
@@ -141,6 +153,33 @@ model> openai/gpt-5.4
 [tool:end] search_papers ok
 assistant> I found several relevant papers...
 > exit
+```
+
+The router automatically sends high-confidence worker requests to the matching isolated worker. For manuscript edits, either ask naturally or prefix the request with `paper write` when you want an explicit route:
+
+```text
+> 同意，请你修改论文
+[tool:start] load_paper_writing_skill
+[tool:end] load_paper_writing_skill ok
+...
+[tool:start] compile_latex texPath=paper-projects/million-superconducting-qubits/manuscript/main.tex
+[tool:end] compile_latex ok
+
+> paper write 修改 paper-projects/million-superconducting-qubits/manuscript/main.tex，先加载 sciwrite 写作技能，润色摘要并重新编译
+[tool:start] load_paper_writing_skill
+[tool:end] load_paper_writing_skill ok
+...
+[tool:start] compile_latex texPath=paper-projects/million-superconducting-qubits/manuscript/main.tex
+[tool:end] compile_latex ok
+```
+
+The paper-writing worker receives only the `paper-writing-worker` boundary tools: project-local writing skills, manuscript file edits, LaTeX compilation, local wiki retrieval, and wiki linting. It cannot download papers, run web search, build wiki pages, or create raw source summaries.
+
+Other explicit worker routes:
+
+```text
+> wiki evidence 总结 arxiv-2406.06015 并维护 related_papers
+> design 为 transmon frequency allocation 写一个 failure record
 ```
 
 Use `exit` or `quit` to stop. Conversation history is kept in memory for the current process only.
@@ -261,6 +300,14 @@ The key distinction is that `wiki/sources/*.md` are evidence summaries for indiv
 - `wiki_health`: reports records, downloads, authorization state, parse quality, missing summaries, and missing artifacts
 - `wiki_health_fix`: retries or repairs supported health issues such as downloads, parsing, and missing summaries
 - `wiki_lint`: checks wiki structure, stale index entries, broken links, missing citations, orphan pages, and repeated tags that should become pages
+
+### Wiki Evidence Tools
+
+- `generate_paper_wiki_summary`: builds a bounded evidence package from parsed paper Markdown and sends it through the `wiki-evidence-worker` summary pass
+- `write_paper_wiki_source`: writes grounded per-paper source summaries under `wiki/sources/*.md`
+- `paper_wiki_relations`: proposes or applies related-paper links among local source summaries
+
+`paper-summary-worker` and `wiki-page-worker` are not separate runtime roles. Their clean-context behavior is implemented as `wiki-evidence-worker` subtasks: one summary pass for per-paper evidence and one fixed-evidence page-draft pass used by the wiki agent before final page promotion.
 
 ### Design And Paper-Writing Tools
 

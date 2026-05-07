@@ -352,14 +352,14 @@ const generatePaperWikiSummaryParameters = Type.Object({
   ),
   maxEvidenceChars: Type.Optional(
     Type.Integer({
-      description: "Maximum parsed Markdown characters to send to the clean summary worker. Defaults to 60000.",
+      description: "Maximum parsed Markdown characters to send to the wiki-evidence-worker summary pass. Defaults to 60000.",
       minimum: 1000
     })
   ),
   includeRelatedCandidates: Type.Optional(
     Type.Boolean({
       description:
-        "Include local related-paper candidates in the clean summary worker evidence. Defaults to true."
+        "Include local related-paper candidates in the wiki-evidence-worker evidence package. Defaults to true."
     })
   ),
   maxRelatedCandidates: Type.Optional(
@@ -481,7 +481,7 @@ const answerResearchQuestionParameters = Type.Object({
     Type.Boolean({ description: "Whether to download external candidates when local evidence is insufficient. Defaults to true." })
   ),
   autoSummarize: Type.Optional(
-    Type.Boolean({ description: "Whether to write wiki source summaries for newly parsed papers when a summary worker is configured. Defaults to true." })
+    Type.Boolean({ description: "Whether to write wiki source summaries for newly parsed papers when the wiki-evidence-worker summary pass is configured. Defaults to true." })
   )
 });
 
@@ -500,7 +500,7 @@ const bootstrapWikiPageEvidenceParameters = Type.Object({
     Type.Boolean({ description: "Search parsed/local papers when source summaries are insufficient. Defaults to true." })
   ),
   autoSummarizeMissing: Type.Optional(
-    Type.Boolean({ description: "Generate missing source summaries for parsed fallback papers when a summary worker is configured. Defaults to true." })
+    Type.Boolean({ description: "Generate missing source summaries for parsed fallback papers when the wiki-evidence-worker summary pass is configured. Defaults to true." })
   ),
   maxSummariesToGenerate: Type.Optional(
     Type.Integer({ description: "Maximum missing summaries to generate during bootstrap. Defaults to 3.", minimum: 0 })
@@ -3393,7 +3393,7 @@ export function createTools(workspaceDir: string, dependencies: ToolDependencies
     name: "generate_paper_wiki_summary",
     label: "Generate Paper Wiki Summary",
     description:
-      "Builds a bounded evidence package from parsed paper Markdown, sends it to a clean-context summary worker, and optionally writes the grounded wiki source summary.",
+      "Builds a bounded evidence package from parsed paper Markdown, sends it to the wiki-evidence-worker summary pass, and optionally writes the grounded wiki source summary.",
     parameters: generatePaperWikiSummaryParameters,
     executionMode: "sequential",
     execute: async (
@@ -4291,7 +4291,7 @@ export function createTools(workspaceDir: string, dependencies: ToolDependencies
     name: "wiki_health_fix",
     label: "Wiki Health Fix",
     description:
-      "Attempts wiki health repairs, such as retrying downloads, parsing downloaded papers, and generating missing summaries through a clean-context summary worker; reports why unresolved issues need user action.",
+      "Attempts wiki health repairs, such as retrying downloads, parsing downloaded papers, and generating missing summaries through the wiki-evidence-worker summary pass; reports why unresolved issues need user action.",
     parameters: wikiHealthFixParameters,
     execute: async (
       _toolCallId: string,

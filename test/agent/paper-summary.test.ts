@@ -142,7 +142,7 @@ test("generatePaperWikiSummary reports a missing worker without writing content"
     });
 
     assert.equal(result.status, "needs_worker");
-    assert.match(result.message, /Summary worker is not configured/);
+    assert.match(result.message, /Wiki-evidence-worker summary pass is not configured/);
   } finally {
     await rm(workspace, { recursive: true, force: true });
   }

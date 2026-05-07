@@ -340,14 +340,14 @@ export async function generatePaperWikiSummary(
       paperKey: evidence.paperKey,
       engine: evidence.engine,
       ...(evidence.title ? { title: evidence.title } : {}),
-      message: `Skipped summary generation for ${evidence.paperKey}; summary worker is not configured.`
+      message: `Skipped summary generation for ${evidence.paperKey}; wiki-evidence-worker summary pass is not configured.`
     });
     return {
       status: "needs_worker",
       paperKey: evidence.paperKey,
       engine: evidence.engine,
       ...(evidence.title ? { title: evidence.title } : {}),
-      message: "Summary worker is not configured; provide a clean-context summary worker before generating content.",
+      message: "Wiki-evidence-worker summary pass is not configured; provide a clean-context evidence worker before generating content.",
       evidence: evidencePreview
     };
   }
@@ -357,7 +357,7 @@ export async function generatePaperWikiSummary(
     paperKey: evidence.paperKey,
     engine: evidence.engine,
     ...(evidence.title ? { title: evidence.title } : {}),
-    message: `Running clean summary worker for ${evidence.paperKey}.`
+    message: `Running wiki-evidence-worker summary pass for ${evidence.paperKey}.`
   });
   const draft = normalizeWorkerOutput(await options.summaryWorker({ evidence }));
   await options.onProgress?.({
@@ -365,7 +365,7 @@ export async function generatePaperWikiSummary(
     paperKey: evidence.paperKey,
     engine: evidence.engine,
     ...(draft.title ?? evidence.title ? { title: draft.title ?? evidence.title } : {}),
-    message: `Summary worker finished for ${evidence.paperKey}.`
+    message: `Wiki-evidence-worker summary pass finished for ${evidence.paperKey}.`
   });
   if (!options.force && draft.confidence === "low") {
     await options.onProgress?.({
@@ -380,7 +380,7 @@ export async function generatePaperWikiSummary(
       paperKey: evidence.paperKey,
       engine: evidence.engine,
       ...(draft.title ?? evidence.title ? { title: draft.title ?? evidence.title } : {}),
-      message: "Skipped writing because the summary worker reported low confidence.",
+      message: "Skipped writing because the wiki-evidence-worker summary pass reported low confidence.",
       evidence: evidencePreview,
       draft
     };

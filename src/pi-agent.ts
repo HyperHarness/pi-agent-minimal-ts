@@ -26,7 +26,7 @@ import type {
   PaperWikiPageWorker,
   PaperWikiPageWorkerOutput
 } from "./agent/paper-wiki/types.js";
-import { cleanupTools, createTools, getToolsWorkspaceDir } from "./agent/tools.js";
+import { cleanupTools, createTools, createToolsForBoundary, getToolsWorkspaceDir } from "./agent/tools.js";
 import { readPaperDownloadJobEvents, summarizePaperDownloadJobs } from "./agent/paper-download-jobs.js";
 
 type LlmMessage = UserMessage | AssistantMessage | ToolResultMessage;
@@ -48,6 +48,54 @@ export const DEFAULT_SYSTEM_PROMPT = [
   "Treat knowledge-base/wiki/pages/ as the durable knowledge-entry layer and knowledge-base/wiki/sources/ as the citeable evidence layer; index.md should navigate knowledge entries, not enumerate downloaded papers.",
   "If the local wiki has no supporting evidence, say that the current wiki does not contain enough evidence instead of presenting unsupported claims as wiki-grounded."
 ].join(" ");
+
+export const PAPER_WRITING_WORKER_SYSTEM_PROMPT = [
+  "You are the paper-writing-worker for this project. You operate in a clean context with a restricted manuscript-writing tool surface.",
+  "Use project-local writing skills such as load_paper_writing_skill before writing-quality review, prose cleanup, or style-sensitive editing.",
+  "Inspect manuscript files before editing them. Modify workspace files with write_file or replace_file_text when the user asks for manuscript changes.",
+  "Use local wiki tools for evidence checks when claims, citations, or architecture descriptions need grounding.",
+  "Do not download papers, run external web search, create raw wiki source summaries, or build wiki pages. Ask the main wiki agent for those upstream evidence tasks.",
+  "After changing LaTeX manuscript files, run compile_latex and report whether the manuscript compiled."
+].join(" ");
+
+export const WIKI_EVIDENCE_WORKER_SYSTEM_PROMPT = [
+  "You are the wiki-evidence-worker for this project. You operate in a clean context with a restricted evidence-construction tool surface.",
+  "You own paper source-summary construction, paper text inspection, local paper retrieval, relation maintenance, and fixed-evidence wiki-page draft preparation.",
+  "Use only local parsed paper text, local paper records, and supplied evidence unless the main wiki agent has explicitly prepared more evidence for you.",
+  "Do not download papers, run external web search, or write final durable wiki pages. The main wiki agent owns final page promotion.",
+  "Ground every substantive evidence statement in paper keys, source paths, or retrieved local snippets."
+].join(" ");
+
+export const DESIGN_SUBAGENT_SYSTEM_PROMPT = [
+  "You are the design-subagent for this project. You operate in a clean context with a restricted chip-design reasoning tool surface.",
+  "Use local wiki and paper evidence before writing design artifacts. Keep design outputs as structured design records, verification reports, failure records, or benchmark cases.",
+  "Write design artifacts with write_design_artifact. Do not edit arbitrary source files, write wiki pages, download papers, or run external web search.",
+  "When evidence is insufficient for a design conclusion, write a bounded uncertainty or failure record instead of inventing a design result."
+].join(" ");
+
+type RoutedWorkerRole = "paper-writing-worker" | "wiki-evidence-worker" | "design-subagent";
+
+export interface RoutedWorkerPrompt {
+  role: RoutedWorkerRole;
+  instruction: string;
+  reason: "explicit" | "intent";
+}
+
+export interface WorkerHandoff {
+  role: RoutedWorkerRole;
+  instruction: string;
+  routeReason: RoutedWorkerPrompt["reason"];
+  status: "completed" | "failed";
+  changedFiles: string[];
+  artifacts: string[];
+  sourcePaths: string[];
+  pagePaths: string[];
+  designRecords: string[];
+  toolsUsed: string[];
+  failedTools: string[];
+  finalResponse: string;
+  nextSuggestedOwner: "wiki-agent" | "paper-writing-worker" | "wiki-evidence-worker" | "design-subagent";
+}
 const contextWorkspaceDirs = new WeakMap<AgentContext, string>();
 const TRANSIENT_MODEL_RETRY_ATTEMPTS = 5;
 const MAX_AGENT_TOOL_LOOPS_PER_TURN = 90;
@@ -969,8 +1017,269 @@ function parsePaperWikiPageWorkerOutput(value: unknown): PaperWikiPageWorkerOutp
   };
 }
 
-function createPaperSummaryWorker(model: Model<Api>): PaperSummaryWorker {
-  return async (input) => {
+export function parsePaperWritingWorkerCommand(text: string): string | null {
+  const route = routeChatPromptToWorker(text);
+  return route?.role === "paper-writing-worker" ? route.instruction : null;
+}
+
+function matchExplicitWorkerRoute(
+  trimmed: string,
+  role: RoutedWorkerRole,
+  patterns: RegExp[]
+): RoutedWorkerPrompt | null {
+  for (const pattern of patterns) {
+    const match = trimmed.match(pattern);
+    const instruction = match?.[1]?.trim();
+    if (instruction) {
+      return { role, instruction, reason: "explicit" };
+    }
+  }
+
+  return null;
+}
+
+export function routeChatPromptToWorker(text: string): RoutedWorkerPrompt | null {
+  const trimmed = text.trim();
+  if (!trimmed) {
+    return null;
+  }
+
+  const explicit =
+    matchExplicitWorkerRoute(trimmed, "paper-writing-worker", [
+      /^\/?paper\s+write(?:r)?\s+([\s\S]+)$/i,
+      /^\/?paper-writing-worker\s+([\s\S]+)$/i,
+      /^\/?论文写作\s+([\s\S]+)$/i
+    ]) ??
+    matchExplicitWorkerRoute(trimmed, "wiki-evidence-worker", [
+      /^\/?wiki\s+evidence\s+([\s\S]+)$/i,
+      /^\/?evidence\s+([\s\S]+)$/i,
+      /^\/?wiki-evidence-worker\s+([\s\S]+)$/i,
+      /^\/?证据整理\s+([\s\S]+)$/i,
+      /^\/?文献总结\s+([\s\S]+)$/i
+    ]) ??
+    matchExplicitWorkerRoute(trimmed, "design-subagent", [
+      /^\/?design\s+([\s\S]+)$/i,
+      /^\/?design-subagent\s+([\s\S]+)$/i,
+      /^\/?芯片设计\s+([\s\S]+)$/i,
+      /^\/?设计任务\s+([\s\S]+)$/i
+    ]);
+
+  if (explicit) {
+    return explicit;
+  }
+
+  const paperWritingIntent =
+    /(论文|manuscript|main\.tex|latex|paper-projects)/i.test(trimmed) &&
+    /(修改|润色|改写|重写|编辑|修订|编译|polish|revise|rewrite|edit|compile)/i.test(trimmed);
+  if (paperWritingIntent) {
+    return { role: "paper-writing-worker", instruction: trimmed, reason: "intent" };
+  }
+
+  const wikiEvidenceIntent =
+    /(文献|论文|paper|source summaries?|wiki evidence|证据|来源摘要|source summary)/i.test(trimmed) &&
+    /(总结|整理|提取|归纳|关系|关联|证据|summary|summarize|relation|relations|ingest|evidence)/i.test(trimmed);
+  if (wikiEvidenceIntent) {
+    return { role: "wiki-evidence-worker", instruction: trimmed, reason: "intent" };
+  }
+
+  const designIntent =
+    /(芯片|量子|qubit|版图|layout|resonator|coupler|设计记录|design artifact)/i.test(trimmed) &&
+    /(设计|仿真|验证|失败|failure|record|artifact|benchmark|layout|simulate|verify)/i.test(trimmed);
+  if (designIntent) {
+    return { role: "design-subagent", instruction: trimmed, reason: "intent" };
+  }
+
+  return null;
+}
+
+function systemPromptForWorker(role: RoutedWorkerRole): string {
+  if (role === "paper-writing-worker") {
+    return PAPER_WRITING_WORKER_SYSTEM_PROMPT;
+  }
+  if (role === "wiki-evidence-worker") {
+    return WIKI_EVIDENCE_WORKER_SYSTEM_PROMPT;
+  }
+  return DESIGN_SUBAGENT_SYSTEM_PROMPT;
+}
+
+function addString(set: Set<string>, value: unknown): void {
+  if (typeof value === "string" && value.trim()) {
+    set.add(value.trim());
+  }
+}
+
+function firstString(...values: unknown[]): string | undefined {
+  return values.find((value): value is string => typeof value === "string" && value.trim() !== "");
+}
+
+function extractWorkerHandoffPaths(
+  toolName: string,
+  details: unknown,
+  handoff: {
+    changedFiles: Set<string>;
+    artifacts: Set<string>;
+    sourcePaths: Set<string>;
+    pagePaths: Set<string>;
+    designRecords: Set<string>;
+  }
+): void {
+  if (!isRecord(details)) {
+    return;
+  }
+
+  if (toolName === "write_file" || toolName === "replace_file_text" || toolName === "delete_file") {
+    addString(handoff.changedFiles, details.path);
+    return;
+  }
+
+  if (toolName === "compile_latex") {
+    addString(handoff.artifacts, details.pdfPath);
+    return;
+  }
+
+  if (toolName === "write_design_artifact") {
+    addString(handoff.designRecords, details.path);
+    addString(handoff.artifacts, details.path);
+    return;
+  }
+
+  if (toolName === "write_paper_wiki_source") {
+    addString(handoff.sourcePaths, firstString(details.sourcePath, details.path));
+    return;
+  }
+
+  if (toolName === "generate_paper_wiki_summary") {
+    const source = isRecord(details.source) ? details.source : undefined;
+    addString(handoff.sourcePaths, firstString(source?.sourcePath, details.sourcePath));
+    return;
+  }
+
+  if (toolName === "build_wiki_page") {
+    const page = isRecord(details.page) ? details.page : undefined;
+    addString(handoff.pagePaths, firstString(page?.pagePath, details.pagePath));
+  }
+}
+
+function nextOwnerForWorker(role: RoutedWorkerRole): WorkerHandoff["nextSuggestedOwner"] {
+  if (role === "paper-writing-worker") {
+    return "wiki-agent";
+  }
+  if (role === "design-subagent") {
+    return "wiki-agent";
+  }
+  return "wiki-agent";
+}
+
+function createWorkerHandoffMessage(handoff: WorkerHandoff): AssistantMessage {
+  return {
+    role: "assistant",
+    timestamp: Date.now(),
+    stopReason: "stop",
+    content: [
+      {
+        type: "text",
+        text: [
+          "Worker handoff for main-agent continuity. Treat this as a compact record of the routed worker turn, not as a full transcript.",
+          "```json",
+          JSON.stringify(handoff, null, 2),
+          "```"
+        ].join("\n")
+      }
+    ]
+  } as AssistantMessage;
+}
+
+async function runRoutedWorkerPrompt(options: {
+  model: Model<Api>;
+  workspaceDir: string;
+  role: RoutedWorkerRole;
+  routeReason: RoutedWorkerPrompt["reason"];
+  instruction: string;
+  onEvent?: AgentMessageEventHandler;
+}): Promise<{ messages: AgentMessage[]; handoff: WorkerHandoff }> {
+  const workerTools = createToolsForBoundary(options.workspaceDir, options.role);
+  const workerContext: AgentContext = {
+    systemPrompt: systemPromptForWorker(options.role),
+    messages: [],
+    tools: workerTools
+  };
+  const prompt: UserMessage = {
+    role: "user",
+    content: options.instruction,
+    timestamp: Date.now()
+  };
+  const toolLoopLimiter = createAgentToolLoopLimiter(MAX_AGENT_TOOL_LOOPS_PER_TURN);
+  const changedFiles = new Set<string>();
+  const artifacts = new Set<string>();
+  const sourcePaths = new Set<string>();
+  const pagePaths = new Set<string>();
+  const designRecords = new Set<string>();
+  const toolsUsed: string[] = [];
+  const failedTools: string[] = [];
+  const onWorkerEvent: AgentMessageEventHandler = async (event) => {
+    if (event.type === "tool_execution_end") {
+      toolsUsed.push(event.toolName);
+      if (event.isError) {
+        failedTools.push(event.toolName);
+      } else {
+        extractWorkerHandoffPaths(event.toolName, event.result.details, {
+          changedFiles,
+          artifacts,
+          sourcePaths,
+          pagePaths,
+          designRecords
+        });
+      }
+    }
+
+    await options.onEvent?.(event);
+  };
+
+  try {
+    const attemptResult = await runAgentLoopAttempt({
+      inputMessages: [prompt],
+      context: workerContext,
+      tools: workerTools,
+      model: options.model,
+      onEvent: onWorkerEvent,
+      toolLoopLimiter
+    });
+    await flushAgentEvents(
+      applyToolLoopLimitToDelayedEvents(attemptResult.delayedEvents, toolLoopLimiter),
+      onWorkerEvent
+    );
+    const finalAssistant = attemptResult.messages
+      .filter((message): message is AssistantMessage => message.role === "assistant")
+      .at(-1);
+    const finalResponse = finalAssistant ? compactOutputText(getAssistantText(finalAssistant), 1200) ?? "" : "";
+    return {
+      messages: attemptResult.messages,
+      handoff: {
+        role: options.role,
+        instruction: options.instruction,
+        routeReason: options.routeReason,
+        status: isFailedTurn(attemptResult.messages) ? "failed" : "completed",
+        changedFiles: [...changedFiles].sort(),
+        artifacts: [...artifacts].sort(),
+        sourcePaths: [...sourcePaths].sort(),
+        pagePaths: [...pagePaths].sort(),
+        designRecords: [...designRecords].sort(),
+        toolsUsed: [...new Set(toolsUsed)],
+        failedTools: [...new Set(failedTools)],
+        finalResponse,
+        nextSuggestedOwner: nextOwnerForWorker(options.role)
+      }
+    };
+  } finally {
+    await cleanupTools(workerTools);
+  }
+}
+
+function createWikiEvidenceWorker(model: Model<Api>): {
+  paperSummaryWorker: PaperSummaryWorker;
+  paperWikiPageWorker: PaperWikiPageWorker;
+} {
+  const paperSummaryWorker: PaperSummaryWorker = async (input) => {
     const prompt: UserMessage = {
       role: "user",
       timestamp: Date.now(),
@@ -998,8 +1307,7 @@ function createPaperSummaryWorker(model: Model<Api>): PaperSummaryWorker {
       ].join("\n\n")
     };
     const context: AgentContext = {
-      systemPrompt:
-        "You are a careful scientific summarization subagent. You write grounded summaries from supplied paper text only.",
+      systemPrompt: WIKI_EVIDENCE_WORKER_SYSTEM_PROMPT,
       messages: [],
       tools: []
     };
@@ -1015,7 +1323,7 @@ function createPaperSummaryWorker(model: Model<Api>): PaperSummaryWorker {
     );
     const resultPromise = stream.result();
     for await (const _event of stream) {
-      // Drain the stream; the summary worker intentionally does not emit UI events.
+      // Drain the stream; the wiki-evidence-worker subtask intentionally does not emit UI events.
     }
     const messages = await resultPromise;
     const assistant = messages
@@ -1024,10 +1332,8 @@ function createPaperSummaryWorker(model: Model<Api>): PaperSummaryWorker {
     const text = assistant ? getAssistantText(assistant) : "";
     return parsePaperSummaryWorkerOutput(extractJsonObject(text));
   };
-}
 
-function createPaperWikiPageWorker(model: Model<Api>): PaperWikiPageWorker {
-  return async (input) => {
+  const paperWikiPageWorker: PaperWikiPageWorker = async (input) => {
     const prompt: UserMessage = {
       role: "user",
       timestamp: Date.now(),
@@ -1047,8 +1353,7 @@ function createPaperWikiPageWorker(model: Model<Api>): PaperWikiPageWorker {
       ].join("\n\n")
     };
     const context: AgentContext = {
-      systemPrompt:
-        "You are a careful scientific wiki synthesis subagent. You write grounded topic pages from supplied paper source summaries only.",
+      systemPrompt: WIKI_EVIDENCE_WORKER_SYSTEM_PROMPT,
       messages: [],
       tools: []
     };
@@ -1064,7 +1369,7 @@ function createPaperWikiPageWorker(model: Model<Api>): PaperWikiPageWorker {
     );
     const resultPromise = stream.result();
     for await (const _event of stream) {
-      // Drain the stream; the wiki page worker intentionally does not emit UI events.
+      // Drain the stream; the wiki-evidence-worker subtask intentionally does not emit UI events.
     }
     const messages = await resultPromise;
     const assistant = messages
@@ -1073,13 +1378,16 @@ function createPaperWikiPageWorker(model: Model<Api>): PaperWikiPageWorker {
     const text = assistant ? getAssistantText(assistant) : "";
     return parsePaperWikiPageWorkerOutput(extractJsonObject(text));
   };
+
+  return { paperSummaryWorker, paperWikiPageWorker };
 }
 
 function createRuntimeTools(workspaceDir: string, model: Model<Api>) {
+  const wikiEvidenceWorker = createWikiEvidenceWorker(model);
   return createTools(workspaceDir, {
     extensionBridge: createQueuedPaperExtensionBridge({ workspaceDir }),
-    paperSummaryWorker: createPaperSummaryWorker(model),
-    paperWikiPageWorker: createPaperWikiPageWorker(model)
+    paperSummaryWorker: wikiEvidenceWorker.paperSummaryWorker,
+    paperWikiPageWorker: wikiEvidenceWorker.paperWikiPageWorker
   });
 }
 
@@ -1094,6 +1402,31 @@ export async function runSessionPrompt(
 
   if (trimmedPrompt === "exit" || trimmedPrompt === "quit") {
     return { action: "stop", newMessages: [] };
+  }
+
+  const routedWorker = routeChatPromptToWorker(trimmedPrompt);
+  if (routedWorker !== null) {
+    const workerResult = await runRoutedWorkerPrompt({
+      model: options.model,
+      workspaceDir: options.workspaceDir,
+      role: routedWorker.role,
+      routeReason: routedWorker.reason,
+      instruction: routedWorker.instruction,
+      onEvent: options.onEvent
+    });
+    const userMessage: UserMessage = {
+      role: "user",
+      content: trimmedPrompt,
+      timestamp: Date.now()
+    };
+    const handoffMessage = createWorkerHandoffMessage(workerResult.handoff);
+    const newMessages: AgentMessage[] = [userMessage, handoffMessage];
+
+    if (!isFailedTurn(workerResult.messages)) {
+      options.context.messages = [...options.context.messages, ...newMessages];
+    }
+
+    return { action: "continue", newMessages };
   }
 
   const result = await runAgentTurn({

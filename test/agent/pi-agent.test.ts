@@ -57,6 +57,16 @@ function userMessageHasPrompt(message: UserMessage, prompt: string): boolean {
       );
 }
 
+function parseWorkerHandoff(message: AssistantMessage): unknown {
+  const text = message.content
+    .filter((content) => content.type === "text")
+    .map((content) => content.text)
+    .join("\n");
+  const json = text.match(/```json\s*([\s\S]*?)\s*```/)?.[1];
+  assert.ok(json);
+  return JSON.parse(json);
+}
+
 function findMessageIndex(
   messages: AgentMessage[],
   predicate: (message: AgentMessage, index: number) => boolean
@@ -74,6 +84,27 @@ test("default system prompt requires wiki evidence for scientific questions", ()
   assert.match(DEFAULT_SYSTEM_PROMPT, /replace_file_text/);
   assert.match(DEFAULT_SYSTEM_PROMPT, /delete_file/);
   assert.match(DEFAULT_SYSTEM_PROMPT, /compile_latex/);
+});
+
+test("paper writing worker system prompt keeps manuscript edits in the worker boundary", () => {
+  const prompt = (piAgent as { PAPER_WRITING_WORKER_SYSTEM_PROMPT?: string }).PAPER_WRITING_WORKER_SYSTEM_PROMPT;
+  assert.equal(typeof prompt, "string");
+  const promptText = prompt as string;
+  assert.match(promptText, /paper-writing-worker/);
+  assert.match(promptText, /load_paper_writing_skill/);
+  assert.match(promptText, /compile_latex/);
+  assert.match(promptText, /Do not download papers/);
+});
+
+test("router worker system prompts describe isolated responsibilities", () => {
+  const wikiPrompt = (piAgent as { WIKI_EVIDENCE_WORKER_SYSTEM_PROMPT?: string }).WIKI_EVIDENCE_WORKER_SYSTEM_PROMPT;
+  const designPrompt = (piAgent as { DESIGN_SUBAGENT_SYSTEM_PROMPT?: string }).DESIGN_SUBAGENT_SYSTEM_PROMPT;
+  assert.equal(typeof wikiPrompt, "string");
+  assert.equal(typeof designPrompt, "string");
+  assert.match(wikiPrompt as string, /wiki-evidence-worker/);
+  assert.match(wikiPrompt as string, /source-summary/);
+  assert.match(designPrompt as string, /design-subagent/);
+  assert.match(designPrompt as string, /write_design_artifact/);
 });
 
 test("runAgentTurn executes a tool call and appends the resulting messages", async () => {
@@ -750,6 +781,131 @@ test("runSessionPrompt ignores empty prompts without calling the model", async (
 
   assert.deepEqual(result, { action: "continue", newMessages: [] });
   assert.deepEqual(context.messages, previousMessages);
+});
+
+test("runSessionPrompt routes paper write commands to the paper-writing worker boundary", async () => {
+  const runSessionPrompt = (
+    piAgent as {
+      runSessionPrompt?: (options: {
+        model: Model<Api>;
+        workspaceDir: string;
+        context: AgentContext;
+        prompt: string;
+        onEvent?: (event: AgentEvent) => void;
+      }) => Promise<{ action: "stop" | "continue"; newMessages: AgentMessage[] }>;
+    }
+  ).runSessionPrompt;
+  assert.equal(typeof runSessionPrompt, "function");
+
+  const parsePaperWritingWorkerCommand = (
+    piAgent as {
+      parsePaperWritingWorkerCommand?: (text: string) => string | null;
+    }
+  ).parsePaperWritingWorkerCommand;
+  const routeChatPromptToWorker = (
+    piAgent as {
+      routeChatPromptToWorker?: (text: string) => {
+        role: "paper-writing-worker" | "wiki-evidence-worker" | "design-subagent";
+        instruction: string;
+        reason: "explicit" | "intent";
+      } | null;
+    }
+  ).routeChatPromptToWorker;
+  assert.equal(typeof parsePaperWritingWorkerCommand, "function");
+  assert.equal(typeof routeChatPromptToWorker, "function");
+  assert.equal(parsePaperWritingWorkerCommand!("paper write polish the abstract"), "polish the abstract");
+  assert.equal(parsePaperWritingWorkerCommand!("/paper-writing-worker 修改论文"), "修改论文");
+  assert.equal(parsePaperWritingWorkerCommand!("同意，请你修改论文"), "同意，请你修改论文");
+  assert.deepEqual(routeChatPromptToWorker!("wiki evidence summarize local papers"), {
+    role: "wiki-evidence-worker",
+    instruction: "summarize local papers",
+    reason: "explicit"
+  });
+  assert.deepEqual(routeChatPromptToWorker!("design 写一个芯片设计 failure record"), {
+    role: "design-subagent",
+    instruction: "写一个芯片设计 failure record",
+    reason: "explicit"
+  });
+  assert.equal(routeChatPromptToWorker!("请解释一下router layer的设计"), null);
+
+  const registration = registerFauxProvider();
+  const workspace = await mkdtemp(path.join(tmpdir(), "pi-agent-paper-writing-worker-"));
+  const skillDir = path.join(workspace, "paper-writing-worker", "skills", "sciwrite");
+  await mkdir(skillDir, { recursive: true });
+  await writeFile(path.join(skillDir, "prompt.md"), "SciWrite local prompt.", "utf8");
+  registration.setResponses([
+    fauxAssistantMessage([fauxToolCall("load_paper_writing_skill", { skillName: "sciwrite" })], {
+      stopReason: "toolUse"
+    }),
+    fauxAssistantMessage([fauxToolCall("write_file", { path: "demo.txt", content: "edited manuscript" })], {
+      stopReason: "toolUse"
+    }),
+    fauxAssistantMessage([fauxText("Paper-writing worker finished.")])
+  ]);
+
+  const context: AgentContext = {
+    systemPrompt: "You are a helpful assistant. Use tools when they are useful.",
+    messages: [],
+    tools: []
+  };
+  const observedEvents: AgentEvent[] = [];
+
+  try {
+    const result = await runSessionPrompt!({
+      model: registration.getModel(),
+      workspaceDir: workspace,
+      context,
+      prompt: "paper write polish the manuscript",
+      onEvent: (event) => {
+        observedEvents.push(event);
+      }
+    });
+
+    assert.equal(result.action, "continue");
+    assert.ok(
+      observedEvents.some(
+        (event) => event.type === "tool_execution_start" && event.toolName === "load_paper_writing_skill"
+      )
+    );
+    assert.ok(
+      observedEvents.some(
+        (event): event is ToolExecutionEndEvent =>
+          event.type === "tool_execution_end" &&
+          event.toolName === "load_paper_writing_skill" &&
+          !event.isError
+      )
+    );
+    assert.ok(
+      observedEvents.some(
+        (event): event is ToolExecutionEndEvent =>
+          event.type === "tool_execution_end" &&
+          event.toolName === "write_file" &&
+          !event.isError
+      )
+    );
+    assert.deepEqual(context.tools, []);
+    assert.equal(result.newMessages.length, 2);
+    assert.ok(isUserMessage(result.newMessages[0]));
+    assert.ok(isAssistantMessage(result.newMessages[1]));
+    const handoff = parseWorkerHandoff(result.newMessages[1]) as {
+      role?: string;
+      status?: string;
+      changedFiles?: string[];
+      toolsUsed?: string[];
+      finalResponse?: string;
+      nextSuggestedOwner?: string;
+    };
+    assert.equal(handoff.role, "paper-writing-worker");
+    assert.equal(handoff.status, "completed");
+    assert.deepEqual(handoff.changedFiles, ["demo.txt"]);
+    assert.deepEqual(handoff.toolsUsed, ["load_paper_writing_skill", "write_file"]);
+    assert.equal(handoff.finalResponse, "Paper-writing worker finished.");
+    assert.equal(handoff.nextSuggestedOwner, "wiki-agent");
+    assert.deepEqual(context.messages, result.newMessages);
+  } finally {
+    registration.unregister();
+    await rm(workspace, { recursive: true, force: true });
+  }
 });
 
 test("readInteractivePrompt treats closed readline as a normal stop signal", async () => {

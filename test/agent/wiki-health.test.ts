@@ -922,7 +922,7 @@ test("fixWikiHealth skips user-authored or user-authorized repairs with explicit
     ));
     assert.ok(result.results.some((item) =>
       item.issue.kind === "summary_missing" &&
-      /Summary worker is not configured/i.test(item.message)
+      /Wiki-evidence-worker summary pass is not configured/i.test(item.message)
     ));
   } finally {
     await rm(workspace, { recursive: true, force: true });
@@ -1042,7 +1042,7 @@ test("fixWikiHealth generates missing summaries when a summary worker is availab
     assert.equal(result.results[0]?.status, "fixed");
     assert.ok(progressMessages.some((message) => message.includes("Checking wiki health")));
     assert.ok(progressMessages.some((message) => message.includes("Generating summary 1/1")));
-    assert.ok(progressMessages.some((message) => message.includes("Summary 1/1: Running clean summary worker")));
+    assert.ok(progressMessages.some((message) => message.includes("Summary 1/1: Running wiki-evidence-worker summary pass")));
     assert.ok(progressMessages.some((message) => message.includes("Finished summary 1/1")));
   } finally {
     await rm(workspace, { recursive: true, force: true });
