@@ -28,6 +28,7 @@ import {
 } from "./paper-reader/paper-reader.js";
 import { savePaperWebPageParse } from "./paper-reader/engines/webpage.js";
 import {
+  mergePaperWikiAliases,
   searchPaperWiki,
   writePaperWikiPage,
   writePaperWikiSource
@@ -468,6 +469,27 @@ const buildWikiPageParameters = Type.Object({
   )
 });
 
+const mergeWikiAliasesParameters = Type.Object({
+  aliases: Type.Array(Type.Object({
+    alias: Type.String({
+      description:
+        "Alias page key or concept phrase to redirect, for example eda or cross-resonance-gates."
+    }),
+    canonical: Type.String({
+      description:
+        "Existing canonical wiki page key that should own the maintained synthesis content."
+    }),
+    title: Type.Optional(Type.String({ description: "Optional display title for the alias page." })),
+    note: Type.Optional(Type.String({ description: "Optional short reason for the alias mapping." }))
+  }), {
+    description: "Alias-to-canonical wiki page mappings to create or update."
+  }),
+  replaceExisting: Type.Optional(Type.Boolean({
+    description:
+      "Replace an existing non-alias synthesis page with an alias page. Defaults to false; set true only after confirming the duplicate page should be merged."
+  }))
+});
+
 const clarifyResearchTopicParameters = Type.Object({
   topic: Type.String({ description: "Broad research direction that needs user steering before a research program starts." }),
   userRequest: Type.Optional(
@@ -604,6 +626,7 @@ type AnswerPaperWikiQuestionParameters = Static<typeof answerPaperWikiQuestionPa
 type AnswerResearchQuestionParameters = Static<typeof answerResearchQuestionParameters>;
 type BootstrapWikiPageEvidenceParameters = Static<typeof bootstrapWikiPageEvidenceParameters>;
 type BuildWikiPageParameters = Static<typeof buildWikiPageParameters>;
+type MergeWikiAliasesParameters = Static<typeof mergeWikiAliasesParameters>;
 type ClarifyResearchTopicParameters = Static<typeof clarifyResearchTopicParameters>;
 type ResearchTopicBootstrapParameters = Static<typeof researchTopicBootstrapParameters>;
 type ExpandResearchTopicParameters = Static<typeof expandResearchTopicParameters>;
@@ -771,6 +794,11 @@ async function resolveWorkspaceDeletableFilePath(workspaceDir: string, requested
 
 function relativeWorkspacePath(workspaceDir: string, filePath: string): string {
   return path.relative(path.resolve(workspaceDir), filePath).split(path.sep).join("/");
+}
+
+function isWikiSynthesisPagePath(relativePath: string): boolean {
+  return relativePath === "knowledge-base/wiki/pages" ||
+    relativePath.startsWith("knowledge-base/wiki/pages/");
 }
 
 function countOccurrences(text: string, search: string): number {
@@ -1284,6 +1312,10 @@ type ResearchWorkflowProgress = {
 type BuildWikiPageTool = AgentTool<
   typeof buildWikiPageParameters,
   BuildWikiPageDetails
+>;
+type MergeWikiAliasesTool = AgentTool<
+  typeof mergeWikiAliasesParameters,
+  Awaited<ReturnType<typeof mergePaperWikiAliases>>
 >;
 type ClarifyResearchTopicTool = AgentTool<
   typeof clarifyResearchTopicParameters,
@@ -2514,13 +2546,18 @@ export function createTools(workspaceDir: string, dependencies: ToolDependencies
     name: "write_file",
     label: "Write File",
     description:
-      "Creates or overwrites a UTF-8 text file inside the workspace. Use this when the user asks you to actually edit a local writing project or manuscript file.",
+      "Creates or overwrites a UTF-8 text file inside the workspace. Use this when the user asks you to actually edit a local writing project or manuscript file. This tool does not write knowledge-base/wiki/pages/ synthesis pages; use build_wiki_page for evidence-grounded wiki page writes or read_file plus replace_file_text for a precise edit to an existing page.",
     parameters: writeFileParameters,
     executionMode: "sequential",
     execute: async (_toolCallId: string, args: WriteFileParameters) => {
       const resolvedPath = await resolveWorkspaceWritablePath(resolvedWorkspaceDir, args.path);
-      await writeFile(resolvedPath, args.content, "utf8");
       const relativePath = relativeWorkspacePath(resolvedWorkspaceDir, resolvedPath);
+      if (isWikiSynthesisPagePath(relativePath)) {
+        throw new Error(
+          "write_file cannot create or overwrite synthesis wiki pages under knowledge-base/wiki/pages/. Use build_wiki_page for evidence-grounded wiki page writes, or read_file plus replace_file_text for a precise edit to an existing page."
+        );
+      }
+      await writeFile(resolvedPath, args.content, "utf8");
 
       return {
         content: [{ type: "text", text: `Wrote ${relativePath}.` }],
@@ -3579,6 +3616,27 @@ export function createTools(workspaceDir: string, dependencies: ToolDependencies
     }
   };
 
+  const mergeWikiAliasesTool: MergeWikiAliasesTool = {
+    name: "merge_wiki_aliases",
+    label: "Merge Wiki Aliases",
+    description:
+      "Creates or updates lightweight alias pages under knowledge-base/wiki/pages/ that point duplicate names, acronyms, plural forms, or synonyms to an existing canonical synthesis page. Use this instead of write_file when the user asks to handle wiki synonyms or duplicate concepts. It refuses to overwrite existing non-alias synthesis pages unless replaceExisting=true.",
+    parameters: mergeWikiAliasesParameters,
+    executionMode: "sequential",
+    execute: async (_toolCallId: string, args: MergeWikiAliasesParameters) => {
+      const result = await mergePaperWikiAliases({
+        workspaceDir: resolvedWorkspaceDir,
+        aliases: args.aliases,
+        ...(args.replaceExisting !== undefined ? { replaceExisting: args.replaceExisting } : {})
+      });
+
+      return {
+        content: [{ type: "text", text: JSON.stringify(result) }],
+        details: result
+      };
+    }
+  };
+
   const clarifyResearchTopicTool: ClarifyResearchTopicTool = {
     name: "clarify_research_topic",
     label: "Clarify Research Topic",
@@ -3868,6 +3926,7 @@ export function createTools(workspaceDir: string, dependencies: ToolDependencies
     answerResearchQuestionTool,
     bootstrapWikiPageEvidenceTool,
     buildWikiPageTool,
+    mergeWikiAliasesTool,
     clarifyResearchTopicTool,
     researchTopicBootstrapTool,
     expandResearchTopicTool,

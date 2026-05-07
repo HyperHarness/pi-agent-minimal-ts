@@ -122,6 +122,35 @@ export interface PaperWikiPageResult {
   sourceCount: number;
 }
 
+export interface PaperWikiAliasInput {
+  alias: string;
+  canonical: string;
+  title?: string;
+  note?: string;
+}
+
+export interface PaperWikiAliasMergeInput {
+  workspaceDir: string;
+  aliases: PaperWikiAliasInput[];
+  replaceExisting?: boolean;
+}
+
+export interface PaperWikiAliasMergeItem {
+  aliasPageKey: string;
+  canonicalPageKey: string;
+  title: string;
+  pagePath: string;
+  status: "written" | "skipped";
+  reason?: string;
+}
+
+export interface PaperWikiAliasMergeResult {
+  status: "written" | "partial" | "blocked";
+  aliases: PaperWikiAliasMergeItem[];
+  indexPath: string;
+  logPath: string;
+}
+
 export interface PaperWikiPageWorkerInput {
   topic: string;
   question?: string;

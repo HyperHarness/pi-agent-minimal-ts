@@ -23,6 +23,9 @@ import {
 import type {
   PaperWikiPageInput,
   PaperWikiPageResult,
+  PaperWikiAliasMergeInput,
+  PaperWikiAliasMergeItem,
+  PaperWikiAliasMergeResult,
   PaperWikiPageSourceCitation,
   PaperWikiSearchOptions,
   PaperWikiSearchResult,
@@ -132,6 +135,11 @@ function extractTitle(markdown: string, fallback: string): string {
   return extractFrontmatterValue(markdown, "title") ??
     markdown.match(/^#\s+(.+)$/m)?.[1]?.trim() ??
     fallback;
+}
+
+function isAliasPage(markdown: string): boolean {
+  return extractFrontmatterValue(markdown, "type") === "wiki-alias-page" ||
+    Boolean(extractFrontmatterValue(markdown, "canonical_page"));
 }
 
 function createSnippet(text: string, query: string): string {
@@ -450,6 +458,133 @@ ${input.sourceCitations.map((source) =>
     indexPath: relativeToWorkspace(input.workspaceDir, getPaperWikiIndexPath(input.workspaceDir)),
     logPath: relativeToWorkspace(input.workspaceDir, getPaperWikiLogPath(input.workspaceDir)),
     sourceCount: input.sourceCitations.length
+  };
+}
+
+function uniqueAliasInputs(aliases: PaperWikiAliasMergeInput["aliases"]): PaperWikiAliasMergeInput["aliases"] {
+  const seen = new Set<string>();
+  const unique: PaperWikiAliasMergeInput["aliases"] = [];
+  for (const alias of aliases) {
+    const aliasPageKey = sanitizeWikiFilename(alias.alias.toLowerCase());
+    if (seen.has(aliasPageKey)) {
+      continue;
+    }
+    seen.add(aliasPageKey);
+    unique.push(alias);
+  }
+  return unique;
+}
+
+export async function mergePaperWikiAliases(input: PaperWikiAliasMergeInput): Promise<PaperWikiAliasMergeResult> {
+  if (input.aliases.length === 0) {
+    throw new Error("At least one alias mapping is required.");
+  }
+
+  await ensurePaperWikiScaffold(input.workspaceDir);
+  const now = new Date().toISOString();
+  const pageFiles = await listPaperWikiPageFiles(input.workspaceDir);
+  const pageKeys = new Set(pageFiles.map((filePath) => path.basename(filePath, ".md")));
+  const items: PaperWikiAliasMergeItem[] = [];
+
+  for (const aliasInput of uniqueAliasInputs(input.aliases)) {
+    const aliasPageKey = sanitizeWikiFilename(aliasInput.alias.toLowerCase());
+    const canonicalPageKey = sanitizeWikiFilename(aliasInput.canonical.toLowerCase());
+    const pagePath = getPaperWikiPagePath(input.workspaceDir, aliasPageKey);
+    const pagePathRelative = relativeToWorkspace(input.workspaceDir, pagePath);
+    if (aliasPageKey === canonicalPageKey) {
+      items.push({
+        aliasPageKey,
+        canonicalPageKey,
+        title: aliasInput.title?.trim() || aliasInput.alias.trim() || aliasPageKey,
+        pagePath: pagePathRelative,
+        status: "skipped",
+        reason: "Alias and canonical page keys are identical."
+      });
+      continue;
+    }
+    if (!pageKeys.has(canonicalPageKey)) {
+      items.push({
+        aliasPageKey,
+        canonicalPageKey,
+        title: aliasInput.title?.trim() || aliasInput.alias.trim() || aliasPageKey,
+        pagePath: pagePathRelative,
+        status: "skipped",
+        reason: "Canonical wiki page does not exist; build the canonical page before creating aliases."
+      });
+      continue;
+    }
+
+    const existing = await readFile(pagePath, "utf8").catch(() => undefined);
+    if (existing && !isAliasPage(existing) && input.replaceExisting !== true) {
+      items.push({
+        aliasPageKey,
+        canonicalPageKey,
+        title: extractTitle(existing, aliasInput.title?.trim() || aliasPageKey),
+        pagePath: pagePathRelative,
+        status: "skipped",
+        reason: "Alias page already exists as a synthesis page; set replaceExisting=true only after confirming it should be merged."
+      });
+      continue;
+    }
+
+    const canonicalPath = getPaperWikiPagePath(input.workspaceDir, canonicalPageKey);
+    const canonicalMarkdown = await readFile(canonicalPath, "utf8");
+    const canonicalTitle = extractTitle(canonicalMarkdown, canonicalPageKey);
+    const title = aliasInput.title?.trim() || aliasInput.alias.trim() || aliasPageKey;
+    const note = aliasInput.note?.trim();
+    const createdAt = existing ? extractFrontmatterValue(existing, "created_at") ?? now : now;
+    const markdown = `---
+type: "wiki-alias-page"
+page_key: ${quoteYaml(aliasPageKey)}
+title: ${quoteYaml(title)}
+canonical_page: ${quoteYaml(canonicalPageKey)}
+created_at: ${quoteYaml(createdAt)}
+updated_at: ${quoteYaml(now)}
+tags:
+  - "alias"
+related_pages:
+  - ${quoteYaml(canonicalPageKey)}
+---
+
+# ${title}
+
+This page is an alias for [${canonicalTitle}](knowledge-base/wiki/pages/${canonicalPageKey}.md).
+
+Use the canonical page for maintained synthesis content.
+
+## Alias
+
+- Canonical page: \`${canonicalPageKey}\`
+${note ? `- Note: ${note}\n` : ""}`;
+    await writeFile(pagePath, markdown.trimEnd() + "\n", "utf8");
+    pageKeys.add(aliasPageKey);
+    items.push({
+      aliasPageKey,
+      canonicalPageKey,
+      title,
+      pagePath: pagePathRelative,
+      status: "written"
+    });
+  }
+
+  if (items.some((item) => item.status === "written")) {
+    await rewriteWikiIndex(input.workspaceDir);
+    await appendFile(
+      getPaperWikiLogPath(input.workspaceDir),
+      `\n## [${now.slice(0, 10)}] aliases\n\n${items
+        .filter((item) => item.status === "written")
+        .map((item) => `- \`${item.aliasPageKey}\` -> \`${item.canonicalPageKey}\` (${item.pagePath})`)
+        .join("\n")}\n`,
+      "utf8"
+    );
+  }
+
+  const writtenCount = items.filter((item) => item.status === "written").length;
+  return {
+    status: writtenCount === 0 ? "blocked" : writtenCount === items.length ? "written" : "partial",
+    aliases: items,
+    indexPath: relativeToWorkspace(input.workspaceDir, getPaperWikiIndexPath(input.workspaceDir)),
+    logPath: relativeToWorkspace(input.workspaceDir, getPaperWikiLogPath(input.workspaceDir))
   };
 }
 

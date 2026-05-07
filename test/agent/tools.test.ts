@@ -350,6 +350,22 @@ type BuildWikiPageTool = {
   ) => Promise<ToolResult>;
 };
 
+type MergeWikiAliasesTool = {
+  execute: (
+    toolCallId: string,
+    args: {
+      aliases: Array<{
+        alias: string;
+        canonical: string;
+        title?: string;
+        note?: string;
+      }>;
+      replaceExisting?: boolean;
+    },
+    signal: undefined,
+  ) => Promise<ToolResult>;
+};
+
 type ListLocalPapersTool = {
   execute: (
     toolCallId: string,
@@ -756,6 +772,17 @@ function getBuildWikiPageTool(
   return tool as BuildWikiPageTool;
 }
 
+function getMergeWikiAliasesTool(workspace: string): MergeWikiAliasesTool {
+  const tools = createTools(workspace) as ReadonlyArray<{
+    name: string;
+    execute?: MergeWikiAliasesTool["execute"];
+  }>;
+  const tool = tools.find((candidate) => candidate.name === "merge_wiki_aliases");
+  assert.ok(tool);
+  assert.equal(typeof tool.execute, "function");
+  return tool as MergeWikiAliasesTool;
+}
+
 function getBootstrapWikiPageEvidenceTool(
   workspace: string,
   dependencies?: Parameters<typeof createTools>[1],
@@ -953,6 +980,32 @@ test("write_file rejects absolute paths outside the workspace", async () => {
   } finally {
     await rm(workspace, { recursive: true, force: true });
     await rm(outside, { recursive: true, force: true });
+  }
+});
+
+test("write_file rejects synthesis wiki page writes", async () => {
+  const workspace = await mkdtemp(path.join(tmpdir(), "pi-agent-tools-"));
+
+  try {
+    const writeFileTool = getWriteFileTool(workspace);
+    await assert.rejects(
+      () => writeFileTool.execute(
+        "call-write-wiki-page",
+        { path: "knowledge-base/wiki/pages/eda.md", content: "# EDA\n" },
+        undefined,
+      ),
+      /cannot create or overwrite synthesis wiki pages/i,
+    );
+    await assert.rejects(
+      () => writeFileTool.execute(
+        "call-write-wiki-page-absolute",
+        { path: path.join(workspace, "knowledge-base/wiki/pages/eda.md"), content: "# EDA\n" },
+        undefined,
+      ),
+      /cannot create or overwrite synthesis wiki pages/i,
+    );
+  } finally {
+    await rm(workspace, { recursive: true, force: true });
   }
 });
 
@@ -1257,6 +1310,7 @@ test("createTools exposes the minimal default tool set", async () => {
       "answer_research_question",
       "bootstrap_wiki_page_evidence",
       "build_wiki_page",
+      "merge_wiki_aliases",
       "clarify_research_topic",
       "research_topic_bootstrap",
       "expand_research_topic",
@@ -1313,6 +1367,7 @@ test("createTools full profile exposes every built-in tool", async () => {
       "answer_research_question",
       "bootstrap_wiki_page_evidence",
       "build_wiki_page",
+      "merge_wiki_aliases",
       "clarify_research_topic",
       "research_topic_bootstrap",
       "expand_research_topic",
@@ -3475,6 +3530,137 @@ test("build_wiki_page writes a synthesis page from local wiki evidence", async (
     assert.match(index, /## Knowledge Entries/);
     assert.match(index, /\[qLDPC on Superconducting Chips\]\(pages\/qldpc-superconducting-chips\.md\)/);
     assert.match(index, /qldpc-superconducting-chips/);
+  } finally {
+    await rm(workspace, { recursive: true, force: true });
+  }
+});
+
+test("merge_wiki_aliases writes alias pages and refreshes the wiki index", async () => {
+  const workspace = await mkdtemp(path.join(tmpdir(), "pi-agent-tools-"));
+  const pagesDir = path.join(workspace, "knowledge-base/wiki/pages");
+  await mkdir(pagesDir, { recursive: true });
+  await writeFile(path.join(pagesDir, "electronic-design-automation.md"), `---
+type: "wiki-synthesis-page"
+page_key: "electronic-design-automation"
+title: "Electronic Design Automation"
+tags: []
+sources: []
+related_pages: []
+---
+
+# Electronic Design Automation
+
+Canonical content.
+`, "utf8");
+
+  try {
+    const tool = getMergeWikiAliasesTool(workspace);
+    const result = await tool.execute("merge-aliases", {
+      aliases: [
+        {
+          alias: "eda",
+          canonical: "electronic-design-automation",
+          title: "EDA",
+          note: "Common acronym."
+        },
+      ],
+    }, undefined);
+    const details = result.details as {
+      status?: string;
+      aliases?: Array<{ aliasPageKey?: string; canonicalPageKey?: string; status?: string; pagePath?: string }>;
+    };
+
+    assert.equal(details.status, "written");
+    assert.deepEqual(details.aliases?.map((alias) => ({
+      aliasPageKey: alias.aliasPageKey,
+      canonicalPageKey: alias.canonicalPageKey,
+      status: alias.status,
+      pagePath: alias.pagePath,
+    })), [
+      {
+        aliasPageKey: "eda",
+        canonicalPageKey: "electronic-design-automation",
+        status: "written",
+        pagePath: "knowledge-base/wiki/pages/eda.md",
+      },
+    ]);
+
+    const aliasPage = await readFile(path.join(pagesDir, "eda.md"), "utf8");
+    assert.match(aliasPage, /type: "wiki-alias-page"/);
+    assert.match(aliasPage, /canonical_page: "electronic-design-automation"/);
+    assert.match(aliasPage, /\[Electronic Design Automation\]\(knowledge-base\/wiki\/pages\/electronic-design-automation\.md\)/);
+
+    const index = await readFile(path.join(workspace, "knowledge-base/wiki/index.md"), "utf8");
+    assert.match(index, /\[EDA\]\(pages\/eda\.md\)/);
+    assert.match(index, /\[Electronic Design Automation\]\(pages\/electronic-design-automation\.md\)/);
+
+    const lint = await getWikiLintTool(workspace).execute("lint-aliases", { maxItems: 10 }, undefined);
+    assert.deepEqual((lint.details as { summary?: Record<string, number> }).summary, {
+      stale_index: 0,
+      broken_wiki_link: 0,
+      missing_source_citation: 0,
+      orphan_page: 0,
+      concept_gap: 0,
+    });
+  } finally {
+    await rm(workspace, { recursive: true, force: true });
+  }
+});
+
+test("merge_wiki_aliases refuses to replace existing synthesis pages unless requested", async () => {
+  const workspace = await mkdtemp(path.join(tmpdir(), "pi-agent-tools-"));
+  const pagesDir = path.join(workspace, "knowledge-base/wiki/pages");
+  await mkdir(pagesDir, { recursive: true });
+  await writeFile(path.join(pagesDir, "surface-code.md"), `---
+type: "wiki-synthesis-page"
+page_key: "surface-code"
+title: "Surface Code"
+tags: []
+sources: []
+related_pages: []
+---
+
+# Surface Code
+
+Canonical content.
+`, "utf8");
+  await writeFile(path.join(pagesDir, "surface-codes.md"), `---
+type: "wiki-synthesis-page"
+page_key: "surface-codes"
+title: "Surface Codes"
+tags: []
+sources: []
+related_pages: []
+---
+
+# Surface Codes
+
+Duplicate but still substantive content.
+`, "utf8");
+
+  try {
+    const tool = getMergeWikiAliasesTool(workspace);
+    const blocked = await tool.execute("merge-alias-blocked", {
+      aliases: [{ alias: "surface-codes", canonical: "surface-code" }],
+    }, undefined);
+    const blockedDetails = blocked.details as {
+      status?: string;
+      aliases?: Array<{ status?: string; reason?: string }>;
+    };
+
+    assert.equal(blockedDetails.status, "blocked");
+    assert.equal(blockedDetails.aliases?.[0]?.status, "skipped");
+    assert.match(blockedDetails.aliases?.[0]?.reason ?? "", /already exists as a synthesis page/);
+    assert.match(await readFile(path.join(pagesDir, "surface-codes.md"), "utf8"), /Duplicate but still substantive content/);
+
+    const replaced = await tool.execute("merge-alias-replace", {
+      aliases: [{ alias: "surface-codes", canonical: "surface-code" }],
+      replaceExisting: true,
+    }, undefined);
+    assert.equal((replaced.details as { status?: string }).status, "written");
+    const aliasPage = await readFile(path.join(pagesDir, "surface-codes.md"), "utf8");
+    assert.match(aliasPage, /type: "wiki-alias-page"/);
+    assert.match(aliasPage, /canonical_page: "surface-code"/);
   } finally {
     await rm(workspace, { recursive: true, force: true });
   }
