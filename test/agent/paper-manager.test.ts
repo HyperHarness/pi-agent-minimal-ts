@@ -437,6 +437,39 @@ test("searchPapers classifies link.aps.org DOI URLs as APS sources", async () =>
   ]);
 });
 
+test("searchPapers canonicalizes lowercase APS PhysRev DOI URLs from web results", async () => {
+  const results = await searchPapers({
+    query: "lowercase aps doi",
+    searchArxivImpl: async () => [],
+    searchApsPapersImpl: async () => [],
+    searchWebImpl: async () => [
+      createWebResult({
+        title: "Lowercase APS DOI",
+        url: "https://journals.aps.org/pra/abstract/10.1103/physreva.111.012619",
+        snippet: "aps summary"
+      })
+    ]
+  });
+
+  assert.deepEqual(results, [
+    {
+      title: "Lowercase APS DOI",
+      authors: [],
+      summary: "aps summary",
+      primarySource: "aps",
+      primaryAction: "authorized_download",
+      sources: [
+        {
+          source: "aps",
+          canonicalId: "10.1103/PhysRevA.111.012619",
+          articleUrl: "https://journals.aps.org/pra/abstract/10.1103/PhysRevA.111.012619",
+          action: "authorized_download"
+        }
+      ]
+    } satisfies PaperSearchResult
+  ]);
+});
+
 test("searchPapers reorders merged candidates when a higher-priority source appears later", async () => {
   const results = await searchPapers({
     query: "ordering",

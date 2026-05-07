@@ -5,6 +5,7 @@ import os from "node:os";
 import path from "node:path";
 import { PaperBrowserSessionError } from "../../src/agent/browser-session.js";
 import {
+  canonicalizeApsDoi,
   PaperDownloadError,
   downloadPaperPdf,
   resolvePublisherCanonicalId
@@ -373,4 +374,16 @@ test("resolvePublisherCanonicalId decodes percent-encoded Science DOI path segme
 
   assert.equal(canonicalId, "10.1126/science.adz8659");
   assert.notEqual(canonicalId, "10.1126%2Fscience.adz8659");
+});
+
+test("resolvePublisherCanonicalId restores APS PhysRev DOI casing from lowercase URLs", () => {
+  assert.equal(canonicalizeApsDoi("10.1103/physreva.111.012619"), "10.1103/PhysRevA.111.012619");
+  assert.equal(canonicalizeApsDoi("10.1103/physrevresearch.4.023079"), "10.1103/PhysRevResearch.4.023079");
+
+  const canonicalId = resolvePublisherCanonicalId({
+    publisher: "aps",
+    url: "https://journals.aps.org/prresearch/abstract/10.1103/physrevresearch.4.023079"
+  });
+
+  assert.equal(canonicalId, "10.1103/PhysRevResearch.4.023079");
 });

@@ -17,6 +17,7 @@ import {
   type PaperBrowserSession
 } from "./browser-session.js";
 import {
+  canonicalizeApsDoi,
   PaperDownloadError,
   downloadPublisherPaper,
   resolvePublisherCanonicalId,
@@ -410,14 +411,27 @@ function classifySupportedSource(url: URL): Extract<
 }
 
 function normalizeApsArticleUrl(url: URL): string {
-  if (url.hostname !== "journals.aps.org" || !/^\/doi\/(?!pdf\/).+/i.test(url.pathname)) {
+  if (url.hostname !== "journals.aps.org") {
+    return url.toString();
+  }
+
+  const doiResolverPathMatch = url.pathname.match(/^\/doi\/(?!pdf\/)(.+)$/i);
+  if (doiResolverPathMatch?.[1]) {
+    const normalizedUrl = new URL(url);
+    normalizedUrl.hostname = "link.aps.org";
+    normalizedUrl.pathname = `/doi/${canonicalizeApsDoi(decodeURIComponent(doiResolverPathMatch[1]))}`;
+    normalizedUrl.search = "";
+    normalizedUrl.hash = "";
+    return normalizedUrl.toString();
+  }
+
+  const journalPathMatch = url.pathname.match(/^\/([^/]+)\/(abstract|pdf|accepted)\/(.+)$/i);
+  if (!journalPathMatch?.[1] || !journalPathMatch[2] || !journalPathMatch[3]) {
     return url.toString();
   }
 
   const normalizedUrl = new URL(url);
-  normalizedUrl.hostname = "link.aps.org";
-  normalizedUrl.search = "";
-  normalizedUrl.hash = "";
+  normalizedUrl.pathname = `/${journalPathMatch[1]}/${journalPathMatch[2]}/${canonicalizeApsDoi(decodeURIComponent(journalPathMatch[3]))}`;
   return normalizedUrl.toString();
 }
 

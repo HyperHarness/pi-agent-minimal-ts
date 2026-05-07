@@ -49,15 +49,44 @@ function extractScienceDoi(urlString: string): string | null {
   return match?.[1] ? decodePublisherPathSegment(match[1]).replace(/\.pdf$/i, "") : null;
 }
 
+const APS_CANONICAL_DOI_PREFIXES = new Map<string, string>([
+  ["physreva", "PhysRevA"],
+  ["physrevb", "PhysRevB"],
+  ["physrevc", "PhysRevC"],
+  ["physrevd", "PhysRevD"],
+  ["physreve", "PhysRevE"],
+  ["physrevlett", "PhysRevLett"],
+  ["physrevapplied", "PhysRevApplied"],
+  ["physrevresearch", "PhysRevResearch"],
+  ["physrevmaterials", "PhysRevMaterials"],
+  ["physrevfluids", "PhysRevFluids"],
+  ["physrevx", "PhysRevX"],
+  ["prxquantum", "PRXQuantum"],
+  ["revmodphys", "RevModPhys"]
+]);
+
+export function canonicalizeApsDoi(doi: string): string {
+  const trimmed = doi.trim();
+  const match = trimmed.match(/^10\.1103\/([^.\/]+)(\..+)$/i);
+  if (!match?.[1] || !match[2]) {
+    return trimmed;
+  }
+
+  const canonicalPrefix = APS_CANONICAL_DOI_PREFIXES.get(match[1].toLowerCase());
+  return canonicalPrefix ? `10.1103/${canonicalPrefix}${match[2]}` : trimmed;
+}
+
 function extractApsDoi(urlString: string): string | null {
   const path = new URL(urlString).pathname;
   const directDoiMatch = path.match(/^\/doi\/(?:pdf\/)?(.+)$/i);
   if (directDoiMatch?.[1]) {
-    return decodePublisherPathSegment(directDoiMatch[1]).replace(/\.pdf$/i, "");
+    return canonicalizeApsDoi(decodePublisherPathSegment(directDoiMatch[1]).replace(/\.pdf$/i, ""));
   }
 
   const journalMatch = path.match(/^\/[^/]+\/(?:abstract|pdf|accepted)\/(.+)$/i);
-  return journalMatch?.[1] ? decodePublisherPathSegment(journalMatch[1]).replace(/\.pdf$/i, "") : null;
+  return journalMatch?.[1]
+    ? canonicalizeApsDoi(decodePublisherPathSegment(journalMatch[1]).replace(/\.pdf$/i, ""))
+    : null;
 }
 
 export function resolvePublisherCanonicalId(options: {
