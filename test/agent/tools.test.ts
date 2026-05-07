@@ -30,7 +30,7 @@ type ToolResult = {
 type ReadFileTool = {
   execute: (
     toolCallId: string,
-    args: { path: string },
+    args: { path: string; offsetBytes?: number; maxBytes?: number },
     signal: undefined,
   ) => Promise<ToolResult>;
 };
@@ -940,6 +940,113 @@ test("read_file reads a UTF-8 file inside the workspace", async () => {
         item.type === "text" && typeof item.text === "string" && item.text.includes(expectedContent),
     );
     assert.ok(textPayload);
+  } finally {
+    await rm(workspace, { recursive: true, force: true });
+  }
+});
+
+test("read_file returns bounded metadata for small files", async () => {
+  const workspace = await mkdtemp(path.join(tmpdir(), "pi-agent-tools-"));
+  const nested = path.join(workspace, "notes.txt");
+  const expectedContent = "bounded read";
+  await writeFile(nested, expectedContent, "utf8");
+
+  try {
+    const readFileTool = getReadFileTool(workspace);
+    const result = await readFileTool.execute("call-small", { path: "notes.txt" }, undefined);
+    assert.equal(result.content?.[0]?.text, expectedContent);
+    assert.deepEqual(result.details, {
+      path: "notes.txt",
+      sizeBytes: Buffer.byteLength(expectedContent, "utf8"),
+      offsetBytes: 0,
+      requestedMaxBytes: 256 * 1024,
+      maxBytes: 256 * 1024,
+      returnedBytes: Buffer.byteLength(expectedContent, "utf8"),
+      truncated: false
+    });
+  } finally {
+    await rm(workspace, { recursive: true, force: true });
+  }
+});
+
+test("read_file truncates large files by default and reports the next byte offset", async () => {
+  const workspace = await mkdtemp(path.join(tmpdir(), "pi-agent-tools-"));
+  const nested = path.join(workspace, "large.txt");
+  const content = "a".repeat(256 * 1024 + 17);
+  await writeFile(nested, content, "utf8");
+
+  try {
+    const readFileTool = getReadFileTool(workspace);
+    const result = await readFileTool.execute("call-large", { path: "large.txt" }, undefined);
+    assert.equal(result.content?.[0]?.text, content.slice(0, 256 * 1024));
+    assert.deepEqual(result.details, {
+      path: "large.txt",
+      sizeBytes: content.length,
+      offsetBytes: 0,
+      requestedMaxBytes: 256 * 1024,
+      maxBytes: 256 * 1024,
+      returnedBytes: 256 * 1024,
+      truncated: true,
+      nextOffsetBytes: 256 * 1024
+    });
+  } finally {
+    await rm(workspace, { recursive: true, force: true });
+  }
+});
+
+test("read_file reads an explicit byte range", async () => {
+  const workspace = await mkdtemp(path.join(tmpdir(), "pi-agent-tools-"));
+  const nested = path.join(workspace, "range.txt");
+  const content = "0123456789abcdef";
+  await writeFile(nested, content, "utf8");
+
+  try {
+    const readFileTool = getReadFileTool(workspace);
+    const result = await readFileTool.execute(
+      "call-range",
+      { path: "range.txt", offsetBytes: 4, maxBytes: 6 },
+      undefined,
+    );
+    assert.equal(result.content?.[0]?.text, "456789");
+    assert.deepEqual(result.details, {
+      path: "range.txt",
+      sizeBytes: content.length,
+      offsetBytes: 4,
+      requestedMaxBytes: 6,
+      maxBytes: 6,
+      returnedBytes: 6,
+      truncated: true,
+      nextOffsetBytes: 10
+    });
+  } finally {
+    await rm(workspace, { recursive: true, force: true });
+  }
+});
+
+test("read_file clamps oversized maxBytes requests", async () => {
+  const workspace = await mkdtemp(path.join(tmpdir(), "pi-agent-tools-"));
+  const nested = path.join(workspace, "huge.txt");
+  const content = "b".repeat(1024 * 1024 + 11);
+  await writeFile(nested, content, "utf8");
+
+  try {
+    const readFileTool = getReadFileTool(workspace);
+    const result = await readFileTool.execute(
+      "call-clamp",
+      { path: "huge.txt", maxBytes: 2 * 1024 * 1024 },
+      undefined,
+    );
+    assert.equal(result.content?.[0]?.text?.length, 1024 * 1024);
+    assert.deepEqual(result.details, {
+      path: "huge.txt",
+      sizeBytes: content.length,
+      offsetBytes: 0,
+      requestedMaxBytes: 2 * 1024 * 1024,
+      maxBytes: 1024 * 1024,
+      returnedBytes: 1024 * 1024,
+      truncated: true,
+      nextOffsetBytes: 1024 * 1024
+    });
   } finally {
     await rm(workspace, { recursive: true, force: true });
   }

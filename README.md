@@ -195,7 +195,7 @@ The default chat agent exposes a compact tool profile. Development and benchmark
 ### Workspace Tools
 
 - `list_files`: lists files and directories under the workspace
-- `read_file`: reads UTF-8 text files inside the workspace
+- `read_file`: reads bounded UTF-8 text-file segments inside the workspace; use `offsetBytes` / `maxBytes` and the returned `nextOffsetBytes` to page through large files
 - `write_file`: writes workspace text files, but refuses `knowledge-base/wiki/pages/`; use `build_wiki_page` for durable wiki pages
 - `replace_file_text`: replaces a unique exact text block, useful for precise edits to existing files and wiki pages
 - `delete_file`: deletes a workspace file after path-safety checks
@@ -434,4 +434,4 @@ npm test
 
 - conversation history is kept in memory only for local REPL sessions
 - failed assistant turns are not persisted into the ongoing context
-- full-mode `read_file` does not size-limit very large files yet, so it can still create memory pressure if misused
+- `read_file` uses bounded paged reads by default and reports truncation metadata so agents can recognize when a file needs another page or a search-oriented workflow

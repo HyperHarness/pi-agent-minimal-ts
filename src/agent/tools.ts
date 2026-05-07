@@ -1,5 +1,5 @@
 import { execFile } from "node:child_process";
-import { lstat, mkdir, readFile, readdir, realpath, stat, unlink, writeFile } from "node:fs/promises";
+import { lstat, mkdir, open, readFile, readdir, realpath, stat, unlink, writeFile } from "node:fs/promises";
 import path from "node:path";
 import { promisify } from "node:util";
 import { Type, type Static } from "@mariozechner/pi-ai";
@@ -86,12 +86,30 @@ import type { PaperRecord } from "./paper-types.js";
 
 const execFileAsync = promisify(execFile);
 
+const DEFAULT_READ_FILE_MAX_BYTES = 256 * 1024;
+const HARD_READ_FILE_MAX_BYTES = 1024 * 1024;
+
 const getTimeParameters = Type.Object({
   timezone: Type.Optional(Type.String({ description: "Optional IANA timezone name." }))
 });
 
 const readFileParameters = Type.Object({
-  path: Type.String({ description: "UTF-8 text file path inside the workspace. Relative paths and workspace-absolute paths are accepted." })
+  path: Type.String({
+    description: "UTF-8 text file path inside the workspace. Relative paths and workspace-absolute paths are accepted."
+  }),
+  offsetBytes: Type.Optional(
+    Type.Integer({
+      description: "Byte offset to start reading from. Defaults to 0.",
+      minimum: 0
+    })
+  ),
+  maxBytes: Type.Optional(
+    Type.Integer({
+      description:
+        `Maximum bytes to return. Defaults to ${DEFAULT_READ_FILE_MAX_BYTES}; values above ${HARD_READ_FILE_MAX_BYTES} are clamped.`,
+      minimum: 1
+    })
+  )
 });
 
 const listFilesParameters = Type.Object({
@@ -1089,8 +1107,65 @@ async function listWorkspaceFiles(input: {
   };
 }
 
+async function readWorkspaceTextFileRange(input: {
+  resolvedPath: string;
+  requestedPath: string;
+  offsetBytes?: number;
+  maxBytes?: number;
+}): Promise<{ content: string; details: ReadFileDetails }> {
+  const fileStats = await stat(input.resolvedPath);
+  if (!fileStats.isFile()) {
+    throw new Error(`read_file path is not a file: ${input.requestedPath}`);
+  }
+
+  const offsetBytes = Math.max(0, Math.trunc(input.offsetBytes ?? 0));
+  const requestedMaxBytes = Math.max(1, Math.trunc(input.maxBytes ?? DEFAULT_READ_FILE_MAX_BYTES));
+  const maxBytes = Math.min(requestedMaxBytes, HARD_READ_FILE_MAX_BYTES);
+  const availableBytes = Math.max(0, fileStats.size - offsetBytes);
+  const bytesToRead = Math.min(maxBytes, availableBytes);
+
+  if (bytesToRead === 0) {
+    return {
+      content: "",
+      details: {
+        path: input.requestedPath,
+        sizeBytes: fileStats.size,
+        offsetBytes,
+        requestedMaxBytes,
+        maxBytes,
+        returnedBytes: 0,
+        truncated: false
+      }
+    };
+  }
+
+  const buffer = Buffer.alloc(bytesToRead);
+  const fileHandle = await open(input.resolvedPath, "r");
+  try {
+    const { bytesRead } = await fileHandle.read(buffer, 0, bytesToRead, offsetBytes);
+    const nextOffsetBytes = offsetBytes + bytesRead;
+    const truncated = nextOffsetBytes < fileStats.size;
+
+    return {
+      content: buffer.subarray(0, bytesRead).toString("utf8"),
+      details: {
+        path: input.requestedPath,
+        sizeBytes: fileStats.size,
+        offsetBytes,
+        requestedMaxBytes,
+        maxBytes,
+        returnedBytes: bytesRead,
+        truncated,
+        ...(truncated ? { nextOffsetBytes } : {})
+      }
+    };
+  } finally {
+    await fileHandle.close();
+  }
+}
+
 type GetTimeTool = AgentTool<typeof getTimeParameters, { timezone: string }>;
-type ReadFileTool = AgentTool<typeof readFileParameters, { path: string }>;
+type ReadFileTool = AgentTool<typeof readFileParameters, ReadFileDetails>;
 type ListFilesTool = AgentTool<typeof listFilesParameters, ListFilesDetails>;
 type WriteFileTool = AgentTool<typeof writeFileParameters, { path: string; bytes: number }>;
 type ReplaceFileTextTool = AgentTool<
@@ -1121,6 +1196,18 @@ interface ListFilesDetails {
   maxDepth: number;
   maxEntries: number;
 }
+
+interface ReadFileDetails {
+  path: string;
+  sizeBytes: number;
+  offsetBytes: number;
+  requestedMaxBytes: number;
+  maxBytes: number;
+  returnedBytes: number;
+  truncated: boolean;
+  nextOffsetBytes?: number;
+}
+
 type SearchResultPreview = {
   title: string;
   url?: string;
@@ -2718,16 +2805,21 @@ export function createTools(workspaceDir: string, dependencies: ToolDependencies
     name: "read_file",
     label: "Read File",
     description:
-      "Reads a UTF-8 text file from inside the workspace. Use list_files first when the user gives a directory.",
+      "Reads a bounded UTF-8 text-file segment from inside the workspace. Use offsetBytes and maxBytes to page through large files, and list_files first when the user gives a directory.",
     parameters: readFileParameters,
     executionMode: "sequential",
     execute: async (_toolCallId: string, args: ReadFileParameters) => {
       const resolvedPath = await resolveWorkspacePath(resolvedWorkspaceDir, args.path);
-      const content = await readFile(resolvedPath, "utf8");
+      const result = await readWorkspaceTextFileRange({
+        resolvedPath,
+        requestedPath: args.path,
+        offsetBytes: args.offsetBytes,
+        maxBytes: args.maxBytes
+      });
 
       return {
-        content: [{ type: "text", text: content }],
-        details: { path: args.path }
+        content: [{ type: "text", text: result.content }],
+        details: result.details
       };
     }
   };
