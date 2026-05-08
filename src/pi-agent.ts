@@ -2,9 +2,32 @@ import process from "node:process";
 import { pathToFileURL } from "node:url";
 import { main } from "./agent/agent-cli.js";
 
-export * from "./agent/agent-prompts.js";
-export * from "./agent/agent-routing.js";
-export * from "./agent/agent-runtime.js";
+export {
+  DEFAULT_SYSTEM_PROMPT,
+  DESIGN_SUBAGENT_SYSTEM_PROMPT,
+  PAPER_DOWNLOAD_SUBAGENT_SYSTEM_PROMPT,
+  PAPER_WRITING_WORKER_SYSTEM_PROMPT,
+  WIKI_EVIDENCE_WORKER_SYSTEM_PROMPT
+} from "./agent/agent-prompts.js";
+export {
+  parsePaperWritingWorkerCommand,
+  routeChatPromptToWorker
+} from "./agent/agent-routing.js";
+export type {
+  RoutedWorkerPrompt,
+  RoutedWorkerRole,
+  WorkerHandoff
+} from "./agent/agent-routing.js";
+export {
+  runAgentTurn,
+  runSessionPrompt
+} from "./agent/agent-runtime.js";
+export type {
+  AgentMessageEventHandler,
+  RunAgentTurnOptions,
+  RunAgentTurnResult,
+  SessionPromptResult
+} from "./agent/agent-runtime.js";
 export {
   applyModelBaseUrlOverride,
   consumePromptLines,
