@@ -1,15 +1,11 @@
-import { writeFile } from "node:fs/promises";
 import path from "node:path";
 import { Type, type Static } from "@mariozechner/pi-ai";
 import type { AgentTool, AgentToolUpdateCallback } from "@mariozechner/pi-agent-core";
 import type { AgentTools, ToolDependencies, ToolSetMetadata } from "./tool-types.js";
 export type { AgentTools, ToolDependencies } from "./tool-types.js";
-import {
-  createFileTools,
-  relativeWorkspacePath,
-  resolveWorkspaceWritablePath
-} from "./file-tools.js";
+import { createFileTools } from "./file-tools.js";
 import { createWebTools } from "./web-tools.js";
+import { createDesignTools } from "./design-tools.js";
 import {
   createPaperTools,
   paperReaderEngineParameter,
@@ -147,49 +143,6 @@ const answerPaperWikiQuestionParameters = Type.Object({
       description: "Maximum wiki source summaries or fallback local matches to return. Defaults to 8.",
       minimum: 1
     })
-  )
-});
-
-const writeDesignArtifactParameters = Type.Object({
-  artifactType: Type.Union([
-    Type.Literal("design_record"),
-    Type.Literal("verification_report"),
-    Type.Literal("failure_record"),
-    Type.Literal("benchmark_case")
-  ], {
-    description:
-      "Design artifact type. Use design_record for proposals, verification_report for checks, failure_record for failed attempts, and benchmark_case for reusable evaluation tasks."
-  }),
-  title: Type.String({ description: "Human-readable artifact title." }),
-  artifactKey: Type.Optional(
-    Type.String({
-      description:
-        "Optional filename-safe artifact key. Defaults to a sanitized title."
-    })
-  ),
-  status: Type.Optional(
-    Type.Union([
-      Type.Literal("proposed"),
-      Type.Literal("source-supported"),
-      Type.Literal("tool-verified"),
-      Type.Literal("expert-approved"),
-      Type.Literal("assumed"),
-      Type.Literal("unsupported"),
-      Type.Literal("failed")
-    ], {
-      description:
-        "Verification status for the artifact. Defaults to proposed."
-    })
-  ),
-  contentMarkdown: Type.String({
-    description:
-      "Full grounded markdown body. Include design goal, assumptions, evidence, checks, failure mode/root cause when applicable, reusable lesson, and open questions."
-  }),
-  relatedWikiPages: Type.Optional(
-    Type.Array(Type.String({ description: "Related wiki synthesis page key." }))
-  ),
-  sourceKeys: Type.Optional(
-    Type.Array(Type.String({ description: "Related wiki source summary or parsed paper key." }))
   )
 });
 
@@ -404,7 +357,6 @@ type PaperWikiRelationsParameters = Static<typeof paperWikiRelationsParameters>;
 type SearchPaperWikiParameters = Static<typeof searchPaperWikiParameters>;
 type WikiLintParameters = Static<typeof wikiLintParameters>;
 type AnswerPaperWikiQuestionParameters = Static<typeof answerPaperWikiQuestionParameters>;
-type WriteDesignArtifactParameters = Static<typeof writeDesignArtifactParameters>;
 type AnswerResearchQuestionParameters = Static<typeof answerResearchQuestionParameters>;
 type BootstrapWikiPageEvidenceParameters = Static<typeof bootstrapWikiPageEvidenceParameters>;
 type BuildWikiPageParameters = Static<typeof buildWikiPageParameters>;
@@ -416,61 +368,6 @@ type ListLocalPapersParameters = Static<typeof listLocalPapersParameters>;
 type SearchLocalPapersParameters = Static<typeof searchLocalPapersParameters>;
 type WikiHealthParameters = Static<typeof wikiHealthParameters>;
 type WikiHealthFixParameters = Static<typeof wikiHealthFixParameters>;
-
-const DESIGN_ARTIFACT_DIRECTORIES: Record<WriteDesignArtifactParameters["artifactType"], string> = {
-  design_record: "design-records",
-  verification_report: "verification-reports",
-  failure_record: "failures",
-  benchmark_case: "benchmark-cases"
-};
-
-function formatFrontmatterString(value: string): string {
-  return JSON.stringify(value);
-}
-
-function formatFrontmatterList(values: readonly string[] | undefined): string {
-  if (!values || values.length === 0) {
-    return "[]";
-  }
-  return `\n${values.map((value) => `  - ${formatFrontmatterString(value)}`).join("\n")}`;
-}
-
-function formatDesignArtifactMarkdown(args: WriteDesignArtifactParameters): string {
-  const status = args.status ?? "proposed";
-  const relatedWikiPages = args.relatedWikiPages ?? [];
-  const sourceKeys = args.sourceKeys ?? [];
-  return `---
-type: ${args.artifactType}
-title: ${formatFrontmatterString(args.title)}
-status: ${status}
-created_at: ${new Date().toISOString()}
-related_wiki_pages:${formatFrontmatterList(relatedWikiPages)}
-source_keys:${formatFrontmatterList(sourceKeys)}
----
-
-# ${args.title}
-
-${args.contentMarkdown.trimEnd()}
-`;
-}
-
-async function writeDesignArtifact(
-  workspaceDir: string,
-  args: WriteDesignArtifactParameters
-): Promise<{ artifactType: WriteDesignArtifactParameters["artifactType"]; path: string; bytes: number; title: string }> {
-  const artifactKey = sanitizeWikiFilename(args.artifactKey ?? args.title);
-  const directory = DESIGN_ARTIFACT_DIRECTORIES[args.artifactType];
-  const relativePath = `knowledge-base/design-records/${directory}/${artifactKey}.md`;
-  const resolvedPath = await resolveWorkspaceWritablePath(workspaceDir, relativePath);
-  const content = formatDesignArtifactMarkdown(args);
-  await writeFile(resolvedPath, content, "utf8");
-  return {
-    artifactType: args.artifactType,
-    path: relativeWorkspacePath(workspaceDir, resolvedPath),
-    bytes: Buffer.byteLength(content, "utf8"),
-    title: args.title
-  };
-}
 
 type WritePaperWikiSourceTool = AgentTool<
   typeof writePaperWikiSourceParameters,
@@ -491,10 +388,6 @@ type SearchPaperWikiTool = AgentTool<
 type WikiLintTool = AgentTool<
   typeof wikiLintParameters,
   Awaited<ReturnType<typeof lintPaperWiki>>
->;
-type WriteDesignArtifactTool = AgentTool<
-  typeof writeDesignArtifactParameters,
-  Awaited<ReturnType<typeof writeDesignArtifact>>
 >;
 type AnswerPaperWikiQuestionDetails = {
   query: string;
@@ -1227,6 +1120,9 @@ export function createTools(workspaceDir: string, dependencies: ToolDependencies
     workspaceDir: resolvedWorkspaceDir,
     dependencies
   });
+  const designTools = createDesignTools({
+    workspaceDir: resolvedWorkspaceDir
+  });
   const paperTools = createPaperTools({
     workspaceDir: resolvedWorkspaceDir,
     dependencies
@@ -1385,23 +1281,6 @@ export function createTools(workspaceDir: string, dependencies: ToolDependencies
         workspaceDir: resolvedWorkspaceDir,
         ...(args.maxItems !== undefined ? { maxItems: args.maxItems } : {})
       });
-
-      return {
-        content: [{ type: "text", text: JSON.stringify(result) }],
-        details: result
-      };
-    }
-  };
-
-  const writeDesignArtifactTool: WriteDesignArtifactTool = {
-    name: "write_design_artifact",
-    label: "Write Design Artifact",
-    description:
-      "Writes a structured chip-design artifact under knowledge-base/design-records/. Use this for minimal design-subagent outputs: design records, verification reports, failure records, and benchmark cases. This tool cannot write wiki pages, paper source summaries, or arbitrary workspace files.",
-    parameters: writeDesignArtifactParameters,
-    executionMode: "sequential",
-    execute: async (_toolCallId: string, args: WriteDesignArtifactParameters) => {
-      const result = await writeDesignArtifact(resolvedWorkspaceDir, args);
 
       return {
         content: [{ type: "text", text: JSON.stringify(result) }],
@@ -2262,7 +2141,7 @@ export function createTools(workspaceDir: string, dependencies: ToolDependencies
       generatePaperWikiSummaryTool,
       paperWikiRelationsTool,
       searchPaperWikiTool,
-      writeDesignArtifactTool,
+      ...designTools.fullTools,
       ...fileTools.tailFullTools,
       listLocalPapersTool,
       ...webTools.fullTools,
