@@ -29,10 +29,7 @@ import {
   type RoutedWorkerRole,
   type WorkerHandoff
 } from "./agent-routing.js";
-import {
-  DEFAULT_SYSTEM_PROMPT,
-  WIKI_EVIDENCE_WORKER_SYSTEM_PROMPT
-} from "./agent-prompts.js";
+import { WIKI_EVIDENCE_WORKER_SYSTEM_PROMPT } from "./agent-prompts.js";
 
 type LlmMessage = UserMessage | AssistantMessage | ToolResultMessage;
 type AgentMessageEventHandler = (event: AgentEvent) => Promise<void> | void;
@@ -46,6 +43,10 @@ const TRANSIENT_MODEL_RETRY_PATTERNS = [
   /service unavailable/i,
   /\b503\b/i
 ];
+
+export function forgetAgentContextWorkspaceDir(context: AgentContext): void {
+  contextWorkspaceDirs.delete(context);
+}
 
 export interface RunAgentTurnOptions {
   model: Model<Api>;

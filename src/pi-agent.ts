@@ -46,6 +46,7 @@ export type {
 import { DEFAULT_SYSTEM_PROMPT } from "./agent/agent-prompts.js";
 import {
   compactOutputText,
+  forgetAgentContextWorkspaceDir,
   getAssistantText,
   isRecord,
   runSessionPrompt,
@@ -560,6 +561,7 @@ async function runRpcMode(options: {
   } finally {
     repl.close();
     await cleanupTools(context.tools);
+    forgetAgentContextWorkspaceDir(context);
   }
 }
 
@@ -772,6 +774,7 @@ export async function main(argv = process.argv.slice(2)): Promise<void> {
     await refreshAgentChatSessionDownloadQueue(sessionStats);
     process.stdout.write(formatAgentChatSessionStats(sessionStats));
     await cleanupTools(context.tools);
+    forgetAgentContextWorkspaceDir(context);
   }
 }
 
