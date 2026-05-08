@@ -4,6 +4,8 @@ import path from "node:path";
 import { promisify } from "node:util";
 import { Type, type Static } from "@mariozechner/pi-ai";
 import type { AgentTool, AgentToolUpdateCallback } from "@mariozechner/pi-agent-core";
+import type { AgentTools, ToolDependencies, ToolSetMetadata } from "./tool-types.js";
+export type { AgentTools, ToolDependencies } from "./tool-types.js";
 import {
   getPaperBrowserProfileDir,
   resolveDefaultPaperBrowserSessionFactory,
@@ -41,13 +43,11 @@ import {
 import { lintPaperWiki } from "./paper-wiki/lint.js";
 import type {
   PaperWikiPageBootstrapResult,
-  PaperWikiPageWorker,
   PaperWikiPageWorkerOutput
 } from "./paper-wiki/types.js";
 import {
   generatePaperWikiSummary,
-  type PaperSummaryProgress,
-  type PaperSummaryWorker
+  type PaperSummaryProgress
 } from "./paper-summary.js";
 import { paperWikiRelations } from "./paper-relations.js";
 import {
@@ -55,8 +55,7 @@ import {
   type PaperExtensionBridge
 } from "./paper-extension-bridge.js";
 import {
-  createPaperBrowserManagerClient,
-  type PaperBrowserManagerClient
+  createPaperBrowserManagerClient
 } from "./paper-browser-manager-client.js";
 import { createPaperBrowserManagerServer, startPaperBrowserManagerHttpServer } from "./paper-browser-manager-server.js";
 import { searchApsPapers } from "./aps-search.js";
@@ -77,7 +76,6 @@ import {
 import {
   checkWikiHealth,
   fixWikiHealth,
-  type PaperDownloadWorker,
   type WikiHealthFixProgress
 } from "./wiki-health.js";
 import {
@@ -91,8 +89,7 @@ import type { PaperRecord } from "./paper-types.js";
 import {
   getToolBoundaryToolNames as getToolBoundaryToolNamesFromBoundaryModule,
   TOOL_BOUNDARY_NAMES,
-  type ToolBoundaryRole,
-  type ToolProfile
+  type ToolBoundaryRole
 } from "./tool-boundaries.js";
 
 const execFileAsync = promisify(execFile);
@@ -1347,10 +1344,6 @@ type OpenPaperPageForLoginResult = {
   profileDir?: string;
   executablePath?: string;
 };
-type OpenPaperPageForLoginDependency = (options: {
-  workspaceDir: string;
-  url: string;
-}) => Promise<OpenPaperPageForLoginResult>;
 type WritePaperWikiSourceTool = AgentTool<
   typeof writePaperWikiSourceParameters,
   Awaited<ReturnType<typeof writePaperWikiSource>>
@@ -1962,49 +1955,6 @@ async function assertDownloadedFileIsPdf(pdfPath: string): Promise<void> {
     throw new PaperDownloadError("download_failed", "Downloaded file is not a valid PDF.");
   }
 }
-
-export interface ToolDependencies {
-  searchWeb?: typeof searchWeb;
-  fetchWebPage?: typeof fetchWebPage;
-  fetchPaperWebPage?: typeof fetchPaperWebPage;
-  savePaperWebPageParse?: typeof savePaperWebPageParse;
-  searchPapers?: typeof searchPapers;
-  searchApsPapers?: typeof searchApsPapers;
-  downloadPaper?: typeof downloadPaper;
-  registerManualPaperDownload?: typeof registerManualPaperDownload;
-  parsePaper?: typeof parsePaper;
-  inspectPaper?: typeof inspectPaper;
-  readPaperSection?: typeof readPaperSection;
-  searchPaperText?: typeof searchPaperText;
-  writePaperWikiSource?: typeof writePaperWikiSource;
-  writePaperWikiPage?: typeof writePaperWikiPage;
-  generatePaperWikiSummary?: typeof generatePaperWikiSummary;
-  paperWikiRelations?: typeof paperWikiRelations;
-  bootstrapPaperWikiPageEvidence?: typeof bootstrapPaperWikiPageEvidence;
-  lintPaperWiki?: typeof lintPaperWiki;
-  paperSummaryWorker?: PaperSummaryWorker;
-  paperWikiPageWorker?: PaperWikiPageWorker;
-  searchPaperWiki?: typeof searchPaperWiki;
-  listLocalPapers?: typeof listLocalPapers;
-  searchLocalPapers?: typeof searchLocalPapers;
-  checkWikiHealth?: typeof checkWikiHealth;
-  fixWikiHealth?: typeof fixWikiHealth;
-  paperDownloadWorker?: PaperDownloadWorker;
-  openPaperPageForLogin?: OpenPaperPageForLoginDependency;
-  browserSessionFactory?: ReturnType<typeof resolveDefaultPaperBrowserSessionFactory>;
-  paperBrowserManagerClient?: PaperBrowserManagerClient;
-  extensionBridge?: PaperExtensionBridge;
-  usePlaywrightPaperFallback?: boolean;
-  allowBuildWikiPageExternalEvidence?: boolean;
-  toolProfile?: ToolProfile;
-}
-
-interface ToolSetMetadata {
-  cleanup: () => Promise<void>;
-  workspaceDir: string;
-}
-
-export type AgentTools = AgentTool<any>[] & ToolSetMetadata;
 
 type ToolProgress = PaperSummaryProgress | WikiHealthFixProgress | ResearchWorkflowProgress;
 
