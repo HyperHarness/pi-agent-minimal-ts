@@ -1515,40 +1515,62 @@ test("get_time returns text content", async () => {
   }
 });
 
+const EXPECTED_DEFAULT_TOOL_NAMES = [
+  "list_files",
+  "read_file",
+  "write_file",
+  "replace_file_text",
+  "delete_file",
+  "compile_latex",
+  "web_search",
+  "fetch_url",
+  "search_papers",
+  "download_paper",
+  "block_paper_download",
+  "inspect_paper",
+  "read_paper_section",
+  "search_paper_text",
+  "answer_paper_wiki_question",
+  "answer_research_question",
+  "bootstrap_wiki_page_evidence",
+  "build_wiki_page",
+  "merge_wiki_aliases",
+  "clarify_research_topic",
+  "research_topic_bootstrap",
+  "expand_research_topic",
+  "search_local_papers",
+  "wiki_health",
+  "wiki_lint",
+  "wiki_health_fix",
+] as const;
+
+const EXPECTED_FULL_ONLY_TOOL_NAMES = [
+  "write_paper_wiki_source",
+  "generate_paper_wiki_summary",
+  "paper_wiki_relations",
+  "search_paper_wiki",
+  "write_design_artifact",
+  "load_paper_writing_skill",
+  "list_local_papers",
+  "fetch_paper_webpage",
+  "register_manual_paper_download",
+  "open_paper_page_for_login",
+  "parse_paper",
+] as const;
+
+const EXPECTED_FULL_TOOL_NAMES = [
+  "get_time",
+  ...EXPECTED_DEFAULT_TOOL_NAMES,
+  ...EXPECTED_FULL_ONLY_TOOL_NAMES,
+] as const;
+
 test("createTools exposes the minimal default tool set", async () => {
   const workspace = await mkdtemp(path.join(tmpdir(), "pi-agent-tools-"));
 
   try {
     const tools = createTools(workspace);
     const toolNames = tools.map((tool) => tool.name);
-    assert.deepEqual(toolNames, [
-      "list_files",
-      "read_file",
-      "write_file",
-      "replace_file_text",
-      "delete_file",
-      "compile_latex",
-      "web_search",
-      "fetch_url",
-      "search_papers",
-      "download_paper",
-      "block_paper_download",
-      "inspect_paper",
-      "read_paper_section",
-      "search_paper_text",
-      "answer_paper_wiki_question",
-      "answer_research_question",
-      "bootstrap_wiki_page_evidence",
-      "build_wiki_page",
-      "merge_wiki_aliases",
-      "clarify_research_topic",
-      "research_topic_bootstrap",
-      "expand_research_topic",
-      "search_local_papers",
-      "wiki_health",
-      "wiki_lint",
-      "wiki_health_fix",
-    ]);
+    assert.deepEqual(toolNames, [...EXPECTED_DEFAULT_TOOL_NAMES]);
 
     const webSearchTool = tools.find((tool) => tool.name === "web_search");
     const searchPapersTool = tools.find((tool) => tool.name === "search_papers");
@@ -1577,46 +1599,7 @@ test("createTools full profile exposes every built-in tool", async () => {
   try {
     const tools = createTools(workspace, { toolProfile: "full" });
     const toolNames = tools.map((tool) => tool.name);
-    assert.deepEqual(toolNames, [
-      "get_time",
-      "list_files",
-      "read_file",
-      "write_file",
-      "replace_file_text",
-      "delete_file",
-      "compile_latex",
-      "web_search",
-      "fetch_url",
-      "search_papers",
-      "download_paper",
-      "block_paper_download",
-      "inspect_paper",
-      "read_paper_section",
-      "search_paper_text",
-      "answer_paper_wiki_question",
-      "answer_research_question",
-      "bootstrap_wiki_page_evidence",
-      "build_wiki_page",
-      "merge_wiki_aliases",
-      "clarify_research_topic",
-      "research_topic_bootstrap",
-      "expand_research_topic",
-      "search_local_papers",
-      "wiki_health",
-      "wiki_lint",
-      "wiki_health_fix",
-      "write_paper_wiki_source",
-      "generate_paper_wiki_summary",
-      "paper_wiki_relations",
-      "search_paper_wiki",
-      "write_design_artifact",
-      "load_paper_writing_skill",
-      "list_local_papers",
-      "fetch_paper_webpage",
-      "register_manual_paper_download",
-      "open_paper_page_for_login",
-      "parse_paper",
-    ]);
+    assert.deepEqual(toolNames, [...EXPECTED_FULL_TOOL_NAMES]);
   } finally {
     await rm(workspace, { recursive: true, force: true });
   }
@@ -1671,6 +1654,25 @@ test("createToolsForBoundary exposes isolated wiki and worker tool surfaces", as
     assert.ok(!writingTools.some((tool) => tool.name === "generate_paper_wiki_summary"));
     assert.ok(!writingTools.some((tool) => tool.name === "build_wiki_page"));
     assert.ok(!writingTools.some((tool) => tool.name === "write_paper_wiki_source"));
+  } finally {
+    await rm(workspace, { recursive: true, force: true });
+  }
+});
+
+test("createToolsForBoundary keeps every boundary in declared order", async () => {
+  const workspace = await mkdtemp(path.join(tmpdir(), "pi-agent-tools-"));
+
+  try {
+    for (const role of [
+      "wiki-agent",
+      "paper-download-subagent",
+      "wiki-evidence-worker",
+      "design-subagent",
+      "paper-writing-worker",
+    ] as const) {
+      const tools = createToolsForBoundary(workspace, role);
+      assert.deepEqual(tools.map((tool) => tool.name), getToolBoundaryToolNames(role));
+    }
   } finally {
     await rm(workspace, { recursive: true, force: true });
   }
