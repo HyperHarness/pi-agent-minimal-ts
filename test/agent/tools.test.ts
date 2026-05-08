@@ -11,7 +11,10 @@ import type {
 } from "../../src/agent/paper-types.js";
 import * as agentTools from "../../src/agent/tools.js";
 import { createTools, createToolsForBoundary, getToolBoundaryToolNames } from "../../src/agent/tools.js";
-import { getToolBoundaryToolNames as getToolBoundaryToolNamesFromBoundaryModule } from "../../src/agent/tool-boundaries.js";
+import {
+  getToolBoundaryToolNames as getToolBoundaryToolNamesFromBoundaryModule,
+  TOOL_BOUNDARY_NAMES as TOOL_BOUNDARY_NAMES_FROM_BOUNDARY_MODULE
+} from "../../src/agent/tool-boundaries.js";
 import {
   resolvePaperPdfPath,
   updatePaperRecordParseManifest,
@@ -1679,6 +1682,8 @@ test("createToolsForBoundary keeps every boundary in declared order", async () =
 });
 
 test("tools module re-exports tool boundary names from the boundary module", () => {
+  assert.equal(agentTools.TOOL_BOUNDARY_NAMES, TOOL_BOUNDARY_NAMES_FROM_BOUNDARY_MODULE);
+
   for (const role of [
     "wiki-agent",
     "paper-download-subagent",

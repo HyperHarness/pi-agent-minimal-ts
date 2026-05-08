@@ -15,6 +15,7 @@ import {
 } from "./tool-boundaries.js";
 
 export type { AgentTools, ToolDependencies } from "./tool-types.js";
+export { TOOL_BOUNDARY_NAMES };
 
 export async function cleanupTools(tools: ReadonlyArray<AgentTool<any>> | undefined): Promise<void> {
   const cleanup = (tools as Partial<ToolSetMetadata> | undefined)?.cleanup;
