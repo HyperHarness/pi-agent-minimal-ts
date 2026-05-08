@@ -1821,10 +1821,12 @@ test("fetch_url delegates to the injected fetch client and returns JSON text wit
   }
 });
 
-test("fetch_paper_webpage delegates to the injected article webpage client and returns JSON text with details", async () => {
+test("fetch_paper_webpage saves full article text but returns compact JSON for model context", async () => {
   const workspace = await mkdtemp(path.join(tmpdir(), "pi-agent-tools-"));
   const capturedCalls: Array<{ url: string }> = [];
   const capturedSaves: Array<{ paperKey?: string; force?: boolean; markdown: string }> = [];
+  const largeMarkdown = `# Paper title\n\n${"Full article text. ".repeat(500)}`;
+  const largeAsset = Buffer.from("fake image bytes").toString("base64").repeat(500);
 
   try {
     const fetchPaperWebpageTool = getFetchPaperWebpageTool(workspace, {
@@ -1833,7 +1835,15 @@ test("fetch_paper_webpage delegates to the injected article webpage client and r
         return {
           url: options.url,
           title: "Paper title",
-          markdown: "# Paper title\n\nFull article text.",
+          markdown: largeMarkdown,
+          assets: [
+            {
+              url: "https://example.com/figure.png",
+              dataBase64: largeAsset,
+              mimeType: "image/png",
+              alt: "Figure",
+            },
+          ],
           metadata: {
             title: "Paper title",
             doi: "10.1234/example",
@@ -1895,7 +1905,13 @@ test("fetch_paper_webpage delegates to the injected article webpage client and r
     const expected = {
       url: "https://example.com/article",
       title: "Paper title",
-      markdown: "# Paper title\n\nFull article text.",
+      markdownPreview: `${largeMarkdown.slice(0, 1999).trimEnd()}...`,
+      markdownChars: largeMarkdown.length,
+      markdownOmitted: true,
+      assets: {
+        count: 1,
+        omittedDataBase64: true,
+      },
       metadata: {
         title: "Paper title",
         doi: "10.1234/example",
@@ -1937,13 +1953,17 @@ test("fetch_paper_webpage delegates to the injected article webpage client and r
         },
         sections: [],
       },
+      nextSteps: [
+        "Use savedParse.paperKey with read_paper_section or search_paper_text for targeted reading.",
+        "Use savedParse.artifacts.markdownPath if you need the full saved markdown file.",
+      ],
     };
     assert.deepEqual(capturedCalls, [{ url: "https://example.com/article" }]);
     assert.deepEqual(capturedSaves, [
       {
         paperKey: "example-paper",
         force: true,
-        markdown: "# Paper title\n\nFull article text.",
+        markdown: largeMarkdown,
       },
     ]);
     assert.deepEqual(result.content, [
@@ -1953,6 +1973,8 @@ test("fetch_paper_webpage delegates to the injected article webpage client and r
       },
     ]);
     assert.deepEqual(result.details, expected);
+    assert.ok(!result.content?.[0]?.text?.includes("dataBase64"));
+    assert.ok(!result.content?.[0]?.text?.includes(largeMarkdown));
   } finally {
     await rm(workspace, { recursive: true, force: true });
   }

@@ -22,6 +22,7 @@ import { searchWeb, type WebSearchResult } from "./web-search.js";
 
 const MAX_SEARCH_RESULT_PREVIEWS = 5;
 const MAX_SEARCH_PREVIEW_TEXT_LENGTH = 220;
+const MAX_PAPER_WEBPAGE_MARKDOWN_PREVIEW_LENGTH = 2_000;
 
 const webSearchParameters = Type.Object({
   query: Type.String({ description: "Search query string." }),
@@ -78,9 +79,7 @@ type WebSearchTool = AgentTool<
 >;
 type FetchUrlTool = AgentTool<typeof fetchUrlParameters, { url: string }>;
 type FetchPaperWebpageDetails =
-  | (Awaited<ReturnType<typeof fetchPaperWebPage>> & {
-      savedParse?: Awaited<ReturnType<typeof savePaperWebPageParse>>;
-    })
+  | CompactPaperWebpageDetails
   | (Awaited<ReturnType<PaperExtensionBridge["submitJob"]>> & {
       purpose: "webpage";
       directFetchError: string;
@@ -89,6 +88,23 @@ type FetchPaperWebpageTool = AgentTool<
   typeof fetchPaperWebpageParameters,
   FetchPaperWebpageDetails
 >;
+
+type CompactPaperWebpageDetails = {
+  url: string;
+  title?: string;
+  markdownPreview: string;
+  markdownChars: number;
+  markdownOmitted: boolean;
+  assets?: {
+    count: number;
+    omittedDataBase64: boolean;
+  };
+  metadata: Awaited<ReturnType<typeof fetchPaperWebPage>>["metadata"];
+  access: Awaited<ReturnType<typeof fetchPaperWebPage>>["access"];
+  stats: Awaited<ReturnType<typeof fetchPaperWebPage>>["stats"];
+  savedParse?: Awaited<ReturnType<typeof savePaperWebPageParse>>;
+  nextSteps: string[];
+};
 
 function compactPreviewText(value: string | undefined, maxLength = MAX_SEARCH_PREVIEW_TEXT_LENGTH): string | undefined {
   const compacted = value?.replace(/\s+/g, " ").trim();
@@ -107,6 +123,55 @@ function summarizeWebSearchResults(results: WebSearchResult[]): SearchResultPrev
     url: result.url,
     summary: compactPreviewText(result.snippet)
   }));
+}
+
+function compactMarkdownPreview(markdown: string): {
+  markdownPreview: string;
+  markdownOmitted: boolean;
+} {
+  if (markdown.length <= MAX_PAPER_WEBPAGE_MARKDOWN_PREVIEW_LENGTH) {
+    return {
+      markdownPreview: markdown,
+      markdownOmitted: false
+    };
+  }
+
+  return {
+    markdownPreview: `${markdown
+      .slice(0, Math.max(0, MAX_PAPER_WEBPAGE_MARKDOWN_PREVIEW_LENGTH - 1))
+      .trimEnd()}...`,
+    markdownOmitted: true
+  };
+}
+
+function compactPaperWebpageOutput(input: {
+  result: Awaited<ReturnType<typeof fetchPaperWebPage>>;
+  savedParse?: Awaited<ReturnType<typeof savePaperWebPageParse>>;
+}): CompactPaperWebpageDetails {
+  const { markdownPreview, markdownOmitted } = compactMarkdownPreview(input.result.markdown);
+  return {
+    url: input.result.url,
+    ...(input.result.title ? { title: input.result.title } : {}),
+    markdownPreview,
+    markdownChars: input.result.markdown.length,
+    markdownOmitted,
+    ...(input.result.assets
+      ? {
+        assets: {
+          count: input.result.assets.length,
+          omittedDataBase64: true
+        }
+      }
+      : {}),
+    metadata: input.result.metadata,
+    access: input.result.access,
+    stats: input.result.stats,
+    ...(input.savedParse ? { savedParse: input.savedParse } : {}),
+    nextSteps: [
+      "Use savedParse.paperKey with read_paper_section or search_paper_text for targeted reading.",
+      "Use savedParse.artifacts.markdownPath if you need the full saved markdown file."
+    ]
+  };
 }
 
 async function updateRecordWithParseResult(input: {
@@ -219,7 +284,7 @@ export function createWebTools(input: {
     name: "fetch_paper_webpage",
     label: "Fetch Paper Webpage",
     description:
-      "Fetches a scientific paper article page and returns untruncated article markdown with navigation, header, footer, sharing, advertising, and recommendation noise removed. Prefer this over fetch_url when reading a publisher article webpage.",
+      "Fetches a scientific paper article page, saves the full cleaned article markdown under knowledge-base/wiki/sources, and returns compact metadata, a markdown preview, and saved artifact paths. Prefer this over fetch_url when reading a publisher article webpage.",
     parameters: fetchPaperWebpageParameters,
     execute: async (_toolCallId: string, args: FetchPaperWebpageParameters) => {
       try {
@@ -246,10 +311,7 @@ export function createWebTools(input: {
             });
           }
         }
-        const output = {
-          ...result,
-          ...(savedParse ? { savedParse } : {})
-        };
+        const output = compactPaperWebpageOutput({ result, savedParse });
 
         return {
           content: [{ type: "text", text: JSON.stringify(output) }],
