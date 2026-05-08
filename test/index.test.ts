@@ -5,8 +5,16 @@ import * as publicApi from "../src/index.js";
 import {
   applyModelBaseUrlOverride,
   createReplEventHandler,
+  DEFAULT_SYSTEM_PROMPT,
+  DESIGN_SUBAGENT_SYSTEM_PROMPT,
   main,
+  PAPER_DOWNLOAD_SUBAGENT_SYSTEM_PROMPT,
+  PAPER_WRITING_WORKER_SYSTEM_PROMPT,
   parseCliArgs,
+  parsePaperWritingWorkerCommand,
+  routeChatPromptToWorker,
+  runSessionPrompt,
+  WIKI_EVIDENCE_WORKER_SYSTEM_PROMPT,
   runAgentTurn
 } from "../src/pi-agent.js";
 import { resolveInitialModel } from "../src/agent/model-resolver.js";
@@ -18,6 +26,14 @@ test("public entrypoint re-exports the reusable library APIs", () => {
   assert.equal(publicApi.applyModelBaseUrlOverride, applyModelBaseUrlOverride);
   assert.equal(publicApi.createReplEventHandler, createReplEventHandler);
   assert.equal(publicApi.main, main);
+  assert.equal(publicApi.DEFAULT_SYSTEM_PROMPT, DEFAULT_SYSTEM_PROMPT);
+  assert.equal(publicApi.PAPER_DOWNLOAD_SUBAGENT_SYSTEM_PROMPT, PAPER_DOWNLOAD_SUBAGENT_SYSTEM_PROMPT);
+  assert.equal(publicApi.PAPER_WRITING_WORKER_SYSTEM_PROMPT, PAPER_WRITING_WORKER_SYSTEM_PROMPT);
+  assert.equal(publicApi.WIKI_EVIDENCE_WORKER_SYSTEM_PROMPT, WIKI_EVIDENCE_WORKER_SYSTEM_PROMPT);
+  assert.equal(publicApi.DESIGN_SUBAGENT_SYSTEM_PROMPT, DESIGN_SUBAGENT_SYSTEM_PROMPT);
+  assert.equal(publicApi.parsePaperWritingWorkerCommand, parsePaperWritingWorkerCommand);
+  assert.equal(publicApi.routeChatPromptToWorker, routeChatPromptToWorker);
+  assert.equal(publicApi.runSessionPrompt, runSessionPrompt);
   assert.equal(publicApi.resolveInitialModel, resolveInitialModel);
   assert.equal(publicApi.createTools, createTools);
   assert.equal(typeof publicApi.createPaperBrowserManagerClient, "function");

@@ -11,6 +11,7 @@ import type {
 } from "../../src/agent/paper-types.js";
 import * as agentTools from "../../src/agent/tools.js";
 import { createTools, createToolsForBoundary, getToolBoundaryToolNames } from "../../src/agent/tools.js";
+import { getToolBoundaryToolNames as getToolBoundaryToolNamesFromBoundaryModule } from "../../src/agent/tool-boundaries.js";
 import {
   resolvePaperPdfPath,
   updatePaperRecordParseManifest,
@@ -1672,6 +1673,18 @@ test("createToolsForBoundary exposes isolated wiki and worker tool surfaces", as
     assert.ok(!writingTools.some((tool) => tool.name === "write_paper_wiki_source"));
   } finally {
     await rm(workspace, { recursive: true, force: true });
+  }
+});
+
+test("tools module re-exports tool boundary names from the boundary module", () => {
+  for (const role of [
+    "wiki-agent",
+    "paper-download-subagent",
+    "wiki-evidence-worker",
+    "design-subagent",
+    "paper-writing-worker",
+  ] as const) {
+    assert.deepEqual(getToolBoundaryToolNames(role), getToolBoundaryToolNamesFromBoundaryModule(role));
   }
 });
 
