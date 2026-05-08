@@ -23,8 +23,9 @@ agent runtime + worker router
 
 - `src/agent/agent-cli.ts` 负责本地 CLI/RPC 进程形态，`src/agent/agent-runtime.ts` 负责一次 agent turn 怎么运行。
 - `src/agent/agent-routing.ts` 在进入默认 main agent 前识别 worker 意图，选择 `paper-download-subagent`、`wiki-evidence-worker`、`design-subagent` 或 `paper-writing-worker`。
-- `src/agent/tools.ts` 是工具装配中心，`src/agent/tool-boundaries.ts` 是 worker 可见工具面的白名单。
+- `src/agent/tools.ts` 是工具装配中心，按各领域工具 factory 的命名分组拼出默认/full 工具面；worker 可见工具面的白名单定义在 `src/agent/tool-types.ts`。
 - 论文能力分三层：检索/下载由 `paper-manager.ts` 和 `paper-download.ts` 承担，持久记录由 `paper-store.ts` 承担，解析和阅读由 `paper-reader/**` 承担。
+- 论文工具适配层位于 `src/agent/paper/tools.ts`，和 paper 领域服务放在同一目录树下。
 - Wiki 能力集中在 `src/agent/wiki/**`：store/content/bootstrap/lint/summary/relations/health 是领域服务，`wiki/tools.ts` 是 agent 工具适配层，`wiki/worker.ts` 承载 clean-context evidence worker。
 - 浏览器扩展不是 agent runtime 的一部分。agent 通过 `paper-extension-bridge.ts` 写 job；native host `paper-extension-host.ts` 被浏览器调用，再把下载或网页快照登记回本地库。
 - Feishu bridge 在 `src/feishu-bridge/**`，它是传输、队列、记忆、PDF 回传和仓库命令边界，不应该承载科学推理逻辑。
@@ -67,7 +68,7 @@ agent runtime + worker router
 
 ### 论文下载
 
-1. `search_papers` 工具进 `paper-tools.ts`，默认调用 `paper-manager.ts` 的 `searchPapers()`，组合 arXiv、APS、通用 web 检索。
+1. `search_papers` 工具进 `paper/tools.ts`，默认调用 `paper-manager.ts` 的 `searchPapers()`，组合 arXiv、APS、通用 web 检索。
 2. `download_paper` 调用 `paper-manager.ts` 的 `downloadPaper()`。它先查 blocklist 和本地记录，再按 source 选择 arXiv 直下、supported publisher、extension job 或 manual login。
 3. 低层 publisher 下载逻辑在 `paper-download.ts`；Science/Nature/APS 识别在 `publisher-adapters/**`。
 4. 下载结果由 `paper-store.ts` 写入 `knowledge-base/raw/papers`、`knowledge-base/raw/pdfs` 和 source metadata。
@@ -75,7 +76,7 @@ agent runtime + worker router
 
 ### 论文解析
 
-1. `parse_paper` 工具进 `paper-tools.ts`，默认调用 `paper-reader/paper-reader.ts`。
+1. `parse_paper` 工具进 `paper/tools.ts`，默认调用 `paper-reader/paper-reader.ts`。
 2. `paper-reader-store.ts` 定位 PDF、缓存目录和 parse artifact。
 3. `paper-reader.ts` 选择引擎：OpenDataLoader、Docling、TeX source、webpage 或 plain text baseline。
 4. `quality.ts` 评估 parse 质量，`chunks.ts` 生成检索块。
@@ -126,9 +127,8 @@ agent runtime + worker router
 | `src/agent/agent-runtime.ts` | 单 turn agentLoop、worker route 执行、工具生命周期、失败 turn 处理、瞬时模型错误重试。 | `agent-cli.ts`、顶层导出测试。 | `tools.ts`、`agent-routing.ts`、`paper-extension-bridge.ts`、`wiki/worker.ts`。 | 高耦合点是 routed worker 执行与 runtime tool 注入；改动要同时看 worker handoff、tool cleanup 和失败消息持久化。 |
 | `src/agent/agent-routing.ts` | 自然语言/显式前缀到 worker role 的路由，worker handoff 路径提取。 | `agent-runtime.ts`、`src/pi-agent.ts` 导出。 | `agent-prompts.ts`、Pi message type。 | 路由正则会影响用户请求归属；新增工具产物时同步 `extractWorkerHandoffPaths()`。 |
 | `src/agent/agent-prompts.ts` | main agent 与各 worker 的 system prompt 常量。 | `agent-routing.ts`、`agent-runtime.ts`、`pi-agent.ts`。 | 无运行时依赖。 | 修改 prompt 等同修改行为；同步 README 中 worker 边界说明和相关路由测试。 |
-| `src/agent/tools.ts` | 聚合 file/web/paper/wiki/design/health 工具，提供 full/default profile 与 boundary 工具过滤。 | `agent-runtime.ts`、测试、公共导出。 | `file-tools.ts`、`web-tools.ts`、`paper-tools.ts`、`wiki/tools.ts`、`design-tools.ts`、`library-health-tools.ts`、`tool-boundaries.ts`。 | 新工具必须同时考虑默认工具顺序、full profile、cleanup、boundary 白名单和测试。 |
-| `src/agent/tool-boundaries.ts` | 定义 `ToolProfile`、worker role、各 boundary 可见工具名。 | `tools.ts`、README/文档。 | 无运行时依赖。 | 这是安全/职责边界；新增工具不能只在 `tools.ts` 暴露，必须确认哪些 worker 可见。 |
-| `src/agent/tool-types.ts` | 工具依赖注入接口和工具集合 metadata 类型。 | 各 `*-tools.ts`、`tools.ts`。 | paper、wiki、browser、web 相关类型。 | 测试替身都从这里进来；改类型时优先保持可选依赖便于单测。 |
+| `src/agent/tools.ts` | 聚合 file/web/paper/wiki/design/health 工具，提供 full/default profile 与 boundary 工具过滤。 | `agent-runtime.ts`、测试、公共导出。 | `file-tools.ts`、`web-tools.ts`、`paper/tools.ts`、`wiki/tools.ts`、`library-health-tools.ts`、`tool-types.ts`。 | 新工具必须同时考虑默认工具顺序、full profile、cleanup、boundary 白名单和测试；默认顺序应来自领域 factory 的命名分组，避免靠数组 `slice()` 推断。 |
+| `src/agent/tool-types.ts` | 工具依赖注入接口、工具集合 metadata 类型、`ToolProfile`、worker role 和各 boundary 可见工具名。 | 各 `*-tools.ts`、`tools.ts`、README/文档。 | paper、wiki、browser、web 相关类型。 | 这是工具契约和安全边界 owner；新增工具不能只在 `tools.ts` 暴露，必须确认哪些 worker 可见。测试替身也从这里进来，改类型时优先保持可选依赖便于单测。 |
 | `src/agent/model-resolver.ts` | 从 CLI/env/auth 状态中选择初始 provider/model。 | `agent-cli.ts`、测试。 | `@mariozechner/pi-ai` 类型。 | 这是启动失败诊断热点；修改错误信息会影响用户排查和测试。 |
 | `src/agent/env-proxy.ts` | 从环境变量配置 undici 全局代理。 | `agent-cli.ts`、测试。 | `undici`。 | WSL/代理问题常落在这里；保持 env 读取集中。 |
 
@@ -136,33 +136,32 @@ agent runtime + worker router
 
 | 文件 | 职责 | 上游调用者 | 下游依赖 | 重构注意点 |
 | --- | --- | --- | --- | --- |
-| `src/agent/file-tools.ts` | workspace 受限文件读写、列表、删除、文本替换、时间、写作技能加载、LaTeX 编译。 | `tools.ts`、worker boundary。 | Node fs/path/child_process。 | 路径安全是核心；所有写操作必须经过 workspace 校验，CLI trace 依赖工具参数字段。 |
+| `src/agent/file-tools.ts` | workspace 受限文件读写、列表、删除、文本替换、时间、写作技能加载、LaTeX 编译、设计记录/工件写入工具。 | `tools.ts`、worker boundary。 | Node fs/path/child_process、`wiki/store.ts` 的 filename sanitizer。 | 路径安全是核心；所有写操作必须经过 workspace 校验，CLI trace 依赖工具参数字段。设计工件也留在 workspace 内，避免与论文/wiki 持久目录混淆。 |
 | `src/agent/web-tools.ts` | `web_search`、`fetch_url`、`fetch_paper_webpage` 工具包装。 | `tools.ts`。 | `web-search.ts`、`web-fetch.ts`、`paper-webpage-fetch.ts`。 | 区分普通网页抓取与论文网页抓取，避免把 publisher 解析逻辑塞进通用 fetch。 |
-| `src/agent/paper-tools.ts` | 论文检索/下载/blocklist/manual/login/parse/inspect/read/search 的 tool schema 和执行器。 | `tools.ts`、`wiki/tools.ts` 复用部分工具。 | `paper-manager.ts`、`paper-download.ts`、`paper-reader/**`、`paper-store.ts`、browser manager、extension bridge。 | 大文件；拆分时按 search/download/extension/reader 工具拆，但保持 tool name、details shape 和 boundary 测试不变。 |
 | `src/agent/library-health-tools.ts` | 本地论文列表/搜索、wiki health、wiki health fix 的 tool schema。 | `tools.ts`。 | `local-paper-library.ts`、`wiki/health.ts`、`paper-manager.ts`、`wiki/summary.ts`。 | `wiki_health_fix` 会触发下载/解析/总结；测试时优先用依赖注入隔离真实网络。 |
-| `src/agent/design-tools.ts` | 设计记录/工件写入工具。 | `tools.ts`、`design-subagent` boundary。 | `wiki/store.ts` 的 filename sanitizer、Node fs/path。 | 保持设计工件在 workspace 内，避免与论文/wiki 持久目录混淆。 |
 
 ### 论文检索、下载与记录
 
 | 文件 | 职责 | 上游调用者 | 下游依赖 | 重构注意点 |
 | --- | --- | --- | --- | --- |
 | `src/agent/paper/index.ts` | paper domain facade，统一导出论文获取、解析、存储、浏览器和扩展接口。 | `src/index.ts`、外部/测试导入者。 | `paper/**` 子模块和 `knowledge-base.ts` 路径 helper。 | 外部工具优先从这里或明确子域入口导入，避免重新穿透到旧平铺路径。 |
+| `src/agent/paper/tools.ts` | 论文检索/下载/blocklist/manual/login/parse/inspect/read/search 的 tool schema 和执行器。 | `tools.ts`、`wiki/tools.ts` 复用部分工具。 | `paper-manager.ts`、`paper-download.ts`、`paper-reader/**`、`paper-store.ts`、browser manager、extension bridge。 | 大文件；拆分时按 search/download/extension/reader 工具拆，但保持 tool name、details shape 和 boundary 测试不变。 |
 | `src/agent/paper/acquisition/arxiv.ts` | arXiv ID 解析、HTML URL 构造、搜索和 PDF 下载。 | `paper-manager.ts`、测试。 | Node/fetch。 | arXiv canonical id 会进入 paper key；改规范化逻辑要迁移或兼容旧记录。 |
 | `src/agent/paper/acquisition/aps-search.ts` | APS 检索结果解析和搜索。 | `paper-manager.ts`、测试。 | fetch/HTML 解析逻辑。 | APS 站点结构易变；保持 parser 单测覆盖真实样例 HTML。 |
 | `src/agent/network.ts` | 网络响应/错误处理小工具。 | 下载和 web 相关模块。 | fetch/Response 类型。 | 保持低层无业务语义，避免散落 publisher 特例。 |
 | `src/agent/web-search.ts` | agent 侧 web search provider 调用和结果规范化。 | `web-tools.ts`、`paper-manager.ts`。 | child_process 或外部检索命令。 | 与 Feishu bridge 的 `web/search.ts` 是两套实现；合并前先确认缓存和格式差异。 |
 | `src/agent/web-fetch.ts` | 普通网页内容抓取。 | `web-tools.ts`、测试。 | fetch。 | 不承担论文网页结构化解析；论文网页走 `paper-webpage-fetch.ts`。 |
-| `src/agent/paper/acquisition/paper-download.ts` | 低层 PDF 下载、publisher canonical id、supported publisher 下载。 | `paper-manager.ts`、`paper-tools.ts`、`paper-extension-host.ts`。 | publisher adapters、fetch、browser/session fallback。 | license/access/Cloudflare 错误分类会影响 fallback 和 blocklist；不要把高层策略塞进这里。 |
-| `src/agent/paper/acquisition/paper-manager.ts` | 高层论文检索/下载策略：去重、blocklist、arXiv fallback、publisher/manual/extension flow、APS batch。 | `paper-tools.ts`、`wiki/health.ts`、测试。 | `arxiv.ts`、`aps-search.ts`、`paper-download.ts`、`paper-store.ts`、`paper-blocklist.ts`、`publisher-access-state.ts`、browser/extension。 | 最大业务文件；拆分方向是 search aggregation、candidate ranking、download strategy、publisher fallback、manual registration。每步要保留 result shape。 |
+| `src/agent/paper/acquisition/paper-download.ts` | 低层 PDF 下载、publisher canonical id、supported publisher 下载。 | `paper-manager.ts`、`paper/tools.ts`、`paper-extension-host.ts`。 | publisher adapters、fetch、browser/session fallback。 | license/access/Cloudflare 错误分类会影响 fallback 和 blocklist；不要把高层策略塞进这里。 |
+| `src/agent/paper/acquisition/paper-manager.ts` | 高层论文检索/下载策略：去重、blocklist、arXiv fallback、publisher/manual/extension flow、APS batch。 | `paper/tools.ts`、`wiki/health.ts`、测试。 | `arxiv.ts`、`aps-search.ts`、`paper-download.ts`、`paper-store.ts`、`paper-blocklist.ts`、`publisher-access-state.ts`、browser/extension。 | 最大业务文件；拆分方向是 search aggregation、candidate ranking、download strategy、publisher fallback、manual registration。每步要保留 result shape。 |
 | `src/agent/paper/storage/paper-store.ts` | paper record/source metadata 路径、读写、查重、parse/reading 状态回写。 | `paper-manager.ts`、`paper-reader-store.ts`、`paper-extension-host.ts`、`wiki/health.ts`。 | `knowledge-base.ts`、`paper-types.ts`、Node fs/path/crypto。 | 这是数据格式 owner；改字段要兼容现有 JSON，优先加迁移/宽松读取。 |
 | `src/agent/paper/types.ts` | paper source、record、download/search/result 等共享类型。 | paper、reader、wiki、extension 多模块。 | 无运行时依赖。 | 类型是跨子系统契约；重命名状态值会波及测试和持久 JSON。 |
 | `src/agent/knowledge-base.ts` | 解析 workspace 下 knowledge-base/raw/wiki 路径。 | store、local library、wiki store。 | Node path。 | 路径布局 owner；不要在各模块硬编码新路径。 |
 | `src/agent/paper/storage/knowledge-paths.ts` | paper domain 对 knowledge-base 路径 helper 的 facade。 | `paper/index.ts`、边界测试。 | `knowledge-base.ts`。 | 当前只重导出路径 API；若后续拆 wiki/paper 路径，这里是兼容层。 |
 | `src/agent/paper/storage/local-paper-library.ts` | 扫描本地 paper records、parse manifest 和 source summaries，提供 list/search。 | `library-health-tools.ts`、`wiki/health.ts`、`wiki/bootstrap.ts`、`wiki/tools.ts`。 | `knowledge-base.ts`、`paper-download.ts`、reader types。 | 是 wiki/health 的本地索引层；搜索评分变更会影响 evidence bootstrap。 |
-| `src/agent/paper/acquisition/paper-blocklist.ts` | 下载 blocklist 读写、匹配和 paper key 推导。 | `paper-manager.ts`、`paper-tools.ts`、`wiki/health.ts`。 | `paper-types.ts`、Node fs/path。 | reason code 是运维语义；`download-blocked` 类健康降级依赖这里的匹配。 |
+| `src/agent/paper/acquisition/paper-blocklist.ts` | 下载 blocklist 读写、匹配和 paper key 推导。 | `paper-manager.ts`、`paper/tools.ts`、`wiki/health.ts`。 | `paper-types.ts`、Node fs/path。 | reason code 是运维语义；`download-blocked` 类健康降级依赖这里的匹配。 |
 | `src/agent/paper/acquisition/publisher-access-state.ts` | publisher 访问状态、Cloudflare cooldown 等持久状态。 | `paper-manager.ts`。 | Node fs/path。 | 限流/阻断判断影响是否访问真实 publisher；测试中保持 now/read/write 可注入。 |
 | `src/agent/paper/extension/paper-download-jobs.ts` | extension job event log 路径、追加、读取、汇总。 | `paper-manager.ts`、`paper-extension-bridge.ts`、`paper-extension-host.ts`、`agent-cli.ts`。 | `paper-types.ts`、extension protocol 类型。 | 这是队列事件源；新增 status/purpose 要同步 extension protocol 和 browser-extension 测试。 |
-| `src/agent/paper/extension/paper-extension-bridge.ts` | agent 侧创建 extension job，并提供 queued bridge 实现。 | `agent-runtime.ts`、`paper-manager.ts`、`paper-tools.ts`。 | `paper-download-jobs.ts`。 | 它只写 queue，不直接和浏览器通信；不要引入 native messaging 进程依赖。 |
+| `src/agent/paper/extension/paper-extension-bridge.ts` | agent 侧创建 extension job，并提供 queued bridge 实现。 | `agent-runtime.ts`、`paper-manager.ts`、`paper/tools.ts`。 | `paper-download-jobs.ts`。 | 它只写 queue，不直接和浏览器通信；不要引入 native messaging 进程依赖。 |
 
 ### Publisher adapters
 
@@ -178,10 +177,10 @@ agent runtime + worker router
 
 | 文件 | 职责 | 上游调用者 | 下游依赖 | 重构注意点 |
 | --- | --- | --- | --- | --- |
-| `src/agent/paper/browser/browser-session.ts` | Playwright/CDP/system Chrome 启动、manual login、授权状态分类。 | `paper-manager.ts`、`paper-tools.ts`、测试。 | Playwright、Node child_process/fs。 | 浏览器路径和 profile 逻辑跨 WSL/Windows；改动要跑 browser-session 相关测试。 |
+| `src/agent/paper/browser/browser-session.ts` | Playwright/CDP/system Chrome 启动、manual login、授权状态分类。 | `paper-manager.ts`、`paper/tools.ts`、测试。 | Playwright、Node child_process/fs。 | 浏览器路径和 profile 逻辑跨 WSL/Windows；改动要跑 browser-session 相关测试。 |
 | `src/agent/paper/browser/paper-browser-manager-types.ts` | browser manager HTTP API 类型。 | client/server/discovery。 | 无。 | API 类型要与 client/server 同步。 |
 | `src/agent/paper/browser/paper-browser-manager-discovery.ts` | browser manager metadata 文件读写、stale 判断、发现。 | `paper-browser-manager-client.ts`、测试。 | Node fs/path。 | metadata stale 规则影响是否复用浏览器 manager。 |
-| `src/agent/paper/browser/paper-browser-manager-client.ts` | 发现或启动 browser manager，并调用 open/download API。 | `paper-tools.ts`、测试。 | discovery、HTTP fetch、child_process。 | 进程启动和 HTTP 调用交织；拆分时保留 spawn result 兼容。 |
+| `src/agent/paper/browser/paper-browser-manager-client.ts` | 发现或启动 browser manager，并调用 open/download API。 | `paper/tools.ts`、测试。 | discovery、HTTP fetch、child_process。 | 进程启动和 HTTP 调用交织；拆分时保留 spawn result 兼容。 |
 | `src/agent/paper/browser/paper-browser-manager-server.ts` | browser manager HTTP server。 | browser manager 进程、测试。 | HTTP、manager types。 | 端口绑定在沙箱可能失败；测试中区分环境限制和逻辑失败。 |
 | `src/agent/paper/extension/paper-extension-protocol.ts` | native host 消息/响应类型和 runtime parser。 | `paper-extension-host.ts`、browser-extension 测试。 | `paper-types.ts`。 | 协议契约 owner；新增字段要保持 parser 严格但向后兼容可选字段。 |
 | `src/agent/paper/extension/paper-extension-host.ts` | native messaging 编解码、job polling、PDF/bytes/download path 登记、网页快照登记、manifest 写入。 | `src/paper-extension-host.ts`、浏览器 native host、测试。 | protocol、jobs、paper-store、paper-reader、paper-webpage-fetch。 | 大文件；拆分方向是 native framing、message handler、PDF registration、webpage registration、manifest。路径候选和 WSL 兼容要谨慎。 |
@@ -191,8 +190,8 @@ agent runtime + worker router
 
 | 文件 | 职责 | 上游调用者 | 下游依赖 | 重构注意点 |
 | --- | --- | --- | --- | --- |
-| `src/agent/paper/reading/types.ts` | 解析文档、section、quality、engine 等 reader 类型和 `PaperReaderError`。 | reader engines、paper-tools、wiki/health。 | 无。 | 这是 parse artifact 的类型契约；新增 engine/status 要同步 store 和 tests。 |
-| `src/agent/paper/reading/paper-reader.ts` | `parsePaper`、`inspectPaper`、`readPaperSection`、`searchPaperText` 的主编排。 | `paper-tools.ts`、`wiki/summary.ts`、`wiki/health.ts`。 | reader store、engines、quality、chunks。 | 解析 engine 选择和缓存策略集中在这里；改默认 engine 会影响大量行为。 |
+| `src/agent/paper/reading/types.ts` | 解析文档、section、quality、engine 等 reader 类型和 `PaperReaderError`。 | reader engines、`paper/tools.ts`、wiki/health。 | 无。 | 这是 parse artifact 的类型契约；新增 engine/status 要同步 store 和 tests。 |
+| `src/agent/paper/reading/paper-reader.ts` | `parsePaper`、`inspectPaper`、`readPaperSection`、`searchPaperText` 的主编排。 | `paper/tools.ts`、`wiki/summary.ts`、`wiki/health.ts`。 | reader store、engines、quality、chunks。 | 解析 engine 选择和缓存策略集中在这里；改默认 engine 会影响大量行为。 |
 | `src/agent/paper/reading/paper-reader-store.ts` | PDF/source 定位、parse artifact 路径、缓存读写、paper key 查找。 | `paper-reader.ts`、`paper-store.ts`、tests。 | `paper-store.ts`、Node fs/path/crypto。 | 保持 repo-managed-path 约束；外部路径放开会扩大安全面。 |
 | `src/agent/paper/reading/quality.ts` | Markdown/section parse 质量评分。 | `paper-reader.ts`、`webpage.ts`、`wiki/health.ts`。 | reader types。 | 健康检查和总结 gating 依赖评分阈值；改评分要同步测试预期。 |
 | `src/agent/paper/reading/chunks.ts` | 从 parsed document 生成检索 chunks。 | `paper-reader.ts`。 | reader types。 | chunk id 和位置字段影响 `search_paper_text` 结果。 |
@@ -209,14 +208,14 @@ agent runtime + worker router
 | --- | --- | --- | --- | --- |
 | `src/agent/wiki/index.ts` | wiki domain facade，统一导出 source/page/bootstrap/lint/summary/relations/health/worker API。 | `src/index.ts`、边界测试、外部复用者。 | `wiki/**` 子模块。 | 外部导入优先走这里或明确子域入口，避免重新形成散落路径。 |
 | `src/agent/wiki/types.ts` | wiki source/page/search/bootstrap/worker 类型。 | wiki tools、content、bootstrap、worker。 | 无。 | Worker JSON 输出契约在这里；字段变动要同步 prompt 和 parser。 |
-| `src/agent/wiki/store.ts` | wiki 目录、source/page/assets/manifests/state 路径和 scaffold。 | `content.ts`、`tools.ts`、`design-tools.ts`。 | `knowledge-base.ts`、Node fs/path。 | Wiki 路径 owner；共享文档要避免写死用户 home 路径。 |
+| `src/agent/wiki/store.ts` | wiki 目录、source/page/assets/manifests/state 路径和 scaffold。 | `content.ts`、`tools.ts`、`file-tools.ts` 的设计工件写入。 | `knowledge-base.ts`、Node fs/path。 | Wiki 路径 owner；共享文档要避免写死用户 home 路径。 |
 | `src/agent/wiki/content.ts` | 写 source summary、写 synthesis page、alias merge、wiki 搜索。 | `wiki/tools.ts`、`wiki/summary.ts`、tests。 | wiki store、types、paper reader store、Node fs。 | Source/page 文件格式 owner；搜索索引简单但被 answer/build flows 依赖。 |
 | `src/agent/wiki/bootstrap.ts` | 为新 wiki page 构建固定 evidence 包和 seed queries。 | `wiki/tools.ts`、tests。 | `local-paper-library.ts`、`wiki/content.ts`。 | 这是 no-page-yet bootstrap 入口；改 seed query 会改变页面覆盖范围。 |
 | `src/agent/wiki/lint.ts` | Wiki 结构和引用健康 lint。 | `wiki/tools.ts`、tests。 | wiki store、wiki types。 | lint severity 会影响 agent 修复建议；保持 issue kind 稳定。 |
 | `src/agent/wiki/summary.ts` | 从 parsed paper 构建 summary evidence，调用 worker 生成/写入 source summary。 | `wiki/tools.ts`、`library-health-tools.ts`、`wiki/health.ts`。 | `paper-reader.ts`、`wiki/content.ts`、`local-paper-library.ts`。 | 证据截断和 worker confidence gating 是质量关键；不要让 worker 无证据扩写。 |
 | `src/agent/wiki/relations.ts` | 发现和更新 source summary 的 related paper keys。 | `wiki/tools.ts`、`wiki/summary.ts`。 | `local-paper-library.ts`、`wiki/store.ts`。 | 关系评分会影响知识图谱；写入模式 append/replace 要保留。 |
 | `src/agent/wiki/health.ts` | 检查/修复 wiki、parse、summary、download 状态。 | `library-health-tools.ts`、tests。 | `local-paper-library.ts`、`paper-manager.ts`、`paper-reader.ts`、`paper-blocklist.ts`、`wiki/lint.ts`。 | 大文件；download-blocked 降级、自动下载、自动总结都在这里，拆分时保持 issue kind/status 稳定。 |
-| `src/agent/wiki/tools.ts` | Wiki source/page/relations/health answer/research/bootstrap/build/alias 相关工具编排。 | `tools.ts`。 | `wiki/**` 领域服务、`local-paper-library.ts`、`paper-tools.ts`。 | 最大耦合文件；优先拆分为 source tools、page tools、research-answer flow、topic expansion，同时保留外部证据禁用开关。 |
+| `src/agent/wiki/tools.ts` | Wiki source/page/relations/health answer/research/bootstrap/build/alias 相关工具编排。 | `tools.ts`。 | `wiki/**` 领域服务、`local-paper-library.ts`、`paper/tools.ts`。 | 最大耦合文件；优先拆分为 source tools、page tools、research-answer flow、topic expansion，同时保留外部证据禁用开关。 |
 | `src/agent/wiki/worker.ts` | 创建 clean-context `wiki-evidence-worker` summary/page 子任务，并解析 worker JSON 输出。 | `agent-runtime.ts`。 | `agent-prompts.ts`、`tools.ts` boundary、`agentLoop`。 | 递归工具过滤是关键，不能让 worker 直接调用 `generate_paper_wiki_summary` 或 `build_wiki_page` 形成自递归。 |
 
 ### Feishu bridge

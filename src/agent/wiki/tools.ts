@@ -29,7 +29,7 @@ import {
   paperReaderEngineParameter,
   type DownloadPaperClosedLoopDetails,
   type DownloadPaperReadingClosure
-} from "../paper-tools.js";
+} from "../paper/tools.js";
 
 const writePaperWikiSourceParameters = Type.Object({
   paperKey: Type.String({ description: "Parsed paper key, for example arxiv-2406.06015." }),
@@ -876,6 +876,10 @@ export function createWikiTools(input: {
   parsePaperTool: AgentTool<any>;
 }): {
   defaultTools: AgentTool<any>[];
+  defaultToolGroups: {
+    coreTools: AgentTool<any>[];
+    lintTools: AgentTool<any>[];
+  };
   fullTools: AgentTool<any>[];
 } {
   const resolvedWorkspaceDir = path.resolve(input.workspaceDir);
@@ -1837,20 +1841,27 @@ export function createWikiTools(input: {
       };
     }
   };
-
+  const coreTools = [
+    answerPaperWikiQuestionTool,
+    answerResearchQuestionTool,
+    bootstrapWikiPageEvidenceTool,
+    buildWikiPageTool,
+    mergeWikiAliasesTool,
+    clarifyResearchTopicTool,
+    researchTopicBootstrapTool,
+    expandResearchTopicTool
+  ];
+  const lintTools = [wikiLintTool];
 
   return {
     defaultTools: [
-      answerPaperWikiQuestionTool,
-      answerResearchQuestionTool,
-      bootstrapWikiPageEvidenceTool,
-      buildWikiPageTool,
-      mergeWikiAliasesTool,
-      clarifyResearchTopicTool,
-      researchTopicBootstrapTool,
-      expandResearchTopicTool,
-      wikiLintTool
+      ...coreTools,
+      ...lintTools
     ],
+    defaultToolGroups: {
+      coreTools,
+      lintTools
+    },
     fullTools: [
       writePaperWikiSourceTool,
       generatePaperWikiSummaryTool,

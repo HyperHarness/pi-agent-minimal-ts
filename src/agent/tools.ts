@@ -1,18 +1,19 @@
 import type { AgentTool } from "@mariozechner/pi-agent-core";
 import path from "node:path";
-import { createDesignTools } from "./design-tools.js";
 import { createFileTools } from "./file-tools.js";
 import { createLibraryHealthTools } from "./library-health-tools.js";
-import { createPaperTools } from "./paper-tools.js";
+import { createPaperTools } from "./paper/tools.js";
 import { createWebTools } from "./web-tools.js";
 import { createWikiTools } from "./wiki/tools.js";
-import type { AgentTools, ToolDependencies, ToolSetMetadata } from "./tool-types.js";
 import {
   getToolBoundaryToolNames as getToolBoundaryToolNamesFromBoundaryModule,
   TOOL_BOUNDARY_NAMES,
+  type AgentTools,
+  type ToolDependencies,
   type ToolBoundaryRole,
   type ToolProfile,
-} from "./tool-boundaries.js";
+  type ToolSetMetadata,
+} from "./tool-types.js";
 
 export type { AgentTools, ToolDependencies } from "./tool-types.js";
 export { TOOL_BOUNDARY_NAMES };
@@ -38,9 +39,6 @@ export function createTools(workspaceDir: string, dependencies: ToolDependencies
     workspaceDir: resolvedWorkspaceDir,
     dependencies
   });
-  const designTools = createDesignTools({
-    workspaceDir: resolvedWorkspaceDir
-  });
   const paperTools = createPaperTools({
     workspaceDir: resolvedWorkspaceDir,
     dependencies
@@ -56,26 +54,23 @@ export function createTools(workspaceDir: string, dependencies: ToolDependencies
     workspaceDir: resolvedWorkspaceDir,
     dependencies
   });
-  const wikiToolsBeforeLint = wikiTools.defaultTools.slice(0, -1);
-  const wikiLintTools = wikiTools.defaultTools.slice(-1);
-  const libraryHealthToolsBeforeLint = libraryHealthTools.defaultTools.slice(0, 2);
-  const libraryHealthToolsAfterLint = libraryHealthTools.defaultTools.slice(2);
 
   const tools = [
     ...fileTools.defaultTools,
     ...webTools.defaultTools,
     ...paperTools.defaultTools,
-    ...wikiToolsBeforeLint,
-    ...libraryHealthToolsBeforeLint,
-    ...wikiLintTools,
-    ...libraryHealthToolsAfterLint,
+    ...wikiTools.defaultToolGroups.coreTools,
+    ...libraryHealthTools.defaultToolGroups.searchTools,
+    ...libraryHealthTools.defaultToolGroups.healthCheckTools,
+    ...wikiTools.defaultToolGroups.lintTools,
+    ...libraryHealthTools.defaultToolGroups.healthRepairTools,
   ] as unknown as AgentTools;
 
   if (dependencies.toolProfile === "full") {
     tools.unshift(...fileTools.prependFullTools);
     tools.push(
       ...wikiTools.fullTools,
-      ...designTools.fullTools,
+      ...fileTools.artifactFullTools,
       ...fileTools.tailFullTools,
       ...libraryHealthTools.fullTools,
       ...webTools.fullTools,

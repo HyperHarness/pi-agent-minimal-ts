@@ -2,53 +2,53 @@ import { readFile } from "node:fs/promises";
 import path from "node:path";
 import { Type, type Static } from "@mariozechner/pi-ai";
 import type { AgentTool } from "@mariozechner/pi-agent-core";
-import type { ToolDependencies } from "./tool-types.js";
-import { resolveWorkspacePath } from "./file-tools.js";
+import type { ToolDependencies } from "../tool-types.js";
+import { resolveWorkspacePath } from "../file-tools.js";
 import {
   getPaperBrowserProfileDir,
   resolveDefaultPaperBrowserSessionFactory,
   type PaperBrowserSession
-} from "./paper/browser/browser-session.js";
+} from "./browser/browser-session.js";
 import {
   PaperDownloadError,
   downloadPaperPdf,
   resolvePublisherCanonicalId,
   resolvePublisherCanonicalIdFromArticleUrl
-} from "./paper/acquisition/paper-download.js";
+} from "./acquisition/paper-download.js";
 import {
   downloadPaper,
   registerManualPaperDownload,
   searchPapers
-} from "./paper/acquisition/paper-manager.js";
+} from "./acquisition/paper-manager.js";
 import {
   inspectPaper,
   parsePaper,
   readPaperSection,
   searchPaperText
-} from "./paper/reading/paper-reader.js";
-import { savePaperWebPageParse } from "./paper/reading/engines/webpage.js";
-import { createPaperExtensionJob } from "./paper/extension/paper-extension-bridge.js";
-import { createPaperBrowserManagerClient } from "./paper/browser/paper-browser-manager-client.js";
+} from "./reading/paper-reader.js";
+import { savePaperWebPageParse } from "./reading/engines/webpage.js";
+import { createPaperExtensionJob } from "./extension/paper-extension-bridge.js";
+import { createPaperBrowserManagerClient } from "./browser/paper-browser-manager-client.js";
 import {
   createPaperBrowserManagerServer,
   startPaperBrowserManagerHttpServer
-} from "./paper/browser/paper-browser-manager-server.js";
-import { searchApsPapers } from "./paper/acquisition/aps-search.js";
-import { getPublisherAdapter } from "./paper/acquisition/publisher-adapters/index.js";
-import { fetchPaperWebPage } from "./paper/acquisition/paper-webpage-fetch.js";
-import type { PaperDownloadResult, PaperSearchResult, SupportedPaperSource } from "./paper/types.js";
-import { buildArxivHtmlUrls } from "./paper/acquisition/arxiv.js";
+} from "./browser/paper-browser-manager-server.js";
+import { searchApsPapers } from "./acquisition/aps-search.js";
+import { getPublisherAdapter } from "./acquisition/publisher-adapters/index.js";
+import { fetchPaperWebPage } from "./acquisition/paper-webpage-fetch.js";
+import type { PaperDownloadResult, PaperSearchResult, SupportedPaperSource } from "./types.js";
+import { buildArxivHtmlUrls } from "./acquisition/arxiv.js";
 import {
   blockPaperDownload,
   type PaperBlockReasonCode
-} from "./paper/acquisition/paper-blocklist.js";
+} from "./acquisition/paper-blocklist.js";
 import {
   readPaperRecordByPath,
   updatePaperRecordParseManifest,
   updatePaperRecordQueuedReading,
   updatePaperRecordReadingFailure
-} from "./paper/storage/paper-store.js";
-import type { PaperRecord } from "./paper/types.js";
+} from "./storage/paper-store.js";
+import type { PaperRecord } from "./types.js";
 
 const MAX_SEARCH_RESULT_PREVIEWS = 5;
 const MAX_SEARCH_PREVIEW_TEXT_LENGTH = 220;

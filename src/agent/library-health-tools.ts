@@ -172,6 +172,11 @@ export function createLibraryHealthTools(input: {
   dependencies: ToolDependencies;
 }): {
   defaultTools: AgentTool<any>[];
+  defaultToolGroups: {
+    searchTools: AgentTool<any>[];
+    healthCheckTools: AgentTool<any>[];
+    healthRepairTools: AgentTool<any>[];
+  };
   fullTools: AgentTool<any>[];
 } {
   const resolvedWorkspaceDir = path.resolve(input.workspaceDir);
@@ -289,12 +294,21 @@ export function createLibraryHealthTools(input: {
     }
   };
 
+  const searchTools = [searchLocalPapersTool];
+  const healthCheckTools = [wikiHealthTool];
+  const healthRepairTools = [wikiHealthFixTool];
+
   return {
     defaultTools: [
-      searchLocalPapersTool,
-      wikiHealthTool,
-      wikiHealthFixTool
+      ...searchTools,
+      ...healthCheckTools,
+      ...healthRepairTools
     ],
+    defaultToolGroups: {
+      searchTools,
+      healthCheckTools,
+      healthRepairTools
+    },
     fullTools: [
       listLocalPapersTool
     ]

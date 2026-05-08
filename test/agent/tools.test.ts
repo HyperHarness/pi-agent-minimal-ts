@@ -14,7 +14,7 @@ import { createTools, createToolsForBoundary, getToolBoundaryToolNames } from ".
 import {
   getToolBoundaryToolNames as getToolBoundaryToolNamesFromBoundaryModule,
   TOOL_BOUNDARY_NAMES as TOOL_BOUNDARY_NAMES_FROM_BOUNDARY_MODULE
-} from "../../src/agent/tool-boundaries.js";
+} from "../../src/agent/tool-types.js";
 import {
   resolvePaperPdfPath,
   updatePaperRecordParseManifest,
@@ -1681,7 +1681,7 @@ test("createToolsForBoundary keeps every boundary in declared order", async () =
   }
 });
 
-test("tools module re-exports tool boundary names from the boundary module", () => {
+test("tools module re-exports tool boundary names from tool types", () => {
   assert.equal(agentTools.TOOL_BOUNDARY_NAMES, TOOL_BOUNDARY_NAMES_FROM_BOUNDARY_MODULE);
 
   for (const role of [
