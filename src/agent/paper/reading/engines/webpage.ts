@@ -255,6 +255,27 @@ function isArxivExtractionUrl(url: string): boolean {
   }
 }
 
+function stripPublisherHtmlMarkup(markdown: string, extractionUrl: string): string {
+  if (isArxivExtractionUrl(extractionUrl) || !/<\/?[a-z][\s>/]/i.test(markdown)) {
+    return markdown;
+  }
+
+  return markdown
+    .replace(/<\s*h([1-6])\b[^>]*>/gi, (_match, level: string) => `${"#".repeat(Number(level))} `)
+    .replace(/<\s*li\b[^>]*>/gi, "- ")
+    .replace(/<\s*br\s*\/?>/gi, "\n")
+    .replace(/<\s*\/(?:article|div|figcaption|figure|li|ol|p|section|ul)\s*>/gi, "\n")
+    .replace(/<\s*(?:article|div|figcaption|figure|ol|p|section|ul)\b[^>]*>/gi, "\n")
+    .replace(/<\s*img\b[^>]*\balt=["']([^"']+)["'][^>]*\/?>/gi, "$1")
+    .replace(/<\s*img\b[^>]*\/?>/gi, "")
+    .replace(/<\/?[a-z][^>\n]*>/gi, "")
+    .split(/\r?\n/)
+    .map((line) => line.replace(/[ \t]+/g, " ").trim())
+    .join("\n")
+    .replace(/\n{3,}/g, "\n\n")
+    .trim();
+}
+
 function isLikelyOrderedFigureAsset(filename: string, allowGenericImage: boolean): boolean {
   return (
     /^x\d+\.(?:png|jpe?g|gif|webp|svg|pdf)$/i.test(filename) ||
@@ -349,7 +370,10 @@ async function materializeWebpageAssets(input: {
 }): Promise<PaperWebPageExtraction> {
   const assets = input.extraction.assets?.filter((asset) => asset.dataBase64.trim()) ?? [];
   if (assets.length === 0) {
-    return input.extraction;
+    return {
+      ...input.extraction,
+      markdown: stripPublisherHtmlMarkup(input.extraction.markdown, input.extraction.url)
+    };
   }
 
   const assetsDir = path.join(getParseDir(input.workspaceDir, input.paperKey, "webpage"), "assets");
@@ -409,6 +433,7 @@ async function materializeWebpageAssets(input: {
     extractionUrl: input.extraction.url,
     assets: materializedAssets
   });
+  markdown = stripPublisherHtmlMarkup(markdown, input.extraction.url);
 
   return {
     ...input.extraction,

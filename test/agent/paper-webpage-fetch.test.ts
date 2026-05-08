@@ -468,6 +468,68 @@ test("savePaperWebPageParse downgrades webpage markdown with substantial raw HTM
   }
 });
 
+test("savePaperWebPageParse strips publisher raw HTML wrappers before quality scoring", async () => {
+  const workspace = await mkdtemp(path.join(tmpdir(), "pi-paper-webpage-nature-html-cleanup-"));
+  try {
+    const body = "Subharmonic drives support fast superconducting qubit control while limiting cryostat heating. ".repeat(180);
+    const result = await savePaperWebPageParse({
+      workspaceDir: workspace,
+      paperKey: "nature-s41467-025-67766-6",
+      extraction: {
+        url: "https://www.nature.com/articles/s41467-025-67766-6",
+        title: "Fast superconducting qubit control with subharmonic drives",
+        markdown: [
+          '<div class="c-article-main-column" role="main">',
+          "",
+          "## Abstract",
+          "",
+          '<div class="c-article-section__content">',
+          `${body}<sup><a href="#ref-CR1" title="Reference">1</a></sup>`,
+          "</div>",
+          "",
+          "## Introduction",
+          "",
+          '<span class="mathjax-tex">\\eta^3</span>',
+          `${body}<a href="/articles/s41467-025-67766-6/figures/1"><span>Full size image</span></a>`,
+          "",
+          "## Results",
+          "",
+          `${body}<figcaption><strong>Fig. 1:</strong> Subharmonic driving schematic.</figcaption>`,
+          "</div>"
+        ].join("\n"),
+        metadata: {
+          title: "Fast superconducting qubit control with subharmonic drives",
+          doi: "10.1038/s41467-025-67766-6",
+          authors: []
+        },
+        access: {
+          status: "full_text",
+          signals: []
+        },
+        stats: {
+          chars: body.length * 3,
+          wordsApprox: 2200,
+          navigationLinesRemoved: 0,
+          extractedFrom: "article"
+        }
+      }
+    });
+
+    assert.equal(result.quality.status, "good");
+    assert.ok(result.quality.score >= 0.7);
+    assert.ok(
+      !result.quality.warnings.some((warning) =>
+        warning.includes("substantial raw HTML markup")
+      )
+    );
+    const markdown = await readFile(result.artifacts.markdownPath, "utf8");
+    assert.doesNotMatch(markdown, /<\/?(?:div|span|sup|a|figcaption)\b/i);
+    assert.match(markdown, /Subharmonic drives support fast superconducting qubit control/);
+  } finally {
+    await rm(workspace, { recursive: true, force: true });
+  }
+});
+
 test("Science webpage parsing removes access chrome and flags abstract-only pages", async () => {
   const workspace = await mkdtemp(path.join(tmpdir(), "pi-paper-science-webpage-"));
   try {
