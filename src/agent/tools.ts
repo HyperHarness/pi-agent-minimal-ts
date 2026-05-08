@@ -10,6 +10,7 @@ import {
   resolveWorkspacePath,
   resolveWorkspaceWritablePath
 } from "./file-tools.js";
+import { createWebTools } from "./web-tools.js";
 import {
   getPaperBrowserProfileDir,
   resolveDefaultPaperBrowserSessionFactory,
@@ -55,8 +56,7 @@ import {
 } from "./paper-summary.js";
 import { paperWikiRelations } from "./paper-relations.js";
 import {
-  createPaperExtensionJob,
-  type PaperExtensionBridge
+  createPaperExtensionJob
 } from "./paper-extension-bridge.js";
 import {
   createPaperBrowserManagerClient
@@ -64,9 +64,7 @@ import {
 import { createPaperBrowserManagerServer, startPaperBrowserManagerHttpServer } from "./paper-browser-manager-server.js";
 import { searchApsPapers } from "./aps-search.js";
 import { getPublisherAdapter } from "./publisher-adapters/index.js";
-import { fetchWebPage } from "./web-fetch.js";
 import { fetchPaperWebPage } from "./paper-webpage-fetch.js";
-import { searchWeb, type WebSearchResult } from "./web-search.js";
 import type { PaperDownloadResult, PaperSearchResult, PaperSearchSource, SupportedPaperSource } from "./paper-types.js";
 import { buildArxivHtmlUrls } from "./arxiv.js";
 import {
@@ -83,7 +81,6 @@ import {
   type WikiHealthFixProgress
 } from "./wiki-health.js";
 import {
-  readPaperRecord,
   readPaperRecordByPath,
   updatePaperRecordParseManifest,
   updatePaperRecordQueuedReading,
@@ -95,40 +92,6 @@ import {
   TOOL_BOUNDARY_NAMES,
   type ToolBoundaryRole
 } from "./tool-boundaries.js";
-
-const webSearchParameters = Type.Object({
-  query: Type.String({ description: "Search query string." }),
-  maxResults: Type.Optional(
-    Type.Integer({ description: "Maximum number of results to return.", minimum: 1 })
-  )
-});
-
-const fetchUrlParameters = Type.Object({
-  url: Type.String({ description: "HTTP or HTTPS URL to fetch." })
-});
-
-const fetchPaperWebpageParameters = Type.Object({
-  url: Type.String({ description: "HTTP or HTTPS scientific paper article page URL to fetch." }),
-  paperKey: Type.Optional(
-    Type.String({
-      description:
-        "Optional paper key to use under knowledge-base/wiki/sources/. Defaults to a publisher-derived key such as nature-s41467-025-59778-z."
-    })
-  ),
-  save: Type.Optional(
-    Type.Boolean({
-      description:
-        "Whether to save the extracted webpage parse under knowledge-base/wiki/sources/. Defaults to true."
-    })
-  ),
-  force: Type.Optional(Type.Boolean({ description: "Re-fetch and overwrite the cached webpage parse." })),
-  useExtensionFallback: Type.Optional(
-    Type.Boolean({
-      description:
-        "Queue a browser-extension webpage snapshot job when direct HTML fetch is blocked. Defaults to true."
-    })
-  )
-});
 
 const searchPapersParameters = Type.Object({
   query: Type.String({ description: "Search query string for papers." }),
@@ -584,9 +547,6 @@ const wikiHealthFixParameters = Type.Object({
   }))
 });
 
-type WebSearchParameters = Static<typeof webSearchParameters>;
-type FetchUrlParameters = Static<typeof fetchUrlParameters>;
-type FetchPaperWebpageParameters = Static<typeof fetchPaperWebpageParameters>;
 type SearchPapersParameters = Static<typeof searchPapersParameters>;
 type DownloadPaperParameters = Static<typeof downloadPaperParameters>;
 type BlockPaperDownloadParameters = Static<typeof blockPaperDownloadParameters>;
@@ -684,23 +644,6 @@ type SearchToolDetails = {
   count: number;
   results: SearchResultPreview[];
 };
-type WebSearchTool = AgentTool<
-  typeof webSearchParameters,
-  SearchToolDetails
->;
-type FetchUrlTool = AgentTool<typeof fetchUrlParameters, { url: string }>;
-type FetchPaperWebpageDetails =
-  | (Awaited<ReturnType<typeof fetchPaperWebPage>> & {
-      savedParse?: Awaited<ReturnType<typeof savePaperWebPageParse>>;
-    })
-  | (Awaited<ReturnType<PaperExtensionBridge["submitJob"]>> & {
-      purpose: "webpage";
-      directFetchError: string;
-    });
-type FetchPaperWebpageTool = AgentTool<
-  typeof fetchPaperWebpageParameters,
-  FetchPaperWebpageDetails
->;
 type SearchPapersTool = AgentTool<
   typeof searchPapersParameters,
   SearchToolDetails
@@ -1152,14 +1095,6 @@ function researchCandidateKey(candidate: ResearchExternalCandidate): string {
   ].find((value) => value !== undefined && value.length > 0) ?? candidate.title;
 }
 
-function summarizeWebSearchResults(results: WebSearchResult[]): SearchResultPreview[] {
-  return results.slice(0, MAX_SEARCH_RESULT_PREVIEWS).map((result) => ({
-    title: compactPreviewText(result.title, 120) ?? "(untitled)",
-    url: result.url,
-    summary: compactPreviewText(result.snippet)
-  }));
-}
-
 function summarizePaperSearchResults(results: PaperSearchResult[]): SearchResultPreview[] {
   return results.slice(0, MAX_SEARCH_RESULT_PREVIEWS).map((result) => {
     const primarySource = result.sources[0];
@@ -1288,43 +1223,6 @@ function assertSupportedPaperPublisherUrl(input: string): void {
   }
 
   getPublisherAdapter(url.toString());
-}
-
-function resolveExtensionPaperSource(input: string): SupportedPaperSource | "external" {
-  try {
-    return getPublisherAdapter(input).id;
-  } catch {
-    return "external";
-  }
-}
-
-async function resolveRecordPathForArticleUrl(input: {
-  workspaceDir: string;
-  url: string;
-}): Promise<string | undefined> {
-  const source = resolveExtensionPaperSource(input.url);
-  if (source === "external") {
-    return (await readPaperRecord({
-      workspaceDir: input.workspaceDir,
-      source,
-      articleUrl: input.url
-    }))?.recordPath;
-  }
-
-  const canonicalId = resolvePublisherCanonicalIdFromArticleUrl({
-    publisher: source,
-    articleUrl: input.url
-  });
-  if (!canonicalId) {
-    return undefined;
-  }
-
-  return (await readPaperRecord({
-    workspaceDir: input.workspaceDir,
-    source,
-    canonicalId,
-    articleUrl: input.url
-  }))?.recordPath;
 }
 
 const PAPER_DOWNLOAD_ERROR_CODES = new Set<PaperDownloadError["code"]>([
@@ -1631,8 +1529,6 @@ export function getToolsWorkspaceDir(
 
 export function createTools(workspaceDir: string, dependencies: ToolDependencies = {}): AgentTools {
   const resolvedWorkspaceDir = path.resolve(workspaceDir);
-  const searchWebImpl = dependencies.searchWeb ?? searchWeb;
-  const fetchWebPageImpl = dependencies.fetchWebPage ?? fetchWebPage;
   const fetchPaperWebPageImpl = dependencies.fetchPaperWebPage ?? fetchPaperWebPage;
   const savePaperWebPageParseImpl = dependencies.savePaperWebPageParse ?? savePaperWebPageParse;
   const searchApsPapersImpl = dependencies.searchApsPapers ?? searchApsPapers;
@@ -2089,110 +1985,10 @@ export function createTools(workspaceDir: string, dependencies: ToolDependencies
     dependencies.parsePaper !== undefined;
 
   const fileTools = createFileTools({ workspaceDir: resolvedWorkspaceDir });
-
-  const webSearchTool: WebSearchTool = {
-    name: "web_search",
-    label: "Web Search",
-    description: "Searches the web and returns structured result summaries.",
-    parameters: webSearchParameters,
-    execute: async (_toolCallId: string, args: WebSearchParameters) => {
-      const results = await searchWebImpl({ query: args.query, maxResults: args.maxResults });
-      const maxResults = args.maxResults ?? 5;
-
-      return {
-        content: [{ type: "text", text: JSON.stringify(results) }],
-        details: {
-          query: args.query,
-          maxResults,
-          count: results.length,
-          results: summarizeWebSearchResults(results)
-        }
-      };
-    }
-  };
-
-  const fetchUrlTool: FetchUrlTool = {
-    name: "fetch_url",
-    label: "Fetch URL",
-    description: "Fetches a web page and returns its extracted text.",
-    parameters: fetchUrlParameters,
-    execute: async (_toolCallId: string, args: FetchUrlParameters) => {
-      const text = await fetchWebPageImpl({ url: args.url });
-
-      return {
-        content: [{ type: "text", text: JSON.stringify(text) }],
-        details: { url: args.url }
-      };
-    }
-  };
-
-  const fetchPaperWebpageTool: FetchPaperWebpageTool = {
-    name: "fetch_paper_webpage",
-    label: "Fetch Paper Webpage",
-    description:
-      "Fetches a scientific paper article page and returns untruncated article markdown with navigation, header, footer, sharing, advertising, and recommendation noise removed. Prefer this over fetch_url when reading a publisher article webpage.",
-    parameters: fetchPaperWebpageParameters,
-    execute: async (_toolCallId: string, args: FetchPaperWebpageParameters) => {
-      try {
-        const result = await fetchPaperWebPageImpl({ url: args.url });
-        const savedParse = args.save === false
-          ? undefined
-          : await savePaperWebPageParseImpl({
-            workspaceDir: resolvedWorkspaceDir,
-            extraction: result,
-            ...(args.paperKey ? { paperKey: args.paperKey } : {}),
-            ...(args.force !== undefined ? { force: args.force } : {})
-          });
-        if (savedParse) {
-          const recordPath = await resolveRecordPathForArticleUrl({
-            workspaceDir: resolvedWorkspaceDir,
-            url: result.url
-          });
-          if (recordPath) {
-            await updateRecordWithParseResult({
-              workspaceDir: resolvedWorkspaceDir,
-              recordPath,
-              strategy: "webpage",
-              result: savedParse
-            });
-          }
-        }
-        const output = {
-          ...result,
-          ...(savedParse ? { savedParse } : {})
-        };
-
-        return {
-          content: [{ type: "text", text: JSON.stringify(output) }],
-          details: output
-        };
-      } catch (error) {
-        if (args.useExtensionFallback === false || dependencies.extensionBridge === undefined) {
-          throw error;
-        }
-
-        const source = resolveExtensionPaperSource(args.url);
-        const queued = await dependencies.extensionBridge.submitJob(
-          createPaperExtensionJob({
-            articleUrl: args.url,
-            source,
-            purpose: "webpage",
-            autoClose: true
-          })
-        );
-        const output = {
-          ...queued,
-          purpose: "webpage" as const,
-          directFetchError: error instanceof Error ? error.message : "Direct paper webpage fetch failed."
-        };
-
-        return {
-          content: [{ type: "text", text: JSON.stringify(output) }],
-          details: output
-        };
-      }
-    }
-  };
+  const webTools = createWebTools({
+    workspaceDir: resolvedWorkspaceDir,
+    dependencies
+  });
 
   const searchPapersTool: SearchPapersTool = {
     name: "search_papers",
@@ -3387,8 +3183,7 @@ export function createTools(workspaceDir: string, dependencies: ToolDependencies
 
   const tools = [
     ...fileTools.defaultTools,
-    webSearchTool,
-    fetchUrlTool,
+    ...webTools.defaultTools,
     searchPapersTool,
     downloadPaperTool,
     blockPaperDownloadTool,
@@ -3419,7 +3214,7 @@ export function createTools(workspaceDir: string, dependencies: ToolDependencies
       writeDesignArtifactTool,
       ...fileTools.tailFullTools,
       listLocalPapersTool,
-      fetchPaperWebpageTool,
+      ...webTools.fullTools,
       registerManualPaperDownloadTool,
       openPaperPageForLoginTool,
       parsePaperTool
