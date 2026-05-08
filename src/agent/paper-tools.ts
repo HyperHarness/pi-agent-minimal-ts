@@ -423,6 +423,11 @@ export function createPaperTools(input: {
 }): {
   defaultTools: AgentTool<any>[];
   fullTools: AgentTool<any>[];
+  toolsByName: {
+    searchPapersTool: SearchPapersTool;
+    downloadPaperTool: DownloadPaperTool;
+    parsePaperTool: ParsePaperTool;
+  };
   cleanup: () => Promise<void>;
 } {
   const resolvedWorkspaceDir = path.resolve(input.workspaceDir);
@@ -1036,6 +1041,11 @@ export function createPaperTools(input: {
       openPaperPageForLoginTool,
       parsePaperTool
     ],
+    toolsByName: {
+      searchPapersTool,
+      downloadPaperTool,
+      parsePaperTool
+    },
     cleanup: closePaperManager
   };
 }
