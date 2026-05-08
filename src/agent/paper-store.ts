@@ -817,9 +817,96 @@ async function readCrossrefCitationMetadata(input: {
   }
 }
 
+function normalizeCitationTitleForCompare(value: string | undefined): string {
+  return normalizeText(value)
+    .toLowerCase()
+    .replace(/[-‐‑‒–—]/g, " ")
+    .replace(/[^\p{L}\p{N}]+/gu, " ")
+    .replace(/\s+/g, " ")
+    .trim();
+}
+
+function crossrefMessageToMetadataPatch(input: {
+  message: Record<string, unknown>;
+  fallbackDoi?: string;
+  resolvedFrom: PaperSourceMetadataPatch["resolvedFrom"];
+}): PaperSourceMetadataPatch | undefined {
+  const titles = Array.isArray(input.message.title) ? input.message.title : [];
+  const venues = Array.isArray(input.message["container-title"]) ? input.message["container-title"] : [];
+  const title = typeof titles[0] === "string" ? normalizeText(titles[0]) : undefined;
+  const venue = typeof venues[0] === "string" ? normalizeText(venues[0]) : undefined;
+  const doi = typeof input.message.DOI === "string" && input.message.DOI.trim()
+    ? input.message.DOI.trim()
+    : input.fallbackDoi;
+  const year =
+    extractCrossrefYear(input.message.published) ??
+    extractCrossrefYear(input.message["published-print"]) ??
+    extractCrossrefYear(input.message["published-online"]) ??
+    extractCrossrefYear(input.message.created);
+  const authors = formatCrossrefAuthors(input.message.author);
+  if (!title && authors.length === 0 && typeof year !== "number" && !venue && !doi) {
+    return undefined;
+  }
+  return {
+    resolvedFrom: input.resolvedFrom,
+    ...(title ? { title } : {}),
+    authors,
+    ...(typeof year === "number" ? { year } : {}),
+    ...(venue ? { venue } : {}),
+    ...(doi ? { doi } : {})
+  };
+}
+
+async function readCrossrefSearchCitationMetadata(input: {
+  doi?: string;
+  title?: string;
+  fetchImpl: typeof fetch;
+}): Promise<PaperSourceMetadataPatch | undefined> {
+  const query = input.doi ?? input.title;
+  if (!query?.trim()) {
+    return undefined;
+  }
+
+  try {
+    const endpoint = new URL("https://api.crossref.org/works");
+    endpoint.searchParams.set("query.bibliographic", query);
+    endpoint.searchParams.set("rows", "5");
+    if (input.doi?.trim()) {
+      endpoint.searchParams.set("filter", "type:journal-article");
+    }
+    const response = await input.fetchImpl(endpoint);
+    if (!response.ok) {
+      return undefined;
+    }
+    const items = (((await response.json()) as { message?: { items?: unknown[] } }).message?.items ?? [])
+      .filter((item): item is Record<string, unknown> => typeof item === "object" && item !== null);
+    const normalizedDoi = input.doi?.trim().toLowerCase();
+    const normalizedTitle = normalizeCitationTitleForCompare(input.title);
+    const match = items.find((item) => {
+      const itemDoi = typeof item.DOI === "string" ? item.DOI.trim().toLowerCase() : undefined;
+      if (normalizedDoi && itemDoi === normalizedDoi) {
+        return true;
+      }
+      const titles = Array.isArray(item.title) ? item.title : [];
+      const itemTitle = typeof titles[0] === "string" ? normalizeCitationTitleForCompare(titles[0]) : "";
+      return Boolean(normalizedTitle && itemTitle === normalizedTitle);
+    }) ?? items[0];
+    return match
+      ? crossrefMessageToMetadataPatch({
+        message: match,
+        ...(input.doi ? { fallbackDoi: input.doi } : {}),
+        resolvedFrom: "crossref_search"
+      })
+      : undefined;
+  } catch {
+    return undefined;
+  }
+}
+
 async function readRemoteCitationMetadata(input: {
   doi?: string;
   arxivId?: string;
+  title?: string;
   fetchImpl?: typeof fetch;
 }): Promise<PaperSourceMetadataPatch | undefined> {
   const fetchImpl = input.fetchImpl ?? globalThis.fetch?.bind(globalThis);
@@ -830,7 +917,16 @@ async function readRemoteCitationMetadata(input: {
     return readArxivApiCitationMetadata({ arxivId: input.arxivId, fetchImpl });
   }
   if (input.doi) {
-    return readCrossrefCitationMetadata({ doi: input.doi, fetchImpl });
+    return (
+      await readCrossrefCitationMetadata({ doi: input.doi, fetchImpl })
+    ) ?? readCrossrefSearchCitationMetadata({
+      doi: input.doi,
+      ...(input.title ? { title: input.title } : {}),
+      fetchImpl
+    });
+  }
+  if (input.title) {
+    return readCrossrefSearchCitationMetadata({ title: input.title, fetchImpl });
   }
   return undefined;
 }
@@ -874,6 +970,7 @@ export async function writePaperSourceMetadataForRecord(input: {
   const acquisitionPath = toWorkspacePath({ workspaceDir: input.workspaceDir, filePath: input.recordPath });
   const baseDoi = getRecordDoi(input.record) ?? existing?.doi;
   const baseArxivId = getRecordArxivId(input.record) ?? existing?.arxivId;
+  const baseTitle = readRecordString(input.record, "title") ?? existing?.title;
   const localParseMetadata = await readLocalParseCitationMetadata({
     workspaceDir: input.workspaceDir,
     record: input.record,
@@ -883,6 +980,7 @@ export async function writePaperSourceMetadataForRecord(input: {
     ? await readRemoteCitationMetadata({
         ...(baseDoi ? { doi: baseDoi } : {}),
         ...(baseArxivId ? { arxivId: baseArxivId } : {}),
+        ...(baseTitle ? { title: baseTitle } : {}),
         ...(input.fetchImpl ? { fetchImpl: input.fetchImpl } : {})
       })
     : undefined;

@@ -2122,6 +2122,100 @@ test("download_paper prefers arXiv HTML webpage markdown before TeX source and P
   }
 });
 
+test("download_paper falls back from arxiv.org HTML to ar5iv labs HTML before TeX parsing", async () => {
+  const workspace = await mkdtemp(path.join(tmpdir(), "pi-agent-tools-"));
+  const recordPath = path.join(workspace, "papers", "arxiv-2601.00425.json");
+  const pdfPath = path.join(workspace, "papers", "arxiv-2601.00425.pdf");
+  const managerResult: PaperDownloadResult = {
+    status: "downloaded",
+    source: "arxiv",
+    canonicalId: "2601.00425",
+    articleUrl: "https://arxiv.org/abs/2601.00425",
+    finalPdfUrl: "https://arxiv.org/pdf/2601.00425.pdf",
+    path: pdfPath,
+    recordPath,
+  };
+  const calls: string[] = [];
+
+  try {
+    const downloadPaperTool = getDownloadPaperTool(workspace, {
+      downloadPaper: async () => managerResult,
+      fetchPaperWebPage: async (options) => {
+        calls.push(`fetch:${options.url}`);
+        if (options.url === "https://arxiv.org/html/2601.00425") {
+          throw new Error("arxiv.org HTML unavailable");
+        }
+        return {
+          url: options.url,
+          title: "Arxiv mirror HTML Paper",
+          markdown: "# Arxiv mirror HTML Paper\n\nFull article text from ar5iv labs HTML.",
+          metadata: {
+            title: "Arxiv mirror HTML Paper",
+            authors: [],
+          },
+          access: {
+            status: "full_text",
+            signals: [],
+          },
+          stats: {
+            chars: 60,
+            wordsApprox: 10,
+            navigationLinesRemoved: 0,
+            extractedFrom: "article",
+          },
+        };
+      },
+      savePaperWebPageParse: async (options) => {
+        calls.push(`save:${options.extraction.url}`);
+        return {
+          status: "parsed",
+          paperKey: options.paperKey ?? "arxiv-2601.00425",
+          engine: "webpage",
+          pdfSha256: "webpage-hash",
+          artifacts: {
+            sourcePath: path.join(workspace, "knowledge-base/wiki/sources/arxiv-2601.00425/source.json"),
+            parsePath: path.join(workspace, "knowledge-base/wiki/sources/arxiv-2601.00425/parses/webpage/parse.json"),
+            markdownPath: path.join(workspace, "knowledge-base/wiki/sources/arxiv-2601.00425/parses/webpage/document.md"),
+            qualityPath: path.join(workspace, "knowledge-base/wiki/sources/arxiv-2601.00425/parses/webpage/quality.json"),
+            chunksPath: path.join(workspace, "knowledge-base/wiki/sources/arxiv-2601.00425/chunks/webpage.jsonl"),
+          },
+          quality: {
+            status: "good",
+            score: 1,
+            pages: 1,
+            totalTextLength: 128,
+            emptyPageCount: 0,
+            headingCount: 2,
+            tableCount: 0,
+            figureOrCaptionCount: 0,
+            warnings: [],
+          },
+          sections: [],
+        };
+      },
+      parsePaper: async () => {
+        throw new Error("TeX source should not be parsed when ar5iv fallback HTML succeeds");
+      },
+    });
+
+    const result = await downloadPaperTool.execute(
+      "call-arxiv-html-mirror-fallback",
+      { id: "2601.00425" },
+      undefined,
+    );
+
+    assert.deepEqual(calls, [
+      "fetch:https://arxiv.org/html/2601.00425",
+      "fetch:https://ar5iv.labs.arxiv.org/html/2601.00425",
+      "save:https://ar5iv.labs.arxiv.org/html/2601.00425",
+    ]);
+    assert.equal((result.details as { reading?: { strategy?: string } }).reading?.strategy, "webpage");
+    assert.equal((result.details as { reading?: { engine?: string } }).reading?.engine, "webpage");
+  } finally {
+    await rm(workspace, { recursive: true, force: true });
+  }
+});
+
 test("download_paper falls back to arXiv TeX source before PDF parsing when HTML fails", async () => {
   const workspace = await mkdtemp(path.join(tmpdir(), "pi-agent-tools-"));
   const recordPath = path.join(workspace, "papers", "arxiv-2601.00425.json");
@@ -2184,6 +2278,7 @@ test("download_paper falls back to arXiv TeX source before PDF parsing when HTML
 
     assert.deepEqual(calls, [
       "fetch:https://arxiv.org/html/2601.00425",
+      "fetch:https://ar5iv.labs.arxiv.org/html/2601.00425",
       "parse:tex-source",
     ]);
     assert.equal((result.details as { reading?: { strategy?: string } }).reading?.strategy, "pdf");

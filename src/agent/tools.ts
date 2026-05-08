@@ -65,7 +65,7 @@ import { fetchWebPage } from "./web-fetch.js";
 import { fetchPaperWebPage } from "./paper-webpage-fetch.js";
 import { searchWeb, type WebSearchResult } from "./web-search.js";
 import type { PaperDownloadResult, PaperSearchResult, PaperSearchSource, SupportedPaperSource } from "./paper-types.js";
-import { buildArxivHtmlUrl } from "./arxiv.js";
+import { buildArxivHtmlUrls } from "./arxiv.js";
 import {
   listLocalPapers,
   searchLocalPapers
@@ -2726,25 +2726,26 @@ export function createTools(workspaceDir: string, dependencies: ToolDependencies
     canonicalId: string,
     recordPath: string
   ): Promise<DownloadPaperReadingClosure | undefined> => {
-    try {
-      const extraction = await fetchPaperWebPageImpl({
-        url: buildArxivHtmlUrl(canonicalId)
-      });
-      const result = await savePaperWebPageParseImpl({
-        workspaceDir: resolvedWorkspaceDir,
-        extraction,
-        paperKey: `arxiv-${canonicalId}`
-      });
-      await updateRecordWithParseResult({
-        workspaceDir: resolvedWorkspaceDir,
-        recordPath,
-        strategy: "webpage",
-        result
-      });
-      return summarizeParseResult(result, "webpage");
-    } catch {
-      return undefined;
+    for (const url of buildArxivHtmlUrls(canonicalId)) {
+      try {
+        const extraction = await fetchPaperWebPageImpl({ url });
+        const result = await savePaperWebPageParseImpl({
+          workspaceDir: resolvedWorkspaceDir,
+          extraction,
+          paperKey: `arxiv-${canonicalId}`
+        });
+        await updateRecordWithParseResult({
+          workspaceDir: resolvedWorkspaceDir,
+          recordPath,
+          strategy: "webpage",
+          result
+        });
+        return summarizeParseResult(result, "webpage");
+      } catch {
+        // Try the next arXiv HTML mirror before falling back to TeX/PDF parsing.
+      }
     }
+    return undefined;
   };
 
   const describeDownloadReadingClosure = async (

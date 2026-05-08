@@ -460,48 +460,54 @@ async function fetchImageAssets(input: {
     alt?: string;
   }>;
   fetchImpl: (input: RequestInfo | URL, init?: RequestInit) => Promise<Response>;
-  signal: AbortSignal;
   userAgent: string;
+  timeoutMs: number;
 }): Promise<PaperWebPageAsset[]> {
-  const assets: PaperWebPageAsset[] = [];
-  for (const candidate of input.candidates) {
+  const fetchOne = async (candidate: typeof input.candidates[number]): Promise<PaperWebPageAsset | undefined> => {
     if (candidate.url.startsWith("data:")) {
-      const asset = parseDataImageAsset(candidate);
-      if (asset) {
-        assets.push(asset);
-      }
-      continue;
+      return parseDataImageAsset(candidate);
     }
 
+    const timeout = withRequestTimeout(input.timeoutMs);
     try {
       const response = await input.fetchImpl(candidate.url, {
         headers: new Headers({
           "user-agent": input.userAgent
         }),
-        signal: input.signal
+        signal: timeout.signal
       });
       if (!response.ok) {
-        continue;
+        return undefined;
       }
       const contentType = response.headers.get("content-type") ?? "";
       if (!isImageContentType(contentType)) {
-        continue;
+        return undefined;
       }
       const bytes = Buffer.from(await response.arrayBuffer());
       if (bytes.byteLength === 0 || bytes.byteLength > MAX_DIRECT_IMAGE_BYTES) {
-        continue;
+        return undefined;
       }
-      assets.push({
+      return {
         url: candidate.url,
         originalUrl: candidate.originalUrl,
         dataBase64: bytes.toString("base64"),
         mimeType: contentType,
         ...(candidate.filename ? { filename: candidate.filename } : {}),
         ...(candidate.alt ? { alt: candidate.alt } : {})
-      });
+      };
     } catch {
-      continue;
+      return undefined;
+    } finally {
+      timeout.dispose();
     }
+  };
+
+  const assets: PaperWebPageAsset[] = [];
+  const batchSize = 8;
+  for (let index = 0; index < input.candidates.length; index += batchSize) {
+    const batch = input.candidates.slice(index, index + batchSize);
+    const batchAssets = await Promise.all(batch.map((candidate) => fetchOne(candidate)));
+    assets.push(...batchAssets.filter((asset): asset is PaperWebPageAsset => asset !== undefined));
   }
   return assets;
 }
@@ -1170,7 +1176,8 @@ export async function fetchPaperWebPage(
   const env = options.env ?? process.env;
   const fetchImpl = options.fetchImpl ?? globalThis.fetch.bind(globalThis);
   const endpoint = normalizeUrl(options.url);
-  const timeout = withRequestTimeout(resolveFetchTimeoutMs(env));
+  const requestTimeoutMs = resolveFetchTimeoutMs(env);
+  const timeout = withRequestTimeout(requestTimeoutMs);
   const userAgent = normalizeUserAgent(env);
 
   try {
@@ -1218,8 +1225,8 @@ export async function fetchPaperWebPage(
     const assets = await fetchImageAssets({
       candidates: collectImageAssetCandidates(cleanedBlocks.html, resolveArticleAssetBaseUrl(new URL(finalUrl))),
       fetchImpl,
-      signal: timeout.signal,
-      userAgent
+      userAgent,
+      timeoutMs: requestTimeoutMs
     });
 
     return assets.length > 0

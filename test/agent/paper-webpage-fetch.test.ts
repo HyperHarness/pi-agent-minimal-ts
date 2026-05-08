@@ -288,6 +288,88 @@ test("fetchPaperWebPage downloads direct HTML image assets", async () => {
   }
 });
 
+test("fetchPaperWebPage does not let one slow arXiv image prevent later image assets", async () => {
+  const workspace = await mkdtemp(path.join(tmpdir(), "pi-paper-webpage-arxiv-assets-timeout-"));
+  const requestedUrls: string[] = [];
+  try {
+    const extraction = await fetchPaperWebPage({
+      url: "https://arxiv.org/html/2601.00425v1",
+      env: {
+        ...process.env,
+        PI_FETCH_TIMEOUT_MS: "30"
+      },
+      fetchImpl: async (input, init) => {
+        const url = input.toString();
+        requestedUrls.push(url);
+        if (url === "https://arxiv.org/html/2601.00425v1") {
+          return createHtmlResponse(
+            200,
+            `
+              <html>
+                <head><meta name="citation_title" content="arXiv image article"></head>
+                <body>
+                  <article>
+                    <h1>arXiv image article</h1>
+                    <p>${"Article body. ".repeat(200)}</p>
+                    ${Array.from({ length: 8 }, (_value, index) => `
+                      <figure>
+                        <img src="x${index + 1}.png" alt="Figure ${index + 1}">
+                        <figcaption>Figure ${index + 1}: Local figure.</figcaption>
+                      </figure>
+                    `).join("\n")}
+                  </article>
+                </body>
+              </html>
+            `
+          );
+        }
+        if (url === "https://arxiv.org/abs/2601.00425") {
+          return createHtmlResponse(200, `<td class="tablecell comments">12 pages, 8 figures</td>`);
+        }
+        if (url === "https://arxiv.org/html/2601.00425v1/x1.png") {
+          const signal = init?.signal as AbortSignal | undefined;
+          return new Promise<Response>((_resolve, reject) => {
+            signal?.addEventListener("abort", () => reject(new DOMException("aborted", "AbortError")), { once: true });
+          });
+        }
+        const imageMatch = url.match(/^https:\/\/arxiv\.org\/html\/2601\.00425v1\/x([2-8])\.png$/);
+        if (imageMatch?.[1]) {
+          return new Response(Buffer.from(`png-${imageMatch[1]}`), {
+            status: 200,
+            headers: { "content-type": "image/png" }
+          });
+        }
+        return new Response("missing", { status: 404 });
+      }
+    });
+
+    assert.equal(extraction.assets?.length, 7);
+    for (let index = 1; index <= 8; index += 1) {
+      assert.ok(requestedUrls.includes(`https://arxiv.org/html/2601.00425v1/x${index}.png`));
+    }
+
+    const result = await savePaperWebPageParse({
+      workspaceDir: workspace,
+      extraction,
+      paperKey: "arxiv-2601.00425"
+    });
+    const assetDir = path.join(path.dirname(result.artifacts.markdownPath), "assets");
+    assert.deepEqual(await readdir(assetDir), [
+      "x2.png",
+      "x3.png",
+      "x4.png",
+      "x5.png",
+      "x6.png",
+      "x7.png",
+      "x8.png"
+    ]);
+    const markdown = await readFile(result.artifacts.markdownPath, "utf8");
+    assert.match(markdown, /assets\/x8\.png/);
+  } finally {
+    await rm(workspace, { recursive: true, force: true });
+  }
+});
+
 test("savePaperWebPageParse warns when arXiv comments report missing figures", async () => {
   const workspace = await mkdtemp(path.join(tmpdir(), "pi-paper-webpage-arxiv-figure-warning-"));
   try {

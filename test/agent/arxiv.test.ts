@@ -1,7 +1,9 @@
 import test from "node:test";
 import assert from "node:assert/strict";
 import {
+  buildArxivHtmlFallbackUrl,
   buildArxivHtmlUrl,
+  buildArxivHtmlUrls,
   buildArxivPdfUrl,
   downloadArxivPdf,
   parseArxivLocator,
@@ -59,7 +61,18 @@ test("buildArxivPdfUrl accepts legacy identifiers", () => {
 test("buildArxivHtmlUrl accepts modern identifiers", () => {
   assert.equal(
     buildArxivHtmlUrl("2601.00425v1"),
-    "https://arxiv.org/html/2601.00425"
+    "https://arxiv.org/html/2601.00425v1"
+  );
+});
+
+test("buildArxivHtmlUrls returns arxiv.org before ar5iv labs fallback", () => {
+  assert.deepEqual(buildArxivHtmlUrls("2411.15039v1"), [
+    "https://arxiv.org/html/2411.15039v1",
+    "https://ar5iv.labs.arxiv.org/html/2411.15039v1"
+  ]);
+  assert.equal(
+    buildArxivHtmlFallbackUrl("2411.15039v1"),
+    "https://ar5iv.labs.arxiv.org/html/2411.15039v1"
   );
 });
 

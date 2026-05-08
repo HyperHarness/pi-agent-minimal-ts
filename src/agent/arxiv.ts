@@ -53,6 +53,12 @@ function stripVersion(arxivId: string): string {
   return arxivId.replace(/v\d+$/i, "");
 }
 
+function assertValidArxivId(id: string): void {
+  if (!MODERN_ARXIV_ID.test(id) && !LEGACY_ARXIV_ID.test(id)) {
+    throw new Error("A valid arXiv identifier is required.");
+  }
+}
+
 function getFirstTag(entry: string, tagName: string): string {
   const match = entry.match(new RegExp(`<${tagName}>([\\s\\S]*?)</${tagName}>`, "i"));
   return collapseWhitespace(match?.[1] ?? "");
@@ -72,11 +78,15 @@ function extractEntryId(rawId: string): string {
 
 export function normalizeArxivId(id: string): string {
   const trimmed = id.trim();
-  if (!MODERN_ARXIV_ID.test(trimmed) && !LEGACY_ARXIV_ID.test(trimmed)) {
-    throw new Error("A valid arXiv identifier is required.");
-  }
+  assertValidArxivId(trimmed);
 
   return stripVersion(trimmed);
+}
+
+function normalizeArxivIdWithVersion(id: string): string {
+  const trimmed = id.trim();
+  assertValidArxivId(trimmed);
+  return trimmed;
 }
 
 export function buildArxivAbsUrl(id: string): string {
@@ -84,7 +94,18 @@ export function buildArxivAbsUrl(id: string): string {
 }
 
 export function buildArxivHtmlUrl(id: string): string {
-  return `https://arxiv.org/html/${normalizeArxivId(id)}`;
+  return `https://arxiv.org/html/${normalizeArxivIdWithVersion(id)}`;
+}
+
+export function buildArxivHtmlFallbackUrl(id: string): string {
+  return `https://ar5iv.labs.arxiv.org/html/${normalizeArxivIdWithVersion(id)}`;
+}
+
+export function buildArxivHtmlUrls(id: string): string[] {
+  return [
+    buildArxivHtmlUrl(id),
+    buildArxivHtmlFallbackUrl(id)
+  ];
 }
 
 export function buildArxivPdfUrl(id: string): string {

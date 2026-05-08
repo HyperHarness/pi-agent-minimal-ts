@@ -20,6 +20,7 @@ import {
   updatePaperRecordParseManifest,
   updatePaperRecordQueuedReading,
   updatePaperRecordReadingFailure,
+  writePaperSourceMetadataForRecord,
   writePaperRecord
 } from "../../src/agent/paper-store.js";
 import { resolvePaperLibraryPaths } from "../../src/agent/knowledge-base.js";
@@ -429,6 +430,93 @@ test("paper source metadata derives arXiv ids and preserves manually enriched fi
     assert.equal(updated.readingStatus, "queued");
     assert.equal(updated.citationStatus, "complete");
     assert.deepEqual(updated.missingFields, []);
+  } finally {
+    await rm(workspaceDir, { recursive: true, force: true });
+  }
+});
+
+test("writePaperSourceMetadataForRecord falls back to Crossref bibliographic search for APS citation metadata", async () => {
+  const workspaceDir = await mkdtemp(path.join(os.tmpdir(), "paper-store-"));
+
+  try {
+    const recordPath = await writePaperRecord({
+      workspaceDir,
+      record: {
+        source: "aps",
+        canonicalId: "10.1103/1rbn-c4xf",
+        articleUrl: "https://journals.aps.org/prapplied/abstract/10.1103/1rbn-c4xf",
+        recordedAt: "2026-05-07T14:41:39.609Z",
+        handlingMethod: "arxiv_preprint_fallback",
+        status: "preprint_fallback",
+        title: "Energy-participation-ratio analysis for very anharmonic superconducting circuits",
+        preprint: {
+          source: "arxiv",
+          canonicalId: "2411.15039",
+          articleUrl: "https://arxiv.org/abs/2411.15039",
+          pdfUrl: "https://arxiv.org/pdf/2411.15039",
+          recordPath: path.join(workspaceDir, "knowledge-base/wiki/sources/arxiv-2411.15039/acquisition.json"),
+          downloadPath: path.join(workspaceDir, "knowledge-base/raw/pdfs/arxiv-2411.15039.pdf"),
+          status: "downloaded"
+        },
+        failure: {
+          code: "publisher_version_not_available",
+          message: "Using matching arXiv preprint."
+        }
+      }
+    });
+
+    const sourcePath = await writePaperSourceMetadataForRecord({
+      workspaceDir,
+      record: JSON.parse(await readFile(recordPath, "utf8")),
+      recordPath,
+      enrichCitationMetadata: true,
+      fetchImpl: async (input) => {
+        const url = new URL(input.toString());
+        if (url.pathname === "/works/10.1103%2F1rbn-c4xf") {
+          return new Response("missing", { status: 404 });
+        }
+        assert.equal(url.pathname, "/works");
+        assert.equal(url.searchParams.get("query.bibliographic"), "10.1103/1rbn-c4xf");
+        return new Response(JSON.stringify({
+          message: {
+            items: [
+              {
+                DOI: "10.1103/1rbn-c4xf",
+                title: ["Energy-participation-ratio analysis for very anharmonic superconducting circuits"],
+                author: [
+                  { given: "Figen", family: "Yilmaz" },
+                  { given: "Siddharth", family: "Singh" },
+                  { given: "Martijn F.S.", family: "Zwanenburg" },
+                  { given: "Jinlun", family: "Hu" },
+                  { given: "Taryn V.", family: "Stefanski" },
+                  { given: "Christian Kraglund", family: "Andersen" }
+                ],
+                published: { "date-parts": [[2026, 4, 1]] },
+                "container-title": ["Physical Review Applied"]
+              }
+            ]
+          }
+        }), {
+          status: 200,
+          headers: { "content-type": "application/json" }
+        });
+      }
+    });
+
+    const source = JSON.parse(await readFile(sourcePath, "utf8"));
+    assert.deepEqual(source.authors, [
+      "Figen Yilmaz",
+      "Siddharth Singh",
+      "Martijn F.S. Zwanenburg",
+      "Jinlun Hu",
+      "Taryn V. Stefanski",
+      "Christian Kraglund Andersen"
+    ]);
+    assert.equal(source.year, 2026);
+    assert.equal(source.venue, "Physical Review Applied");
+    assert.equal(source.citationStatus, "complete");
+    assert.deepEqual(source.missingFields, []);
+    assert.equal(source.resolvedFrom, "crossref_search");
   } finally {
     await rm(workspaceDir, { recursive: true, force: true });
   }
