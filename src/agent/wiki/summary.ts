@@ -5,19 +5,19 @@ import {
   readParsedPaperDocument,
   readPaperSourceByKey,
   resolvePaperParseArtifactPaths
-} from "./paper/reading/paper-reader-store.js";
+} from "../paper/reading/paper-reader-store.js";
 import type {
   ConcretePaperParseEngine,
   PaperParseQualityReport,
   PaperReaderSource
-} from "./paper/reading/types.js";
-import { PaperReaderError } from "./paper/reading/types.js";
-import { writePaperWikiSource } from "./paper-wiki/paper-wiki.js";
-import type { PaperWikiSourceResult } from "./paper-wiki/types.js";
+} from "../paper/reading/types.js";
+import { PaperReaderError } from "../paper/reading/types.js";
+import { writePaperWikiSource } from "./content.js";
+import type { PaperWikiSourceResult } from "./types.js";
 import {
   findPaperWikiRelations,
   type PaperWikiRelationCandidate
-} from "./paper-relations.js";
+} from "./relations.js";
 
 const DEFAULT_MAX_EVIDENCE_CHARS = 60000;
 const MAX_SECTION_OUTLINE_ITEMS = 80;

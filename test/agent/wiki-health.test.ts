@@ -3,7 +3,7 @@ import assert from "node:assert/strict";
 import { mkdir, mkdtemp, readFile, rm, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import path from "node:path";
-import { checkWikiHealth, fixWikiHealth } from "../../src/agent/wiki-health.js";
+import { checkWikiHealth, fixWikiHealth } from "../../src/agent/wiki/health.js";
 import { appendPaperDownloadJobEvent } from "../../src/agent/paper/extension/paper-download-jobs.js";
 import { blockPaperDownload } from "../../src/agent/paper/acquisition/paper-blocklist.js";
 import type { PaperParseResult } from "../../src/agent/paper/reading/types.js";

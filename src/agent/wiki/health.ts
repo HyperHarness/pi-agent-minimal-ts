@@ -1,31 +1,31 @@
 import { access, readFile } from "node:fs/promises";
 import path from "node:path";
-import { listLocalPapers, type LocalPaperEntry, type LocalPaperParseSummary } from "./paper/storage/local-paper-library.js";
-import { downloadPaper, type DownloadPaperOptions } from "./paper/acquisition/paper-manager.js";
-import { parsePaper, type ParsePaperOptions } from "./paper/reading/paper-reader.js";
+import { listLocalPapers, type LocalPaperEntry, type LocalPaperParseSummary } from "../paper/storage/local-paper-library.js";
+import { downloadPaper, type DownloadPaperOptions } from "../paper/acquisition/paper-manager.js";
+import { parsePaper, type ParsePaperOptions } from "../paper/reading/paper-reader.js";
 import {
   generatePaperWikiSummary,
   type GeneratePaperWikiSummaryOptions,
   type PaperSummaryProgress,
   type PaperSummaryWorker
-} from "./paper-summary.js";
+} from "./summary.js";
 import {
   readPaperDownloadJobEvents,
   type PaperDownloadJobEvent
-} from "./paper/extension/paper-download-jobs.js";
+} from "../paper/extension/paper-download-jobs.js";
 import {
   updatePaperRecordParseManifest,
   updatePaperRecordReadingFailure,
   writePaperSourceMetadataForRecord,
   writePaperSourceMetadataForSource
-} from "./paper/storage/paper-store.js";
+} from "../paper/storage/paper-store.js";
 import {
   derivePaperKeyForBlocklist,
   findBlockedPaperDownload,
   type PaperBlocklistEntry
-} from "./paper/acquisition/paper-blocklist.js";
-import type { PaperCitationStatus, PaperRecord, PaperSource, PaperSourceMetadata } from "./paper/types.js";
-import type { PaperParseResult } from "./paper/reading/types.js";
+} from "../paper/acquisition/paper-blocklist.js";
+import type { PaperCitationStatus, PaperRecord, PaperSource, PaperSourceMetadata } from "../paper/types.js";
+import type { PaperParseResult } from "../paper/reading/types.js";
 
 export type WikiHealthIssueKind =
   | "needs_download"

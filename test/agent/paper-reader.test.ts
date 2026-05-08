@@ -15,9 +15,9 @@ import {
   searchPaperWiki,
   writePaperWikiPage,
   writePaperWikiSource
-} from "../../src/agent/paper-wiki/paper-wiki.js";
-import { bootstrapPaperWikiPageEvidence } from "../../src/agent/paper-wiki/bootstrap.js";
-import { lintPaperWiki } from "../../src/agent/paper-wiki/lint.js";
+} from "../../src/agent/wiki/content.js";
+import { bootstrapPaperWikiPageEvidence } from "../../src/agent/wiki/bootstrap.js";
+import { lintPaperWiki } from "../../src/agent/wiki/lint.js";
 import {
   evaluateParseQuality,
   evaluateParseQualityWithMarkdown

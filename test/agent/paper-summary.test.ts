@@ -7,7 +7,7 @@ import { parsePaper } from "../../src/agent/paper/reading/paper-reader.js";
 import {
   buildPaperSummaryEvidence,
   generatePaperWikiSummary
-} from "../../src/agent/paper-summary.js";
+} from "../../src/agent/wiki/summary.js";
 
 async function createWorkspace(): Promise<string> {
   const workspace = await mkdtemp(path.join(os.tmpdir(), "pi-paper-summary-"));

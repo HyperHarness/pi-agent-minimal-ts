@@ -7,12 +7,12 @@ import {
   searchLocalPapers
 } from "./paper/storage/local-paper-library.js";
 import { downloadPaper } from "./paper/acquisition/paper-manager.js";
-import { generatePaperWikiSummary } from "./paper-summary.js";
+import { generatePaperWikiSummary } from "./wiki/summary.js";
 import {
   checkWikiHealth,
   fixWikiHealth,
   type WikiHealthFixProgress
-} from "./wiki-health.js";
+} from "./wiki/health.js";
 
 const MAX_SEARCH_PREVIEW_TEXT_LENGTH = 220;
 const MAX_WIKI_HEALTH_FIX_RESULT_PREVIEWS = 80;

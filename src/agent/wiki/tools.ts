@@ -1,35 +1,35 @@
 import path from "node:path";
 import { Type, type Static } from "@mariozechner/pi-ai";
 import type { AgentTool, AgentToolUpdateCallback } from "@mariozechner/pi-agent-core";
-import type { ToolDependencies } from "./tool-types.js";
+import type { ToolDependencies } from "../tool-types.js";
 import {
   mergePaperWikiAliases,
   searchPaperWiki,
   writePaperWikiPage,
   writePaperWikiSource
-} from "./paper-wiki/paper-wiki.js";
-import { sanitizeWikiFilename } from "./paper-wiki/paper-wiki-store.js";
+} from "./content.js";
+import { sanitizeWikiFilename } from "./store.js";
 import {
   bootstrapPaperWikiPageEvidence,
   type BootstrapPaperWikiPageEvidenceDependencies
-} from "./paper-wiki/bootstrap.js";
-import { lintPaperWiki } from "./paper-wiki/lint.js";
+} from "./bootstrap.js";
+import { lintPaperWiki } from "./lint.js";
 import type {
   PaperWikiPageBootstrapResult,
   PaperWikiPageWorkerOutput
-} from "./paper-wiki/types.js";
+} from "./types.js";
 import {
   generatePaperWikiSummary,
   type PaperSummaryProgress
-} from "./paper-summary.js";
-import { paperWikiRelations } from "./paper-relations.js";
-import type { PaperSearchResult, PaperSearchSource } from "./paper/types.js";
-import { searchLocalPapers } from "./paper/storage/local-paper-library.js";
+} from "./summary.js";
+import { paperWikiRelations } from "./relations.js";
+import type { PaperSearchResult, PaperSearchSource } from "../paper/types.js";
+import { searchLocalPapers } from "../paper/storage/local-paper-library.js";
 import {
   paperReaderEngineParameter,
   type DownloadPaperClosedLoopDetails,
   type DownloadPaperReadingClosure
-} from "./paper-tools.js";
+} from "../paper-tools.js";
 
 const writePaperWikiSourceParameters = Type.Object({
   paperKey: Type.String({ description: "Parsed paper key, for example arxiv-2406.06015." }),

@@ -7,7 +7,7 @@ import {
   findPaperWikiRelations,
   paperWikiRelations,
   updatePaperWikiRelations
-} from "../../src/agent/paper-relations.js";
+} from "../../src/agent/wiki/relations.js";
 
 async function createWorkspace(): Promise<string> {
   const workspace = await mkdtemp(path.join(os.tmpdir(), "pi-paper-relations-"));

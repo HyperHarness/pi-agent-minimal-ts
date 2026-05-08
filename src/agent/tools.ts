@@ -5,7 +5,7 @@ import { createFileTools } from "./file-tools.js";
 import { createLibraryHealthTools } from "./library-health-tools.js";
 import { createPaperTools } from "./paper-tools.js";
 import { createWebTools } from "./web-tools.js";
-import { createWikiTools } from "./wiki-tools.js";
+import { createWikiTools } from "./wiki/tools.js";
 import type { AgentTools, ToolDependencies, ToolSetMetadata } from "./tool-types.js";
 import {
   getToolBoundaryToolNames as getToolBoundaryToolNamesFromBoundaryModule,

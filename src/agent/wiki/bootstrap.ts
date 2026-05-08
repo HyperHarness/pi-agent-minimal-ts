@@ -1,12 +1,12 @@
 import { readFile } from "node:fs/promises";
 import path from "node:path";
 import { searchLocalPapers, type SearchLocalPapersResult } from "../paper/storage/local-paper-library.js";
-import { searchPaperWiki } from "./paper-wiki.js";
+import { searchPaperWiki } from "./content.js";
 import {
   listPaperWikiSourceFiles,
   relativeToWorkspace,
   sanitizeWikiFilename
-} from "./paper-wiki-store.js";
+} from "./store.js";
 import type {
   PaperWikiPageBootstrapEvidence,
   PaperWikiPageBootstrapMissingSummary,

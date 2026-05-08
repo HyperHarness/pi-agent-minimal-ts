@@ -7,7 +7,7 @@ import {
   listPaperWikiSourceFiles,
   relativeToWorkspace,
   sanitizeWikiFilename
-} from "./paper-wiki-store.js";
+} from "./store.js";
 
 export type PaperWikiLintIssueKind =
   | "stale_index"

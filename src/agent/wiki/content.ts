@@ -19,7 +19,7 @@ import {
   listPaperWikiSourceFiles,
   relativeToWorkspace,
   sanitizeWikiFilename
-} from "./paper-wiki-store.js";
+} from "./store.js";
 import type {
   PaperWikiPageInput,
   PaperWikiPageResult,

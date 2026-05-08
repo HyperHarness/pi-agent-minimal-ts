@@ -6,7 +6,7 @@ import {
   relativeWorkspacePath,
   resolveWorkspaceWritablePath
 } from "./file-tools.js";
-import { sanitizeWikiFilename } from "./paper-wiki/paper-wiki-store.js";
+import { sanitizeWikiFilename } from "./wiki/store.js";
 
 const writeDesignArtifactParameters = Type.Object({
   artifactType: Type.Union([

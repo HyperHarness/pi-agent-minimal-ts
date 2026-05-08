@@ -1,11 +1,11 @@
 import { readFile, writeFile } from "node:fs/promises";
 import path from "node:path";
-import { listLocalPapers, type LocalPaperEntry } from "./paper/storage/local-paper-library.js";
+import { listLocalPapers, type LocalPaperEntry } from "../paper/storage/local-paper-library.js";
 import {
   ensurePaperWikiScaffold,
   getPaperWikiSourcePath,
   relativeToWorkspace
-} from "./paper-wiki/paper-wiki-store.js";
+} from "./store.js";
 
 const DEFAULT_MAX_CANDIDATES = 8;
 const DEFAULT_MAX_TEXT_CHARS = 30000;
