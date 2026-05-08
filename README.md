@@ -314,7 +314,7 @@ The key distinction is that `wiki/sources/*.md` are evidence summaries for indiv
 ### Design And Paper-Writing Tools
 
 - `write_design_artifact`: full-mode / design-subagent tool that writes structured design records, verification reports, failure records, and benchmark cases under `knowledge-base/design-records/`
-- `load_paper_writing_skill`: full-mode / paper-writing-worker tool that loads project-local writing prompt modules such as `paper-writing-worker/skills/sciwrite/prompt.md`
+- `load_paper_writing_skill`: full-mode / paper-writing-worker tool that loads worker-scoped writing prompt modules such as `skills/paper-writing-worker/sciwrite/prompt.md`
 - paper-writing-worker tools: project-local writing skill loading, manuscript file reading/writing, LaTeX compilation, local wiki retrieval, and wiki-grounded Q&A
 - `get_time`: full-mode diagnostic tool for checking the current local time
 

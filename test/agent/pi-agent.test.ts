@@ -847,7 +847,7 @@ test("runSessionPrompt routes paper write commands to the paper-writing worker b
 
   const registration = registerFauxProvider();
   const workspace = await mkdtemp(path.join(tmpdir(), "pi-agent-paper-writing-worker-"));
-  const skillDir = path.join(workspace, "paper-writing-worker", "skills", "sciwrite");
+  const skillDir = path.join(workspace, "skills", "paper-writing-worker", "sciwrite");
   await mkdir(skillDir, { recursive: true });
   await writeFile(path.join(skillDir, "prompt.md"), "SciWrite local prompt.", "utf8");
   registration.setResponses([

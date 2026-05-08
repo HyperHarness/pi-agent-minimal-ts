@@ -17,7 +17,7 @@ const getTimeParameters = Type.Object({
 const loadPaperWritingSkillParameters = Type.Object({
   skillName: Type.Optional(
     Type.String({
-      description: "Project-local paper-writing skill name under paper-writing-worker/skills/. Defaults to sciwrite."
+      description: "Worker-local skill name under skills/paper-writing-worker/. Defaults to sciwrite."
     })
   )
 });
@@ -531,14 +531,14 @@ async function loadPaperWritingSkill(input: {
     throw new Error("Paper-writing skill name must contain only letters, numbers, underscores, and hyphens.");
   }
 
-  const promptPath = `paper-writing-worker/skills/${skillName}/prompt.md`;
+  const promptPath = `skills/paper-writing-worker/${skillName}/prompt.md`;
   const resolvedPromptPath = await resolveWorkspacePath(input.workspaceDir, promptPath);
   const promptStats = await stat(resolvedPromptPath);
   if (!promptStats.isFile()) {
     throw new Error(`Paper-writing skill prompt is not a file: ${promptPath}`);
   }
 
-  const attributionPath = `paper-writing-worker/skills/${skillName}/ATTRIBUTION.md`;
+  const attributionPath = `skills/paper-writing-worker/${skillName}/ATTRIBUTION.md`;
   const resolvedAttributionPath = path.resolve(input.workspaceDir, attributionPath);
   const hasAttribution = await pathExists(resolvedAttributionPath);
   if (hasAttribution) {
@@ -644,7 +644,7 @@ export function createFileTools(input: {
     name: "load_paper_writing_skill",
     label: "Load Paper Writing Skill",
     description:
-      "Loads a project-local paper-writing-worker prompt module, such as sciwrite, from paper-writing-worker/skills/<skillName>/prompt.md. Use this before manuscript writing-quality review or prose cleanup.",
+      "Loads a paper-writing-worker prompt module, such as sciwrite, from skills/paper-writing-worker/<skillName>/prompt.md. Use this before manuscript writing-quality review or prose cleanup.",
     parameters: loadPaperWritingSkillParameters,
     executionMode: "sequential",
     execute: async (_toolCallId: string, args: LoadPaperWritingSkillParameters) => {

@@ -1104,9 +1104,9 @@ test("read_file accepts workspace-absolute paths", async () => {
   }
 });
 
-test("load_paper_writing_skill loads a project-local prompt module", async () => {
+test("load_paper_writing_skill loads a root worker-scoped prompt module", async () => {
   const workspace = await mkdtemp(path.join(tmpdir(), "pi-agent-tools-"));
-  const skillDir = path.join(workspace, "paper-writing-worker", "skills", "sciwrite");
+  const skillDir = path.join(workspace, "skills", "paper-writing-worker", "sciwrite");
   await mkdir(skillDir, { recursive: true });
   await writeFile(path.join(skillDir, "prompt.md"), "# SciWrite\n\nReview manuscript clarity.", "utf8");
   await writeFile(path.join(skillDir, "ATTRIBUTION.md"), "Adapted from SciWrite.", "utf8");
@@ -1117,8 +1117,8 @@ test("load_paper_writing_skill loads a project-local prompt module", async () =>
     assert.equal(result.content?.[0]?.text, "# SciWrite\n\nReview manuscript clarity.");
     assert.deepEqual(result.details, {
       skillName: "sciwrite",
-      promptPath: "paper-writing-worker/skills/sciwrite/prompt.md",
-      attributionPath: "paper-writing-worker/skills/sciwrite/ATTRIBUTION.md",
+      promptPath: "skills/paper-writing-worker/sciwrite/prompt.md",
+      attributionPath: "skills/paper-writing-worker/sciwrite/ATTRIBUTION.md",
       bytes: Buffer.byteLength("# SciWrite\n\nReview manuscript clarity.", "utf8")
     });
   } finally {
