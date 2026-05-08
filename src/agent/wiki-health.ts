@@ -16,7 +16,8 @@ import {
 import {
   updatePaperRecordParseManifest,
   updatePaperRecordReadingFailure,
-  writePaperSourceMetadataForRecord
+  writePaperSourceMetadataForRecord,
+  writePaperSourceMetadataForSource
 } from "./paper-store.js";
 import {
   derivePaperKeyForBlocklist,
@@ -1026,34 +1027,101 @@ async function readSourceMetadata(sourcePath: string): Promise<Partial<PaperSour
   }
 }
 
+async function fileExists(filePath: string): Promise<boolean> {
+  try {
+    await access(filePath);
+    return true;
+  } catch {
+    return false;
+  }
+}
+
+async function resolveMetadataRefreshPaths(options: PaperDownloadWorkerMetadataRefreshOptions): Promise<{
+  recordPath?: string;
+  sourcePath?: string;
+  recordExists: boolean;
+}> {
+  const recordPath = options.recordPath
+    ? toWorkspacePath(options.workspaceDir, options.recordPath) ?? options.recordPath
+    : undefined;
+  const sourcePath = options.sourcePath
+    ? toWorkspacePath(options.workspaceDir, options.sourcePath) ?? options.sourcePath
+    : undefined;
+  return {
+    ...(recordPath ? { recordPath } : {}),
+    ...(sourcePath ? { sourcePath } : {}),
+    recordExists: recordPath ? await fileExists(recordPath) : false
+  };
+}
+
+async function refreshSourceCitationMetadata(input: {
+  workspaceDir: string;
+  recordPath?: string;
+  sourcePath?: string;
+  recordExists: boolean;
+}): Promise<string> {
+  const recordSiblingSourcePath = input.recordPath
+    ? path.join(path.dirname(input.recordPath), "source.json")
+    : undefined;
+  if (
+    input.sourcePath &&
+    (!input.recordPath ||
+      !input.recordExists ||
+      path.resolve(input.sourcePath) !== path.resolve(recordSiblingSourcePath ?? ""))
+  ) {
+    return writePaperSourceMetadataForSource({
+      workspaceDir: input.workspaceDir,
+      sourcePath: input.sourcePath,
+      enrichCitationMetadata: true
+    });
+  }
+
+  if (input.recordPath && input.recordExists) {
+    const record = JSON.parse(await readFile(input.recordPath, "utf8")) as PaperRecord;
+    return writePaperSourceMetadataForRecord({
+      workspaceDir: input.workspaceDir,
+      record,
+      recordPath: input.recordPath,
+      enrichCitationMetadata: true
+    });
+  }
+
+  if (input.sourcePath || recordSiblingSourcePath) {
+    return writePaperSourceMetadataForSource({
+      workspaceDir: input.workspaceDir,
+      sourcePath: input.sourcePath ?? recordSiblingSourcePath!,
+      enrichCitationMetadata: true
+    });
+  }
+
+  throw new Error("Cannot refresh source citation metadata because no source metadata path could be resolved.");
+}
+
 function createDefaultPaperDownloadWorker(input: {
   downloadPaperImpl: NonNullable<WikiHealthFixOptions["downloadPaperImpl"]>;
 }): PaperDownloadWorker {
   return {
     downloadPaper: input.downloadPaperImpl,
     refreshSourceMetadata: async (options) => {
-      if (!options.recordPath) {
+      const paths = await resolveMetadataRefreshPaths(options);
+      if (!paths.recordPath && !paths.sourcePath) {
         return {
           status: "skipped",
-          message: "Cannot refresh source citation metadata because the issue has no acquisition recordPath."
+          message: "Cannot refresh source citation metadata because the issue has no acquisition recordPath or sourcePath."
         };
       }
-      const recordPath = toWorkspacePath(options.workspaceDir, options.recordPath) ?? options.recordPath;
-      const record = JSON.parse(await readFile(recordPath, "utf8")) as PaperRecord;
-      const sourcePath = await writePaperSourceMetadataForRecord({
+      const refreshedSourcePath = await refreshSourceCitationMetadata({
         workspaceDir: options.workspaceDir,
-        record,
-        recordPath,
-        enrichCitationMetadata: true
+        ...paths
       });
-      const source = await readSourceMetadata(sourcePath);
+      const source = await readSourceMetadata(refreshedSourcePath);
       const missingFields = Array.isArray(source?.missingFields)
         ? source.missingFields.filter((field): field is string => typeof field === "string" && field.trim().length > 0)
         : [];
       const citationStatus = source?.citationStatus;
       return {
         status: "refreshed",
-        sourcePath,
+        sourcePath: refreshedSourcePath,
         ...(citationStatus ? { citationStatus } : {}),
         missingFields,
         message: missingFields.length === 0

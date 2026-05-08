@@ -192,6 +192,27 @@ function readOptionalStringArray(value: unknown): string[] | undefined {
   return value.filter((item): item is string => typeof item === "string" && item.trim().length > 0);
 }
 
+function inferMissingCitationFields(source: PaperReaderSource & Partial<PaperSourceMetadata>): string[] {
+  const missing: string[] = [];
+  const authors = readOptionalStringArray((source as unknown as Record<string, unknown>).authors) ?? [];
+  if (!readOptionalString(source.title)) {
+    missing.push("title");
+  }
+  if (authors.length === 0) {
+    missing.push("authors");
+  }
+  if (typeof source.year !== "number") {
+    missing.push("year");
+  }
+  if (!readOptionalString(source.venue)) {
+    missing.push("venue");
+  }
+  if (!readOptionalString(source.doi) && !readOptionalString(source.arxivId) && !readOptionalString(source.articleUrl)) {
+    missing.push("stableIdentifier");
+  }
+  return missing;
+}
+
 function applySource(
   entry: LocalPaperEntry,
   source: PaperReaderSource & Partial<PaperSourceMetadata>,
@@ -204,8 +225,14 @@ function applySource(
   entry.source = entry.source ?? source.source;
   entry.canonicalId = entry.canonicalId ?? source.canonicalId;
   entry.articleUrl = entry.articleUrl ?? source.articleUrl;
-  entry.citationStatus = source.citationStatus ?? entry.citationStatus;
-  entry.missingCitationFields = readOptionalStringArray(rawSource.missingFields) ?? entry.missingCitationFields;
+  const explicitMissingFields = readOptionalStringArray(rawSource.missingFields);
+  const inferredMissingFields = inferMissingCitationFields(source);
+  entry.citationStatus = source.citationStatus ?? (inferredMissingFields.length > 0 ? "incomplete" : entry.citationStatus);
+  entry.missingCitationFields = explicitMissingFields ?? (
+    source.citationStatus === undefined || inferredMissingFields.length > 0
+      ? inferredMissingFields
+      : entry.missingCitationFields
+  );
   if (source.recordPath && !entry.recordPath) {
     entry.recordPath = relativeToWorkspace(workspaceDir, source.recordPath);
   }

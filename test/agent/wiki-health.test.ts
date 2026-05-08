@@ -192,6 +192,31 @@ test("checkWikiHealth reports incomplete source citation metadata", async () => 
   }
 });
 
+test("checkWikiHealth reports legacy source metadata without citation status fields", async () => {
+  const workspace = await createWorkspace();
+
+  try {
+    const paperKey = "science-10.1126-science.ado6285";
+    await writeJson(path.join(workspace, "knowledge-base", "wiki", "sources", paperKey, "source.json"), {
+      paperKey,
+      source: "science",
+      canonicalId: "10.1126/science.ado6285",
+      articleUrl: "https://www.science.org/doi/10.1126/science.ado6285",
+      title: "Beyond-classical computation in quantum simulation"
+    });
+
+    const result = await checkWikiHealth({ workspaceDir: workspace });
+
+    assert.equal(result.summary.citation_incomplete, 1);
+    const issue = result.issues.find((candidate) => candidate.kind === "citation_incomplete");
+    assert.equal(issue?.paperKey, paperKey);
+    assert.deepEqual(issue?.metadata?.missingFields, ["authors", "year", "venue"]);
+    assert.equal(issue?.metadata?.sourcePath, `knowledge-base/wiki/sources/${paperKey}/source.json`);
+  } finally {
+    await rm(workspace, { recursive: true, force: true });
+  }
+});
+
 test("checkWikiHealth accepts ready webpage reading when PDF parsing failed later", async () => {
   const workspace = await createWorkspace();
 
@@ -626,8 +651,8 @@ test("checkWikiHealth treats publisher accepted-paper arXiv fallback records as 
     assert.equal(result.summary.needs_download, 0);
     assert.equal(result.summary.low_quality, 0);
     assert.equal(result.summary.summary_missing, 0);
-    assert.ok(!result.issues.some((issue) => issue.paperKey === "aps-10.1103-k3d5-v43c"));
-    assert.ok(!result.issues.some((issue) => issue.paperKey === "journals.aps.org-prapplied-accepted-10.1103-k3d5-v43c"));
+    assert.ok(!result.issues.some((issue) => issue.kind !== "citation_incomplete" && issue.paperKey === "aps-10.1103-k3d5-v43c"));
+    assert.ok(!result.issues.some((issue) => issue.kind !== "citation_incomplete" && issue.paperKey === "journals.aps.org-prapplied-accepted-10.1103-k3d5-v43c"));
   } finally {
     await rm(workspace, { recursive: true, force: true });
   }
@@ -682,8 +707,8 @@ test("checkWikiHealth treats accepted publisher-pending records as non-actionabl
     assert.equal(result.summary.needs_download, 0);
     assert.equal(result.summary.low_quality, 0);
     assert.equal(result.summary.summary_missing, 0);
-    assert.ok(!result.issues.some((issue) => issue.paperKey === "aps-10.1103-rp4w-3n7l"));
-    assert.ok(!result.issues.some((issue) => issue.paperKey === "journals.aps.org-prapplied-accepted-10.1103-rp4w-3n7l"));
+    assert.ok(!result.issues.some((issue) => issue.kind !== "citation_incomplete" && issue.paperKey === "aps-10.1103-rp4w-3n7l"));
+    assert.ok(!result.issues.some((issue) => issue.kind !== "citation_incomplete" && issue.paperKey === "journals.aps.org-prapplied-accepted-10.1103-rp4w-3n7l"));
   } finally {
     await rm(workspace, { recursive: true, force: true });
   }
@@ -969,6 +994,78 @@ test("fixWikiHealth delegates citation metadata refresh to the paper download wo
     assert.equal(result.fixed, 1);
     assert.equal(result.results[0]?.action, "metadata_refresh");
   } finally {
+    await rm(workspace, { recursive: true, force: true });
+  }
+});
+
+test("fixWikiHealth refreshes legacy source-only citation metadata through the default worker", async () => {
+  const workspace = await createWorkspace();
+  const originalFetch = globalThis.fetch;
+
+  try {
+    const paperKey = "science-10.1126-science.ado6285";
+    await writeJson(path.join(workspace, "knowledge-base", "wiki", "sources", paperKey, "source.json"), {
+      paperKey,
+      source: "science",
+      canonicalId: "10.1126/science.ado6285",
+      articleUrl: "https://www.science.org/doi/10.1126/science.ado6285",
+      title: "Beyond-classical computation in quantum simulation",
+      createdAt: "2026-05-06T04:45:58.636Z"
+    });
+    globalThis.fetch = (async (input) => {
+      const url = input.toString();
+      if (url === "https://api.crossref.org/works/10.1126%2Fscience.ado6285") {
+        return new Response(JSON.stringify({
+          message: {
+            DOI: "10.1126/science.ado6285",
+            title: ["Beyond-classical computation in quantum simulation"]
+          }
+        }), {
+          status: 200,
+          headers: { "content-type": "application/json" }
+        });
+      }
+      if (url.startsWith("https://api.crossref.org/works?")) {
+        return new Response(JSON.stringify({ message: { items: [] } }), {
+          status: 200,
+          headers: { "content-type": "application/json" }
+        });
+      }
+      assert.equal(
+        url,
+        "https://api.semanticscholar.org/graph/v1/paper/DOI:10.1126%2Fscience.ado6285?fields=title%2Cauthors%2Cyear%2Cvenue%2CpublicationVenue%2CexternalIds"
+      );
+      return new Response(JSON.stringify({
+        title: "Beyond-classical computation in quantum simulation",
+        authors: [
+          { name: "Adam Smith" },
+          { name: "Bao Nguyen" }
+        ],
+        year: 2025,
+        venue: "Science",
+        externalIds: { DOI: "10.1126/science.ado6285" }
+      }), {
+        status: 200,
+        headers: { "content-type": "application/json" }
+      });
+    }) as typeof fetch;
+
+    const result = await fixWikiHealth({
+      workspaceDir: workspace,
+      issueKinds: ["citation_incomplete"]
+    });
+
+    assert.equal(result.attempted, 1);
+    assert.equal(result.fixed, 1);
+    assert.equal(result.results[0]?.action, "metadata_refresh");
+    const source = JSON.parse(await readFile(path.join(workspace, "knowledge-base", "wiki", "sources", paperKey, "source.json"), "utf8"));
+    assert.deepEqual(source.authors, ["Adam Smith", "Bao Nguyen"]);
+    assert.equal(source.year, 2025);
+    assert.equal(source.venue, "Science");
+    assert.equal(source.citationStatus, "complete");
+    assert.deepEqual(source.missingFields, []);
+  } finally {
+    globalThis.fetch = originalFetch;
     await rm(workspace, { recursive: true, force: true });
   }
 });

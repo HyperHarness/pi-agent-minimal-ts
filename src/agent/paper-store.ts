@@ -903,6 +903,74 @@ async function readCrossrefSearchCitationMetadata(input: {
   }
 }
 
+async function readSemanticScholarCitationMetadata(input: {
+  doi: string;
+  fetchImpl: typeof fetch;
+}): Promise<PaperSourceMetadataPatch | undefined> {
+  try {
+    const endpoint = new URL(`https://api.semanticscholar.org/graph/v1/paper/DOI:${encodeURIComponent(input.doi)}`);
+    endpoint.searchParams.set("fields", "title,authors,year,venue,publicationVenue,externalIds");
+    const response = await input.fetchImpl(endpoint);
+    if (!response.ok) {
+      return undefined;
+    }
+    const message = await response.json() as Record<string, unknown>;
+    const authors = Array.isArray(message.authors)
+      ? message.authors.flatMap((author) => {
+        if (!author || typeof author !== "object") {
+          return [];
+        }
+        const name = (author as Record<string, unknown>).name;
+        return typeof name === "string" && name.trim() ? [name.trim()] : [];
+      })
+      : [];
+    const publicationVenue = message.publicationVenue && typeof message.publicationVenue === "object"
+      ? message.publicationVenue as Record<string, unknown>
+      : undefined;
+    const venue = typeof publicationVenue?.name === "string" && publicationVenue.name.trim()
+      ? publicationVenue.name.trim()
+      : typeof message.venue === "string" && message.venue.trim()
+        ? message.venue.trim()
+        : undefined;
+    const externalIds = message.externalIds && typeof message.externalIds === "object"
+      ? message.externalIds as Record<string, unknown>
+      : undefined;
+    const doi = typeof externalIds?.DOI === "string" && externalIds.DOI.trim()
+      ? externalIds.DOI.trim()
+      : input.doi;
+    if (
+      typeof message.title !== "string" &&
+      authors.length === 0 &&
+      typeof message.year !== "number" &&
+      !venue &&
+      !doi
+    ) {
+      return undefined;
+    }
+    return {
+      resolvedFrom: "semantic_scholar_api",
+      ...(typeof message.title === "string" && message.title.trim() ? { title: normalizeText(message.title) } : {}),
+      authors,
+      ...(typeof message.year === "number" ? { year: message.year } : {}),
+      ...(venue ? { venue } : {}),
+      doi
+    };
+  } catch {
+    return undefined;
+  }
+}
+
+function patchHasRequiredCitationCore(patch: PaperSourceMetadataPatch | undefined): boolean {
+  return Boolean(
+    patch &&
+    Array.isArray(patch.authors) &&
+    patch.authors.length > 0 &&
+    typeof patch.year === "number" &&
+    typeof patch.venue === "string" &&
+    patch.venue.trim()
+  );
+}
+
 async function readRemoteCitationMetadata(input: {
   doi?: string;
   arxivId?: string;
@@ -917,13 +985,23 @@ async function readRemoteCitationMetadata(input: {
     return readArxivApiCitationMetadata({ arxivId: input.arxivId, fetchImpl });
   }
   if (input.doi) {
-    return (
-      await readCrossrefCitationMetadata({ doi: input.doi, fetchImpl })
-    ) ?? readCrossrefSearchCitationMetadata({
+    const exact = await readCrossrefCitationMetadata({ doi: input.doi, fetchImpl });
+    if (patchHasRequiredCitationCore(exact)) {
+      return exact;
+    }
+    const search = await readCrossrefSearchCitationMetadata({
       doi: input.doi,
       ...(input.title ? { title: input.title } : {}),
       fetchImpl
     });
+    if (patchHasRequiredCitationCore(search)) {
+      return search;
+    }
+    const semanticScholar = await readSemanticScholarCitationMetadata({ doi: input.doi, fetchImpl });
+    if (semanticScholar) {
+      return semanticScholar;
+    }
+    return search ?? exact;
   }
   if (input.title) {
     return readCrossrefSearchCitationMetadata({ title: input.title, fetchImpl });
@@ -1065,6 +1143,89 @@ export async function writePaperSourceMetadataForRecord(input: {
   await mkdir(path.dirname(sourcePath), { recursive: true });
   await writeFile(sourcePath, `${JSON.stringify(sourceMetadata, null, 2)}\n`, "utf8");
   return sourcePath;
+}
+
+function readSourceString(source: Partial<PaperSourceMetadata>, key: string): string | undefined {
+  const value = (source as unknown as Record<string, unknown>)[key];
+  return typeof value === "string" && value.trim() ? value.trim() : undefined;
+}
+
+function deriveCanonicalIdFromArticleUrl(source: PaperSource | undefined, articleUrl: string): string | undefined {
+  try {
+    const parsed = new URL(articleUrl);
+    if (source === "science") {
+      const match = decodeURIComponent(parsed.pathname).match(/^\/doi\/(?:abs\/|full\/|pdf\/|epdf\/)?(10\.\d{4,9}\/[^/?#]+)$/i);
+      return match?.[1];
+    }
+    if (source === "aps") {
+      const match = decodeURIComponent(parsed.pathname).match(/^\/[^/]+\/(?:abstract|accepted)\/(10\.1103)\/([^/?#]+)$/i);
+      return match?.[1] && match[2] ? `${match[1]}/${match[2]}` : undefined;
+    }
+    if (source === "nature") {
+      const match = parsed.pathname.match(/^\/articles\/(s\d{5}-\d{3}-\d{5}-[a-z0-9])$/i);
+      return match?.[1];
+    }
+  } catch {
+    return undefined;
+  }
+  return undefined;
+}
+
+function paperRecordFromSourceMetadata(input: {
+  existing: Partial<PaperSourceMetadata> | undefined;
+}): PaperRecord {
+  const existing = input.existing;
+  const source = existing?.source;
+  const articleUrl = readSourceString(existing ?? {}, "articleUrl");
+  if (!source || !articleUrl) {
+    throw new Error("source.json must include source and articleUrl before citation metadata can be refreshed.");
+  }
+
+  const canonicalId = readSourceString(existing, "canonicalId") ?? deriveCanonicalIdFromArticleUrl(source, articleUrl);
+  const recordedAt = readSourceString(existing, "recordedAt") ?? readSourceString(existing, "createdAt") ?? new Date().toISOString();
+  const title = readSourceString(existing, "title");
+  const pdfUrl = readSourceString(existing, "pdfUrl");
+  const downloadPath = readSourceString(existing, "downloadPath") ?? readSourceString(existing, "pdfPath");
+  const updatedAt = readSourceString(existing, "updatedAt") ?? recordedAt;
+
+  return {
+    source,
+    articleUrl,
+    recordedAt,
+    handlingMethod: "source_metadata_refresh",
+    status: existing.downloadStatus ?? "external_opened",
+    ...(canonicalId ? { canonicalId } : {}),
+    ...(title ? { title } : {}),
+    ...(pdfUrl ? { pdfUrl } : {}),
+    ...(downloadPath ? { downloadPath } : {}),
+    ...(existing.readingStatus ? {
+      reading: {
+        status: existing.readingStatus,
+        updatedAt
+      }
+    } : {})
+  } as unknown as PaperRecord;
+}
+
+export async function writePaperSourceMetadataForSource(input: {
+  workspaceDir: string;
+  sourcePath: string;
+  enrichCitationMetadata?: boolean;
+  fetchImpl?: typeof fetch;
+}): Promise<string> {
+  const sourcePath = path.isAbsolute(input.sourcePath)
+    ? path.resolve(input.sourcePath)
+    : path.resolve(input.workspaceDir, input.sourcePath);
+  const existing = await readExistingPaperSourceMetadata(sourcePath);
+  const recordPath = path.join(path.dirname(sourcePath), "acquisition.json");
+  const record = paperRecordFromSourceMetadata({ existing });
+  return writePaperSourceMetadataForRecord({
+    workspaceDir: input.workspaceDir,
+    record,
+    recordPath,
+    enrichCitationMetadata: input.enrichCitationMetadata,
+    ...(input.fetchImpl ? { fetchImpl: input.fetchImpl } : {})
+  });
 }
 
 async function writePaperRecordAndSourceMetadata(input: {
