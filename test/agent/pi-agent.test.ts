@@ -823,6 +823,11 @@ test("runSessionPrompt routes paper write commands to the paper-writing worker b
   assert.equal(parsePaperWritingWorkerCommand!("paper write polish the abstract"), "polish the abstract");
   assert.equal(parsePaperWritingWorkerCommand!("/paper-writing-worker 修改论文"), "修改论文");
   assert.equal(parsePaperWritingWorkerCommand!("同意，请你修改论文"), "同意，请你修改论文");
+  assert.deepEqual(routeChatPromptToWorker!("让paper-writing-worker评审论文，找出问题点"), {
+    role: "paper-writing-worker",
+    instruction: "让paper-writing-worker评审论文，找出问题点",
+    reason: "intent"
+  });
   assert.deepEqual(routeChatPromptToWorker!("wiki evidence summarize local papers"), {
     role: "wiki-evidence-worker",
     instruction: "summarize local papers",

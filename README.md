@@ -51,7 +51,7 @@ The bridge should not contain domain reasoning. It should route messages, collec
 
 The local chat/RPC runtime has a lightweight router layer before the default main-agent turn. It detects high-confidence worker intents and runs the requested turn in a clean worker context with the corresponding boundary tools:
 
-- manuscript editing or LaTeX requests -> `paper-writing-worker`
+- manuscript editing, writing-quality review, or LaTeX requests -> `paper-writing-worker`
 - paper search, paper download, acquisition fallback, and citation-metadata repair requests -> `paper-download-subagent`
 - evidence construction, paper summarization, and source-summary relation requests -> `wiki-evidence-worker`
 - chip-design records, verification records, or design-failure cases -> `design-subagent`
@@ -156,7 +156,7 @@ assistant> I found several relevant papers...
 > exit
 ```
 
-The router automatically sends high-confidence worker requests to the matching isolated worker. For manuscript edits, either ask naturally or prefix the request with `paper write` when you want an explicit route:
+The router automatically sends high-confidence worker requests to the matching isolated worker. For manuscript edits or writing-quality review, either ask naturally or prefix the request with `paper write` when you want an explicit route:
 
 ```text
 > 同意，请你修改论文
