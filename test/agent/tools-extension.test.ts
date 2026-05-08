@@ -3,9 +3,18 @@ import assert from "node:assert/strict";
 import { mkdtemp, rm } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import path from "node:path";
-import { PaperDownloadError } from "../../src/agent/paper-download.js";
 import type { PaperExtensionBridge } from "../../src/agent/paper-extension-bridge.js";
-import { createTools } from "../../src/agent/tools.js";
+import type { createTools as CreateToolsFunction } from "../../src/agent/tools.js";
+
+const agentModulePrefix = import.meta.url.includes("/dist/test/")
+  ? "../../src/agent"
+  : "../../dist/src/agent";
+const { PaperDownloadError } = await import(
+  `${agentModulePrefix}/paper-download.js`
+) as typeof import("../../src/agent/paper-download.js");
+const { createTools } = await import(`${agentModulePrefix}/tools.js`) as {
+  createTools: typeof CreateToolsFunction;
+};
 
 type ToolContentItem = {
   type?: string;
