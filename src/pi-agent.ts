@@ -15,7 +15,6 @@ export {
 } from "./agent/agent-routing.js";
 export type {
   RoutedWorkerPrompt,
-  RoutedWorkerRole,
   WorkerHandoff
 } from "./agent/agent-routing.js";
 export {
