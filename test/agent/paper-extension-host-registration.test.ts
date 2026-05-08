@@ -3,7 +3,7 @@ import assert from "node:assert/strict";
 import os from "node:os";
 import path from "node:path";
 import { mkdtemp, readFile, rm } from "node:fs/promises";
-import { writeNativeHostManifest } from "../../src/agent/paper-extension-host.js";
+import { writeNativeHostManifest } from "../../src/agent/paper/extension/paper-extension-host.js";
 
 test("writeNativeHostManifest writes Chrome native messaging manifest", async () => {
   const workspace = await mkdtemp(path.join(os.tmpdir(), "native-host-manifest-"));

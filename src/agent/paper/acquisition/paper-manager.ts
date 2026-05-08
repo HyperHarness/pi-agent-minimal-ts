@@ -15,7 +15,7 @@ import {
   resolveDefaultPaperBrowserSessionFactory,
   type OpenSystemChromePageResult,
   type PaperBrowserSession
-} from "./browser-session.js";
+} from "../browser/browser-session.js";
 import {
   canonicalizeApsDoi,
   PaperDownloadError,
@@ -26,11 +26,11 @@ import {
 import {
   createPaperExtensionJob,
   type PaperExtensionBridge
-} from "./paper-extension-bridge.js";
+} from "../extension/paper-extension-bridge.js";
 import {
   readPaperDownloadJobEvents,
   summarizePaperDownloadJobs
-} from "./paper-download-jobs.js";
+} from "../extension/paper-download-jobs.js";
 import {
   findDownloadedPaperRecord,
   readPaperRecord,
@@ -38,8 +38,8 @@ import {
   resolvePaperPdfPath,
   writePaperRecord,
   type DownloadedPaperRecordMatch
-} from "./paper-store.js";
-import { resolvePaperLibraryPaths } from "./knowledge-base.js";
+} from "../storage/paper-store.js";
+import { resolvePaperLibraryPaths } from "../../knowledge-base.js";
 import {
   DEFAULT_CLOUDFLARE_COOLDOWN_MS,
   getRecentCloudflareBlock,
@@ -48,8 +48,8 @@ import {
   writePublisherAccessState,
   type PublisherAccessState
 } from "./publisher-access-state.js";
-import { searchWeb, type WebSearchResult } from "./web-search.js";
-import { listLocalPapers } from "./local-paper-library.js";
+import { searchWeb, type WebSearchResult } from "../../web-search.js";
+import { listLocalPapers } from "../storage/local-paper-library.js";
 import {
   derivePaperKeyForBlocklist,
   findBlockedPaperDownload,
@@ -66,7 +66,7 @@ import type {
   PaperSource,
   PublisherPreprintFallbackResult,
   SupportedPaperSource
-} from "./paper-types.js";
+} from "../types.js";
 
 const execFileAsync = promisify(execFile);
 

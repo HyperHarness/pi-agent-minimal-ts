@@ -7,7 +7,7 @@ import {
   normalizeChromeExecutablePath,
   resolveSystemChromeExecutablePath,
   resolvePaperBrowserLaunchOptions
-} from "../../src/agent/browser-session.js";
+} from "../../src/agent/paper/browser/browser-session.js";
 
 test("getPaperBrowserProfileDir keeps the browser profile inside the workspace", () => {
   const workspaceDir = path.join("D:", "Codex", "pi-agent-minimal-ts");

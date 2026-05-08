@@ -495,8 +495,6 @@ If you run `npm install --ignore-scripts`, build/test still work, but browser to
 - `npm run agent:rpc`: build and start the JSONL RPC agent
 - `npm run feishu-bridge`: build and start the Feishu bridge
 - `npm run wiki:web`: serve the local wiki and graph viewer
-- `npm run doctor:approval`: diagnose Windows PowerShell Codex approval rules for routine Git commands
-- `npm run doctor:approval -- --apply`: append missing safe approval rules without allowing broad `git` prefixes
 
 ## Test
 
@@ -506,6 +504,7 @@ npm test
 
 ## Supporting Docs
 
+- [docs/code-architecture.md](docs/code-architecture.md)
 - [docs/paper-downloader-extension.md](docs/paper-downloader-extension.md)
 - [docs/wiki-web-graph.md](docs/wiki-web-graph.md)
 - [docs/opendataloader-pdf-install.md](docs/opendataloader-pdf-install.md)

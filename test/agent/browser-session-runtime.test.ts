@@ -8,7 +8,7 @@ import {
   PaperBrowserSessionError,
   classifyArticleAuthorization,
   resolveDefaultPaperBrowserSessionFactory
-} from "../../src/agent/browser-session.js";
+} from "../../src/agent/paper/browser/browser-session.js";
 
 test("classifyArticleAuthorization marks publisher login walls as authorization_failed", () => {
   const result = classifyArticleAuthorization({

@@ -4,18 +4,18 @@ import { createHash } from "node:crypto";
 import { mkdir, mkdtemp, readFile, rm, writeFile } from "node:fs/promises";
 import os from "node:os";
 import path from "node:path";
-import { downloadPaper } from "../../src/agent/paper-manager.js";
-import { PaperDownloadError } from "../../src/agent/paper-download.js";
+import { downloadPaper } from "../../src/agent/paper/acquisition/paper-manager.js";
+import { PaperDownloadError } from "../../src/agent/paper/acquisition/paper-download.js";
 import {
   createPaperExtensionJob,
   createQueuedPaperExtensionBridge
-} from "../../src/agent/paper-extension-bridge.js";
-import { appendPaperDownloadJobEvent } from "../../src/agent/paper-download-jobs.js";
+} from "../../src/agent/paper/extension/paper-extension-bridge.js";
+import { appendPaperDownloadJobEvent } from "../../src/agent/paper/extension/paper-download-jobs.js";
 import {
   resolveExternalPaperPdfPath,
   resolvePaperPdfPath,
   resolvePaperRecordPath
-} from "../../src/agent/paper-store.js";
+} from "../../src/agent/paper/storage/paper-store.js";
 
 function expectedJobId(source: string, articleUrl: string): string {
   return `paper-${source}-${createHash("sha1").update(`${source}:${articleUrl}`).digest("hex").slice(0, 12)}`;

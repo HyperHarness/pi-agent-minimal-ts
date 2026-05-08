@@ -6,7 +6,7 @@ import path from "node:path";
 import {
   listLocalPapers,
   searchLocalPapers
-} from "../../src/agent/local-paper-library.js";
+} from "../../src/agent/paper/storage/local-paper-library.js";
 
 async function createWorkspace(): Promise<string> {
   return mkdtemp(path.join(tmpdir(), "pi-local-paper-library-"));

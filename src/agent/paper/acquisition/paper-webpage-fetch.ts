@@ -8,8 +8,8 @@ import {
   getResponseStatusError,
   resolveFetchTimeoutMs,
   withRequestTimeout
-} from "./network.js";
-import { sanitizeLatexmlMarkdown } from "./paper-reader/latexml-markdown.js";
+} from "../../network.js";
+import { sanitizeLatexmlMarkdown } from "../reading/latexml-markdown.js";
 
 export interface FetchPaperWebPageOptions {
   url: string;

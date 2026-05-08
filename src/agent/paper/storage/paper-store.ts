@@ -4,7 +4,7 @@ import path from "node:path";
 import {
   isPathInsideDirectory,
   resolvePaperLibraryPaths
-} from "./knowledge-base.js";
+} from "../../knowledge-base.js";
 import type {
   DownloadablePaperSource,
   PaperRecord,
@@ -12,8 +12,8 @@ import type {
   PaperRecordReadingManifest,
   PaperSourceMetadata,
   PaperSource
-} from "./paper-types.js";
-import type { ParsedPaperDocument } from "./paper-reader/types.js";
+} from "../types.js";
+import type { ParsedPaperDocument } from "../reading/types.js";
 
 type DownloadedPaperRecord = Extract<PaperRecord, { status: "downloaded" }>;
 type FindDownloadedPaperRecordInput =

@@ -1,17 +1,17 @@
 import assert from "node:assert/strict";
 import test from "node:test";
-import { createAttachedPaperBrowserSession } from "../../src/agent/browser-session.js";
+import { createAttachedPaperBrowserSession } from "../../src/agent/paper/browser/browser-session.js";
 import {
   createPaperBrowserManagerServer,
   startPaperBrowserManagerHttpServer,
   type PaperBrowserController
-} from "../../src/agent/paper-browser-manager-server.js";
+} from "../../src/agent/paper/browser/paper-browser-manager-server.js";
 import type {
   DownloadPdfRequest,
   DownloadPdfResponse,
   OpenArticleRequest,
   OpenArticleResponse
-} from "../../src/agent/paper-browser-manager-types.js";
+} from "../../src/agent/paper/browser/paper-browser-manager-types.js";
 
 function createControllerStub(overrides: Partial<PaperBrowserController> = {}): PaperBrowserController {
   return {

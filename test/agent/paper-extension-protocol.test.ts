@@ -3,7 +3,7 @@ import test from "node:test";
 import {
   parseExtensionHostMessage,
   parseExtensionHostResponse
-} from "../../src/agent/paper-extension-protocol.js";
+} from "../../src/agent/paper/extension/paper-extension-protocol.js";
 
 test("parseExtensionHostMessage accepts register_download messages", () => {
   const message = parseExtensionHostMessage({

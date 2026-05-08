@@ -1,6 +1,6 @@
 import { mkdir, readFile, writeFile } from "node:fs/promises";
 import path from "node:path";
-import type { SupportedPaperSource } from "./paper-types.js";
+import type { SupportedPaperSource } from "../types.js";
 
 export const DEFAULT_CLOUDFLARE_COOLDOWN_MS = 30 * 60 * 1000;
 

@@ -9,8 +9,8 @@ import {
   parsePaper,
   readPaperSection,
   searchPaperText
-} from "../../src/agent/paper-reader/paper-reader.js";
-import { savePaperWebPageParse } from "../../src/agent/paper-reader/engines/webpage.js";
+} from "../../src/agent/paper/reading/paper-reader.js";
+import { savePaperWebPageParse } from "../../src/agent/paper/reading/engines/webpage.js";
 import {
   searchPaperWiki,
   writePaperWikiPage,
@@ -21,10 +21,10 @@ import { lintPaperWiki } from "../../src/agent/paper-wiki/lint.js";
 import {
   evaluateParseQuality,
   evaluateParseQualityWithMarkdown
-} from "../../src/agent/paper-reader/quality.js";
-import { PaperReaderError, type ParsedPaperDocument } from "../../src/agent/paper-reader/types.js";
-import { parsePaperWebPageHtml } from "../../src/agent/paper-webpage-fetch.js";
-import { appendPaperDownloadJobEvent } from "../../src/agent/paper-download-jobs.js";
+} from "../../src/agent/paper/reading/quality.js";
+import { PaperReaderError, type ParsedPaperDocument } from "../../src/agent/paper/reading/types.js";
+import { parsePaperWebPageHtml } from "../../src/agent/paper/acquisition/paper-webpage-fetch.js";
+import { appendPaperDownloadJobEvent } from "../../src/agent/paper/extension/paper-download-jobs.js";
 
 async function createWorkspace(): Promise<string> {
   const workspace = await mkdtemp(path.join(os.tmpdir(), "pi-paper-reader-"));

@@ -3,7 +3,7 @@ import assert from "node:assert/strict";
 import { mkdir, mkdtemp, readFile, rm, writeFile } from "node:fs/promises";
 import os from "node:os";
 import path from "node:path";
-import { parsePaper } from "../../src/agent/paper-reader/paper-reader.js";
+import { parsePaper } from "../../src/agent/paper/reading/paper-reader.js";
 import {
   buildPaperSummaryEvidence,
   generatePaperWikiSummary

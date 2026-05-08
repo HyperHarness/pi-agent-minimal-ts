@@ -1,6 +1,6 @@
 import test from "node:test";
 import assert from "node:assert/strict";
-import { searchApsPapers } from "../../src/agent/aps-search.js";
+import { searchApsPapers } from "../../src/agent/paper/acquisition/aps-search.js";
 
 function jsonResponse(body: unknown): Response {
   return new Response(JSON.stringify(body), {

@@ -1,7 +1,7 @@
 import { appendFile, mkdir, readFile } from "node:fs/promises";
 import path from "node:path";
 import type { ExtensionJobPurpose, ExtensionJobStatus } from "./paper-extension-protocol.js";
-import type { PaperSource } from "./paper-types.js";
+import type { PaperSource } from "../types.js";
 
 export interface PaperDownloadJobEvent {
   jobId: string;

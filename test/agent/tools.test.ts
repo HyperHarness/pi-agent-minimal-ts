@@ -4,11 +4,11 @@ import { createHash } from "node:crypto";
 import { chmod, mkdtemp, mkdir, readFile, rm, symlink, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import path from "node:path";
-import { PaperDownloadError } from "../../src/agent/paper-download.js";
+import { PaperDownloadError } from "../../src/agent/paper/acquisition/paper-download.js";
 import type {
   PaperDownloadResult,
   PaperSearchResult
-} from "../../src/agent/paper-types.js";
+} from "../../src/agent/paper/types.js";
 import * as agentTools from "../../src/agent/tools.js";
 import { createTools, createToolsForBoundary, getToolBoundaryToolNames } from "../../src/agent/tools.js";
 import {
@@ -19,7 +19,7 @@ import {
   resolvePaperPdfPath,
   updatePaperRecordParseManifest,
   writePaperRecord
-} from "../../src/agent/paper-store.js";
+} from "../../src/agent/paper/storage/paper-store.js";
 
 type ToolContentItem = {
   type?: string;

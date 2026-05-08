@@ -1,7 +1,7 @@
 import { mkdir, readFile, writeFile } from "node:fs/promises";
 import path from "node:path";
-import { resolvePaperLibraryPaths } from "./knowledge-base.js";
-import type { PaperSource } from "./paper-types.js";
+import { resolvePaperLibraryPaths } from "../../knowledge-base.js";
+import type { PaperSource } from "../types.js";
 
 export type PaperBlockReasonCode =
   | "irrelevant"

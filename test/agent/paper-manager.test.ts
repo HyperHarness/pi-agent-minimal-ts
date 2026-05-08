@@ -9,18 +9,18 @@ import {
   downloadPaper,
   registerManualPaperDownload,
   searchPapers
-} from "../../src/agent/paper-manager.js";
-import type { ArxivSearchResult } from "../../src/agent/arxiv.js";
-import { PaperDownloadError } from "../../src/agent/paper-download.js";
+} from "../../src/agent/paper/acquisition/paper-manager.js";
+import type { ArxivSearchResult } from "../../src/agent/paper/acquisition/arxiv.js";
+import { PaperDownloadError } from "../../src/agent/paper/acquisition/paper-download.js";
 import {
   resolveExternalPaperPdfPath,
   resolvePaperPdfPath,
   resolvePaperRecordPath
-} from "../../src/agent/paper-store.js";
-import { appendPaperDownloadJobEvent } from "../../src/agent/paper-download-jobs.js";
-import { blockPaperDownload } from "../../src/agent/paper-blocklist.js";
+} from "../../src/agent/paper/storage/paper-store.js";
+import { appendPaperDownloadJobEvent } from "../../src/agent/paper/extension/paper-download-jobs.js";
+import { blockPaperDownload } from "../../src/agent/paper/acquisition/paper-blocklist.js";
 import type { WebSearchResult } from "../../src/agent/web-search.js";
-import type { PaperSearchResult, PaperSearchSource } from "../../src/agent/paper-types.js";
+import type { PaperSearchResult, PaperSearchSource } from "../../src/agent/paper/types.js";
 
 type SearchArxivCall = {
   query: string;

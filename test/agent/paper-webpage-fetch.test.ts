@@ -8,13 +8,13 @@ import {
   fetchPaperWebPage,
   parsePaperWebPageHtml,
   parsePaperWebPageHtmlWithPandoc
-} from "../../src/agent/paper-webpage-fetch.js";
-import { savePaperWebPageParse } from "../../src/agent/paper-reader/engines/webpage.js";
+} from "../../src/agent/paper/acquisition/paper-webpage-fetch.js";
+import { savePaperWebPageParse } from "../../src/agent/paper/reading/engines/webpage.js";
 import {
   inspectPaper,
   readPaperSection,
   searchPaperText
-} from "../../src/agent/paper-reader/paper-reader.js";
+} from "../../src/agent/paper/reading/paper-reader.js";
 
 function createHtmlResponse(status: number, body: string, contentType = "text/html; charset=utf-8") {
   return new Response(body, {

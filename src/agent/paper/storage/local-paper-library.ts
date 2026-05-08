@@ -1,16 +1,16 @@
 import { access, readdir, readFile } from "node:fs/promises";
 import type { Dirent } from "node:fs";
 import path from "node:path";
-import { resolvePaperLibraryPaths } from "./knowledge-base.js";
-import { resolvePublisherCanonicalIdFromArticleUrl } from "./paper-download.js";
-import type { ConcretePaperParseEngine, PaperParseQualityReport, PaperReaderSource } from "./paper-reader/types.js";
+import { resolvePaperLibraryPaths } from "../../knowledge-base.js";
+import { resolvePublisherCanonicalIdFromArticleUrl } from "../acquisition/paper-download.js";
+import type { ConcretePaperParseEngine, PaperParseQualityReport, PaperReaderSource } from "../reading/types.js";
 import type {
   PaperCitationStatus,
   PaperRecord,
   PaperSource,
   PaperSourceMetadata,
   SupportedPaperSource
-} from "./paper-types.js";
+} from "../types.js";
 
 export type LocalPaperListStatus = "all" | "downloaded" | "parsed" | "summarized";
 

@@ -5,9 +5,9 @@ import {
   readParsedPaperDocument,
   readPaperSourceByKey,
   resolvePaperParseArtifactPaths
-} from "../paper-reader/paper-reader-store.js";
-import type { ConcretePaperParseEngine } from "../paper-reader/types.js";
-import { PaperReaderError } from "../paper-reader/types.js";
+} from "../paper/reading/paper-reader-store.js";
+import type { ConcretePaperParseEngine } from "../paper/reading/types.js";
+import { PaperReaderError } from "../paper/reading/types.js";
 import {
   ensurePaperWikiScaffold,
   getPaperWikiDir,

@@ -1,7 +1,7 @@
 import { createHash } from "node:crypto";
 import { appendPaperDownloadJobEvent } from "./paper-download-jobs.js";
 import type { ExtensionJobPurpose } from "./paper-extension-protocol.js";
-import type { ExtensionPaperJobResult, SupportedPaperSource } from "./paper-types.js";
+import type { ExtensionPaperJobResult, SupportedPaperSource } from "../types.js";
 
 type ExtensionPaperSource = SupportedPaperSource | "external";
 

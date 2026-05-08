@@ -1,4 +1,4 @@
-import type { PaperSearchResult } from "./paper-types.js";
+import type { PaperSearchResult } from "../types.js";
 
 export interface SearchApsPapersOptions {
   query: string;

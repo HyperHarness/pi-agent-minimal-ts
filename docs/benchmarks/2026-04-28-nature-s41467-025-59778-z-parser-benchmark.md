@@ -19,7 +19,7 @@ This benchmark compares five extraction routes on the same difficult Nature arti
 2. Docling local PDF parser.
 3. Plain text PDF baseline parser.
 4. Generic direct extraction from the original Nature article webpage through `src/agent/web-fetch.ts`.
-5. Dedicated scientific paper webpage extraction through `src/agent/paper-webpage-fetch.ts`.
+5. Dedicated scientific paper webpage extraction through `src/agent/paper/acquisition/paper-webpage-fetch.ts`.
 
 The goal is not only to check whether text can be extracted, but whether the output is suitable as a source layer for the planned LLM wiki and downstream retrieval.
 
@@ -141,7 +141,7 @@ The current generic webpage fetcher should not be used as the canonical LLM wiki
 
 ## Dedicated Paper Webpage Extraction
 
-The dedicated paper webpage extractor succeeded through `src/agent/paper-webpage-fetch.ts` and removed the main limitation of the generic webpage route.
+The dedicated paper webpage extractor succeeded through `src/agent/paper/acquisition/paper-webpage-fetch.ts` and removed the main limitation of the generic webpage route.
 
 Measured output:
 

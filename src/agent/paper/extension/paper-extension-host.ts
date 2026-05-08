@@ -12,10 +12,10 @@ import {
   type ExtensionHostMessage,
   type ExtensionHostResponse
 } from "./paper-extension-protocol.js";
-import { parsePaperWebPageHtmlWithPandoc } from "./paper-webpage-fetch.js";
-import { savePaperWebPageParse } from "./paper-reader/engines/webpage.js";
-import { parsePaper } from "./paper-reader/paper-reader.js";
-import type { PaperParseResult } from "./paper-reader/types.js";
+import { parsePaperWebPageHtmlWithPandoc } from "../acquisition/paper-webpage-fetch.js";
+import { savePaperWebPageParse } from "../reading/engines/webpage.js";
+import { parsePaper } from "../reading/paper-reader.js";
+import type { PaperParseResult } from "../reading/types.js";
 import {
   readPaperRecord,
   resolveExternalPaperPdfPath,
@@ -23,9 +23,9 @@ import {
   updatePaperRecordParseManifest,
   updatePaperRecordReadingFailure,
   writePaperRecord
-} from "./paper-store.js";
-import { resolvePublisherCanonicalIdFromArticleUrl } from "./paper-download.js";
-import type { PaperRecord, SupportedPaperSource } from "./paper-types.js";
+} from "../storage/paper-store.js";
+import { resolvePublisherCanonicalIdFromArticleUrl } from "../acquisition/paper-download.js";
+import type { PaperRecord, SupportedPaperSource } from "../types.js";
 
 const NATIVE_HOST_NAME = "com.pi_agent.paper_downloader";
 const NATIVE_HOST_DESCRIPTION = "Pi Agent paper downloader native host";

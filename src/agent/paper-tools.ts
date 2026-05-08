@@ -8,47 +8,47 @@ import {
   getPaperBrowserProfileDir,
   resolveDefaultPaperBrowserSessionFactory,
   type PaperBrowserSession
-} from "./browser-session.js";
+} from "./paper/browser/browser-session.js";
 import {
   PaperDownloadError,
   downloadPaperPdf,
   resolvePublisherCanonicalId,
   resolvePublisherCanonicalIdFromArticleUrl
-} from "./paper-download.js";
+} from "./paper/acquisition/paper-download.js";
 import {
   downloadPaper,
   registerManualPaperDownload,
   searchPapers
-} from "./paper-manager.js";
+} from "./paper/acquisition/paper-manager.js";
 import {
   inspectPaper,
   parsePaper,
   readPaperSection,
   searchPaperText
-} from "./paper-reader/paper-reader.js";
-import { savePaperWebPageParse } from "./paper-reader/engines/webpage.js";
-import { createPaperExtensionJob } from "./paper-extension-bridge.js";
-import { createPaperBrowserManagerClient } from "./paper-browser-manager-client.js";
+} from "./paper/reading/paper-reader.js";
+import { savePaperWebPageParse } from "./paper/reading/engines/webpage.js";
+import { createPaperExtensionJob } from "./paper/extension/paper-extension-bridge.js";
+import { createPaperBrowserManagerClient } from "./paper/browser/paper-browser-manager-client.js";
 import {
   createPaperBrowserManagerServer,
   startPaperBrowserManagerHttpServer
-} from "./paper-browser-manager-server.js";
-import { searchApsPapers } from "./aps-search.js";
-import { getPublisherAdapter } from "./publisher-adapters/index.js";
-import { fetchPaperWebPage } from "./paper-webpage-fetch.js";
-import type { PaperDownloadResult, PaperSearchResult, SupportedPaperSource } from "./paper-types.js";
-import { buildArxivHtmlUrls } from "./arxiv.js";
+} from "./paper/browser/paper-browser-manager-server.js";
+import { searchApsPapers } from "./paper/acquisition/aps-search.js";
+import { getPublisherAdapter } from "./paper/acquisition/publisher-adapters/index.js";
+import { fetchPaperWebPage } from "./paper/acquisition/paper-webpage-fetch.js";
+import type { PaperDownloadResult, PaperSearchResult, SupportedPaperSource } from "./paper/types.js";
+import { buildArxivHtmlUrls } from "./paper/acquisition/arxiv.js";
 import {
   blockPaperDownload,
   type PaperBlockReasonCode
-} from "./paper-blocklist.js";
+} from "./paper/acquisition/paper-blocklist.js";
 import {
   readPaperRecordByPath,
   updatePaperRecordParseManifest,
   updatePaperRecordQueuedReading,
   updatePaperRecordReadingFailure
-} from "./paper-store.js";
-import type { PaperRecord } from "./paper-types.js";
+} from "./paper/storage/paper-store.js";
+import type { PaperRecord } from "./paper/types.js";
 
 const MAX_SEARCH_RESULT_PREVIEWS = 5;
 const MAX_SEARCH_PREVIEW_TEXT_LENGTH = 220;

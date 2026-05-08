@@ -9,7 +9,7 @@ import {
   type UserMessage
 } from "@mariozechner/pi-ai";
 import { agentLoop, type AgentContext, type AgentEvent, type AgentMessage } from "@mariozechner/pi-agent-core";
-import { createQueuedPaperExtensionBridge } from "./paper-extension-bridge.js";
+import { createQueuedPaperExtensionBridge } from "./paper/extension/paper-extension-bridge.js";
 import type {
   PaperSummaryWorker,
   PaperSummaryWorkerOutput

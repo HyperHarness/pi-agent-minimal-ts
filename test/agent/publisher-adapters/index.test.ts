@@ -3,7 +3,7 @@ import assert from "node:assert/strict";
 import {
   getPublisherAdapter,
   resolvePdfPathFromHtml
-} from "../../../src/agent/publisher-adapters/index.js";
+} from "../../../src/agent/paper/acquisition/publisher-adapters/index.js";
 
 test("getPublisherAdapter selects the science adapter", () => {
   const adapter = getPublisherAdapter("https://www.science.org/doi/10.1126/science.adz8659");

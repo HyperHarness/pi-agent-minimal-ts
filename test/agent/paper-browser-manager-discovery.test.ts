@@ -9,7 +9,7 @@ import {
   isPaperBrowserManagerMetadataStale,
   readPaperBrowserManagerMetadata,
   writePaperBrowserManagerMetadata
-} from "../../src/agent/paper-browser-manager-discovery.js";
+} from "../../src/agent/paper/browser/paper-browser-manager-discovery.js";
 import type {
   DownloadPdfRequest,
   DownloadPdfResponse,
@@ -17,7 +17,7 @@ import type {
   OpenArticleResponse,
   PaperBrowserManagerHealthResponse,
   PaperBrowserManagerMetadata
-} from "../../src/agent/paper-browser-manager-types.js";
+} from "../../src/agent/paper/browser/paper-browser-manager-types.js";
 
 test("getPaperBrowserManagerMetadataPath stores metadata inside the browser profile directory", () => {
   const workspaceDir = path.join("C:", "work", "papers");

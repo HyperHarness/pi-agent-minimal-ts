@@ -1,6 +1,6 @@
 import { readFile, writeFile } from "node:fs/promises";
 import path from "node:path";
-import { listLocalPapers, type LocalPaperEntry } from "./local-paper-library.js";
+import { listLocalPapers, type LocalPaperEntry } from "./paper/storage/local-paper-library.js";
 import {
   ensurePaperWikiScaffold,
   getPaperWikiSourcePath,

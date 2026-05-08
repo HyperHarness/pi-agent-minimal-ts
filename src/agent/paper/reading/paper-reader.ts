@@ -3,13 +3,13 @@ import { access, readFile } from "node:fs/promises";
 import {
   readPaperDownloadJobEvents,
   summarizePaperDownloadJobs
-} from "../paper-download-jobs.js";
+} from "../extension/paper-download-jobs.js";
 import {
   readPaperRecord,
   readPaperRecordByPath
-} from "../paper-store.js";
-import type { PaperRecord } from "../paper-types.js";
-import type { PaperSource } from "../paper-types.js";
+} from "../storage/paper-store.js";
+import type { PaperRecord } from "../types.js";
+import type { PaperSource } from "../types.js";
 import { createPaperChunks } from "./chunks.js";
 import { parseWithDocling } from "./engines/docling.js";
 import { parseWithOpenDataLoader } from "./engines/opendataloader.js";

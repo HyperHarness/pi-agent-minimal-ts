@@ -5,8 +5,8 @@ import type { ToolDependencies } from "./tool-types.js";
 import {
   listLocalPapers,
   searchLocalPapers
-} from "./local-paper-library.js";
-import { downloadPaper } from "./paper-manager.js";
+} from "./paper/storage/local-paper-library.js";
+import { downloadPaper } from "./paper/acquisition/paper-manager.js";
 import { generatePaperWikiSummary } from "./paper-summary.js";
 import {
   checkWikiHealth,

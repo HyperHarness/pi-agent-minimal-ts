@@ -1,9 +1,9 @@
 import { mkdir } from "node:fs/promises";
 import path from "node:path";
 import { getPublisherAdapter } from "./publisher-adapters/index.js";
-import { PaperBrowserSessionError, type PaperBrowserSession } from "./browser-session.js";
-import { resolvePaperLibraryPaths } from "./knowledge-base.js";
-import type { SupportedPaperSource } from "./paper-types.js";
+import { PaperBrowserSessionError, type PaperBrowserSession } from "../browser/browser-session.js";
+import { resolvePaperLibraryPaths } from "../../knowledge-base.js";
+import type { SupportedPaperSource } from "../types.js";
 
 export class PaperDownloadError extends Error {
   constructor(

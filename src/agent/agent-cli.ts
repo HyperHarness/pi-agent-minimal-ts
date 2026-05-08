@@ -14,7 +14,7 @@ import { DEFAULT_SYSTEM_PROMPT } from "./agent-prompts.js";
 import { configureEnvProxy } from "./env-proxy.js";
 import { resolveInitialModel } from "./model-resolver.js";
 import { cleanupTools } from "./tools.js";
-import { readPaperDownloadJobEvents, summarizePaperDownloadJobs } from "./paper-download-jobs.js";
+import { readPaperDownloadJobEvents, summarizePaperDownloadJobs } from "./paper/extension/paper-download-jobs.js";
 import {
   compactOutputText,
   forgetAgentContextWorkspaceDir,

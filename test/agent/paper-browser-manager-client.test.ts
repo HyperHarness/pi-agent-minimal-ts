@@ -1,7 +1,7 @@
 import assert from "node:assert/strict";
 import http from "node:http";
 import test from "node:test";
-import { createPaperBrowserManagerClient } from "../../src/agent/paper-browser-manager-client.js";
+import { createPaperBrowserManagerClient } from "../../src/agent/paper/browser/paper-browser-manager-client.js";
 
 test("paper browser manager client reuses a healthy stored endpoint", async () => {
   const calls: Array<{ url: string; init?: { method?: string; body?: string } }> = [];

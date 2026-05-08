@@ -5,8 +5,8 @@ import {
   isPathInsideDirectory,
   resolvePaperLibraryPaths,
   uniquePaths
-} from "../knowledge-base.js";
-import type { PaperRecord } from "../paper-types.js";
+} from "../../knowledge-base.js";
+import type { PaperRecord } from "../types.js";
 import type {
   ConcretePaperParseEngine,
   PaperParseArtifactPaths,

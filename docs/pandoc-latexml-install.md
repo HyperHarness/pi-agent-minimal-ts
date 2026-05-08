@@ -111,5 +111,5 @@ node --test dist/test/agent/paper-webpage-fetch.test.js --test-name-pattern "Pan
 Run a real TeX source parse when an arXiv source archive is available:
 
 ```sh
-node --input-type=module -e 'import { parsePaper } from "./dist/src/agent/paper-reader/paper-reader.js"; const result = await parsePaper({ workspaceDir: process.cwd(), recordPath: "knowledge-base/wiki/sources/arxiv-2507.09690/acquisition.json", engine: "tex-source", force: true, timeoutMs: 300000 }); console.log(JSON.stringify({ status: result.status, paperKey: result.paperKey, engine: result.engine, markdownPath: result.artifacts.markdownPath, quality: result.quality }, null, 2));'
+node --input-type=module -e 'import { parsePaper } from "./dist/src/agent/paper/reading/paper-reader.js"; const result = await parsePaper({ workspaceDir: process.cwd(), recordPath: "knowledge-base/wiki/sources/arxiv-2507.09690/acquisition.json", engine: "tex-source", force: true, timeoutMs: 300000 }); console.log(JSON.stringify({ status: result.status, paperKey: result.paperKey, engine: result.engine, markdownPath: result.artifacts.markdownPath, quality: result.quality }, null, 2));'
 ```

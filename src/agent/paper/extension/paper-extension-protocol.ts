@@ -1,4 +1,4 @@
-import type { PaperSource } from "./paper-types.js";
+import type { PaperSource } from "../types.js";
 
 export type ExtensionJobStatus =
   | "queued"

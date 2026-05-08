@@ -5,13 +5,13 @@ import {
   readParsedPaperDocument,
   readPaperSourceByKey,
   resolvePaperParseArtifactPaths
-} from "./paper-reader/paper-reader-store.js";
+} from "./paper/reading/paper-reader-store.js";
 import type {
   ConcretePaperParseEngine,
   PaperParseQualityReport,
   PaperReaderSource
-} from "./paper-reader/types.js";
-import { PaperReaderError } from "./paper-reader/types.js";
+} from "./paper/reading/types.js";
+import { PaperReaderError } from "./paper/reading/types.js";
 import { writePaperWikiSource } from "./paper-wiki/paper-wiki.js";
 import type { PaperWikiSourceResult } from "./paper-wiki/types.js";
 import {

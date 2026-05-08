@@ -8,7 +8,7 @@ import {
   readPaperDownloadJobEvents,
   resolvePaperDownloadJobsPath,
   summarizePaperDownloadJobs
-} from "../../src/agent/paper-download-jobs.js";
+} from "../../src/agent/paper/extension/paper-download-jobs.js";
 
 async function createWorkspaceDir(): Promise<string> {
   return mkdtemp(path.join(tmpdir(), "paper-download-jobs-"));

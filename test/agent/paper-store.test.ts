@@ -9,7 +9,7 @@ import type {
   PaperSearchResult,
   PaperSearchSource,
   PaperSource
-} from "../../src/agent/paper-types.js";
+} from "../../src/agent/paper/types.js";
 import {
   findDownloadedPaperRecord,
   readPaperRecordByPath,
@@ -22,7 +22,7 @@ import {
   updatePaperRecordReadingFailure,
   writePaperSourceMetadataForRecord,
   writePaperRecord
-} from "../../src/agent/paper-store.js";
+} from "../../src/agent/paper/storage/paper-store.js";
 import { resolvePaperLibraryPaths } from "../../src/agent/knowledge-base.js";
 
 type Assert<T extends true> = T;

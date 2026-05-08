@@ -3,13 +3,13 @@ import assert from "node:assert/strict";
 import { mkdtemp, rm } from "node:fs/promises";
 import os from "node:os";
 import path from "node:path";
-import { PaperBrowserSessionError } from "../../src/agent/browser-session.js";
+import { PaperBrowserSessionError } from "../../src/agent/paper/browser/browser-session.js";
 import {
   canonicalizeApsDoi,
   PaperDownloadError,
   downloadPaperPdf,
   resolvePublisherCanonicalId
-} from "../../src/agent/paper-download.js";
+} from "../../src/agent/paper/acquisition/paper-download.js";
 
 function assertPaperDownloadError(error: unknown): asserts error is PaperDownloadError {
   assert.ok(error instanceof PaperDownloadError);

@@ -1,6 +1,6 @@
 import { readFile } from "node:fs/promises";
 import path from "node:path";
-import { searchLocalPapers, type SearchLocalPapersResult } from "../local-paper-library.js";
+import { searchLocalPapers, type SearchLocalPapersResult } from "../paper/storage/local-paper-library.js";
 import { searchPaperWiki } from "./paper-wiki.js";
 import {
   listPaperWikiSourceFiles,

@@ -19,10 +19,10 @@ import type {
   PaperSection,
   ParsedPaperDocument
 } from "../types.js";
-import type { PaperWebPageExtraction } from "../../paper-webpage-fetch.js";
-import { getPublisherAdapter } from "../../publisher-adapters/index.js";
-import { resolvePublisherCanonicalIdFromArticleUrl } from "../../paper-download.js";
-import { parseArxivLocator } from "../../arxiv.js";
+import type { PaperWebPageExtraction } from "../../acquisition/paper-webpage-fetch.js";
+import { getPublisherAdapter } from "../../acquisition/publisher-adapters/index.js";
+import { resolvePublisherCanonicalIdFromArticleUrl } from "../../acquisition/paper-download.js";
+import { parseArxivLocator } from "../../acquisition/arxiv.js";
 
 export interface SavePaperWebPageParseOptions {
   workspaceDir: string;

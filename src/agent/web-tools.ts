@@ -5,18 +5,18 @@ import type { ToolDependencies } from "./tool-types.js";
 import {
   createPaperExtensionJob,
   type PaperExtensionBridge
-} from "./paper-extension-bridge.js";
-import { fetchPaperWebPage } from "./paper-webpage-fetch.js";
-import { savePaperWebPageParse } from "./paper-reader/engines/webpage.js";
+} from "./paper/extension/paper-extension-bridge.js";
+import { fetchPaperWebPage } from "./paper/acquisition/paper-webpage-fetch.js";
+import { savePaperWebPageParse } from "./paper/reading/engines/webpage.js";
 import {
   readPaperRecord,
   updatePaperRecordParseManifest
-} from "./paper-store.js";
+} from "./paper/storage/paper-store.js";
 import {
   resolvePublisherCanonicalIdFromArticleUrl
-} from "./paper-download.js";
-import type { SupportedPaperSource } from "./paper-types.js";
-import { getPublisherAdapter } from "./publisher-adapters/index.js";
+} from "./paper/acquisition/paper-download.js";
+import type { SupportedPaperSource } from "./paper/types.js";
+import { getPublisherAdapter } from "./paper/acquisition/publisher-adapters/index.js";
 import { fetchWebPage } from "./web-fetch.js";
 import { searchWeb, type WebSearchResult } from "./web-search.js";
 

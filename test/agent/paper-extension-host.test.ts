@@ -9,7 +9,7 @@ import {
   appendPaperDownloadJobEvent,
   readPaperDownloadJobEvents,
   resolvePaperDownloadJobsPath
-} from "../../src/agent/paper-download-jobs.js";
+} from "../../src/agent/paper/extension/paper-download-jobs.js";
 import {
   encodeNativeMessage,
   handleExtensionHostMessage,
@@ -17,15 +17,15 @@ import {
   resolveDownloadPathCandidates,
   runPaperExtensionNativeHost,
   writeNativeHostManifest
-} from "../../src/agent/paper-extension-host.js";
+} from "../../src/agent/paper/extension/paper-extension-host.js";
 import {
   findDownloadedPaperRecord,
   resolveExternalPaperPdfPath,
   resolvePaperPdfPath,
   resolvePaperRecordPath,
   writePaperRecord
-} from "../../src/agent/paper-store.js";
-import type { ExtensionHostResponse } from "../../src/agent/paper-extension-protocol.js";
+} from "../../src/agent/paper/storage/paper-store.js";
+import type { ExtensionHostResponse } from "../../src/agent/paper/extension/paper-extension-protocol.js";
 
 async function createWorkspaceDir(): Promise<string> {
   return mkdtemp(path.join(tmpdir(), "paper-extension-host-"));

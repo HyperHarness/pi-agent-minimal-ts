@@ -23,8 +23,8 @@ import {
   type PaperSummaryProgress
 } from "./paper-summary.js";
 import { paperWikiRelations } from "./paper-relations.js";
-import type { PaperSearchResult, PaperSearchSource } from "./paper-types.js";
-import { searchLocalPapers } from "./local-paper-library.js";
+import type { PaperSearchResult, PaperSearchSource } from "./paper/types.js";
+import { searchLocalPapers } from "./paper/storage/local-paper-library.js";
 import {
   paperReaderEngineParameter,
   type DownloadPaperClosedLoopDetails,

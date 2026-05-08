@@ -4,7 +4,7 @@ import { access, copyFile, mkdir, mkdtemp, readFile, readdir, rm } from "node:fs
 import os from "node:os";
 import path from "node:path";
 import { promisify } from "node:util";
-import { resolvePaperLibraryPaths } from "../../knowledge-base.js";
+import { resolvePaperLibraryPaths } from "../../../knowledge-base.js";
 import {
   decodeHtmlEntities,
   sanitizeLatexmlMarkdown

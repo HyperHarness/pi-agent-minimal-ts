@@ -1,5 +1,5 @@
 import path from 'node:path';
-import { readPaperDownloadJobEvents, summarizePaperDownloadJobs } from '../../agent/paper-download-jobs.js';
+import { readPaperDownloadJobEvents, summarizePaperDownloadJobs } from '../../agent/paper/extension/paper-download-jobs.js';
 
 export interface DownloadedPdfAttachment {
   path: string;
