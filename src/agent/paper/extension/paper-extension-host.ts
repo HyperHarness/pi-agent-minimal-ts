@@ -65,6 +65,7 @@ export function readNativeMessagesFromBuffer(buffer: Buffer): unknown[] {
 export async function handleExtensionHostMessage(options: {
   workspaceDir: string;
   message: unknown;
+  citationMetadataFetchImpl?: typeof fetch;
   now?: () => Date;
 }): Promise<ExtensionHostResponse> {
   let message: ExtensionHostMessage;
@@ -133,7 +134,8 @@ export async function handleExtensionHostMessage(options: {
   return registerDownloadedPaper({
     workspaceDir: options.workspaceDir,
     message,
-    recordedAt
+    recordedAt,
+    ...(options.citationMetadataFetchImpl ? { citationMetadataFetchImpl: options.citationMetadataFetchImpl } : {})
   });
 }
 
@@ -255,6 +257,7 @@ async function registerDownloadedPaper(options: {
   workspaceDir: string;
   message: Extract<ExtensionHostMessage, { type: "register_download" | "register_download_bytes" }>;
   recordedAt: string;
+  citationMetadataFetchImpl?: typeof fetch;
 }): Promise<ExtensionHostResponse> {
   const downloadPath =
     options.message.type === "register_download"
@@ -405,6 +408,7 @@ async function registerExternalDownload(options: {
   message: Extract<ExtensionHostMessage, { type: "register_download" | "register_download_bytes" }>;
   recordedAt: string;
   pdfBytes: Buffer;
+  citationMetadataFetchImpl?: typeof fetch;
 }): Promise<ExtensionHostResponse> {
   const downloadPath = resolveExternalPaperPdfPath({
     workspaceDir: options.workspaceDir,
@@ -426,6 +430,9 @@ async function registerExternalDownload(options: {
   const title = normalizeOptionalString(options.message.title);
   const recordPath = await writePaperRecord({
     workspaceDir: options.workspaceDir,
+    ...(options.citationMetadataFetchImpl
+      ? { enrichCitationMetadata: true, fetchImpl: options.citationMetadataFetchImpl }
+      : {}),
     record: {
       source: "external",
       articleUrl: options.message.articleUrl,
@@ -472,6 +479,7 @@ async function registerSupportedPublisherDownload(options: {
   source: SupportedPaperSource;
   recordedAt: string;
   pdfBytes: Buffer;
+  citationMetadataFetchImpl?: typeof fetch;
 }): Promise<ExtensionHostResponse> {
   const canonicalId = resolvePublisherCanonicalIdFromArticleUrl({
     publisher: options.source,
@@ -536,6 +544,9 @@ async function registerSupportedPublisherDownload(options: {
   const existingReadingArtifacts = preserveExistingReadingArtifacts(existingRecord?.record);
   const recordPath = await writePaperRecord({
     workspaceDir: options.workspaceDir,
+    ...(options.citationMetadataFetchImpl
+      ? { enrichCitationMetadata: true, fetchImpl: options.citationMetadataFetchImpl }
+      : {}),
     record: {
       source: options.source,
       articleUrl: options.message.articleUrl,
@@ -997,6 +1008,7 @@ export async function runPaperExtensionNativeHost(options: {
   workspaceDir: string;
   stdin: Readable;
   stdout: Writable;
+  citationMetadataFetchImpl?: typeof fetch;
 }): Promise<void> {
   let buffered: Buffer = Buffer.alloc(0);
   let processing = Promise.resolve();
@@ -1026,7 +1038,8 @@ export async function runPaperExtensionNativeHost(options: {
           try {
             response = await handleExtensionHostMessage({
               workspaceDir: options.workspaceDir,
-              message
+              message,
+              ...(options.citationMetadataFetchImpl ? { citationMetadataFetchImpl: options.citationMetadataFetchImpl } : {})
             });
           } catch (error) {
             response = {

@@ -179,7 +179,7 @@ test("handleExtensionHostMessage registers external PDF downloads with manual im
 
 test("handleExtensionHostMessage registers supported publisher PDFs using canonical publisher records", async () => {
   const workspaceDir = await createWorkspaceDir();
-  const articleUrl = "https://www.nature.com/articles/s41586-019-1666-5";
+  const articleUrl = "https://www.nature.com/articles/s41586-024-08449-y";
   const sourcePdfPath = path.join(workspaceDir, "inbox", "nature.pdf");
 
   try {
@@ -188,6 +188,26 @@ test("handleExtensionHostMessage registers supported publisher PDFs using canoni
     const response = await handleExtensionHostMessage({
       workspaceDir,
       now: () => new Date("2026-04-25T10:30:00.000Z"),
+      citationMetadataFetchImpl: async (input: RequestInfo | URL) => {
+        const url = new URL(input.toString());
+        assert.equal(url.hostname, "api.crossref.org");
+        assert.equal(url.pathname, "/works/10.1038%2Fs41586-024-08449-y");
+        return new Response(JSON.stringify({
+          message: {
+            DOI: "10.1038/s41586-024-08449-y",
+            title: ["Quantum error correction below the surface code threshold"],
+            author: [
+              { given: "Google", family: "Quantum AI" },
+              { given: "A.", family: "Researcher" }
+            ],
+            published: { "date-parts": [[2025, 1, 1]] },
+            "container-title": ["Nature"]
+          }
+        }), {
+          status: 200,
+          headers: { "content-type": "application/json" }
+        });
+      },
       message: {
         type: "register_download",
         jobId: "job-nature",
@@ -201,12 +221,12 @@ test("handleExtensionHostMessage registers supported publisher PDFs using canoni
     const expectedDownloadPath = resolvePaperPdfPath({
       workspaceDir,
       source: "nature",
-      canonicalId: "s41586-019-1666-5"
+      canonicalId: "s41586-024-08449-y"
     });
     const expectedRecordPath = resolvePaperRecordPath({
       workspaceDir,
       source: "nature",
-      canonicalId: "s41586-019-1666-5",
+      canonicalId: "s41586-024-08449-y",
       articleUrl
     });
     const expectedSha256 = createHash("sha256")
@@ -229,12 +249,19 @@ test("handleExtensionHostMessage registers supported publisher PDFs using canoni
       recordedAt: "2026-04-25T10:30:00.000Z",
       handlingMethod: "browser_session",
       status: "downloaded",
-      canonicalId: "s41586-019-1666-5",
-      pdfUrl: "https://www.nature.com/articles/s41586-019-1666-5.pdf",
+      canonicalId: "s41586-024-08449-y",
+      pdfUrl: "https://www.nature.com/articles/s41586-024-08449-y.pdf",
       downloadPath: expectedDownloadPath
     });
     assert.equal(savedRecord.download.status, "downloaded");
     assert.equal(savedRecord.reading.status, "not_ready");
+    const source = JSON.parse(await readFile(path.join(path.dirname(expectedRecordPath), "source.json"), "utf8"));
+    assert.equal(source.title, "Quantum error correction below the surface code threshold");
+    assert.deepEqual(source.authors, ["Google Quantum AI", "A. Researcher"]);
+    assert.equal(source.year, 2025);
+    assert.equal(source.venue, "Nature");
+    assert.equal(source.citationStatus, "complete");
+    assert.deepEqual(source.missingFields, []);
     const events = await readPaperDownloadJobEvents({ workspaceDir });
     assert.equal(events.at(-1)?.status, "downloaded");
     assert.equal(events.at(-1)?.recordPath, expectedRecordPath);

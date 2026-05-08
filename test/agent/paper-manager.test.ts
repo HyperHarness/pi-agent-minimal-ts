@@ -887,6 +887,76 @@ test("downloadPaper returns existing APS downloads for equivalent PDF URLs witho
   }
 });
 
+test("downloadPaper enriches source citation metadata after a supported publisher download", async () => {
+  const workspaceDir = await mkdtemp(path.join(os.tmpdir(), "paper-manager-"));
+  const articleUrl = "https://www.nature.com/articles/s41586-024-08449-y";
+  const finalPdfUrl = "https://www.nature.com/articles/s41586-024-08449-y.pdf";
+  const pdfPath = resolvePaperPdfPath({
+    workspaceDir,
+    source: "nature",
+    canonicalId: "s41586-024-08449-y"
+  });
+  const citationFetchCalls: string[] = [];
+
+  try {
+    await mkdir(path.dirname(pdfPath), { recursive: true });
+    await writeFile(pdfPath, "%PDF-1.7\nnature pdf\n", "utf8");
+
+    const result = await downloadPaper({
+      workspaceDir,
+      url: articleUrl,
+      title: "Quantum error correction below the surface code threshold",
+      usePlaywrightFallback: true,
+      searchArxivImpl: async () => [],
+      downloadPublisherPaperImpl: async () => ({
+        publisher: "nature",
+        canonicalId: "s41586-024-08449-y",
+        articleUrl,
+        finalArticleUrl: articleUrl,
+        finalPdfUrl,
+        path: pdfPath
+      }),
+      citationMetadataFetchImpl: async (input: RequestInfo | URL) => {
+        const url = new URL(input.toString());
+        citationFetchCalls.push(url.toString());
+        assert.equal(url.hostname, "api.crossref.org");
+        assert.equal(url.pathname, "/works/10.1038%2Fs41586-024-08449-y");
+        return new Response(JSON.stringify({
+          message: {
+            DOI: "10.1038/s41586-024-08449-y",
+            title: ["Quantum error correction below the surface code threshold"],
+            author: [
+              { given: "Google", family: "Quantum AI" },
+              { given: "A.", family: "Researcher" }
+            ],
+            published: { "date-parts": [[2025, 1, 1]] },
+            "container-title": ["Nature"]
+          }
+        }), {
+          status: 200,
+          headers: { "content-type": "application/json" }
+        });
+      }
+    });
+
+    assert.equal(result.status, "downloaded");
+    const sourcePath = path.join(path.dirname(result.recordPath), "source.json");
+    const source = JSON.parse(await readFile(sourcePath, "utf8"));
+
+    assert.equal(source.title, "Quantum error correction below the surface code threshold");
+    assert.deepEqual(source.authors, ["Google Quantum AI", "A. Researcher"]);
+    assert.equal(source.year, 2025);
+    assert.equal(source.venue, "Nature");
+    assert.equal(source.doi, "10.1038/s41586-024-08449-y");
+    assert.equal(source.citationStatus, "complete");
+    assert.deepEqual(source.missingFields, []);
+    assert.equal(source.resolvedFrom, "crossref_api");
+    assert.equal(citationFetchCalls.length, 1);
+  } finally {
+    await rm(workspaceDir, { recursive: true, force: true });
+  }
+});
+
 test("downloadPaper only downloads open APS abstract PDFs directly in explicit fallback mode", async () => {
   const workspaceDir = await mkdtemp(path.join(os.tmpdir(), "paper-manager-"));
   const articleUrl = "https://journals.aps.org/prapplied/abstract/10.1103/4ssz-6ctb";

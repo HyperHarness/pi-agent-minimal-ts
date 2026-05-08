@@ -99,6 +99,7 @@ export interface DownloadPaperOptions {
   id?: string;
   url?: string;
   title?: string;
+  citationMetadataFetchImpl?: typeof fetch;
   forceManualOpen?: PaperFailure;
   fetchImpl?: typeof fetch;
   searchArxivImpl?: typeof searchArxiv;
@@ -137,6 +138,7 @@ export interface RegisterManualPaperDownloadOptions {
   url: string;
   pdfPath: string;
   title?: string;
+  citationMetadataFetchImpl?: typeof fetch;
   now?: () => Date;
 }
 
@@ -182,6 +184,17 @@ type ClassifiedPaperUrl =
       articleUrl: string;
       action: "open_url_only";
     };
+
+function citationMetadataWriteOptions(input: {
+  citationMetadataFetchImpl?: typeof fetch;
+}): { enrichCitationMetadata?: true; fetchImpl?: typeof fetch } {
+  return input.citationMetadataFetchImpl
+    ? {
+      enrichCitationMetadata: true,
+      fetchImpl: input.citationMetadataFetchImpl
+    }
+    : {};
+}
 
 type ArxivDownloadedPaperResult = PaperDownloadResult & {
   status: "downloaded" | "already_downloaded";
@@ -939,6 +952,7 @@ async function tryDownloadDirectExternalPaper(options: {
   workspaceDir: string;
   classification: Extract<ClassifiedPaperUrl, { source: "external" }>;
   title?: string;
+  citationMetadataFetchImpl?: typeof fetch;
   fetchImpl?: typeof fetch;
 }): Promise<PaperDownloadResult | null> {
   const pdfUrlCandidates = resolveDirectExternalPdfUrlCandidates(options.classification.articleUrl);
@@ -967,6 +981,7 @@ async function tryDownloadDirectExternalPaper(options: {
       const title = options.title?.trim();
       const recordPath = await writePaperRecord({
         workspaceDir: options.workspaceDir,
+        ...citationMetadataWriteOptions(options),
         record: {
           source: "external",
           articleUrl: options.classification.articleUrl,
@@ -1060,6 +1075,7 @@ function isDirectPublisherPdfUrl(
 async function tryDownloadDirectSupportedPublisherPaper(options: {
   workspaceDir: string;
   classification: Extract<ClassifiedPaperUrl, { source: SupportedPaperSource }>;
+  citationMetadataFetchImpl?: typeof fetch;
   fetchImpl?: typeof fetch;
 }): Promise<PaperDownloadResult | null> {
   const pdfUrl = resolveDirectPublisherPdfUrl(options.classification);
@@ -1096,6 +1112,7 @@ async function tryDownloadDirectSupportedPublisherPaper(options: {
 
     const recordPath = await writePaperRecord({
       workspaceDir: options.workspaceDir,
+      ...citationMetadataWriteOptions(options),
       record: {
         source: options.classification.source,
         articleUrl: options.classification.articleUrl,
@@ -1127,6 +1144,7 @@ async function openSupportedPublisherForManualFallback(input: {
   classification: Extract<ClassifiedPaperUrl, { source: SupportedPaperSource }>;
   failure: PaperFailure;
   openPublisherForLoginImpl: OpenPublisherForLoginImplementation;
+  citationMetadataFetchImpl?: typeof fetch;
 }): Promise<PaperDownloadResult> {
   const canonicalId = resolveFallbackCanonicalId({
     articleUrl: input.classification.articleUrl,
@@ -1142,6 +1160,7 @@ async function openSupportedPublisherForManualFallback(input: {
   });
   const recordPath = await writePaperRecord({
     workspaceDir: input.workspaceDir,
+    ...citationMetadataWriteOptions(input),
     record: {
       source: input.classification.source,
       articleUrl: input.classification.articleUrl,
@@ -1170,6 +1189,7 @@ async function openSupportedPublisherForManualFallback(input: {
 async function downloadArxivPaper(options: {
   workspaceDir: string;
   input: string;
+  citationMetadataFetchImpl?: typeof fetch;
   fetchImpl?: typeof fetch;
 }): Promise<PaperDownloadResult> {
   const locator = parseArxivLocator(options.input);
@@ -1204,6 +1224,7 @@ async function downloadArxivPaper(options: {
 
   const recordPath = await writePaperRecord({
     workspaceDir: options.workspaceDir,
+    ...citationMetadataWriteOptions(options),
     record: {
       source: "arxiv",
       articleUrl: result.articleUrl,
@@ -1346,6 +1367,7 @@ async function writePublisherPendingRecord(options: {
   workspaceDir: string;
   classification: Extract<ClassifiedPaperUrl, { source: SupportedPaperSource }>;
   title?: string;
+  citationMetadataFetchImpl?: typeof fetch;
 }): Promise<PaperDownloadResult> {
   const canonicalId = resolveFallbackCanonicalId({
     articleUrl: options.classification.articleUrl,
@@ -1354,6 +1376,7 @@ async function writePublisherPendingRecord(options: {
   const failure = createPublisherPendingFailure();
   const recordPath = await writePaperRecord({
     workspaceDir: options.workspaceDir,
+    ...citationMetadataWriteOptions(options),
     record: {
       source: options.classification.source,
       articleUrl: options.classification.articleUrl,
@@ -1382,6 +1405,7 @@ async function writePublisherPreprintFallbackRecord(options: {
   classification: Extract<ClassifiedPaperUrl, { source: SupportedPaperSource }>;
   title?: string;
   arxivResult: ArxivDownloadedPaperResult;
+  citationMetadataFetchImpl?: typeof fetch;
 }): Promise<PublisherPreprintFallbackResult> {
   const canonicalId = resolveFallbackCanonicalId({
     articleUrl: options.classification.articleUrl,
@@ -1391,6 +1415,7 @@ async function writePublisherPreprintFallbackRecord(options: {
     `Publisher PDF was not downloaded automatically; using matching arXiv preprint ${options.arxivResult.canonicalId}.`;
   const recordPath = await writePaperRecord({
     workspaceDir: options.workspaceDir,
+    ...citationMetadataWriteOptions(options),
     record: {
       source: options.classification.source,
       articleUrl: options.classification.articleUrl,
@@ -1426,6 +1451,7 @@ async function tryDownloadArxivPreprintForPublisherFallback(options: {
   workspaceDir: string;
   classification: Extract<ClassifiedPaperUrl, { source: SupportedPaperSource }>;
   title?: string;
+  citationMetadataFetchImpl?: typeof fetch;
   fetchImpl?: typeof fetch;
   searchArxivImpl?: typeof searchArxiv;
 }): Promise<PaperDownloadResult | null> {
@@ -1448,7 +1474,8 @@ async function tryDownloadArxivPreprintForPublisherFallback(options: {
     workspaceDir: options.workspaceDir,
     classification: options.classification,
     title: options.title,
-    arxivResult: arxivDownloadedResult
+    arxivResult: arxivDownloadedResult,
+    ...(options.citationMetadataFetchImpl ? { citationMetadataFetchImpl: options.citationMetadataFetchImpl } : {})
   });
 
   return {
@@ -1492,6 +1519,7 @@ export async function downloadPaper(options: DownloadPaperOptions): Promise<Pape
     return downloadArxivPaper({
       workspaceDir: options.workspaceDir,
       input: locator.id,
+      ...(options.citationMetadataFetchImpl ? { citationMetadataFetchImpl: options.citationMetadataFetchImpl } : {}),
       fetchImpl: options.fetchImpl
     });
   }
@@ -1527,6 +1555,7 @@ export async function downloadPaper(options: DownloadPaperOptions): Promise<Pape
     return downloadArxivPaper({
       workspaceDir: options.workspaceDir,
       input: classification.canonicalId,
+      ...(options.citationMetadataFetchImpl ? { citationMetadataFetchImpl: options.citationMetadataFetchImpl } : {}),
       fetchImpl: options.fetchImpl
     });
   }
@@ -1545,6 +1574,7 @@ export async function downloadPaper(options: DownloadPaperOptions): Promise<Pape
       workspaceDir: options.workspaceDir,
       classification,
       title: options.title,
+      ...(options.citationMetadataFetchImpl ? { citationMetadataFetchImpl: options.citationMetadataFetchImpl } : {}),
       fetchImpl: options.fetchImpl
     });
     if (directExternalDownload) {
@@ -1582,6 +1612,7 @@ export async function downloadPaper(options: DownloadPaperOptions): Promise<Pape
     });
     const recordPath = await writePaperRecord({
       workspaceDir: options.workspaceDir,
+      ...citationMetadataWriteOptions(options),
       record: {
         source: "external",
         articleUrl: classification.articleUrl,
@@ -1644,7 +1675,8 @@ export async function downloadPaper(options: DownloadPaperOptions): Promise<Pape
       workspaceDir: options.workspaceDir,
       classification,
       failure: options.forceManualOpen,
-      openPublisherForLoginImpl
+      openPublisherForLoginImpl,
+      ...(options.citationMetadataFetchImpl ? { citationMetadataFetchImpl: options.citationMetadataFetchImpl } : {})
     });
   }
 
@@ -1652,6 +1684,7 @@ export async function downloadPaper(options: DownloadPaperOptions): Promise<Pape
     const directPublisherDownload = await tryDownloadDirectSupportedPublisherPaper({
       workspaceDir: options.workspaceDir,
       classification,
+      ...(options.citationMetadataFetchImpl ? { citationMetadataFetchImpl: options.citationMetadataFetchImpl } : {}),
       fetchImpl: options.fetchImpl
     });
     if (directPublisherDownload) {
@@ -1671,6 +1704,7 @@ export async function downloadPaper(options: DownloadPaperOptions): Promise<Pape
       workspaceDir: options.workspaceDir,
       classification,
       title: acceptedPaperTitle,
+      ...(options.citationMetadataFetchImpl ? { citationMetadataFetchImpl: options.citationMetadataFetchImpl } : {}),
       fetchImpl: options.fetchImpl,
       searchArxivImpl: options.searchArxivImpl
     });
@@ -1680,7 +1714,8 @@ export async function downloadPaper(options: DownloadPaperOptions): Promise<Pape
     return writePublisherPendingRecord({
       workspaceDir: options.workspaceDir,
       classification,
-      title: acceptedPaperTitle
+      title: acceptedPaperTitle,
+      ...(options.citationMetadataFetchImpl ? { citationMetadataFetchImpl: options.citationMetadataFetchImpl } : {})
     });
   }
 
@@ -1694,6 +1729,7 @@ export async function downloadPaper(options: DownloadPaperOptions): Promise<Pape
       workspaceDir: options.workspaceDir,
       classification,
       title: await getPublisherFallbackTitle(),
+      ...(options.citationMetadataFetchImpl ? { citationMetadataFetchImpl: options.citationMetadataFetchImpl } : {}),
       fetchImpl: options.fetchImpl,
       searchArxivImpl: options.searchArxivImpl
     });
@@ -1718,6 +1754,7 @@ export async function downloadPaper(options: DownloadPaperOptions): Promise<Pape
       workspaceDir: options.workspaceDir,
       classification,
       title: await getPublisherFallbackTitle(),
+      ...(options.citationMetadataFetchImpl ? { citationMetadataFetchImpl: options.citationMetadataFetchImpl } : {}),
       fetchImpl: options.fetchImpl,
       searchArxivImpl: options.searchArxivImpl
     });
@@ -1748,6 +1785,7 @@ export async function downloadPaper(options: DownloadPaperOptions): Promise<Pape
           workspaceDir: options.workspaceDir,
           classification,
           title: await getPublisherFallbackTitle(),
+          ...(options.citationMetadataFetchImpl ? { citationMetadataFetchImpl: options.citationMetadataFetchImpl } : {}),
           fetchImpl: options.fetchImpl,
           searchArxivImpl: options.searchArxivImpl
         });
@@ -1767,6 +1805,7 @@ export async function downloadPaper(options: DownloadPaperOptions): Promise<Pape
       workspaceDir: options.workspaceDir,
       classification,
       title: await getPublisherFallbackTitle(),
+      ...(options.citationMetadataFetchImpl ? { citationMetadataFetchImpl: options.citationMetadataFetchImpl } : {}),
       fetchImpl: options.fetchImpl,
       searchArxivImpl: options.searchArxivImpl
     });
@@ -1783,6 +1822,7 @@ export async function downloadPaper(options: DownloadPaperOptions): Promise<Pape
   const directPublisherDownload = await tryDownloadDirectSupportedPublisherPaper({
     workspaceDir: options.workspaceDir,
     classification,
+    ...(options.citationMetadataFetchImpl ? { citationMetadataFetchImpl: options.citationMetadataFetchImpl } : {}),
     fetchImpl: options.fetchImpl
   });
   if (directPublisherDownload) {
@@ -1793,6 +1833,7 @@ export async function downloadPaper(options: DownloadPaperOptions): Promise<Pape
     workspaceDir: options.workspaceDir,
     classification,
     title: await getPublisherFallbackTitle(),
+    ...(options.citationMetadataFetchImpl ? { citationMetadataFetchImpl: options.citationMetadataFetchImpl } : {}),
     fetchImpl: options.fetchImpl,
     searchArxivImpl: options.searchArxivImpl
   });
@@ -1820,6 +1861,7 @@ export async function downloadPaper(options: DownloadPaperOptions): Promise<Pape
     });
     const recordPath = await writePaperRecord({
       workspaceDir: options.workspaceDir,
+      ...citationMetadataWriteOptions(options),
       record: {
         source: result.publisher,
         articleUrl: result.articleUrl,
@@ -1850,6 +1892,7 @@ export async function downloadPaper(options: DownloadPaperOptions): Promise<Pape
       workspaceDir: options.workspaceDir,
       classification,
       title: await getPublisherFallbackTitle(),
+      ...(options.citationMetadataFetchImpl ? { citationMetadataFetchImpl: options.citationMetadataFetchImpl } : {}),
       fetchImpl: options.fetchImpl,
       searchArxivImpl: options.searchArxivImpl
     });
@@ -1861,7 +1904,8 @@ export async function downloadPaper(options: DownloadPaperOptions): Promise<Pape
       workspaceDir: options.workspaceDir,
       classification,
       failure: toPaperFailure(error),
-      openPublisherForLoginImpl
+      openPublisherForLoginImpl,
+      ...(options.citationMetadataFetchImpl ? { citationMetadataFetchImpl: options.citationMetadataFetchImpl } : {})
     });
   }
 }
@@ -1896,6 +1940,7 @@ export async function registerManualPaperDownload(
       : undefined;
   const recordPath = await writePaperRecord({
     workspaceDir: options.workspaceDir,
+    ...citationMetadataWriteOptions(options),
     record: {
       source: "external",
       articleUrl: classification.articleUrl,

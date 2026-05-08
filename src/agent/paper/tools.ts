@@ -620,6 +620,8 @@ export function createPaperTools(input: {
       }));
   const registerManualPaperDownloadImpl =
     dependencies.registerManualPaperDownload ?? registerManualPaperDownload;
+  const citationMetadataFetchImpl: typeof fetch | undefined =
+    typeof globalThis.fetch === "function" ? globalThis.fetch.bind(globalThis) : undefined;
   const parsePaperImpl = dependencies.parsePaper ?? parsePaper;
   const inspectPaperImpl = dependencies.inspectPaper ?? inspectPaper;
   const readPaperSectionImpl = dependencies.readPaperSection ?? readPaperSection;
@@ -840,7 +842,10 @@ export function createPaperTools(input: {
         workspaceDir: resolvedWorkspaceDir,
         ...(args.id ? { id: args.id } : {}),
         ...(args.url ? { url: args.url } : {}),
-        ...(args.title ? { title: args.title } : {})
+        ...(args.title ? { title: args.title } : {}),
+        ...(dependencies.downloadPaper === undefined && citationMetadataFetchImpl
+          ? { citationMetadataFetchImpl }
+          : {})
       });
       const reading = shouldDescribeDownloadReadingClosure
         ? await describeDownloadReadingClosure(rawResult)
@@ -896,7 +901,10 @@ export function createPaperTools(input: {
         workspaceDir: resolvedWorkspaceDir,
         url: args.url,
         pdfPath: resolvedPdfPath,
-        ...(args.title ? { title: args.title } : {})
+        ...(args.title ? { title: args.title } : {}),
+        ...(dependencies.registerManualPaperDownload === undefined && citationMetadataFetchImpl
+          ? { citationMetadataFetchImpl }
+          : {})
       });
       const reading = dependencies.registerManualPaperDownload === undefined
         ? await parseDownloadedPdfForReading(result.recordPath)

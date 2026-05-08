@@ -6,5 +6,6 @@ const workspaceDir = path.resolve(process.env.PI_PAPER_WORKSPACE ?? process.cwd(
 await runPaperExtensionNativeHost({
   workspaceDir,
   stdin: process.stdin,
-  stdout: process.stdout
+  stdout: process.stdout,
+  ...(globalThis.fetch ? { citationMetadataFetchImpl: globalThis.fetch.bind(globalThis) } : {})
 });

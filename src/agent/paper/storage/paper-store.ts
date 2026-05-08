@@ -1232,9 +1232,17 @@ async function writePaperRecordAndSourceMetadata(input: {
   workspaceDir: string;
   record: PaperRecord;
   recordPath: string;
+  enrichCitationMetadata?: boolean;
+  fetchImpl?: typeof fetch;
 }): Promise<void> {
   await writeFile(input.recordPath, `${JSON.stringify(input.record, null, 2)}\n`, "utf8");
-  await writePaperSourceMetadataForRecord(input);
+  await writePaperSourceMetadataForRecord({
+    workspaceDir: input.workspaceDir,
+    record: input.record,
+    recordPath: input.recordPath,
+    ...(input.enrichCitationMetadata !== undefined ? { enrichCitationMetadata: input.enrichCitationMetadata } : {}),
+    ...(input.fetchImpl ? { fetchImpl: input.fetchImpl } : {})
+  });
 }
 
 function resolveInputRecordPath(input: { workspaceDir: string; recordPath: string }): string {
@@ -1349,6 +1357,8 @@ export async function findDownloadedPaperRecord(
 export async function writePaperRecord(input: {
   workspaceDir: string;
   record: PaperRecord;
+  enrichCitationMetadata?: boolean;
+  fetchImpl?: typeof fetch;
 }): Promise<string> {
   const record = withInitialRecordManifest(input);
   const recordPath = resolvePaperRecordPath({
@@ -1358,7 +1368,13 @@ export async function writePaperRecord(input: {
     articleUrl: record.articleUrl
   });
   await mkdir(path.dirname(recordPath), { recursive: true });
-  await writePaperRecordAndSourceMetadata({ workspaceDir: input.workspaceDir, record, recordPath });
+  await writePaperRecordAndSourceMetadata({
+    workspaceDir: input.workspaceDir,
+    record,
+    recordPath,
+    ...(input.enrichCitationMetadata !== undefined ? { enrichCitationMetadata: input.enrichCitationMetadata } : {}),
+    ...(input.fetchImpl ? { fetchImpl: input.fetchImpl } : {})
+  });
   return recordPath;
 }
 
