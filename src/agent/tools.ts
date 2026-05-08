@@ -1,18 +1,20 @@
-import path from "node:path";
 import type { AgentTool } from "@mariozechner/pi-agent-core";
-import type { AgentTools, ToolDependencies, ToolSetMetadata } from "./tool-types.js";
-export type { AgentTools, ToolDependencies } from "./tool-types.js";
-import { createFileTools } from "./file-tools.js";
-import { createWebTools } from "./web-tools.js";
+import path from "node:path";
 import { createDesignTools } from "./design-tools.js";
+import { createFileTools } from "./file-tools.js";
 import { createLibraryHealthTools } from "./library-health-tools.js";
 import { createPaperTools } from "./paper-tools.js";
+import { createWebTools } from "./web-tools.js";
 import { createWikiTools } from "./wiki-tools.js";
+import type { AgentTools, ToolDependencies, ToolSetMetadata } from "./tool-types.js";
 import {
   getToolBoundaryToolNames as getToolBoundaryToolNamesFromBoundaryModule,
   TOOL_BOUNDARY_NAMES,
-  type ToolBoundaryRole
+  type ToolBoundaryRole,
+  type ToolProfile,
 } from "./tool-boundaries.js";
+
+export type { AgentTools, ToolDependencies } from "./tool-types.js";
 
 export async function cleanupTools(tools: ReadonlyArray<AgentTool<any>> | undefined): Promise<void> {
   const cleanup = (tools as Partial<ToolSetMetadata> | undefined)?.cleanup;
@@ -53,15 +55,19 @@ export function createTools(workspaceDir: string, dependencies: ToolDependencies
     workspaceDir: resolvedWorkspaceDir,
     dependencies
   });
+  const wikiToolsBeforeLint = wikiTools.defaultTools.slice(0, -1);
+  const wikiLintTools = wikiTools.defaultTools.slice(-1);
+  const libraryHealthToolsBeforeLint = libraryHealthTools.defaultTools.slice(0, 2);
+  const libraryHealthToolsAfterLint = libraryHealthTools.defaultTools.slice(2);
 
   const tools = [
     ...fileTools.defaultTools,
     ...webTools.defaultTools,
     ...paperTools.defaultTools,
-    ...wikiTools.defaultTools.slice(0, -1),
-    ...libraryHealthTools.defaultTools.slice(0, 2),
-    ...wikiTools.defaultTools.slice(-1),
-    ...libraryHealthTools.defaultTools.slice(2)
+    ...wikiToolsBeforeLint,
+    ...libraryHealthToolsBeforeLint,
+    ...wikiLintTools,
+    ...libraryHealthToolsAfterLint,
   ] as unknown as AgentTools;
 
   if (dependencies.toolProfile === "full") {
@@ -72,7 +78,7 @@ export function createTools(workspaceDir: string, dependencies: ToolDependencies
       ...fileTools.tailFullTools,
       ...libraryHealthTools.fullTools,
       ...webTools.fullTools,
-      ...paperTools.fullTools
+      ...paperTools.fullTools,
     );
   }
 
@@ -98,7 +104,7 @@ export function createTools(workspaceDir: string, dependencies: ToolDependencies
   return tools;
 }
 
-export type { ToolBoundaryRole, ToolProfile } from "./tool-boundaries.js";
+export type { ToolBoundaryRole, ToolProfile };
 
 export function getToolBoundaryToolNames(role: ToolBoundaryRole): string[] {
   return getToolBoundaryToolNamesFromBoundaryModule(role);
