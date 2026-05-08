@@ -454,10 +454,27 @@ async function runRoutedWorkerPrompt(options: {
   }
 }
 
-function createWikiEvidenceWorker(model: Model<Api>): {
+function createWikiEvidenceWorker(model: Model<Api>, workspaceDir: string): {
   paperSummaryWorker: PaperSummaryWorker;
   paperWikiPageWorker: PaperWikiPageWorker;
 } {
+  const createWikiEvidenceWorkerTools = () => {
+    const recursiveToolNames = new Set(["generate_paper_wiki_summary", "write_paper_wiki_source", "build_wiki_page"]);
+    const tools = createToolsForBoundary(workspaceDir, "wiki-evidence-worker");
+    const filteredTools = tools.filter((tool) => !recursiveToolNames.has(tool.name)) as typeof tools;
+    Object.defineProperties(filteredTools, {
+      cleanup: {
+        enumerable: false,
+        value: tools.cleanup
+      },
+      workspaceDir: {
+        enumerable: false,
+        value: tools.workspaceDir
+      }
+    });
+    return filteredTools;
+  };
+
   const paperSummaryWorker: PaperSummaryWorker = async (input) => {
     const prompt: UserMessage = {
       role: "user",
@@ -488,28 +505,32 @@ function createWikiEvidenceWorker(model: Model<Api>): {
     const context: AgentContext = {
       systemPrompt: WIKI_EVIDENCE_WORKER_SYSTEM_PROMPT,
       messages: [],
-      tools: []
+      tools: createWikiEvidenceWorkerTools()
     };
-    const stream = agentLoop(
-      [prompt],
-      context,
-      {
-        model,
-        convertToLlm: convertAgentMessagesToLlm,
-        getApiKey: (provider) => getEnvApiKey(provider),
-        toolExecution: "sequential"
+    try {
+      const stream = agentLoop(
+        [prompt],
+        context,
+        {
+          model,
+          convertToLlm: convertAgentMessagesToLlm,
+          getApiKey: (provider) => getEnvApiKey(provider),
+          toolExecution: "sequential"
+        }
+      );
+      const resultPromise = stream.result();
+      for await (const _event of stream) {
+        // Drain the stream; this internal wiki-evidence-worker subtask does not emit UI events.
       }
-    );
-    const resultPromise = stream.result();
-    for await (const _event of stream) {
-      // Drain the stream; the wiki-evidence-worker subtask intentionally does not emit UI events.
+      const messages = await resultPromise;
+      const assistant = messages
+        .filter((message): message is AssistantMessage => message.role === "assistant")
+        .at(-1);
+      const text = assistant ? getAssistantText(assistant) : "";
+      return parsePaperSummaryWorkerOutput(extractJsonObject(text));
+    } finally {
+      await cleanupTools(context.tools);
     }
-    const messages = await resultPromise;
-    const assistant = messages
-      .filter((message): message is AssistantMessage => message.role === "assistant")
-      .at(-1);
-    const text = assistant ? getAssistantText(assistant) : "";
-    return parsePaperSummaryWorkerOutput(extractJsonObject(text));
   };
 
   const paperWikiPageWorker: PaperWikiPageWorker = async (input) => {
@@ -534,35 +555,39 @@ function createWikiEvidenceWorker(model: Model<Api>): {
     const context: AgentContext = {
       systemPrompt: WIKI_EVIDENCE_WORKER_SYSTEM_PROMPT,
       messages: [],
-      tools: []
+      tools: createWikiEvidenceWorkerTools()
     };
-    const stream = agentLoop(
-      [prompt],
-      context,
-      {
-        model,
-        convertToLlm: convertAgentMessagesToLlm,
-        getApiKey: (provider) => getEnvApiKey(provider),
-        toolExecution: "sequential"
+    try {
+      const stream = agentLoop(
+        [prompt],
+        context,
+        {
+          model,
+          convertToLlm: convertAgentMessagesToLlm,
+          getApiKey: (provider) => getEnvApiKey(provider),
+          toolExecution: "sequential"
+        }
+      );
+      const resultPromise = stream.result();
+      for await (const _event of stream) {
+        // Drain the stream; this internal wiki-evidence-worker subtask does not emit UI events.
       }
-    );
-    const resultPromise = stream.result();
-    for await (const _event of stream) {
-      // Drain the stream; the wiki-evidence-worker subtask intentionally does not emit UI events.
+      const messages = await resultPromise;
+      const assistant = messages
+        .filter((message): message is AssistantMessage => message.role === "assistant")
+        .at(-1);
+      const text = assistant ? getAssistantText(assistant) : "";
+      return parsePaperWikiPageWorkerOutput(extractJsonObject(text));
+    } finally {
+      await cleanupTools(context.tools);
     }
-    const messages = await resultPromise;
-    const assistant = messages
-      .filter((message): message is AssistantMessage => message.role === "assistant")
-      .at(-1);
-    const text = assistant ? getAssistantText(assistant) : "";
-    return parsePaperWikiPageWorkerOutput(extractJsonObject(text));
   };
 
   return { paperSummaryWorker, paperWikiPageWorker };
 }
 
 function createRuntimeTools(workspaceDir: string, model: Model<Api>) {
-  const wikiEvidenceWorker = createWikiEvidenceWorker(model);
+  const wikiEvidenceWorker = createWikiEvidenceWorker(model, workspaceDir);
   return createTools(workspaceDir, {
     extensionBridge: createQueuedPaperExtensionBridge({ workspaceDir }),
     paperSummaryWorker: wikiEvidenceWorker.paperSummaryWorker,
