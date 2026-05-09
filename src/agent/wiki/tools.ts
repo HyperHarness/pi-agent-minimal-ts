@@ -23,7 +23,9 @@ import {
   type PaperSummaryProgress
 } from "./summary.js";
 import { paperWikiRelations } from "./relations.js";
+import { applyWikiStructurePlan } from "./structure-apply.js";
 import { planWikiStructure } from "./structure-plan.js";
+import type { WikiStructurePlanAction } from "./structure-plan.js";
 import type { PaperSearchResult, PaperSearchSource } from "../paper/types.js";
 import { searchLocalPapers } from "../paper/storage/local-paper-library.js";
 import {
@@ -119,6 +121,29 @@ const wikiStructurePlanParameters = Type.Object({
     description:
       "Include medium-risk actions such as page merges and rebuild recommendations. Defaults to false."
   }))
+});
+
+const wikiStructurePlanActionParameter = Type.Object({
+  id: Type.String({ description: "Action id returned by wiki_structure_plan." }),
+  type: Type.String({ description: "Planned action type returned by wiki_structure_plan." }),
+  priority: Type.String({ description: "Action priority returned by wiki_structure_plan." }),
+  risk: Type.String({ description: "Action risk returned by wiki_structure_plan." }),
+  issueKind: Type.String({ description: "Original wiki_lint issue kind." }),
+  path: Type.Optional(Type.String({ description: "Workspace-relative target path." })),
+  target: Type.Optional(Type.String({ description: "Optional target concept, page, or section title." })),
+  concept: Type.Optional(Type.String({ description: "Optional concept gap name." })),
+  reason: Type.String({ description: "Reason returned by wiki_structure_plan." }),
+  recommendedTool: Type.Optional(Type.String({ description: "Tool recommended by wiki_structure_plan." }))
+});
+
+const wikiApplyStructurePlanParameters = Type.Object({
+  actions: Type.Array(wikiStructurePlanActionParameter, {
+    description: "Actions returned by wiki_structure_plan. Unsupported or non-low-risk actions are skipped by default."
+  }),
+  dryRun: Type.Optional(Type.Boolean({ description: "Preview intended changes without writing files. Defaults to true." })),
+  requireLowRisk: Type.Optional(Type.Boolean({ description: "Skip medium/high risk actions. Defaults to true." })),
+  maxActions: Type.Optional(Type.Integer({ description: "Maximum actions to process. Defaults to 10.", minimum: 1 })),
+  runVerification: Type.Optional(Type.Boolean({ description: "Run wiki_lint before and after the operation. Defaults to true." }))
 });
 
 const answerPaperWikiQuestionParameters = Type.Object({
@@ -281,6 +306,7 @@ type PaperWikiRelationsParameters = Static<typeof paperWikiRelationsParameters>;
 type SearchPaperWikiParameters = Static<typeof searchPaperWikiParameters>;
 type WikiLintParameters = Static<typeof wikiLintParameters>;
 type WikiStructurePlanParameters = Static<typeof wikiStructurePlanParameters>;
+type WikiApplyStructurePlanParameters = Static<typeof wikiApplyStructurePlanParameters>;
 type AnswerPaperWikiQuestionParameters = Static<typeof answerPaperWikiQuestionParameters>;
 type AnswerResearchQuestionParameters = Static<typeof answerResearchQuestionParameters>;
 type BootstrapWikiPageEvidenceParameters = Static<typeof bootstrapWikiPageEvidenceParameters>;
@@ -313,6 +339,10 @@ type WikiLintTool = AgentTool<
 type WikiStructurePlanTool = AgentTool<
   typeof wikiStructurePlanParameters,
   Awaited<ReturnType<typeof planWikiStructure>>
+>;
+type WikiApplyStructurePlanTool = AgentTool<
+  typeof wikiApplyStructurePlanParameters,
+  Awaited<ReturnType<typeof applyWikiStructurePlan>>
 >;
 type AnswerPaperWikiQuestionDetails = {
   query: string;
@@ -905,6 +935,7 @@ export function createWikiTools(input: {
   const bootstrapPaperWikiPageEvidenceImpl = dependencies.bootstrapPaperWikiPageEvidence ?? bootstrapPaperWikiPageEvidence;
   const lintPaperWikiImpl = dependencies.lintPaperWiki ?? lintPaperWiki;
   const planWikiStructureImpl = dependencies.planWikiStructure ?? planWikiStructure;
+  const applyWikiStructurePlanImpl = dependencies.applyWikiStructurePlan ?? applyWikiStructurePlan;
   const searchPaperWikiImpl = dependencies.searchPaperWiki ?? searchPaperWiki;
   const searchLocalPapersImpl = dependencies.searchLocalPapers ?? searchLocalPapers;
 
@@ -1148,6 +1179,29 @@ export function createWikiTools(input: {
         workspaceDir: resolvedWorkspaceDir,
         ...(args.maxItems !== undefined ? { maxItems: args.maxItems } : {}),
         ...(args.includeMediumRisk !== undefined ? { includeMediumRisk: args.includeMediumRisk } : {})
+      });
+
+      return {
+        content: [{ type: "text", text: JSON.stringify(result) }],
+        details: result
+      };
+    }
+  };
+
+  const wikiApplyStructurePlanTool: WikiApplyStructurePlanTool = {
+    name: "wiki_apply_structure_plan",
+    label: "Apply Wiki Structure Plan",
+    description:
+      "Applies approved wiki_structure_plan actions with dry-run and low-risk safeguards. The first implementation only performs deterministic duplicate-section cleanup and skips unsupported or risky actions.",
+    parameters: wikiApplyStructurePlanParameters,
+    execute: async (_toolCallId: string, args: WikiApplyStructurePlanParameters) => {
+      const result = await applyWikiStructurePlanImpl({
+        workspaceDir: resolvedWorkspaceDir,
+        actions: args.actions as WikiStructurePlanAction[],
+        ...(args.dryRun !== undefined ? { dryRun: args.dryRun } : {}),
+        ...(args.requireLowRisk !== undefined ? { requireLowRisk: args.requireLowRisk } : {}),
+        ...(args.maxActions !== undefined ? { maxActions: args.maxActions } : {}),
+        ...(args.runVerification !== undefined ? { runVerification: args.runVerification } : {})
       });
 
       return {
@@ -1886,7 +1940,7 @@ export function createWikiTools(input: {
     researchTopicBootstrapTool,
     expandResearchTopicTool
   ];
-  const lintTools = [wikiLintTool, wikiStructurePlanTool];
+  const lintTools = [wikiLintTool, wikiStructurePlanTool, wikiApplyStructurePlanTool];
 
   return {
     defaultTools: [

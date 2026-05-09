@@ -21,8 +21,7 @@ export interface WikiStructurePlanAction {
   target?: string;
   concept?: string;
   reason: string;
-  recommendedTool?: "merge_wiki_aliases" | "build_wiki_page" | "replace_file_text";
-  recommendedArgs?: unknown;
+  recommendedTool?: "merge_wiki_aliases" | "build_wiki_page" | "replace_file_text" | "wiki_apply_structure_plan";
 }
 
 export interface WikiStructurePlanOptions {
@@ -49,7 +48,10 @@ function priorityForIssue(issue: PaperWikiLintIssue): WikiStructurePriority {
   return "low";
 }
 
-function actionForIssue(issue: PaperWikiLintIssue, index: number): WikiStructurePlanAction | undefined {
+function actionForIssue(
+  issue: PaperWikiLintIssue,
+  index: number
+): WikiStructurePlanAction | undefined {
   const id = `wiki-structure-${String(index + 1).padStart(3, "0")}`;
   if (issue.kind === "duplicate_page_title") {
     return {
@@ -60,11 +62,7 @@ function actionForIssue(issue: PaperWikiLintIssue, index: number): WikiStructure
       issueKind: issue.kind,
       path: issue.path,
       reason: issue.reason,
-      recommendedTool: "merge_wiki_aliases",
-      recommendedArgs: {
-        aliases: [],
-        replaceExisting: false
-      }
+      recommendedTool: "merge_wiki_aliases"
     };
   }
   if (issue.kind === "near_duplicate_page") {
@@ -76,11 +74,7 @@ function actionForIssue(issue: PaperWikiLintIssue, index: number): WikiStructure
       issueKind: issue.kind,
       path: issue.path,
       reason: issue.reason,
-      recommendedTool: "merge_wiki_aliases",
-      recommendedArgs: {
-        aliases: [],
-        replaceExisting: false
-      }
+      recommendedTool: "merge_wiki_aliases"
     };
   }
   if (issue.kind === "duplicate_section") {
@@ -91,8 +85,9 @@ function actionForIssue(issue: PaperWikiLintIssue, index: number): WikiStructure
       risk: "low",
       issueKind: issue.kind,
       path: issue.path,
+      target: issue.target,
       reason: issue.reason,
-      recommendedTool: "replace_file_text"
+      recommendedTool: "wiki_apply_structure_plan"
     };
   }
   if (issue.kind === "rendered_wiki_link") {
@@ -130,16 +125,7 @@ function actionForIssue(issue: PaperWikiLintIssue, index: number): WikiStructure
       concept: issue.concept,
       target: issue.target,
       reason: issue.reason,
-      recommendedTool: "build_wiki_page",
-      recommendedArgs: {
-        topic: issue.concept.replace(/-/g, " "),
-        pageKey: issue.concept,
-        mode: "draft",
-        maxLocalResults: 8,
-        maxDownloads: 0,
-        autoDownload: false,
-        autoSummarize: false
-      }
+      recommendedTool: "build_wiki_page"
     };
   }
   return undefined;

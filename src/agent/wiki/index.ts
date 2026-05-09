@@ -3,6 +3,7 @@ export * from "./store.js";
 export * from "./content.js";
 export * from "./bootstrap.js";
 export * from "./lint.js";
+export * from "./structure-apply.js";
 export * from "./structure-plan.js";
 export * from "./summary.js";
 export * from "./relations.js";

@@ -242,7 +242,7 @@ The default chat agent exposes a compact tool profile. Development and benchmark
 - `read_file`: reads bounded UTF-8 text-file segments inside the workspace; use `offsetBytes` / `maxBytes` and the returned `nextOffsetBytes` to page through large files
 - `write_file`: writes workspace text files, but refuses `knowledge-base/wiki/pages/`; use `build_wiki_page` for durable wiki pages
 - `replace_file_text`: replaces a unique exact text block, useful for precise edits to existing files and wiki pages
-- `delete_file`: deletes a workspace file after path-safety checks
+- `delete_file`: deletes a workspace text, script, or LaTeX-related file after path-safety checks
 - `compile_latex`: compiles a LaTeX project file and reports the output PDF or build errors
 
 These tools reject paths that resolve outside the workspace, including escaping symlinks.
@@ -303,6 +303,7 @@ The key distinction is that `wiki/sources/*.md` are evidence summaries for indiv
 - `wiki_health_fix`: orchestrates supported repairs. Download and citation-metadata repairs go through the paper-download-subagent boundary; citation refresh first reuses local parse artifacts, then uses arXiv/Crossref metadata when an identifier is available. Parsing stays in the ingestion path; missing summaries go through the `wiki-evidence-worker` summary pass.
 - `wiki_lint`: checks wiki structure, stale index entries, broken links, missing citations, orphan pages, repeated tags that should become pages, duplicate titles, repeated sections, weak uncited pages, and rendered wiki-link failures
 - `wiki_structure_plan`: turns `wiki_lint` findings into a reviewable structure-maintenance plan. It suggests low-risk actions by default and does not rewrite wiki content.
+- `wiki_apply_structure_plan`: applies approved `wiki_structure_plan` actions with dry-run and low-risk safeguards. The first implementation only performs deterministic duplicate-section cleanup and skips unsupported or risky actions.
 
 ### Wiki Evidence Tools
 

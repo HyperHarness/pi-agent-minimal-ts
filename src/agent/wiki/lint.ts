@@ -342,6 +342,7 @@ export async function lintPaperWiki(options: PaperWikiLintOptions): Promise<Pape
             kind: "duplicate_section",
             severity: "medium",
             path: relativePath,
+            target: sectionTitle,
             reason: `Section "${sectionTitle}" appears ${count} times in the same synthesis page.`
           });
         }

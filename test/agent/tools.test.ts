@@ -289,6 +289,14 @@ type WikiStructurePlanTool = {
   ) => Promise<ToolResult>;
 };
 
+type WikiApplyStructurePlanTool = {
+  execute: (
+    toolCallId: string,
+    args: { actions: unknown[]; dryRun?: boolean; requireLowRisk?: boolean; maxActions?: number; runVerification?: boolean },
+    signal: undefined,
+  ) => Promise<ToolResult>;
+};
+
 type AnswerPaperWikiQuestionTool = {
   execute: (
     toolCallId: string,
@@ -797,6 +805,16 @@ function getWikiStructurePlanTool(
   assert.ok(tool);
   assert.equal(typeof tool.execute, "function");
   return tool as WikiStructurePlanTool;
+}
+
+function getWikiApplyStructurePlanTool(
+  workspace: string,
+  dependencies: agentTools.ToolDependencies = {},
+): WikiApplyStructurePlanTool {
+  const tool = createTools(workspace, dependencies).find((candidate) => candidate.name === "wiki_apply_structure_plan");
+  assert.ok(tool);
+  assert.equal(typeof tool.execute, "function");
+  return tool as WikiApplyStructurePlanTool;
 }
 
 function getAnswerPaperWikiQuestionTool(
@@ -1315,10 +1333,12 @@ test("delete_file deletes text and LaTeX files inside the workspace", async () =
   const workspace = await mkdtemp(path.join(tmpdir(), "pi-agent-tools-"));
   const texPath = path.join(workspace, "paper-projects/current/obsolete.tex");
   const mdPath = path.join(workspace, "paper-projects/current/notes/old.md");
+  const pyPath = path.join(workspace, "tmp_cleanup.py");
   await mkdir(path.dirname(texPath), { recursive: true });
   await mkdir(path.dirname(mdPath), { recursive: true });
   await writeFile(texPath, "\\section{Old}\n", "utf8");
   await writeFile(mdPath, "# Old note\n", "utf8");
+  await writeFile(pyPath, "print('temporary cleanup draft')\n", "utf8");
 
   try {
     const deleteFileTool = getDeleteFileTool(workspace);
@@ -1332,9 +1352,15 @@ test("delete_file deletes text and LaTeX files inside the workspace", async () =
       { path: path.join(workspace, "paper-projects/current/notes/old.md") },
       undefined,
     );
+    const pyResult = await deleteFileTool.execute(
+      "call-delete-3",
+      { path: "tmp_cleanup.py" },
+      undefined,
+    );
 
     await assert.rejects(() => readFile(texPath, "utf8"), /ENOENT/);
     await assert.rejects(() => readFile(mdPath, "utf8"), /ENOENT/);
+    await assert.rejects(() => readFile(pyPath, "utf8"), /ENOENT/);
     assert.deepEqual(texResult.details, {
       path: "paper-projects/current/obsolete.tex",
       bytes: Buffer.byteLength("\\section{Old}\n", "utf8"),
@@ -1342,6 +1368,10 @@ test("delete_file deletes text and LaTeX files inside the workspace", async () =
     assert.deepEqual(mdResult.details, {
       path: "paper-projects/current/notes/old.md",
       bytes: Buffer.byteLength("# Old note\n", "utf8"),
+    });
+    assert.deepEqual(pyResult.details, {
+      path: "tmp_cleanup.py",
+      bytes: Buffer.byteLength("print('temporary cleanup draft')\n", "utf8"),
     });
   } finally {
     await rm(workspace, { recursive: true, force: true });
@@ -1563,6 +1593,7 @@ const EXPECTED_DEFAULT_TOOL_NAMES = [
   "wiki_health",
   "wiki_lint",
   "wiki_structure_plan",
+  "wiki_apply_structure_plan",
   "wiki_health_fix",
 ] as const;
 
@@ -1636,6 +1667,7 @@ test("createToolsForBoundary exposes isolated wiki and worker tool surfaces", as
     assert.ok(wikiAgentTools.some((tool) => tool.name === "build_wiki_page"));
     assert.ok(wikiAgentTools.some((tool) => tool.name === "search_paper_wiki"));
     assert.ok(wikiAgentTools.some((tool) => tool.name === "wiki_structure_plan"));
+    assert.ok(wikiAgentTools.some((tool) => tool.name === "wiki_apply_structure_plan"));
     assert.ok(!wikiAgentTools.some((tool) => tool.name === "download_paper"));
     assert.ok(!wikiAgentTools.some((tool) => tool.name === "generate_paper_wiki_summary"));
     assert.ok(!wikiAgentTools.some((tool) => tool.name === "web_search"));
@@ -1647,6 +1679,7 @@ test("createToolsForBoundary exposes isolated wiki and worker tool surfaces", as
     assert.ok(downloadTools.some((tool) => tool.name === "parse_paper"));
     assert.ok(!downloadTools.some((tool) => tool.name === "build_wiki_page"));
     assert.ok(!downloadTools.some((tool) => tool.name === "wiki_structure_plan"));
+    assert.ok(!downloadTools.some((tool) => tool.name === "wiki_apply_structure_plan"));
     assert.ok(!downloadTools.some((tool) => tool.name === "write_paper_wiki_source"));
 
     const evidenceTools = createToolsForBoundary(workspace, "wiki-evidence-worker");
@@ -1656,6 +1689,7 @@ test("createToolsForBoundary exposes isolated wiki and worker tool surfaces", as
     assert.ok(!evidenceTools.some((tool) => tool.name === "download_paper"));
     assert.ok(!evidenceTools.some((tool) => tool.name === "build_wiki_page"));
     assert.ok(!evidenceTools.some((tool) => tool.name === "wiki_structure_plan"));
+    assert.ok(!evidenceTools.some((tool) => tool.name === "wiki_apply_structure_plan"));
 
     const designTools = createToolsForBoundary(workspace, "design-subagent");
     assert.deepEqual(designTools.map((tool) => tool.name), getToolBoundaryToolNames("design-subagent"));
@@ -1666,6 +1700,7 @@ test("createToolsForBoundary exposes isolated wiki and worker tool surfaces", as
     assert.ok(!designTools.some((tool) => tool.name === "web_search"));
     assert.ok(!designTools.some((tool) => tool.name === "build_wiki_page"));
     assert.ok(!designTools.some((tool) => tool.name === "wiki_structure_plan"));
+    assert.ok(!designTools.some((tool) => tool.name === "wiki_apply_structure_plan"));
     assert.ok(!designTools.some((tool) => tool.name === "write_paper_wiki_source"));
 
     const writingTools = createToolsForBoundary(workspace, "paper-writing-worker");
@@ -1680,6 +1715,7 @@ test("createToolsForBoundary exposes isolated wiki and worker tool surfaces", as
     assert.ok(!writingTools.some((tool) => tool.name === "generate_paper_wiki_summary"));
     assert.ok(!writingTools.some((tool) => tool.name === "build_wiki_page"));
     assert.ok(!writingTools.some((tool) => tool.name === "wiki_structure_plan"));
+    assert.ok(!writingTools.some((tool) => tool.name === "wiki_apply_structure_plan"));
     assert.ok(!writingTools.some((tool) => tool.name === "write_paper_wiki_source"));
   } finally {
     await rm(workspace, { recursive: true, force: true });
@@ -3454,6 +3490,58 @@ test("wiki_structure_plan delegates to the injected planner and returns details"
       includeMediumRisk: true,
     }]);
     assert.equal((result.details as { actionCount?: number }).actionCount, 1);
+  } finally {
+    await rm(workspace, { recursive: true, force: true });
+  }
+});
+
+test("wiki_apply_structure_plan delegates to the injected applier and returns details", async () => {
+  const workspace = await mkdtemp(path.join(tmpdir(), "pi-agent-tools-"));
+  const capturedCalls: unknown[] = [];
+
+  try {
+    const tool = getWikiApplyStructurePlanTool(workspace, {
+      applyWikiStructurePlan: async (options) => {
+        capturedCalls.push(options);
+        return {
+          status: "dry_run",
+          applied: [],
+          skipped: [],
+          changedFiles: [],
+        };
+      },
+    });
+    const actions = [
+      {
+        id: "wiki-structure-001",
+        type: "fix_duplicate_section",
+        priority: "medium",
+        risk: "low",
+        issueKind: "duplicate_section",
+        path: "knowledge-base/wiki/pages/example.md",
+        target: "Open Questions",
+        reason: "Section appears twice.",
+        recommendedTool: "wiki_apply_structure_plan",
+      },
+    ];
+
+    const result = await tool.execute("wiki-apply-structure-plan-call", {
+      actions,
+      dryRun: true,
+      requireLowRisk: true,
+      maxActions: 3,
+      runVerification: true,
+    }, undefined);
+
+    assert.deepEqual(capturedCalls, [{
+      workspaceDir: workspace,
+      actions,
+      dryRun: true,
+      requireLowRisk: true,
+      maxActions: 3,
+      runVerification: true,
+    }]);
+    assert.equal((result.details as { status?: string }).status, "dry_run");
   } finally {
     await rm(workspace, { recursive: true, force: true });
   }

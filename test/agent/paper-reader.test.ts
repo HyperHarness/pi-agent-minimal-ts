@@ -18,6 +18,7 @@ import {
 } from "../../src/agent/wiki/content.js";
 import { bootstrapPaperWikiPageEvidence } from "../../src/agent/wiki/bootstrap.js";
 import { lintPaperWiki } from "../../src/agent/wiki/lint.js";
+import { applyWikiStructurePlan } from "../../src/agent/wiki/structure-apply.js";
 import { planWikiStructure } from "../../src/agent/wiki/structure-plan.js";
 import {
   evaluateParseQuality,
@@ -686,9 +687,63 @@ test("planWikiStructure turns lint findings into low-risk structure actions", as
     });
 
     assert.equal(plan.status, "planned");
-    assert.ok(plan.actions.some((action) => action.type === "fix_duplicate_section"));
+    const duplicateSectionAction = plan.actions.find((action) => action.type === "fix_duplicate_section");
+    assert.ok(duplicateSectionAction);
+    assert.equal(duplicateSectionAction.path, "knowledge-base/wiki/pages/spec.md");
+    assert.equal(duplicateSectionAction.target, "Open Questions");
+    assert.equal("recommendedArgs" in duplicateSectionAction, false);
     assert.ok(plan.actions.some((action) => action.type === "fix_rendered_wiki_link"));
     assert.ok(plan.actions.every((action) => action.risk === "low"));
+  } finally {
+    await rm(workspace, { recursive: true, force: true });
+  }
+});
+
+test("applyWikiStructurePlan dry-runs and applies low-risk duplicate section cleanup", async () => {
+  const workspace = await mkdtemp(path.join(os.tmpdir(), "pi-agent-wiki-apply-"));
+  try {
+    await mkdir(path.join(workspace, "knowledge-base/wiki/pages"), { recursive: true });
+    await mkdir(path.join(workspace, "knowledge-base/wiki/sources"), { recursive: true });
+    await writeFile(path.join(workspace, "knowledge-base/wiki/index.md"), [
+      "# Paper LLM Wiki Index",
+      "",
+      "## Knowledge Entries",
+      "",
+      "- [Spec](pages/spec.md)"
+    ].join("\n"));
+    const pagePath = path.join(workspace, "knowledge-base/wiki/pages/spec.md");
+    const originalPage = [
+      "---",
+      "title: \"Spec\"",
+      "source_citations: []",
+      "related_pages: []",
+      "---",
+      "# Spec",
+      "",
+      "## Open Questions",
+      "",
+      "- Keep this broader question.",
+      "",
+      "## Open Questions",
+      "",
+      "- Remove this template question."
+    ].join("\n");
+    await writeFile(pagePath, originalPage);
+
+    const plan = await planWikiStructure({ workspaceDir: workspace, maxItems: 10 });
+    const actions = plan.actions.filter((action) => action.type === "fix_duplicate_section");
+
+    const dryRun = await applyWikiStructurePlan({ workspaceDir: workspace, actions, dryRun: true });
+    assert.equal(dryRun.status, "dry_run");
+    assert.equal(await readFile(pagePath, "utf8"), originalPage);
+
+    const applied = await applyWikiStructurePlan({ workspaceDir: workspace, actions, dryRun: false });
+    const updatedPage = await readFile(pagePath, "utf8");
+    assert.equal(applied.status, "applied");
+    assert.deepEqual(applied.changedFiles, ["knowledge-base/wiki/pages/spec.md"]);
+    assert.match(updatedPage, /Keep this broader question/);
+    assert.doesNotMatch(updatedPage, /Remove this template question/);
+    assert.equal(applied.verification?.lintAfter?.summary.duplicate_section, 0);
   } finally {
     await rm(workspace, { recursive: true, force: true });
   }

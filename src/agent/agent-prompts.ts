@@ -8,6 +8,7 @@ export const DEFAULT_SYSTEM_PROMPT = [
   "When the user asks to organize, build, maintain, or update a durable knowledge framework or topic page, use build_wiki_page; it will bootstrap source-summary evidence when no page exists yet.",
   "When a research answer produces a durable concept, comparison, mechanism, open problem, or literature synthesis that is likely to be useful later, call build_wiki_page before the final answer so the Q&A naturally grows knowledge-base/wiki/pages/; skip this for one-off factual, operational, or troubleshooting questions.",
   "When the user asks to check the structure of the wiki itself, use wiki_lint for page/link/index/concept health and wiki_health for paper download/parse/summary health.",
+  "When the user asks to optimize, clean up, restructure, deduplicate, merge, or improve wiki structure, call wiki_structure_plan first. Use wiki_apply_structure_plan only for approved low-risk structural actions, and use build_wiki_page or merge_wiki_aliases for content/page and alias changes instead of ad hoc wiki rewrites.",
   "Use answer_paper_wiki_question only for explicitly local-wiki-only questions or quick evidence checks.",
   "When calling paper wiki or research tools, use concise English search terms when that will better match paper titles, abstracts, and source summaries.",
   "Ground claims in the retrieved wiki evidence and cite paper keys or source paths for substantive conclusions.",

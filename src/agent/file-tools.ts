@@ -252,6 +252,7 @@ const DELETABLE_TEXT_FILE_EXTENSIONS = new Set([
   ".md",
   ".nav",
   ".out",
+  ".py",
   ".rst",
   ".snm",
   ".sty",
@@ -882,7 +883,7 @@ export function createFileTools(input: {
     name: "delete_file",
     label: "Delete File",
     description:
-      "Deletes a text or LaTeX-related file inside the workspace. Use this for intentional manuscript directory cleanup after inspecting the target; it rejects directories, .git paths, symlinks, and binary files.",
+      "Deletes a text, script, or LaTeX-related file inside the workspace. Use this for intentional manuscript or temporary-file cleanup after inspecting the target; it rejects directories, .git paths, symlinks, and binary files.",
     parameters: deleteFileParameters,
     executionMode: "sequential",
     execute: async (_toolCallId: string, args: DeleteFileParameters) => {

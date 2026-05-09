@@ -3,6 +3,7 @@ import assert from "node:assert/strict";
 
 import {
   buildPaperSummaryEvidence,
+  applyWikiStructurePlan,
   bootstrapPaperWikiPageEvidence,
   checkWikiHealth,
   lintPaperWiki,
@@ -21,4 +22,5 @@ test("wiki domain facade exposes source, page, health, and evidence APIs", () =>
   assert.equal(typeof checkWikiHealth, "function");
   assert.equal(typeof lintPaperWiki, "function");
   assert.equal(typeof planWikiStructure, "function");
+  assert.equal(typeof applyWikiStructurePlan, "function");
 });
