@@ -1,4 +1,4 @@
-import { appendFile, readFile, writeFile } from "node:fs/promises";
+import { appendFile, lstat, readFile, realpath, writeFile } from "node:fs/promises";
 import path from "node:path";
 import {
   listPaperParseEngines,
@@ -14,6 +14,7 @@ import {
   getPaperWikiIndexPath,
   getPaperWikiLogPath,
   getPaperWikiPagePath,
+  getPaperWikiPagesDir,
   getPaperWikiSourcePath,
   listPaperWikiPageFiles,
   listPaperWikiSourceFiles,
@@ -51,6 +52,47 @@ function sortEnginesByPreference(engines: ConcretePaperParseEngine[]): ConcreteP
     "plain-text-baseline": 5
   };
   return engines.slice().sort((left, right) => priority[left] - priority[right]);
+}
+
+export async function assertSafePaperWikiWriteTarget(input: {
+  workspaceDir: string;
+  filePath: string;
+  allowedRoot: string;
+  label: string;
+}): Promise<void> {
+  const rootStat = await lstat(input.allowedRoot);
+  if (rootStat.isSymbolicLink()) {
+    throw new Error(`Refusing to write ${input.label} because the allowed wiki root is a symlink.`);
+  }
+
+  const workspaceRealPath = await realpath(input.workspaceDir);
+  const rootRealPath = await realpath(input.allowedRoot);
+  const rootRelativeToWorkspace = path.relative(workspaceRealPath, rootRealPath);
+  if (rootRelativeToWorkspace.startsWith("..") || path.isAbsolute(rootRelativeToWorkspace)) {
+    throw new Error(`Refusing to write ${input.label} because the allowed wiki root escapes the workspace.`);
+  }
+
+  const targetStat = await lstat(input.filePath).catch((error: unknown) => {
+    if ((error as NodeJS.ErrnoException).code === "ENOENT") {
+      return undefined;
+    }
+    throw error;
+  });
+
+  if (targetStat?.isSymbolicLink()) {
+    throw new Error(`Refusing to write ${input.label} through a symlink.`);
+  }
+
+  const resolvedTarget = targetStat ? await realpath(input.filePath) : await realpath(path.dirname(input.filePath));
+  const targetRelativeToWorkspace = path.relative(workspaceRealPath, resolvedTarget);
+  if (targetRelativeToWorkspace.startsWith("..") || path.isAbsolute(targetRelativeToWorkspace)) {
+    throw new Error(`Refusing to write ${input.label} because the resolved path escapes the workspace.`);
+  }
+
+  const relative = path.relative(rootRealPath, resolvedTarget);
+  if (relative.startsWith("..") || path.isAbsolute(relative)) {
+    throw new Error(`Refusing to write ${input.label} because the resolved path escapes the allowed wiki directory.`);
+  }
 }
 
 async function resolveWikiEngine(input: {
@@ -334,7 +376,18 @@ async function rewriteWikiIndex(workspaceDir: string): Promise<void> {
     "- Promote repeated concepts into durable pages with `build_wiki_page`.",
     ""
   ].join("\n");
-  await writeFile(getPaperWikiIndexPath(workspaceDir), content, "utf8");
+  const indexPath = getPaperWikiIndexPath(workspaceDir);
+  await assertSafePaperWikiWriteTarget({
+    workspaceDir,
+    filePath: indexPath,
+    allowedRoot: getPaperWikiDir(workspaceDir),
+    label: "wiki index"
+  });
+  await writeFile(indexPath, content, "utf8");
+}
+
+export async function rewritePaperWikiIndex(workspaceDir: string): Promise<void> {
+  await rewriteWikiIndex(workspaceDir);
 }
 
 export async function writePaperWikiSource(input: PaperWikiSourceInput): Promise<PaperWikiSourceResult> {
@@ -475,6 +528,11 @@ function uniqueAliasInputs(aliases: PaperWikiAliasMergeInput["aliases"]): PaperW
   return unique;
 }
 
+interface WritableAliasCandidate {
+  pagePath: string;
+  markdown: string;
+}
+
 export async function mergePaperWikiAliases(input: PaperWikiAliasMergeInput): Promise<PaperWikiAliasMergeResult> {
   if (input.aliases.length === 0) {
     throw new Error("At least one alias mapping is required.");
@@ -485,6 +543,21 @@ export async function mergePaperWikiAliases(input: PaperWikiAliasMergeInput): Pr
   const pageFiles = await listPaperWikiPageFiles(input.workspaceDir);
   const pageKeys = new Set(pageFiles.map((filePath) => path.basename(filePath, ".md")));
   const items: PaperWikiAliasMergeItem[] = [];
+  const writableAliases: WritableAliasCandidate[] = [];
+  const candidateTitles = new Map<string, string>();
+
+  await assertSafePaperWikiWriteTarget({
+    workspaceDir: input.workspaceDir,
+    filePath: getPaperWikiIndexPath(input.workspaceDir),
+    allowedRoot: getPaperWikiDir(input.workspaceDir),
+    label: "wiki index"
+  });
+  await assertSafePaperWikiWriteTarget({
+    workspaceDir: input.workspaceDir,
+    filePath: getPaperWikiLogPath(input.workspaceDir),
+    allowedRoot: getPaperWikiDir(input.workspaceDir),
+    label: "wiki log"
+  });
 
   for (const aliasInput of uniqueAliasInputs(input.aliases)) {
     const aliasPageKey = sanitizeWikiFilename(aliasInput.alias.toLowerCase());
@@ -514,6 +587,12 @@ export async function mergePaperWikiAliases(input: PaperWikiAliasMergeInput): Pr
       continue;
     }
 
+    await assertSafePaperWikiWriteTarget({
+      workspaceDir: input.workspaceDir,
+      filePath: pagePath,
+      allowedRoot: getPaperWikiPagesDir(input.workspaceDir),
+      label: "wiki alias page"
+    });
     const existing = await readFile(pagePath, "utf8").catch(() => undefined);
     if (existing && !isAliasPage(existing) && input.replaceExisting !== true) {
       items.push({
@@ -528,8 +607,10 @@ export async function mergePaperWikiAliases(input: PaperWikiAliasMergeInput): Pr
     }
 
     const canonicalPath = getPaperWikiPagePath(input.workspaceDir, canonicalPageKey);
-    const canonicalMarkdown = await readFile(canonicalPath, "utf8");
-    const canonicalTitle = extractTitle(canonicalMarkdown, canonicalPageKey);
+    const canonicalMarkdown = await readFile(canonicalPath, "utf8").catch(() => undefined);
+    const canonicalTitle = canonicalMarkdown
+      ? extractTitle(canonicalMarkdown, canonicalPageKey)
+      : candidateTitles.get(canonicalPageKey) ?? canonicalPageKey;
     const title = aliasInput.title?.trim() || aliasInput.alias.trim() || aliasPageKey;
     const note = aliasInput.note?.trim();
     const createdAt = existing ? extractFrontmatterValue(existing, "created_at") ?? now : now;
@@ -556,8 +637,9 @@ Use the canonical page for maintained synthesis content.
 
 - Canonical page: \`${canonicalPageKey}\`
 ${note ? `- Note: ${note}\n` : ""}`;
-    await writeFile(pagePath, markdown.trimEnd() + "\n", "utf8");
     pageKeys.add(aliasPageKey);
+    candidateTitles.set(aliasPageKey, title);
+    writableAliases.push({ pagePath, markdown: markdown.trimEnd() + "\n" });
     items.push({
       aliasPageKey,
       canonicalPageKey,
@@ -568,7 +650,16 @@ ${note ? `- Note: ${note}\n` : ""}`;
   }
 
   if (items.some((item) => item.status === "written")) {
+    for (const alias of writableAliases) {
+      await writeFile(alias.pagePath, alias.markdown, "utf8");
+    }
     await rewriteWikiIndex(input.workspaceDir);
+    await assertSafePaperWikiWriteTarget({
+      workspaceDir: input.workspaceDir,
+      filePath: getPaperWikiLogPath(input.workspaceDir),
+      allowedRoot: getPaperWikiDir(input.workspaceDir),
+      label: "wiki log"
+    });
     await appendFile(
       getPaperWikiLogPath(input.workspaceDir),
       `\n## [${now.slice(0, 10)}] aliases\n\n${items

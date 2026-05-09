@@ -1,6 +1,6 @@
 import test from "node:test";
 import assert from "node:assert/strict";
-import { mkdir, mkdtemp, rm, writeFile } from "node:fs/promises";
+import { mkdir, mkdtemp, readFile, rm, symlink, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import path from "node:path";
 
@@ -654,5 +654,793 @@ test("planWikiStructure maps and budgets semantic alias and scope drift growth a
     assert.ok(!tinyCap.actions.some((action) => action.recommendedTool && action.recommendedTool !== "wiki_lint" && action.recommendedTool !== "wiki_health"));
   } finally {
     await rm(workspace, { recursive: true, force: true });
+  }
+});
+
+test("applyWikiStructurePlan dry-runs safe alias and scope note actions", async () => {
+  const workspace = await createWorkspace();
+
+  try {
+    await writePage(
+      workspace,
+      "tunable-coupler",
+      `
+---
+title: Tunable Coupler
+sources:
+  - paper_key: paper-a
+    title: Evidence
+    path: knowledge-base/wiki/sources/paper-a.md
+---
+
+# Tunable Coupler
+
+Coupler page.
+
+## Sources
+
+- \`paper-a\` - Evidence (knowledge-base/wiki/sources/paper-a.md)
+`
+    );
+
+    const { applyWikiStructurePlan } = await import("../../src/agent/wiki/structure-apply.js");
+    const result = await applyWikiStructurePlan({
+      workspaceDir: workspace,
+      dryRun: true,
+      runVerification: false,
+      actions: [
+        {
+          id: "wiki-structure-001",
+          type: "create_alias",
+          priority: "medium",
+          risk: "low",
+          issueKind: "semantic_alias_candidate",
+          owner: "wiki-agent",
+          path: "knowledge-base/wiki/pages/tunable-couplers.md",
+          target: "tunable-coupler",
+          reason: "Plural alias.",
+          recommendedTool: "merge_wiki_aliases",
+          recommendedArgs: {
+            aliases: [{ alias: "tunable-couplers", canonical: "tunable-coupler", note: "Plural alias." }]
+          }
+        },
+        {
+          id: "wiki-structure-002",
+          type: "update_scope_note",
+          priority: "medium",
+          risk: "low",
+          issueKind: "scope_drift",
+          owner: "wiki-agent",
+          path: "knowledge-base/wiki/pages/tunable-coupler.md",
+          reason: "Add scope note.",
+          recommendedTool: "wiki_apply_structure_plan",
+          recommendedArgs: {
+            pagePath: "knowledge-base/wiki/pages/tunable-coupler.md",
+            scopeNote: "This page focuses on tunable couplers for superconducting chip design."
+          }
+        }
+      ]
+    });
+
+    assert.equal(result.status, "dry_run");
+    assert.equal(result.applied.length, 2);
+    assert.deepEqual(result.changedFiles, []);
+    assert.deepEqual(result.applied[0]?.changedFiles, [
+      "knowledge-base/wiki/pages/tunable-couplers.md",
+      "knowledge-base/wiki/index.md",
+      "knowledge-base/wiki/log.md"
+    ]);
+    await assert.rejects(readFile(path.join(workspace, "knowledge-base/wiki/pages/tunable-couplers.md"), "utf8"));
+    const canonical = await readFile(path.join(workspace, "knowledge-base/wiki/pages/tunable-coupler.md"), "utf8");
+    assert.doesNotMatch(canonical, /## Scope Note/);
+  } finally {
+    await rm(workspace, { recursive: true, force: true });
+  }
+});
+
+test("applyWikiStructurePlan writes safe alias and scope note actions", async () => {
+  const workspace = await createWorkspace();
+
+  try {
+    await writePage(
+      workspace,
+      "tunable-coupler",
+      `
+---
+title: Tunable Coupler
+sources:
+  - paper_key: paper-a
+    title: Evidence
+    path: knowledge-base/wiki/sources/paper-a.md
+---
+
+# Tunable Coupler
+
+Coupler page.
+
+## Sources
+
+- \`paper-a\` - Evidence (knowledge-base/wiki/sources/paper-a.md)
+`
+    );
+
+    const { applyWikiStructurePlan } = await import("../../src/agent/wiki/structure-apply.js");
+    const result = await applyWikiStructurePlan({
+      workspaceDir: workspace,
+      dryRun: false,
+      runVerification: false,
+      actions: [
+        {
+          id: "wiki-structure-001",
+          type: "create_alias",
+          priority: "medium",
+          risk: "low",
+          issueKind: "semantic_alias_candidate",
+          owner: "wiki-agent",
+          path: "knowledge-base/wiki/pages/tunable-couplers.md",
+          target: "tunable-coupler",
+          reason: "Plural alias.",
+          recommendedTool: "merge_wiki_aliases",
+          recommendedArgs: {
+            aliases: [{ alias: "tunable-couplers", canonical: "tunable-coupler", note: "Plural alias." }]
+          }
+        },
+        {
+          id: "wiki-structure-002",
+          type: "update_scope_note",
+          priority: "medium",
+          risk: "low",
+          issueKind: "scope_drift",
+          owner: "wiki-agent",
+          path: "knowledge-base/wiki/pages/tunable-coupler.md",
+          reason: "Add scope note.",
+          recommendedTool: "wiki_apply_structure_plan",
+          recommendedArgs: {
+            pagePath: "knowledge-base/wiki/pages/tunable-coupler.md",
+            scopeNote: "This page focuses on tunable couplers for superconducting chip design."
+          }
+        }
+      ]
+    });
+
+    assert.equal(result.status, "applied");
+    assert.ok(result.changedFiles.includes("knowledge-base/wiki/pages/tunable-couplers.md"));
+    assert.ok(result.changedFiles.includes("knowledge-base/wiki/pages/tunable-coupler.md"));
+    assert.ok(result.changedFiles.includes("knowledge-base/wiki/index.md"));
+    assert.ok(result.changedFiles.includes("knowledge-base/wiki/log.md"));
+    const alias = await readFile(path.join(workspace, "knowledge-base/wiki/pages/tunable-couplers.md"), "utf8");
+    assert.match(alias, /canonical_page: "tunable-coupler"/);
+    const canonical = await readFile(path.join(workspace, "knowledge-base/wiki/pages/tunable-coupler.md"), "utf8");
+    assert.match(canonical, /## Scope Note/);
+    assert.match(canonical, /superconducting chip design/);
+    assert.match(canonical, /## Sources/);
+  } finally {
+    await rm(workspace, { recursive: true, force: true });
+  }
+});
+
+test("applyWikiStructurePlan rejects page actions that escape wiki pages directory", async () => {
+  const workspace = await createWorkspace();
+
+  try {
+    await writeMarkdown(path.join(workspace, "README.md"), "# Workspace Readme");
+
+    const { applyWikiStructurePlan } = await import("../../src/agent/wiki/structure-apply.js");
+    await assert.rejects(
+      applyWikiStructurePlan({
+        workspaceDir: workspace,
+        dryRun: true,
+        runVerification: false,
+        actions: [{
+          id: "wiki-structure-001",
+          type: "update_scope_note",
+          priority: "medium",
+          risk: "low",
+          issueKind: "scope_drift",
+          owner: "wiki-agent",
+          path: "knowledge-base/wiki/pages/../../../README.md",
+          reason: "Escaping path.",
+          recommendedTool: "wiki_apply_structure_plan",
+          recommendedArgs: {
+            pagePath: "knowledge-base/wiki/pages/../../../README.md",
+            scopeNote: "Should not write outside wiki pages."
+          }
+        }]
+      }),
+      /target wiki synthesis pages/
+    );
+  } finally {
+    await rm(workspace, { recursive: true, force: true });
+  }
+});
+
+test("applyWikiStructurePlan refuses to write wiki pages through symlinks", async () => {
+  const workspace = await createWorkspace();
+  const outside = await mkdtemp(path.join(tmpdir(), "pi-wiki-outside-"));
+
+  try {
+    const outsideTarget = path.join(outside, "outside.md");
+    await writeMarkdown(outsideTarget, "# Outside");
+    await mkdir(path.join(workspace, "knowledge-base/wiki/pages"), { recursive: true });
+    await symlink(outsideTarget, path.join(workspace, "knowledge-base/wiki/pages/symlink-page.md"));
+
+    const { applyWikiStructurePlan } = await import("../../src/agent/wiki/structure-apply.js");
+    await assert.rejects(
+      applyWikiStructurePlan({
+        workspaceDir: workspace,
+        dryRun: false,
+        runVerification: false,
+        actions: [{
+          id: "wiki-structure-001",
+          type: "update_scope_note",
+          priority: "medium",
+          risk: "low",
+          issueKind: "scope_drift",
+          owner: "wiki-agent",
+          path: "knowledge-base/wiki/pages/symlink-page.md",
+          reason: "Symlinked page.",
+          recommendedTool: "wiki_apply_structure_plan",
+          recommendedArgs: {
+            pagePath: "knowledge-base/wiki/pages/symlink-page.md",
+            scopeNote: "Should not write outside wiki pages."
+          }
+        }]
+      }),
+      /symlink/
+    );
+
+    const outsideMarkdown = await readFile(outsideTarget, "utf8");
+    assert.doesNotMatch(outsideMarkdown, /Scope Note/);
+  } finally {
+    await rm(workspace, { recursive: true, force: true });
+    await rm(outside, { recursive: true, force: true });
+  }
+});
+
+test("applyWikiStructurePlan refuses wiki roots that resolve outside the workspace", async () => {
+  const workspace = await createWorkspace();
+  const outside = await mkdtemp(path.join(tmpdir(), "pi-wiki-outside-"));
+
+  try {
+    await mkdir(path.join(outside, "knowledge-base/wiki/pages"), { recursive: true });
+    await writeMarkdown(
+      path.join(outside, "knowledge-base/wiki/pages/external-page.md"),
+      `
+---
+title: External Page
+---
+
+# External Page
+`
+    );
+    await symlink(path.join(outside, "knowledge-base"), path.join(workspace, "knowledge-base"));
+
+    const { applyWikiStructurePlan } = await import("../../src/agent/wiki/structure-apply.js");
+    await assert.rejects(
+      applyWikiStructurePlan({
+        workspaceDir: workspace,
+        dryRun: false,
+        runVerification: false,
+        actions: [{
+          id: "wiki-structure-001",
+          type: "update_scope_note",
+          priority: "medium",
+          risk: "low",
+          issueKind: "scope_drift",
+          owner: "wiki-agent",
+          path: "knowledge-base/wiki/pages/external-page.md",
+          reason: "Symlinked wiki root.",
+          recommendedTool: "wiki_apply_structure_plan",
+          recommendedArgs: {
+            pagePath: "knowledge-base/wiki/pages/external-page.md",
+            scopeNote: "Should not write outside workspace."
+          }
+        }]
+      }),
+      /escapes the workspace/
+    );
+
+    const outsideMarkdown = await readFile(path.join(outside, "knowledge-base/wiki/pages/external-page.md"), "utf8");
+    assert.doesNotMatch(outsideMarkdown, /Scope Note/);
+  } finally {
+    await rm(workspace, { recursive: true, force: true });
+    await rm(outside, { recursive: true, force: true });
+  }
+});
+
+test("applyWikiStructurePlan dry-run skips aliases that real alias merge would not write", async () => {
+  const workspace = await createWorkspace();
+
+  try {
+    await writePage(
+      workspace,
+      "canonical",
+      `
+---
+title: Canonical
+---
+
+# Canonical
+`
+    );
+    await writePage(
+      workspace,
+      "existing-synthesis",
+      `
+---
+title: Existing Synthesis
+---
+
+# Existing Synthesis
+`
+    );
+
+    const { applyWikiStructurePlan } = await import("../../src/agent/wiki/structure-apply.js");
+    const result = await applyWikiStructurePlan({
+      workspaceDir: workspace,
+      dryRun: true,
+      runVerification: false,
+      actions: [
+        {
+          id: "wiki-structure-001",
+          type: "create_alias",
+          priority: "medium",
+          risk: "low",
+          issueKind: "semantic_alias_candidate",
+          owner: "wiki-agent",
+          path: "knowledge-base/wiki/pages/missing-canonical-alias.md",
+          target: "missing-canonical",
+          reason: "Missing canonical.",
+          recommendedTool: "merge_wiki_aliases",
+          recommendedArgs: {
+            aliases: [{ alias: "missing-canonical-alias", canonical: "missing-canonical" }]
+          }
+        },
+        {
+          id: "wiki-structure-002",
+          type: "create_alias",
+          priority: "medium",
+          risk: "low",
+          issueKind: "semantic_alias_candidate",
+          owner: "wiki-agent",
+          path: "knowledge-base/wiki/pages/canonical.md",
+          target: "canonical",
+          reason: "Self alias.",
+          recommendedTool: "merge_wiki_aliases",
+          recommendedArgs: {
+            aliases: [{ alias: "canonical", canonical: "canonical" }]
+          }
+        },
+        {
+          id: "wiki-structure-004",
+          type: "create_alias",
+          priority: "medium",
+          risk: "low",
+          issueKind: "semantic_alias_candidate",
+          owner: "wiki-agent",
+          path: "knowledge-base/wiki/pages/existing-synthesis.md",
+          target: "canonical",
+          reason: "Existing synthesis.",
+          recommendedTool: "merge_wiki_aliases",
+          recommendedArgs: {
+            aliases: [{ alias: "existing-synthesis", canonical: "canonical" }]
+          }
+        }
+      ]
+    });
+
+    assert.equal(result.status, "dry_run");
+    assert.equal(result.applied.length, 0);
+    assert.equal(result.skipped.length, 3);
+    assert.deepEqual(result.changedFiles, []);
+    assert.ok(result.skipped.some((item) => /Canonical wiki page does not exist/.test(item.reason)));
+    assert.ok(result.skipped.some((item) => /identical/.test(item.reason)));
+    assert.ok(result.skipped.some((item) => /already exists as a synthesis page/.test(item.reason)));
+  } finally {
+    await rm(workspace, { recursive: true, force: true });
+  }
+});
+
+test("applyWikiStructurePlan dry-run mirrors partial alias merge writes", async () => {
+  const workspace = await createWorkspace();
+
+  try {
+    await writePage(
+      workspace,
+      "canonical",
+      `
+---
+title: Canonical
+---
+
+# Canonical
+`
+    );
+    await writePage(
+      workspace,
+      "existing-synthesis",
+      `
+---
+title: Existing Synthesis
+---
+
+# Existing Synthesis
+`
+    );
+
+    const { applyWikiStructurePlan } = await import("../../src/agent/wiki/structure-apply.js");
+    const result = await applyWikiStructurePlan({
+      workspaceDir: workspace,
+      dryRun: true,
+      runVerification: false,
+      actions: [{
+        id: "wiki-structure-001",
+        type: "create_alias",
+        priority: "medium",
+        risk: "low",
+        issueKind: "semantic_alias_candidate",
+        owner: "wiki-agent",
+        path: "knowledge-base/wiki/pages/good-alias.md",
+        target: "canonical",
+        reason: "Mixed alias batch.",
+        recommendedTool: "merge_wiki_aliases",
+        recommendedArgs: {
+          aliases: [
+            { alias: "good-alias", canonical: "canonical" },
+            { alias: "good-alias", canonical: "canonical" },
+            { alias: "missing-canonical-alias", canonical: "missing-canonical" },
+            { alias: "existing-synthesis", canonical: "canonical" }
+          ]
+        }
+      }]
+    });
+
+    assert.equal(result.status, "dry_run");
+    assert.equal(result.applied.length, 1);
+    assert.equal(result.skipped.length, 0);
+    assert.deepEqual(result.changedFiles, []);
+    assert.deepEqual(result.applied[0]?.changedFiles, [
+      "knowledge-base/wiki/pages/good-alias.md",
+      "knowledge-base/wiki/index.md",
+      "knowledge-base/wiki/log.md"
+    ]);
+    await assert.rejects(readFile(path.join(workspace, "knowledge-base/wiki/pages/good-alias.md"), "utf8"));
+  } finally {
+    await rm(workspace, { recursive: true, force: true });
+  }
+});
+
+test("applyWikiStructurePlan blocks alias writes before touching pages when index is unsafe", async () => {
+  const workspace = await createWorkspace();
+  const outside = await mkdtemp(path.join(tmpdir(), "pi-wiki-outside-"));
+
+  try {
+    await writePage(
+      workspace,
+      "canonical",
+      `
+---
+title: Canonical
+---
+
+# Canonical
+`
+    );
+    const outsideTarget = path.join(outside, "index.md");
+    await writeMarkdown(outsideTarget, "# Outside Index");
+    await writeMarkdown(path.join(workspace, "knowledge-base/wiki/log.md"), "# Log");
+    await rm(path.join(workspace, "knowledge-base/wiki/index.md"), { force: true });
+    await symlink(outsideTarget, path.join(workspace, "knowledge-base/wiki/index.md"));
+
+    const { applyWikiStructurePlan } = await import("../../src/agent/wiki/structure-apply.js");
+    const result = await applyWikiStructurePlan({
+      workspaceDir: workspace,
+      dryRun: false,
+      runVerification: false,
+      actions: [{
+        id: "wiki-structure-001",
+        type: "create_alias",
+        priority: "medium",
+        risk: "low",
+        issueKind: "semantic_alias_candidate",
+        owner: "wiki-agent",
+        path: "knowledge-base/wiki/pages/good-alias.md",
+        target: "canonical",
+        reason: "Alias with unsafe index.",
+        recommendedTool: "merge_wiki_aliases",
+        recommendedArgs: {
+          aliases: [{ alias: "good-alias", canonical: "canonical" }]
+        }
+      }]
+    });
+
+    assert.equal(result.status, "blocked");
+    assert.equal(result.applied.length, 0);
+    assert.match(result.skipped[0]?.reason ?? "", /symlink/);
+    await assert.rejects(readFile(path.join(workspace, "knowledge-base/wiki/pages/good-alias.md"), "utf8"));
+    const outsideMarkdown = await readFile(outsideTarget, "utf8");
+    assert.equal(outsideMarkdown.trim(), "# Outside Index");
+  } finally {
+    await rm(workspace, { recursive: true, force: true });
+    await rm(outside, { recursive: true, force: true });
+  }
+});
+
+test("mergePaperWikiAliases preflights all alias targets before writing any page", async () => {
+  const workspace = await createWorkspace();
+  const outside = await mkdtemp(path.join(tmpdir(), "pi-wiki-outside-"));
+
+  try {
+    await writePage(
+      workspace,
+      "canonical",
+      `
+---
+title: Canonical
+---
+
+# Canonical
+`
+    );
+    const outsideTarget = path.join(outside, "unsafe-alias.md");
+    await writeMarkdown(outsideTarget, "# Outside Alias");
+    await symlink(outsideTarget, path.join(workspace, "knowledge-base/wiki/pages/unsafe-alias.md"));
+
+    const { mergePaperWikiAliases } = await import("../../src/agent/wiki/content.js");
+    await assert.rejects(
+      mergePaperWikiAliases({
+        workspaceDir: workspace,
+        aliases: [
+          { alias: "safe-alias", canonical: "canonical" },
+          { alias: "unsafe-alias", canonical: "canonical" }
+        ]
+      }),
+      /symlink/
+    );
+
+    await assert.rejects(readFile(path.join(workspace, "knowledge-base/wiki/pages/safe-alias.md"), "utf8"));
+    const outsideMarkdown = await readFile(outsideTarget, "utf8");
+    assert.equal(outsideMarkdown.trim(), "# Outside Alias");
+  } finally {
+    await rm(workspace, { recursive: true, force: true });
+    await rm(outside, { recursive: true, force: true });
+  }
+});
+
+test("applyWikiStructurePlan replaces the full existing Scope Note section", async () => {
+  const workspace = await createWorkspace();
+
+  try {
+    await writePage(
+      workspace,
+      "scoped-page",
+      `
+---
+title: Scoped Page
+---
+
+# Scoped Page
+
+Intro.
+
+## Scope Note
+
+Old paragraph one.
+
+- stale bullet
+- stale second bullet
+
+Old paragraph two.
+
+## Sources
+
+- \`paper-a\`
+`
+    );
+
+    const { applyWikiStructurePlan } = await import("../../src/agent/wiki/structure-apply.js");
+    const result = await applyWikiStructurePlan({
+      workspaceDir: workspace,
+      dryRun: false,
+      runVerification: false,
+      actions: [{
+        id: "wiki-structure-001",
+        type: "update_scope_note",
+        priority: "medium",
+        risk: "low",
+        issueKind: "scope_drift",
+        owner: "wiki-agent",
+        path: "knowledge-base/wiki/pages/scoped-page.md",
+        reason: "Replace stale scope note.",
+        recommendedTool: "wiki_apply_structure_plan",
+        recommendedArgs: {
+          pagePath: "knowledge-base/wiki/pages/scoped-page.md",
+          scopeNote: "New focused scope note."
+        }
+      }]
+    });
+
+    assert.equal(result.status, "applied");
+    const page = await readFile(path.join(workspace, "knowledge-base/wiki/pages/scoped-page.md"), "utf8");
+    assert.match(page, /## Scope Note\n\nNew focused scope note\.\n\n## Sources/);
+    assert.doesNotMatch(page, /Old paragraph/);
+    assert.doesNotMatch(page, /stale bullet/);
+  } finally {
+    await rm(workspace, { recursive: true, force: true });
+  }
+});
+
+test("applyWikiStructurePlan rebuild_index rewrites the wiki index", async () => {
+  const workspace = await createWorkspace();
+
+  try {
+    await writeSource(
+      workspace,
+      "paper-a",
+      `
+---
+paper_key: paper-a
+title: Evidence
+---
+
+Evidence summary.
+`
+    );
+    await writePage(
+      workspace,
+      "tunable-coupler",
+      `
+---
+title: Tunable Coupler
+sources:
+  - paper_key: paper-a
+    title: Evidence
+    path: knowledge-base/wiki/sources/paper-a.md
+---
+
+# Tunable Coupler
+
+Coupler page.
+`
+    );
+    await writeMarkdown(path.join(workspace, "knowledge-base/wiki/index.md"), "# Stale Index");
+
+    const { applyWikiStructurePlan } = await import("../../src/agent/wiki/structure-apply.js");
+    const result = await applyWikiStructurePlan({
+      workspaceDir: workspace,
+      dryRun: false,
+      runVerification: false,
+      actions: [{
+        id: "wiki-structure-001",
+        type: "rebuild_index",
+        priority: "low",
+        risk: "low",
+        issueKind: "stale_index",
+        owner: "wiki-agent",
+        path: "knowledge-base/wiki/index.md",
+        reason: "Index is stale.",
+        recommendedTool: "wiki_apply_structure_plan"
+      }]
+    });
+
+    assert.equal(result.status, "applied");
+    assert.deepEqual(result.changedFiles, ["knowledge-base/wiki/index.md"]);
+    const index = await readFile(path.join(workspace, "knowledge-base/wiki/index.md"), "utf8");
+    assert.match(index, /# Paper LLM Wiki Index/);
+    assert.match(index, /\[Tunable Coupler\]\(pages\/tunable-coupler\.md\)/);
+    assert.match(index, /Source summaries: 1/);
+  } finally {
+    await rm(workspace, { recursive: true, force: true });
+  }
+});
+
+test("applyWikiStructurePlan refuses to rebuild a symlinked wiki index", async () => {
+  const workspace = await createWorkspace();
+  const outside = await mkdtemp(path.join(tmpdir(), "pi-wiki-outside-"));
+
+  try {
+    await writeSource(
+      workspace,
+      "paper-a",
+      `
+---
+paper_key: paper-a
+title: Evidence
+---
+
+Evidence summary.
+`
+    );
+    await writePage(
+      workspace,
+      "tunable-coupler",
+      `
+---
+title: Tunable Coupler
+---
+
+# Tunable Coupler
+`
+    );
+
+    const outsideTarget = path.join(outside, "index.md");
+    await writeMarkdown(outsideTarget, "# Outside Index");
+    await rm(path.join(workspace, "knowledge-base/wiki/index.md"), { force: true });
+    await symlink(outsideTarget, path.join(workspace, "knowledge-base/wiki/index.md"));
+
+    const { applyWikiStructurePlan } = await import("../../src/agent/wiki/structure-apply.js");
+    await assert.rejects(
+      applyWikiStructurePlan({
+        workspaceDir: workspace,
+        dryRun: false,
+        runVerification: false,
+        actions: [{
+          id: "wiki-structure-001",
+          type: "rebuild_index",
+          priority: "low",
+          risk: "low",
+          issueKind: "stale_index",
+          owner: "wiki-agent",
+          path: "knowledge-base/wiki/index.md",
+          reason: "Index is stale.",
+          recommendedTool: "wiki_apply_structure_plan"
+        }]
+      }),
+      /symlink/
+    );
+
+    const outsideMarkdown = await readFile(outsideTarget, "utf8");
+    assert.equal(outsideMarkdown.trim(), "# Outside Index");
+  } finally {
+    await rm(workspace, { recursive: true, force: true });
+    await rm(outside, { recursive: true, force: true });
+  }
+});
+
+test("applyWikiStructurePlan dry-run refuses to rebuild a symlinked wiki index", async () => {
+  const workspace = await createWorkspace();
+  const outside = await mkdtemp(path.join(tmpdir(), "pi-wiki-outside-"));
+
+  try {
+    await writeSource(
+      workspace,
+      "paper-a",
+      `
+---
+paper_key: paper-a
+title: Evidence
+---
+
+Evidence summary.
+`
+    );
+    const outsideTarget = path.join(outside, "index.md");
+    await writeMarkdown(outsideTarget, "# Outside Index");
+    await rm(path.join(workspace, "knowledge-base/wiki/index.md"), { force: true });
+    await symlink(outsideTarget, path.join(workspace, "knowledge-base/wiki/index.md"));
+
+    const { applyWikiStructurePlan } = await import("../../src/agent/wiki/structure-apply.js");
+    await assert.rejects(
+      applyWikiStructurePlan({
+        workspaceDir: workspace,
+        dryRun: true,
+        runVerification: false,
+        actions: [{
+          id: "wiki-structure-001",
+          type: "rebuild_index",
+          priority: "low",
+          risk: "low",
+          issueKind: "stale_index",
+          owner: "wiki-agent",
+          path: "knowledge-base/wiki/index.md",
+          reason: "Index is stale.",
+          recommendedTool: "wiki_apply_structure_plan"
+        }]
+      }),
+      /symlink/
+    );
+  } finally {
+    await rm(workspace, { recursive: true, force: true });
+    await rm(outside, { recursive: true, force: true });
   }
 });
