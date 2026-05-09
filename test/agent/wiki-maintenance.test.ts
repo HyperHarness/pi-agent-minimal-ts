@@ -5,6 +5,7 @@ import { tmpdir } from "node:os";
 import path from "node:path";
 
 import { lintPaperWiki } from "../../src/agent/wiki/lint.js";
+import { planWikiStructure } from "../../src/agent/wiki/structure-plan.js";
 import {
   auditPageEvidenceContracts,
   auditScopeDrift,
@@ -414,6 +415,243 @@ test("lintPaperWiki emits rich maintenance issues and optional reports", async (
     });
     assert.equal(defaultResult.summary.high_value_concept_gap, 0);
     assert.ok(!defaultResult.issues.some((issue) => issue.kind === "high_value_concept_gap"));
+  } finally {
+    await rm(workspace, { recursive: true, force: true });
+  }
+});
+
+test("planWikiStructure emits budgeted tool-call-shaped growth and verification actions", async () => {
+  const workspace = await createWorkspace();
+
+  try {
+    await writeSource(
+      workspace,
+      "paper-a",
+      `
+---
+paper_key: paper-a
+title: Tunable Coupler Evidence
+tags:
+  - tunable-coupler
+---
+
+Tunable coupler evidence for superconducting chip design.
+`
+    );
+    await writeSource(
+      workspace,
+      "paper-b",
+      `
+---
+paper_key: paper-b
+title: Coupler Calibration Evidence
+tags:
+  - tunable-coupler
+---
+
+Tunable coupler calibration evidence.
+`
+    );
+
+    const result = await planWikiStructure({
+      workspaceDir: workspace,
+      includeMediumRisk: true,
+      includeGrowthActions: true,
+      goal: "superconducting chip design",
+      focus: ["tunable coupler"],
+      budget: { maxPagesToBuild: 1, maxAliasesToCreate: 0, maxScopeNotes: 0 }
+    });
+
+    const promote = result.actions.find((action) => action.type === "promote_concept");
+    assert.equal(promote?.concept, "tunable-coupler");
+    assert.equal(promote?.owner, "wiki-agent");
+    assert.equal(promote?.recommendedTool, "build_wiki_page");
+    assert.deepEqual(promote?.recommendedArgs, {
+      topic: "tunable-coupler",
+      pageKey: "tunable-coupler",
+      mode: "draft",
+      maxLocalResults: 8
+    });
+    assert.ok(promote?.verification?.some((check) => check.tool === "wiki_lint"));
+    assert.ok(result.actions.some((action) => action.type === "verify" && action.recommendedTool === "wiki_lint"));
+    assert.equal(result.actions.filter((action) => action.type === "promote_concept").length, 1);
+  } finally {
+    await rm(workspace, { recursive: true, force: true });
+  }
+});
+
+test("planWikiStructure does not request high-value concept gaps unless growth actions are enabled", async () => {
+  const workspace = await createWorkspace();
+
+  try {
+    await writeSource(
+      workspace,
+      "paper-a",
+      `
+---
+paper_key: paper-a
+title: Tunable Coupler Evidence
+tags:
+  - tunable-coupler
+---
+
+Tunable coupler evidence for superconducting chip design.
+`
+    );
+    await writeSource(
+      workspace,
+      "paper-b",
+      `
+---
+paper_key: paper-b
+title: Coupler Calibration Evidence
+tags:
+  - tunable-coupler
+---
+
+Tunable coupler calibration evidence.
+`
+    );
+
+    const result = await planWikiStructure({
+      workspaceDir: workspace,
+      includeMediumRisk: true,
+      goal: "superconducting chip design",
+      focus: ["tunable coupler"]
+    });
+
+    assert.equal(result.lintSummary.high_value_concept_gap, 0);
+    assert.ok(!result.actions.some((action) => action.type === "promote_concept"));
+  } finally {
+    await rm(workspace, { recursive: true, force: true });
+  }
+});
+
+test("planWikiStructure applies default and explicit concept promotion budgets", async () => {
+  const workspace = await createWorkspace();
+
+  try {
+    for (const concept of ["alpha-concept", "beta-concept", "delta-concept", "gamma-concept"]) {
+      await writeSource(
+        workspace,
+        `${concept}-a`,
+        `
+---
+paper_key: ${concept}-a
+title: ${concept} Evidence A
+tags:
+  - ${concept}
+---
+
+${concept} evidence for superconducting design.
+`
+      );
+      await writeSource(
+        workspace,
+        `${concept}-b`,
+        `
+---
+paper_key: ${concept}-b
+title: ${concept} Evidence B
+tags:
+  - ${concept}
+---
+
+Additional ${concept} evidence for superconducting design.
+`
+      );
+    }
+
+    const defaultBudget = await planWikiStructure({
+      workspaceDir: workspace,
+      includeMediumRisk: true,
+      includeGrowthActions: true,
+      goal: "superconducting design",
+      focus: ["concept"]
+    });
+    assert.equal(defaultBudget.actions.filter((action) => action.type === "promote_concept").length, 3);
+
+    const zeroBudget = await planWikiStructure({
+      workspaceDir: workspace,
+      includeMediumRisk: true,
+      includeGrowthActions: true,
+      goal: "superconducting design",
+      focus: ["concept"],
+      budget: { maxPagesToBuild: 0 }
+    });
+    assert.equal(zeroBudget.actions.filter((action) => action.type === "promote_concept").length, 0);
+  } finally {
+    await rm(workspace, { recursive: true, force: true });
+  }
+});
+
+test("planWikiStructure maps and budgets semantic alias and scope drift growth actions", async () => {
+  const workspace = await createMaintenanceFixture();
+
+  try {
+    const suppressed = await planWikiStructure({
+      workspaceDir: workspace,
+      includeMediumRisk: true,
+      includeGrowthActions: true,
+      goal: "agentic chip design",
+      budget: { maxPagesToBuild: 0, maxAliasesToCreate: 0, maxScopeNotes: 0 }
+    });
+    assert.equal(suppressed.actions.filter((action) => action.type === "create_alias").length, 0);
+    assert.equal(suppressed.actions.filter((action) => action.type === "update_scope_note").length, 0);
+
+    const allowed = await planWikiStructure({
+      workspaceDir: workspace,
+      includeMediumRisk: true,
+      includeGrowthActions: true,
+      goal: "agentic chip design",
+      budget: { maxPagesToBuild: 0, maxAliasesToCreate: 1, maxScopeNotes: 1 }
+    });
+
+    const alias = allowed.actions.find((action) => action.type === "create_alias");
+    assert.equal(alias?.issueKind, "semantic_alias_candidate");
+    assert.equal(alias?.risk, "medium");
+    assert.equal(alias?.owner, "wiki-agent");
+    assert.equal(alias?.recommendedTool, "merge_wiki_aliases");
+    assert.deepEqual(alias?.recommendedArgs, {
+      aliases: [{
+        alias: "autonomous-agentic-quantum-eda",
+        canonical: "agentic-autonomous-quantum-eda",
+        note: "shared sources: paper-d; overlapping tokens: agentic, autonomous, design, eda, quantum, superconducting"
+      }]
+    });
+
+    const scope = allowed.actions.find((action) => action.type === "update_scope_note");
+    assert.equal(scope?.issueKind, "scope_drift");
+    assert.equal(scope?.risk, "low");
+    assert.equal(scope?.owner, "wiki-agent");
+    assert.equal(scope?.recommendedTool, "wiki_apply_structure_plan");
+    assert.deepEqual(scope?.recommendedArgs, {
+      pagePath: "knowledge-base/wiki/pages/agentic-chip-design.md",
+      scopeNote: "Scope note: Reframe this page around agentic chip design and keep stale roadmap language as context."
+    });
+
+    const capped = await planWikiStructure({
+      workspaceDir: workspace,
+      maxItems: 6,
+      includeMediumRisk: true,
+      includeGrowthActions: true,
+      goal: "agentic chip design",
+      budget: { maxPagesToBuild: 0, maxAliasesToCreate: 1, maxScopeNotes: 0 }
+    });
+    assert.ok(capped.actions.some((action) => action.type === "create_alias"));
+    assert.ok(capped.actions.length <= 6);
+    assert.ok(capped.actions.some((action) => action.type === "verify"));
+
+    const tinyCap = await planWikiStructure({
+      workspaceDir: workspace,
+      maxItems: 1,
+      includeMediumRisk: true,
+      includeGrowthActions: true,
+      goal: "agentic chip design",
+      budget: { maxPagesToBuild: 0, maxAliasesToCreate: 1, maxScopeNotes: 0 }
+    });
+    assert.ok(tinyCap.actions.length <= 1);
+    assert.ok(!tinyCap.actions.some((action) => action.recommendedTool && action.recommendedTool !== "wiki_lint" && action.recommendedTool !== "wiki_health"));
   } finally {
     await rm(workspace, { recursive: true, force: true });
   }

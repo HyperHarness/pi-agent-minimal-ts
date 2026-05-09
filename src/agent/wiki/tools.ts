@@ -124,7 +124,21 @@ const wikiStructurePlanParameters = Type.Object({
   maxItems: Type.Optional(Type.Integer({ description: "Maximum planned structure actions to return.", minimum: 1 })),
   includeMediumRisk: Type.Optional(Type.Boolean({
     description:
-      "Include medium-risk actions such as page merges and rebuild recommendations. Defaults to false."
+      "Include medium-risk actions such as page merges, page promotion drafts, and rebuild recommendations. Defaults to false."
+  })),
+  goal: Type.Optional(Type.String({
+    description: "Optional research or maintenance goal used to prioritize growth actions."
+  })),
+  focus: Type.Optional(Type.Array(Type.String({
+    description: "Optional focus keyword or concept phrase for goal-aware planning."
+  }))),
+  includeGrowthActions: Type.Optional(Type.Boolean({
+    description: "Include goal-aware concept promotion, alias, and scope-note plan actions. Defaults to false."
+  })),
+  budget: Type.Optional(Type.Object({
+    maxPagesToBuild: Type.Optional(Type.Integer({ description: "Maximum concept pages to recommend building.", minimum: 0 })),
+    maxAliasesToCreate: Type.Optional(Type.Integer({ description: "Maximum alias pages to recommend creating.", minimum: 0 })),
+    maxScopeNotes: Type.Optional(Type.Integer({ description: "Maximum scope-note updates to recommend.", minimum: 0 }))
   }))
 });
 
@@ -134,11 +148,18 @@ const wikiStructurePlanActionParameter = Type.Object({
   priority: Type.String({ description: "Action priority returned by wiki_structure_plan." }),
   risk: Type.String({ description: "Action risk returned by wiki_structure_plan." }),
   issueKind: Type.String({ description: "Original wiki_lint issue kind." }),
+  owner: Type.Optional(Type.String({ description: "Worker role that should own this action." })),
   path: Type.Optional(Type.String({ description: "Workspace-relative target path." })),
   target: Type.Optional(Type.String({ description: "Optional target concept, page, or section title." })),
   concept: Type.Optional(Type.String({ description: "Optional concept gap name." })),
   reason: Type.String({ description: "Reason returned by wiki_structure_plan." }),
-  recommendedTool: Type.Optional(Type.String({ description: "Tool recommended by wiki_structure_plan." }))
+  recommendedTool: Type.Optional(Type.String({ description: "Tool recommended by wiki_structure_plan." })),
+  recommendedArgs: Type.Optional(Type.Object({}, { description: "Recommended arguments for the tool." })),
+  verification: Type.Optional(Type.Array(Type.Object({
+    tool: Type.String({ description: "Verification tool to run after applying the action." }),
+    args: Type.Object({}, { description: "Verification tool arguments." }),
+    expected: Type.String({ description: "Expected verification result." })
+  })))
 });
 
 const wikiApplyStructurePlanParameters = Type.Object({
@@ -1188,7 +1209,11 @@ export function createWikiTools(input: {
       const result = await planWikiStructureImpl({
         workspaceDir: resolvedWorkspaceDir,
         ...(args.maxItems !== undefined ? { maxItems: args.maxItems } : {}),
-        ...(args.includeMediumRisk !== undefined ? { includeMediumRisk: args.includeMediumRisk } : {})
+        ...(args.includeMediumRisk !== undefined ? { includeMediumRisk: args.includeMediumRisk } : {}),
+        ...(args.goal !== undefined ? { goal: args.goal } : {}),
+        ...(args.focus !== undefined ? { focus: args.focus } : {}),
+        ...(args.includeGrowthActions !== undefined ? { includeGrowthActions: args.includeGrowthActions } : {}),
+        ...(args.budget !== undefined ? { budget: args.budget } : {})
       });
 
       return {

@@ -1343,10 +1343,7 @@ test("planWikiStructure emits budgeted tool-call-shaped growth and verification 
       topic: "tunable-coupler",
       pageKey: "tunable-coupler",
       mode: "draft",
-      maxLocalResults: 8,
-      forbidExternalEvidence: true,
-      minSources: 2,
-      verifyAfterWrite: true
+      maxLocalResults: 8
     });
     assert.ok(result.actions.some((action) => action.type === "verify" && action.recommendedTool === "wiki_lint"));
   } finally {
@@ -1500,10 +1497,7 @@ For `concept_gap` and `high_value_concept_gap`, create:
         topic: issue.concept,
         pageKey: issue.concept,
         mode: "draft",
-        maxLocalResults: 8,
-        forbidExternalEvidence: true,
-        minSources: 2,
-        verifyAfterWrite: true
+        maxLocalResults: 8
       },
       verification: [{
         tool: "wiki_lint",
@@ -1516,6 +1510,10 @@ For `concept_gap` and `high_value_concept_gap`, create:
         expected: `Concept gap for ${issue.concept} should be reduced after page promotion.`
       }]
 ```
+
+Task 5 adds `minSources`, `forbidExternalEvidence`, and `verifyAfterWrite` to
+`build_wiki_page`; Task 3 should recommend only arguments supported by the
+current tool schema.
 
 Add budget filtering after actions are created:
 

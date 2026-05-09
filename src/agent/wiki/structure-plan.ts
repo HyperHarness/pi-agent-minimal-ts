@@ -6,10 +6,28 @@ export type WikiStructureActionType =
   | "fix_duplicate_section"
   | "fix_rendered_wiki_link"
   | "rebuild_weak_page"
-  | "promote_concept";
+  | "promote_concept"
+  | "update_scope_note"
+  | "rebuild_index"
+  | "verify";
 
 export type WikiStructureRisk = "low" | "medium" | "high";
 export type WikiStructurePriority = "high" | "medium" | "low";
+export type WikiStructureOwner = "wiki-agent" | "paper-download-subagent" | "wiki-evidence-worker";
+export type WikiStructureRecommendedTool =
+  | "merge_wiki_aliases"
+  | "build_wiki_page"
+  | "replace_file_text"
+  | "wiki_apply_structure_plan"
+  | "wiki_lint"
+  | "wiki_health"
+  | "wiki_health_fix";
+
+export interface WikiStructurePlanVerification {
+  tool: "wiki_lint" | "wiki_health" | "search_paper_wiki" | "answer_paper_wiki_question";
+  args: unknown;
+  expected: string;
+}
 
 export interface WikiStructurePlanAction {
   id: string;
@@ -17,17 +35,30 @@ export interface WikiStructurePlanAction {
   priority: WikiStructurePriority;
   risk: WikiStructureRisk;
   issueKind: PaperWikiLintIssue["kind"];
+  owner: WikiStructureOwner;
   path?: string;
   target?: string;
   concept?: string;
   reason: string;
-  recommendedTool?: "merge_wiki_aliases" | "build_wiki_page" | "replace_file_text" | "wiki_apply_structure_plan";
+  recommendedTool?: WikiStructureRecommendedTool;
+  recommendedArgs?: unknown;
+  verification?: WikiStructurePlanVerification[];
+}
+
+export interface WikiStructurePlanBudget {
+  maxPagesToBuild?: number;
+  maxAliasesToCreate?: number;
+  maxScopeNotes?: number;
 }
 
 export interface WikiStructurePlanOptions {
   workspaceDir: string;
   maxItems?: number;
   includeMediumRisk?: boolean;
+  goal?: string;
+  focus?: string[];
+  includeGrowthActions?: boolean;
+  budget?: WikiStructurePlanBudget;
 }
 
 export interface WikiStructurePlanResult {
@@ -37,6 +68,12 @@ export interface WikiStructurePlanResult {
   actions: WikiStructurePlanAction[];
   warnings: string[];
 }
+
+const DEFAULT_BUDGET: Required<WikiStructurePlanBudget> = {
+  maxPagesToBuild: 3,
+  maxAliasesToCreate: 10,
+  maxScopeNotes: 3
+};
 
 function priorityForIssue(issue: PaperWikiLintIssue): WikiStructurePriority {
   if (issue.severity === "high") {
@@ -50,7 +87,8 @@ function priorityForIssue(issue: PaperWikiLintIssue): WikiStructurePriority {
 
 function actionForIssue(
   issue: PaperWikiLintIssue,
-  index: number
+  index: number,
+  options: WikiStructurePlanOptions
 ): WikiStructurePlanAction | undefined {
   const id = `wiki-structure-${String(index + 1).padStart(3, "0")}`;
   if (issue.kind === "duplicate_page_title") {
@@ -60,6 +98,7 @@ function actionForIssue(
       priority: "high",
       risk: "medium",
       issueKind: issue.kind,
+      owner: "wiki-agent",
       path: issue.path,
       reason: issue.reason,
       recommendedTool: "merge_wiki_aliases"
@@ -72,6 +111,7 @@ function actionForIssue(
       priority: priorityForIssue(issue),
       risk: "low",
       issueKind: issue.kind,
+      owner: "wiki-agent",
       path: issue.path,
       reason: issue.reason,
       recommendedTool: "merge_wiki_aliases"
@@ -84,6 +124,7 @@ function actionForIssue(
       priority: priorityForIssue(issue),
       risk: "low",
       issueKind: issue.kind,
+      owner: "wiki-agent",
       path: issue.path,
       target: issue.target,
       reason: issue.reason,
@@ -97,6 +138,7 @@ function actionForIssue(
       priority: "high",
       risk: "low",
       issueKind: issue.kind,
+      owner: "wiki-agent",
       path: issue.path,
       target: issue.target,
       reason: issue.reason,
@@ -110,39 +152,216 @@ function actionForIssue(
       priority: priorityForIssue(issue),
       risk: "medium",
       issueKind: issue.kind,
+      owner: "wiki-agent",
       path: issue.path,
       reason: issue.reason,
       recommendedTool: "build_wiki_page"
     };
   }
-  if (issue.kind === "concept_gap" && issue.concept) {
+  if (issue.kind === "semantic_alias_candidate" && issue.path && issue.target) {
+    const aliasPageKey = pathBasenameWithoutMarkdownExtension(issue.path);
+    if (!aliasPageKey) {
+      return undefined;
+    }
+    return {
+      id,
+      type: "create_alias",
+      priority: priorityForIssue(issue),
+      risk: "medium",
+      issueKind: issue.kind,
+      owner: "wiki-agent",
+      path: issue.path,
+      target: issue.target,
+      reason: issue.reason,
+      recommendedTool: "merge_wiki_aliases",
+      recommendedArgs: {
+        aliases: [{
+          alias: aliasPageKey,
+          canonical: issue.target,
+          note: issue.reason
+        }]
+      }
+    };
+  }
+  if (issue.kind === "scope_drift" && issue.path) {
+    return {
+      id,
+      type: "update_scope_note",
+      priority: priorityForIssue(issue),
+      risk: "low",
+      issueKind: issue.kind,
+      owner: "wiki-agent",
+      path: issue.path,
+      target: issue.target,
+      reason: issue.reason,
+      recommendedTool: "wiki_apply_structure_plan",
+      recommendedArgs: {
+        pagePath: issue.path,
+        // wiki_apply_structure_plan will handle scope-note application in Task 4.
+        scopeNote: scopeNoteForGoal(options.goal)
+      }
+    };
+  }
+  if (
+    options.includeGrowthActions === true &&
+    (issue.kind === "concept_gap" || issue.kind === "high_value_concept_gap") &&
+    issue.concept
+  ) {
     return {
       id,
       type: "promote_concept",
-      priority: issue.count && issue.count >= 5 ? "medium" : "low",
+      priority: issue.kind === "high_value_concept_gap" ? "high" : issue.count && issue.count >= 5 ? "medium" : "low",
       risk: "medium",
       issueKind: issue.kind,
+      owner: "wiki-agent",
       concept: issue.concept,
       target: issue.target,
       reason: issue.reason,
-      recommendedTool: "build_wiki_page"
+      recommendedTool: "build_wiki_page",
+      recommendedArgs: {
+        topic: issue.concept,
+        pageKey: issue.concept,
+        mode: "draft",
+        maxLocalResults: 8
+      },
+      verification: [{
+        tool: "wiki_lint",
+        args: {
+          maxItems: 50,
+          ...(options.goal?.trim() ? { goal: options.goal } : {}),
+          ...(hasFocus(options.focus) ? { focus: options.focus } : {}),
+          includeCoverage: true
+        },
+        expected: `Concept gap for ${issue.concept} should be reduced after page promotion.`
+      }]
     };
   }
   return undefined;
 }
 
+function pathBasenameWithoutMarkdownExtension(filePath: string): string | undefined {
+  const basename = filePath.split(/[\\/]/).pop()?.replace(/\.md$/i, "");
+  return basename?.trim() || undefined;
+}
+
+function scopeNoteForGoal(goal: string | undefined): string {
+  const trimmedGoal = goal?.trim();
+  if (trimmedGoal) {
+    return `Scope note: Reframe this page around ${trimmedGoal} and keep stale roadmap language as context.`;
+  }
+  return "Scope note: Reframe this page around the current wiki scope and keep stale roadmap language as context.";
+}
+
+function hasFocus(focus: string[] | undefined): boolean {
+  return focus?.some((item) => item.trim().length > 0) ?? false;
+}
+
+function normalizeBudget(budget: WikiStructurePlanBudget | undefined): Required<WikiStructurePlanBudget> {
+  return {
+    maxPagesToBuild: normalizeBudgetValue(budget?.maxPagesToBuild, DEFAULT_BUDGET.maxPagesToBuild),
+    maxAliasesToCreate: normalizeBudgetValue(budget?.maxAliasesToCreate, DEFAULT_BUDGET.maxAliasesToCreate),
+    maxScopeNotes: normalizeBudgetValue(budget?.maxScopeNotes, DEFAULT_BUDGET.maxScopeNotes)
+  };
+}
+
+function normalizeBudgetValue(value: number | undefined, fallback: number): number {
+  if (value === undefined) {
+    return fallback;
+  }
+  return Math.max(0, Math.trunc(value));
+}
+
+function applyBudget(
+  actions: WikiStructurePlanAction[],
+  budget: Required<WikiStructurePlanBudget>
+): WikiStructurePlanAction[] {
+  let pages = 0;
+  let aliases = 0;
+  let scopes = 0;
+  return actions.filter((action) => {
+    if (action.type === "promote_concept") {
+      pages += 1;
+      return pages <= budget.maxPagesToBuild;
+    }
+    if (action.type === "create_alias") {
+      aliases += 1;
+      return aliases <= budget.maxAliasesToCreate;
+    }
+    if (action.type === "update_scope_note") {
+      scopes += 1;
+      return scopes <= budget.maxScopeNotes;
+    }
+    return true;
+  });
+}
+
+function appendVerificationAction(
+  actions: WikiStructurePlanAction[],
+  options: WikiStructurePlanOptions
+): WikiStructurePlanAction[] {
+  const hasWriteCapableAction = actions.some((action) =>
+    action.recommendedTool && action.recommendedTool !== "wiki_lint" && action.recommendedTool !== "wiki_health"
+  );
+  if (!hasWriteCapableAction) {
+    return actions;
+  }
+  return [
+    ...actions,
+    {
+      id: nextActionId(actions),
+      type: "verify",
+      priority: "high",
+      risk: "low",
+      issueKind: "stale_index",
+      owner: "wiki-agent",
+      reason: "Verify wiki structure after applying approved maintenance actions.",
+      recommendedTool: "wiki_lint",
+      recommendedArgs: {
+        maxItems: 100,
+        ...(options.goal?.trim() ? { goal: options.goal } : {}),
+        ...(hasFocus(options.focus) ? { focus: options.focus } : {}),
+        includeCoverage: true,
+        includeQualityAudit: true,
+        includeAliasCandidates: true
+      }
+    }
+  ];
+}
+
+function nextActionId(actions: WikiStructurePlanAction[]): string {
+  const maxId = actions.reduce((maxValue, action) => {
+    const numericId = Number(action.id.match(/^wiki-structure-(\d+)$/)?.[1] ?? 0);
+    return Number.isFinite(numericId) ? Math.max(maxValue, numericId) : maxValue;
+  }, 0);
+  return `wiki-structure-${String(maxId + 1).padStart(3, "0")}`;
+}
+
 export async function planWikiStructure(options: WikiStructurePlanOptions): Promise<WikiStructurePlanResult> {
   const maxItems = Math.max(1, Math.trunc(options.maxItems ?? 50));
+  const includeGrowthActions = options.includeGrowthActions ?? false;
+  const lintMaxItems = includeGrowthActions ? Math.max(200, maxItems * 5) : maxItems;
   const lint = await lintPaperWiki({
     workspaceDir: options.workspaceDir,
-    maxItems
+    maxItems: lintMaxItems,
+    ...(includeGrowthActions && options.goal?.trim() ? { goal: options.goal } : {}),
+    ...(includeGrowthActions && hasFocus(options.focus) ? { focus: options.focus } : {}),
+    ...(includeGrowthActions ? {
+      includeCoverage: true,
+      includeQualityAudit: true,
+      includeAliasCandidates: true
+    } : {})
   });
   const includeMediumRisk = options.includeMediumRisk ?? false;
-  const actions = lint.issues
-    .map((issue, index) => actionForIssue(issue, index))
+  const budget = normalizeBudget(options.budget);
+  const plannedActions = applyBudget(lint.issues
+    .map((issue, index) => actionForIssue(issue, index, options))
     .filter((action): action is WikiStructurePlanAction => Boolean(action))
-    .filter((action) => includeMediumRisk || action.risk === "low")
-    .slice(0, maxItems);
+    .filter((action) => includeMediumRisk || action.risk === "low"), budget);
+  const hasWriteCapableAction = plannedActions.some((action) =>
+    action.recommendedTool && action.recommendedTool !== "wiki_lint" && action.recommendedTool !== "wiki_health"
+  );
+  const primaryLimit = hasWriteCapableAction ? Math.max(0, maxItems - 1) : maxItems;
+  const actions = appendVerificationAction(plannedActions.slice(0, primaryLimit), options);
 
   return {
     status: "planned",

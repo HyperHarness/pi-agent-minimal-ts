@@ -291,7 +291,18 @@ type WikiLintTool = {
 type WikiStructurePlanTool = {
   execute: (
     toolCallId: string,
-    args: { maxItems?: number; includeMediumRisk?: boolean },
+    args: {
+      maxItems?: number;
+      includeMediumRisk?: boolean;
+      goal?: string;
+      focus?: string[];
+      includeGrowthActions?: boolean;
+      budget?: {
+        maxPagesToBuild?: number;
+        maxAliasesToCreate?: number;
+        maxScopeNotes?: number;
+      };
+    },
     signal: undefined,
   ) => Promise<ToolResult>;
 };
@@ -3515,6 +3526,7 @@ test("wiki_structure_plan delegates to the injected planner and returns details"
               priority: "medium",
               risk: "low",
               issueKind: "duplicate_section",
+              owner: "wiki-agent",
               path: "knowledge-base/wiki/pages/example.md",
               reason: "Section appears twice.",
               recommendedTool: "replace_file_text",
@@ -3536,6 +3548,100 @@ test("wiki_structure_plan delegates to the injected planner and returns details"
       includeMediumRisk: true,
     }]);
     assert.equal((result.details as { actionCount?: number }).actionCount, 1);
+  } finally {
+    await rm(workspace, { recursive: true, force: true });
+  }
+});
+
+test("wiki_structure_plan schema exposes goal-aware growth and budget options", async () => {
+  const workspace = await mkdtemp(path.join(tmpdir(), "pi-agent-tools-"));
+
+  try {
+    const tool = createTools(workspace).find((candidate) => candidate.name === "wiki_structure_plan");
+    assert.ok(tool);
+    const parameters = tool.parameters as {
+      properties?: {
+        goal?: { type?: string };
+        focus?: { type?: string; items?: { type?: string } };
+        includeGrowthActions?: { type?: string };
+        budget?: {
+          type?: string;
+          properties?: {
+            maxPagesToBuild?: { type?: string; minimum?: number };
+            maxAliasesToCreate?: { type?: string; minimum?: number };
+            maxScopeNotes?: { type?: string; minimum?: number };
+          };
+        };
+      };
+    };
+
+    assert.equal(parameters.properties?.goal?.type, "string");
+    assert.equal(parameters.properties?.focus?.type, "array");
+    assert.equal(parameters.properties?.focus?.items?.type, "string");
+    assert.equal(parameters.properties?.includeGrowthActions?.type, "boolean");
+    assert.equal(parameters.properties?.budget?.type, "object");
+    assert.equal(parameters.properties?.budget?.properties?.maxPagesToBuild?.type, "integer");
+    assert.equal(parameters.properties?.budget?.properties?.maxPagesToBuild?.minimum, 0);
+    assert.equal(parameters.properties?.budget?.properties?.maxAliasesToCreate?.type, "integer");
+    assert.equal(parameters.properties?.budget?.properties?.maxAliasesToCreate?.minimum, 0);
+    assert.equal(parameters.properties?.budget?.properties?.maxScopeNotes?.type, "integer");
+    assert.equal(parameters.properties?.budget?.properties?.maxScopeNotes?.minimum, 0);
+  } finally {
+    await rm(workspace, { recursive: true, force: true });
+  }
+});
+
+test("wiki_structure_plan passes goal, focus, growth, and budget options", async () => {
+  const workspace = await mkdtemp(path.join(tmpdir(), "pi-agent-tools-"));
+  const capturedCalls: unknown[] = [];
+
+  try {
+    const tool = getWikiStructurePlanTool(workspace, {
+      planWikiStructure: async (options) => {
+        capturedCalls.push(options);
+        return {
+          status: "planned",
+          lintSummary: {
+            stale_index: 0,
+            broken_wiki_link: 0,
+            missing_source_citation: 0,
+            orphan_page: 0,
+            concept_gap: 0,
+            high_value_concept_gap: 0,
+            evidence_contract_gap: 0,
+            semantic_alias_candidate: 0,
+            scope_drift: 0,
+            duplicate_page_title: 0,
+            near_duplicate_page: 0,
+            duplicate_section: 0,
+            weak_synthesis_page: 0,
+            rendered_wiki_link: 0,
+          },
+          actionCount: 0,
+          actions: [],
+          warnings: [],
+        };
+      },
+    });
+
+    await tool.execute("wiki-structure-plan-call", {
+      maxItems: 5,
+      includeMediumRisk: true,
+      includeGrowthActions: true,
+      goal: "superconducting chip design",
+      focus: ["tunable coupler"],
+      budget: { maxPagesToBuild: 1, maxAliasesToCreate: 2, maxScopeNotes: 1 },
+    }, undefined);
+
+    assert.deepEqual(capturedCalls, [{
+      workspaceDir: workspace,
+      maxItems: 5,
+      includeMediumRisk: true,
+      includeGrowthActions: true,
+      goal: "superconducting chip design",
+      focus: ["tunable coupler"],
+      budget: { maxPagesToBuild: 1, maxAliasesToCreate: 2, maxScopeNotes: 1 },
+    }]);
   } finally {
     await rm(workspace, { recursive: true, force: true });
   }
