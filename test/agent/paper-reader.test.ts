@@ -18,6 +18,7 @@ import {
 } from "../../src/agent/wiki/content.js";
 import { bootstrapPaperWikiPageEvidence } from "../../src/agent/wiki/bootstrap.js";
 import { lintPaperWiki } from "../../src/agent/wiki/lint.js";
+import { planWikiStructure } from "../../src/agent/wiki/structure-plan.js";
 import {
   evaluateParseQuality,
   evaluateParseQualityWithMarkdown
@@ -581,6 +582,113 @@ More evidence about qLDPC.
     assert.ok(lint.issues.some((issue) => issue.kind === "missing_source_citation"));
     assert.ok(lint.issues.some((issue) => issue.kind === "broken_wiki_link"));
     assert.ok(lint.issues.some((issue) => issue.kind === "concept_gap" && issue.concept === "qldpc"));
+  } finally {
+    await rm(workspace, { recursive: true, force: true });
+  }
+});
+
+test("lintPaperWiki reports duplicate titles, weak pages, duplicate sections, and rendered wiki links", async () => {
+  const workspace = await mkdtemp(path.join(os.tmpdir(), "pi-agent-wiki-lint-"));
+  try {
+    await mkdir(path.join(workspace, "knowledge-base/wiki/pages"), { recursive: true });
+    await mkdir(path.join(workspace, "knowledge-base/wiki/sources"), { recursive: true });
+    await writeFile(path.join(workspace, "knowledge-base/wiki/index.md"), [
+      "# Paper LLM Wiki Index",
+      "",
+      "## Knowledge Entries",
+      "",
+      "- [Surface Code](pages/surface-code.md)",
+      "- [Surface Codes](pages/surface-codes.md)",
+      "- [Spec](pages/spec.md)"
+    ].join("\n"));
+    await writeFile(path.join(workspace, "knowledge-base/wiki/pages/surface-code.md"), [
+      "---",
+      "title: \"Surface Code\"",
+      "source_citations: []",
+      "related_pages: []",
+      "---",
+      "# Surface Code",
+      "",
+      "## Open Questions",
+      "",
+      "- First question.",
+      "",
+      "## Open Questions",
+      "",
+      "- Second question."
+    ].join("\n"));
+    await writeFile(path.join(workspace, "knowledge-base/wiki/pages/surface-codes.md"), [
+      "---",
+      "title: \"Surface Codes\"",
+      "source_citations: []",
+      "related_pages: []",
+      "---",
+      "# Surface Codes",
+      "",
+      "Alias-like short page."
+    ].join("\n"));
+    await writeFile(path.join(workspace, "knowledge-base/wiki/pages/spec.md"), [
+      "---",
+      "title: \"Minimal [[12,2,3]] Spec\"",
+      "source_citations: []",
+      "related_pages: []",
+      "---",
+      "# Minimal [[12,2,3]] Spec",
+      "",
+      "This page mentions [[12,2,3]] and should produce a missing rendered link."
+    ].join("\n"));
+
+    const lint = await lintPaperWiki({ workspaceDir: workspace, maxItems: 20 });
+
+    assert.ok(lint.issues.some((issue) => issue.kind === "duplicate_section"));
+    assert.ok(lint.issues.some((issue) => issue.kind === "near_duplicate_page"));
+    assert.ok(lint.issues.some((issue) => issue.kind === "weak_synthesis_page"));
+    assert.ok(lint.issues.some((issue) => issue.kind === "rendered_wiki_link" && issue.target?.endsWith("/12-2-3.md")));
+  } finally {
+    await rm(workspace, { recursive: true, force: true });
+  }
+});
+
+test("planWikiStructure turns lint findings into low-risk structure actions", async () => {
+  const workspace = await mkdtemp(path.join(os.tmpdir(), "pi-agent-wiki-plan-"));
+  try {
+    await mkdir(path.join(workspace, "knowledge-base/wiki/pages"), { recursive: true });
+    await mkdir(path.join(workspace, "knowledge-base/wiki/sources"), { recursive: true });
+    await writeFile(path.join(workspace, "knowledge-base/wiki/index.md"), [
+      "# Paper LLM Wiki Index",
+      "",
+      "## Knowledge Entries",
+      "",
+      "- [Spec](pages/spec.md)"
+    ].join("\n"));
+    await writeFile(path.join(workspace, "knowledge-base/wiki/pages/spec.md"), [
+      "---",
+      "title: \"Minimal [[12,2,3]] Spec\"",
+      "source_citations: []",
+      "related_pages: []",
+      "---",
+      "# Minimal [[12,2,3]] Spec",
+      "",
+      "## Open Questions",
+      "",
+      "- First.",
+      "",
+      "## Open Questions",
+      "",
+      "- Second.",
+      "",
+      "This page links [[12,2,3]]."
+    ].join("\n"));
+
+    const plan = await planWikiStructure({
+      workspaceDir: workspace,
+      maxItems: 20
+    });
+
+    assert.equal(plan.status, "planned");
+    assert.ok(plan.actions.some((action) => action.type === "fix_duplicate_section"));
+    assert.ok(plan.actions.some((action) => action.type === "fix_rendered_wiki_link"));
+    assert.ok(plan.actions.every((action) => action.risk === "low"));
   } finally {
     await rm(workspace, { recursive: true, force: true });
   }

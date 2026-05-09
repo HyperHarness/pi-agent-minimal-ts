@@ -7,6 +7,7 @@ import type { inspectPaper, parsePaper, readPaperSection, searchPaperText } from
 import type { savePaperWebPageParse } from "./paper/reading/engines/webpage.js";
 import type { bootstrapPaperWikiPageEvidence } from "./wiki/bootstrap.js";
 import type { lintPaperWiki } from "./wiki/lint.js";
+import type { planWikiStructure } from "./wiki/structure-plan.js";
 import type { mergePaperWikiAliases, searchPaperWiki, writePaperWikiPage, writePaperWikiSource } from "./wiki/content.js";
 import type { PaperWikiPageWorker } from "./wiki/types.js";
 import type { paperWikiRelations } from "./wiki/relations.js";
@@ -63,6 +64,7 @@ type ToolName =
   | "wiki_health"
   | "wiki_health_fix"
   | "wiki_lint"
+  | "wiki_structure_plan"
   | "write_design_artifact"
   | "write_file"
   | "write_paper_wiki_source";
@@ -82,7 +84,8 @@ export const TOOL_BOUNDARY_NAMES: Record<ToolBoundaryRole, readonly ToolName[]> 
     "search_local_papers",
     "search_paper_wiki",
     "wiki_health",
-    "wiki_lint"
+    "wiki_lint",
+    "wiki_structure_plan"
   ],
   "paper-download-subagent": [
     "get_time",
@@ -166,6 +169,7 @@ export interface ToolDependencies {
   paperWikiRelations?: typeof paperWikiRelations;
   bootstrapPaperWikiPageEvidence?: typeof bootstrapPaperWikiPageEvidence;
   lintPaperWiki?: typeof lintPaperWiki;
+  planWikiStructure?: typeof planWikiStructure;
   paperSummaryWorker?: PaperSummaryWorker;
   paperWikiPageWorker?: PaperWikiPageWorker;
   searchPaperWiki?: typeof searchPaperWiki;

@@ -301,7 +301,8 @@ The key distinction is that `wiki/sources/*.md` are evidence summaries for indiv
 
 - `wiki_health`: reports acquisition state, downloads, authorization state, parse quality, incomplete `source.json` citation metadata, missing summaries, and missing artifacts
 - `wiki_health_fix`: orchestrates supported repairs. Download and citation-metadata repairs go through the paper-download-subagent boundary; citation refresh first reuses local parse artifacts, then uses arXiv/Crossref metadata when an identifier is available. Parsing stays in the ingestion path; missing summaries go through the `wiki-evidence-worker` summary pass.
-- `wiki_lint`: checks wiki structure, stale index entries, broken links, missing citations, orphan pages, and repeated tags that should become pages
+- `wiki_lint`: checks wiki structure, stale index entries, broken links, missing citations, orphan pages, repeated tags that should become pages, duplicate titles, repeated sections, weak uncited pages, and rendered wiki-link failures
+- `wiki_structure_plan`: turns `wiki_lint` findings into a reviewable structure-maintenance plan. It suggests low-risk actions by default and does not rewrite wiki content.
 
 ### Wiki Evidence Tools
 

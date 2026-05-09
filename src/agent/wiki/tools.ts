@@ -23,6 +23,7 @@ import {
   type PaperSummaryProgress
 } from "./summary.js";
 import { paperWikiRelations } from "./relations.js";
+import { planWikiStructure } from "./structure-plan.js";
 import type { PaperSearchResult, PaperSearchSource } from "../paper/types.js";
 import { searchLocalPapers } from "../paper/storage/local-paper-library.js";
 import {
@@ -110,6 +111,14 @@ const searchPaperWikiParameters = Type.Object({
 
 const wikiLintParameters = Type.Object({
   maxItems: Type.Optional(Type.Integer({ description: "Maximum wiki structure issues to return.", minimum: 1 }))
+});
+
+const wikiStructurePlanParameters = Type.Object({
+  maxItems: Type.Optional(Type.Integer({ description: "Maximum planned structure actions to return.", minimum: 1 })),
+  includeMediumRisk: Type.Optional(Type.Boolean({
+    description:
+      "Include medium-risk actions such as page merges and rebuild recommendations. Defaults to false."
+  }))
 });
 
 const answerPaperWikiQuestionParameters = Type.Object({
@@ -271,6 +280,7 @@ type GeneratePaperWikiSummaryParameters = Static<typeof generatePaperWikiSummary
 type PaperWikiRelationsParameters = Static<typeof paperWikiRelationsParameters>;
 type SearchPaperWikiParameters = Static<typeof searchPaperWikiParameters>;
 type WikiLintParameters = Static<typeof wikiLintParameters>;
+type WikiStructurePlanParameters = Static<typeof wikiStructurePlanParameters>;
 type AnswerPaperWikiQuestionParameters = Static<typeof answerPaperWikiQuestionParameters>;
 type AnswerResearchQuestionParameters = Static<typeof answerResearchQuestionParameters>;
 type BootstrapWikiPageEvidenceParameters = Static<typeof bootstrapWikiPageEvidenceParameters>;
@@ -299,6 +309,10 @@ type SearchPaperWikiTool = AgentTool<
 type WikiLintTool = AgentTool<
   typeof wikiLintParameters,
   Awaited<ReturnType<typeof lintPaperWiki>>
+>;
+type WikiStructurePlanTool = AgentTool<
+  typeof wikiStructurePlanParameters,
+  Awaited<ReturnType<typeof planWikiStructure>>
 >;
 type AnswerPaperWikiQuestionDetails = {
   query: string;
@@ -890,6 +904,7 @@ export function createWikiTools(input: {
   const paperWikiRelationsImpl = dependencies.paperWikiRelations ?? paperWikiRelations;
   const bootstrapPaperWikiPageEvidenceImpl = dependencies.bootstrapPaperWikiPageEvidence ?? bootstrapPaperWikiPageEvidence;
   const lintPaperWikiImpl = dependencies.lintPaperWiki ?? lintPaperWiki;
+  const planWikiStructureImpl = dependencies.planWikiStructure ?? planWikiStructure;
   const searchPaperWikiImpl = dependencies.searchPaperWiki ?? searchPaperWiki;
   const searchLocalPapersImpl = dependencies.searchLocalPapers ?? searchLocalPapers;
 
@@ -1113,6 +1128,26 @@ export function createWikiTools(input: {
       const result = await lintPaperWikiImpl({
         workspaceDir: resolvedWorkspaceDir,
         ...(args.maxItems !== undefined ? { maxItems: args.maxItems } : {})
+      });
+
+      return {
+        content: [{ type: "text", text: JSON.stringify(result) }],
+        details: result
+      };
+    }
+  };
+
+  const wikiStructurePlanTool: WikiStructurePlanTool = {
+    name: "wiki_structure_plan",
+    label: "Wiki Structure Plan",
+    description:
+      "Creates a reviewable structural maintenance plan from wiki_lint findings. It suggests low-risk actions by default and does not rewrite wiki content.",
+    parameters: wikiStructurePlanParameters,
+    execute: async (_toolCallId: string, args: WikiStructurePlanParameters) => {
+      const result = await planWikiStructureImpl({
+        workspaceDir: resolvedWorkspaceDir,
+        ...(args.maxItems !== undefined ? { maxItems: args.maxItems } : {}),
+        ...(args.includeMediumRisk !== undefined ? { includeMediumRisk: args.includeMediumRisk } : {})
       });
 
       return {
@@ -1851,7 +1886,7 @@ export function createWikiTools(input: {
     researchTopicBootstrapTool,
     expandResearchTopicTool
   ];
-  const lintTools = [wikiLintTool];
+  const lintTools = [wikiLintTool, wikiStructurePlanTool];
 
   return {
     defaultTools: [

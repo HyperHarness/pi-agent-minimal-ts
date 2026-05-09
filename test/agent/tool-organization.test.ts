@@ -48,7 +48,7 @@ test("tool adapters avoid obsolete top-level compatibility files", () => {
   assert.equal(existsSync(legacyPaperToolsPath), false);
   assert.equal(existsSync(legacyDesignToolsPath), false);
   assert.equal(existsSync(legacyToolBoundariesPath), false);
-  assert.ok(sourceFiles.length <= 92, `expected at most 92 src files, found ${sourceFiles.length}`);
+  assert.ok(sourceFiles.length <= 93, `expected at most 93 src files, found ${sourceFiles.length}`);
 });
 
 test("wiki and library health tool factories expose named default groups for registry assembly", async () => {
@@ -69,11 +69,13 @@ test("wiki and library health tool factories expose named default groups for reg
 
     assert.deepEqual(
       wikiTools.defaultToolGroups.coreTools.map((tool) => tool.name),
-      wikiTools.defaultTools.slice(0, -1).map((tool) => tool.name)
+      wikiTools.defaultTools
+        .slice(0, -wikiTools.defaultToolGroups.lintTools.length)
+        .map((tool) => tool.name)
     );
     assert.deepEqual(
       wikiTools.defaultToolGroups.lintTools.map((tool) => tool.name),
-      ["wiki_lint"]
+      ["wiki_lint", "wiki_structure_plan"]
     );
     assert.deepEqual(
       libraryHealthTools.defaultToolGroups.searchTools.map((tool) => tool.name),

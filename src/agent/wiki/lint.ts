@@ -14,7 +14,12 @@ export type PaperWikiLintIssueKind =
   | "broken_wiki_link"
   | "missing_source_citation"
   | "orphan_page"
-  | "concept_gap";
+  | "concept_gap"
+  | "duplicate_page_title"
+  | "near_duplicate_page"
+  | "duplicate_section"
+  | "weak_synthesis_page"
+  | "rendered_wiki_link";
 
 export type PaperWikiLintSeverity = "high" | "medium" | "low";
 
@@ -47,7 +52,12 @@ const ISSUE_KINDS: PaperWikiLintIssueKind[] = [
   "broken_wiki_link",
   "missing_source_citation",
   "orphan_page",
-  "concept_gap"
+  "concept_gap",
+  "duplicate_page_title",
+  "near_duplicate_page",
+  "duplicate_section",
+  "weak_synthesis_page",
+  "rendered_wiki_link"
 ];
 const DEFAULT_MAX_ITEMS = 30;
 
@@ -124,6 +134,12 @@ function extractSourceCitationPaths(frontmatter: string): string[] {
     });
 }
 
+function isAliasFrontmatter(frontmatter: string): boolean {
+  return frontmatter.includes('type: "wiki-alias-page"') ||
+    frontmatter.includes("type: wiki-alias-page") ||
+    /^canonical_page:/m.test(frontmatter);
+}
+
 function extractMarkdownLinks(markdown: string): string[] {
   const links = new Set<string>();
   for (const match of markdown.matchAll(/\[[^\]]+\]\(([^)]+)\)/g)) {
@@ -133,6 +149,76 @@ function extractMarkdownLinks(markdown: string): string[] {
     }
   }
   return [...links];
+}
+
+function extractMarkdownTitle(markdown: string, fallback: string): string {
+  const frontmatterTitle = extractFrontmatter(markdown)
+    .split("\n")
+    .find((line) => line.startsWith("title:"))
+    ?.slice("title:".length)
+    .trim();
+  if (frontmatterTitle) {
+    try {
+      const parsed = JSON.parse(frontmatterTitle);
+      if (typeof parsed === "string" && parsed.trim()) {
+        return parsed.trim();
+      }
+    } catch {
+      return frontmatterTitle.replace(/^"|"$/g, "").trim();
+    }
+  }
+  return markdown.match(/^#\s+(.+)$/m)?.[1]?.trim() || fallback;
+}
+
+function normalizeTitleForDuplicate(value: string): string {
+  return value
+    .toLowerCase()
+    .replace(/\[\[([^\]]+)\]\]/g, "$1")
+    .replace(/[^a-z0-9]+/g, " ")
+    .replace(/\b(codes|qubits|gates|architectures|systems)\b/g, (match) => {
+      const stems: Record<string, string> = {
+        codes: "code",
+        qubits: "qubit",
+        gates: "gate",
+        architectures: "architecture",
+        systems: "system"
+      };
+      return stems[match] ?? match;
+    })
+    .replace(/\s+/g, " ")
+    .trim();
+}
+
+function extractSectionTitles(markdown: string): string[] {
+  return [...markdown.matchAll(/^##\s+(.+)$/gm)]
+    .map((match) => match[1]?.trim())
+    .filter((value): value is string => Boolean(value));
+}
+
+function countBodyWords(markdown: string): number {
+  return markdown
+    .replace(/^---\n[\s\S]*?\n---\n/, "")
+    .replace(/```[\s\S]*?```/g, " ")
+    .replace(/\[[^\]]+\]\([^)]+\)/g, " ")
+    .replace(/[#>*_`[\](),.:;/\\-]+/g, " ")
+    .split(/\s+/)
+    .filter(Boolean).length;
+}
+
+function extractRenderedWikiLinkTargets(markdown: string): string[] {
+  return [...markdown.matchAll(/\[\[([^\]]+)\]\]/g)]
+    .map((match) => match[1]?.trim())
+    .filter((value): value is string => Boolean(value))
+    .map((value) => {
+      const slug = value
+        .split("|")[0]
+        ?.trim()
+        .toLowerCase()
+        .replace(/[^a-z0-9\u4e00-\u9fff]+/g, "-")
+        .replace(/^-|-$/g, "");
+      return slug ? `knowledge-base/wiki/pages/${slug}.md` : undefined;
+    })
+    .filter((value): value is string => Boolean(value));
 }
 
 function summarizeActions(issues: PaperWikiLintIssue[]): string[] {
@@ -145,7 +231,12 @@ function summarizeActions(issues: PaperWikiLintIssue[]): string[] {
     ["broken_wiki_link", "Fix or regenerate markdown links that point to missing wiki files."],
     ["missing_source_citation", "Repair synthesis page source citations or regenerate the page from source summaries."],
     ["orphan_page", "Add related_pages or links from another page so synthesis pages form a navigable graph."],
-    ["concept_gap", "Promote repeated source tags into durable topic pages with build_wiki_page."]
+    ["concept_gap", "Promote repeated source tags into durable topic pages with build_wiki_page."],
+    ["duplicate_page_title", "Merge duplicate-title synthesis pages or convert secondary pages into aliases."],
+    ["near_duplicate_page", "Review near-duplicate concept pages and add aliases when one page is canonical."],
+    ["duplicate_section", "Normalize synthesis pages so each section title appears once."],
+    ["weak_synthesis_page", "Convert short uncited pages into aliases or rebuild them with source-backed evidence."],
+    ["rendered_wiki_link", "Fix double-bracket wiki links that render to missing local pages."]
   ].flatMap(([kind, text]) => {
     const count = counts.get(kind as PaperWikiLintIssueKind) ?? 0;
     return count > 0 ? [`${count}: ${text}`] : [];
@@ -183,6 +274,16 @@ export async function lintPaperWiki(options: PaperWikiLintOptions): Promise<Pape
 
   const incomingPageLinks = new Map<string, number>();
   const sourceTagCounts = new Map<string, number>();
+  const pageMetadata: Array<{
+    pageKey: string;
+    title: string;
+    normalizedTitle: string;
+    path: string;
+    isAlias: boolean;
+    sourceCitationCount: number;
+    sectionTitles: string[];
+    bodyWords: number;
+  }> = [];
 
   for (const filePath of sourceFiles) {
     const markdown = await readFile(filePath, "utf8");
@@ -215,6 +316,60 @@ export async function lintPaperWiki(options: PaperWikiLintOptions): Promise<Pape
     const pageKey = path.basename(filePath, ".md");
     const frontmatter = extractFrontmatter(markdown);
     const relatedPages = extractYamlStringValues(frontmatter, "related_pages");
+    const title = extractMarkdownTitle(markdown, pageKey);
+    const sectionTitles = extractSectionTitles(markdown);
+    const sourceCitationCount = extractSourceCitationPaths(frontmatter).length;
+    const isAlias = isAliasFrontmatter(frontmatter);
+    pageMetadata.push({
+      pageKey,
+      title,
+      normalizedTitle: normalizeTitleForDuplicate(title),
+      path: relativePath,
+      isAlias,
+      sourceCitationCount,
+      sectionTitles,
+      bodyWords: countBodyWords(markdown)
+    });
+
+    if (!isAlias) {
+      const sectionCounts = new Map<string, number>();
+      for (const sectionTitle of sectionTitles) {
+        sectionCounts.set(sectionTitle, (sectionCounts.get(sectionTitle) ?? 0) + 1);
+      }
+      for (const [sectionTitle, count] of sectionCounts) {
+        if (count > 1) {
+          issues.push({
+            kind: "duplicate_section",
+            severity: "medium",
+            path: relativePath,
+            reason: `Section "${sectionTitle}" appears ${count} times in the same synthesis page.`
+          });
+        }
+      }
+
+      if (sourceCitationCount === 0 && countBodyWords(markdown) < 350) {
+        issues.push({
+          kind: "weak_synthesis_page",
+          severity: "medium",
+          path: relativePath,
+          reason: "Page is short and has no source citations; it should be converted to an alias or rebuilt as a grounded synthesis page."
+        });
+      }
+    }
+
+    for (const target of extractRenderedWikiLinkTargets(markdown)) {
+      const targetPath = path.resolve(workspaceDir, target);
+      if (!(await pathExists(targetPath))) {
+        issues.push({
+          kind: "rendered_wiki_link",
+          severity: "high",
+          path: relativePath,
+          target,
+          reason: "Double-bracket wiki link resolves to a missing page in the local viewer."
+        });
+      }
+    }
+
     for (const relatedPage of relatedPages) {
       incomingPageLinks.set(sanitizeWikiFilename(relatedPage), (incomingPageLinks.get(sanitizeWikiFilename(relatedPage)) ?? 0) + 1);
     }
@@ -256,6 +411,44 @@ export async function lintPaperWiki(options: PaperWikiLintOptions): Promise<Pape
         path: relativePath,
         reason: "Synthesis page has no related_pages and no inbound page links."
       });
+    }
+  }
+
+  const exactTitles = new Map<string, typeof pageMetadata>();
+  const normalizedTitles = new Map<string, typeof pageMetadata>();
+  for (const page of pageMetadata) {
+    if (page.isAlias) {
+      continue;
+    }
+    const exactKey = page.title.toLowerCase().trim();
+    exactTitles.set(exactKey, [...(exactTitles.get(exactKey) ?? []), page]);
+    normalizedTitles.set(page.normalizedTitle, [...(normalizedTitles.get(page.normalizedTitle) ?? []), page]);
+  }
+
+  for (const pages of exactTitles.values()) {
+    if (pages.length > 1) {
+      for (const page of pages) {
+        issues.push({
+          kind: "duplicate_page_title",
+          severity: "high",
+          path: page.path,
+          reason: `Page title duplicates: ${pages.map((item) => item.pageKey).join(", ")}.`
+        });
+      }
+    }
+  }
+
+  for (const pages of normalizedTitles.values()) {
+    const uniqueTitles = new Set(pages.map((page) => page.title.toLowerCase().trim()));
+    if (pages.length > 1 && uniqueTitles.size > 1) {
+      for (const page of pages) {
+        issues.push({
+          kind: "near_duplicate_page",
+          severity: "medium",
+          path: page.path,
+          reason: `Page title is near-duplicate with: ${pages.map((item) => item.pageKey).join(", ")}.`
+        });
+      }
     }
   }
 

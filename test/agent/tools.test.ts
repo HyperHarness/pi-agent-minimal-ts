@@ -281,6 +281,14 @@ type WikiLintTool = {
   ) => Promise<ToolResult>;
 };
 
+type WikiStructurePlanTool = {
+  execute: (
+    toolCallId: string,
+    args: { maxItems?: number; includeMediumRisk?: boolean },
+    signal: undefined,
+  ) => Promise<ToolResult>;
+};
+
 type AnswerPaperWikiQuestionTool = {
   execute: (
     toolCallId: string,
@@ -779,6 +787,16 @@ function getWikiLintTool(
   assert.ok(tool);
   assert.equal(typeof tool.execute, "function");
   return tool as WikiLintTool;
+}
+
+function getWikiStructurePlanTool(
+  workspace: string,
+  dependencies: agentTools.ToolDependencies = {},
+): WikiStructurePlanTool {
+  const tool = createTools(workspace, dependencies).find((candidate) => candidate.name === "wiki_structure_plan");
+  assert.ok(tool);
+  assert.equal(typeof tool.execute, "function");
+  return tool as WikiStructurePlanTool;
 }
 
 function getAnswerPaperWikiQuestionTool(
@@ -1544,6 +1562,7 @@ const EXPECTED_DEFAULT_TOOL_NAMES = [
   "search_local_papers",
   "wiki_health",
   "wiki_lint",
+  "wiki_structure_plan",
   "wiki_health_fix",
 ] as const;
 
@@ -1616,6 +1635,7 @@ test("createToolsForBoundary exposes isolated wiki and worker tool surfaces", as
     assert.deepEqual(wikiAgentTools.map((tool) => tool.name), getToolBoundaryToolNames("wiki-agent"));
     assert.ok(wikiAgentTools.some((tool) => tool.name === "build_wiki_page"));
     assert.ok(wikiAgentTools.some((tool) => tool.name === "search_paper_wiki"));
+    assert.ok(wikiAgentTools.some((tool) => tool.name === "wiki_structure_plan"));
     assert.ok(!wikiAgentTools.some((tool) => tool.name === "download_paper"));
     assert.ok(!wikiAgentTools.some((tool) => tool.name === "generate_paper_wiki_summary"));
     assert.ok(!wikiAgentTools.some((tool) => tool.name === "web_search"));
@@ -1626,6 +1646,7 @@ test("createToolsForBoundary exposes isolated wiki and worker tool surfaces", as
     assert.ok(downloadTools.some((tool) => tool.name === "download_paper"));
     assert.ok(downloadTools.some((tool) => tool.name === "parse_paper"));
     assert.ok(!downloadTools.some((tool) => tool.name === "build_wiki_page"));
+    assert.ok(!downloadTools.some((tool) => tool.name === "wiki_structure_plan"));
     assert.ok(!downloadTools.some((tool) => tool.name === "write_paper_wiki_source"));
 
     const evidenceTools = createToolsForBoundary(workspace, "wiki-evidence-worker");
@@ -1634,6 +1655,7 @@ test("createToolsForBoundary exposes isolated wiki and worker tool surfaces", as
     assert.ok(evidenceTools.some((tool) => tool.name === "write_paper_wiki_source"));
     assert.ok(!evidenceTools.some((tool) => tool.name === "download_paper"));
     assert.ok(!evidenceTools.some((tool) => tool.name === "build_wiki_page"));
+    assert.ok(!evidenceTools.some((tool) => tool.name === "wiki_structure_plan"));
 
     const designTools = createToolsForBoundary(workspace, "design-subagent");
     assert.deepEqual(designTools.map((tool) => tool.name), getToolBoundaryToolNames("design-subagent"));
@@ -1643,6 +1665,7 @@ test("createToolsForBoundary exposes isolated wiki and worker tool surfaces", as
     assert.ok(!designTools.some((tool) => tool.name === "download_paper"));
     assert.ok(!designTools.some((tool) => tool.name === "web_search"));
     assert.ok(!designTools.some((tool) => tool.name === "build_wiki_page"));
+    assert.ok(!designTools.some((tool) => tool.name === "wiki_structure_plan"));
     assert.ok(!designTools.some((tool) => tool.name === "write_paper_wiki_source"));
 
     const writingTools = createToolsForBoundary(workspace, "paper-writing-worker");
@@ -1656,6 +1679,7 @@ test("createToolsForBoundary exposes isolated wiki and worker tool surfaces", as
     assert.ok(!writingTools.some((tool) => tool.name === "web_search"));
     assert.ok(!writingTools.some((tool) => tool.name === "generate_paper_wiki_summary"));
     assert.ok(!writingTools.some((tool) => tool.name === "build_wiki_page"));
+    assert.ok(!writingTools.some((tool) => tool.name === "wiki_structure_plan"));
     assert.ok(!writingTools.some((tool) => tool.name === "write_paper_wiki_source"));
   } finally {
     await rm(workspace, { recursive: true, force: true });
@@ -3345,6 +3369,11 @@ test("wiki_lint delegates to the injected wiki lint dependency and returns detai
             missing_source_citation: 0,
             orphan_page: 0,
             concept_gap: 1,
+            duplicate_page_title: 0,
+            near_duplicate_page: 0,
+            duplicate_section: 0,
+            weak_synthesis_page: 0,
+            rendered_wiki_link: 0,
           },
           issues: [
             {
@@ -3369,6 +3398,62 @@ test("wiki_lint delegates to the injected wiki lint dependency and returns detai
       maxItems: 5,
     }]);
     assert.equal((result.details as { issueCount?: number }).issueCount, 1);
+  } finally {
+    await rm(workspace, { recursive: true, force: true });
+  }
+});
+
+test("wiki_structure_plan delegates to the injected planner and returns details", async () => {
+  const workspace = await mkdtemp(path.join(tmpdir(), "pi-agent-tools-"));
+  const capturedCalls: unknown[] = [];
+
+  try {
+    const tool = getWikiStructurePlanTool(workspace, {
+      planWikiStructure: async (options) => {
+        capturedCalls.push(options);
+        return {
+          status: "planned",
+          lintSummary: {
+            stale_index: 0,
+            broken_wiki_link: 0,
+            missing_source_citation: 0,
+            orphan_page: 0,
+            concept_gap: 0,
+            duplicate_page_title: 0,
+            near_duplicate_page: 0,
+            duplicate_section: 1,
+            weak_synthesis_page: 0,
+            rendered_wiki_link: 0,
+          },
+          actionCount: 1,
+          actions: [
+            {
+              id: "wiki-structure-001",
+              type: "fix_duplicate_section",
+              priority: "medium",
+              risk: "low",
+              issueKind: "duplicate_section",
+              path: "knowledge-base/wiki/pages/example.md",
+              reason: "Section appears twice.",
+              recommendedTool: "replace_file_text",
+            },
+          ],
+          warnings: ["This tool only plans structural changes."],
+        };
+      },
+    });
+
+    const result = await tool.execute("wiki-structure-plan-call", {
+      maxItems: 5,
+      includeMediumRisk: true,
+    }, undefined);
+
+    assert.deepEqual(capturedCalls, [{
+      workspaceDir: workspace,
+      maxItems: 5,
+      includeMediumRisk: true,
+    }]);
+    assert.equal((result.details as { actionCount?: number }).actionCount, 1);
   } finally {
     await rm(workspace, { recursive: true, force: true });
   }
@@ -3979,13 +4064,19 @@ test("build_wiki_page writes a synthesis page from local wiki evidence", async (
 test("merge_wiki_aliases writes alias pages and refreshes the wiki index", async () => {
   const workspace = await mkdtemp(path.join(tmpdir(), "pi-agent-tools-"));
   const pagesDir = path.join(workspace, "knowledge-base/wiki/pages");
+  const sourcesDir = path.join(workspace, "knowledge-base/wiki/sources");
   await mkdir(pagesDir, { recursive: true });
+  await mkdir(sourcesDir, { recursive: true });
+  await writeFile(path.join(sourcesDir, "eda-source.md"), "# EDA Source\n\nSource-backed evidence.", "utf8");
   await writeFile(path.join(pagesDir, "electronic-design-automation.md"), `---
 type: "wiki-synthesis-page"
 page_key: "electronic-design-automation"
 title: "Electronic Design Automation"
 tags: []
-sources: []
+sources:
+  - paper_key: "eda-source"
+    title: "EDA Source"
+    path: "knowledge-base/wiki/sources/eda-source.md"
 related_pages: []
 ---
 
@@ -4042,6 +4133,11 @@ Canonical content.
       missing_source_citation: 0,
       orphan_page: 0,
       concept_gap: 0,
+      duplicate_page_title: 0,
+      near_duplicate_page: 0,
+      duplicate_section: 0,
+      weak_synthesis_page: 0,
+      rendered_wiki_link: 0,
     });
   } finally {
     await rm(workspace, { recursive: true, force: true });

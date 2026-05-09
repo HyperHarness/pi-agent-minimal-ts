@@ -6,6 +6,7 @@ import {
   bootstrapPaperWikiPageEvidence,
   checkWikiHealth,
   lintPaperWiki,
+  planWikiStructure,
   searchPaperWiki,
   writePaperWikiPage,
   writePaperWikiSource
@@ -19,4 +20,5 @@ test("wiki domain facade exposes source, page, health, and evidence APIs", () =>
   assert.equal(typeof buildPaperSummaryEvidence, "function");
   assert.equal(typeof checkWikiHealth, "function");
   assert.equal(typeof lintPaperWiki, "function");
+  assert.equal(typeof planWikiStructure, "function");
 });
