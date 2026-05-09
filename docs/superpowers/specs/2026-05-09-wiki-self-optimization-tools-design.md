@@ -87,6 +87,10 @@ Keep the existing `issues`, `summary`, and `actions` fields. Add these issue kin
 | "scope_drift"
 ```
 
+Default lint must keep existing structural repair behavior stable. `conceptTriage`
+can be returned as a report, but `high_value_concept_gap` should only be emitted
+as an issue when the caller supplies `goal` or `focus`.
+
 Add optional machine-readable reports:
 
 ```ts

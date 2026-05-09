@@ -1143,16 +1143,20 @@ Near the end of `lintPaperWiki`, before summary construction, call:
   });
   reports.conceptTriage = conceptTriage;
 
-  for (const concept of conceptTriage.rankedConcepts.filter((item) => item.priority === "high" && item.recommendedAction === "build_page")) {
-    issues.push({
-      kind: "high_value_concept_gap",
-      severity: "medium",
-      concept: concept.concept,
-      count: concept.sourceCount,
-      score: concept.score,
-      target: path.join(relativeToWorkspace(workspaceDir, getPaperWikiPagesDir(workspaceDir)), `${concept.concept}.md`),
-      reason: concept.rationale
-    });
+  // Keep default structural lint compatible with wiki_structure_plan. Only promote
+  // goal-aware concept triage into issues when the caller supplied optimization intent.
+  if (options.goal || options.focus?.length) {
+    for (const concept of conceptTriage.rankedConcepts.filter((item) => item.priority === "high" && item.recommendedAction === "build_page")) {
+      issues.push({
+        kind: "high_value_concept_gap",
+        severity: "medium",
+        concept: concept.concept,
+        count: concept.sourceCount,
+        score: concept.score,
+        target: path.join(relativeToWorkspace(workspaceDir, getPaperWikiPagesDir(workspaceDir)), `${concept.concept}.md`),
+        reason: concept.rationale
+      });
+    }
   }
 
   if (options.includeCoverage) {

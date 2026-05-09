@@ -1,6 +1,18 @@
 import { access, readFile } from "node:fs/promises";
 import path from "node:path";
 import {
+  auditPageEvidenceContracts,
+  auditScopeDrift,
+  buildWikiCoverageMap,
+  rankConceptGaps,
+  suggestSemanticAliases,
+  type ConceptGapTriageResult,
+  type PageEvidenceContractAuditResult,
+  type ScopeDriftAuditResult,
+  type SemanticAliasSuggestionResult,
+  type WikiCoverageMapResult
+} from "./maintenance.js";
+import {
   getPaperWikiIndexPath,
   getPaperWikiPagesDir,
   listPaperWikiPageFiles,
@@ -15,6 +27,10 @@ export type PaperWikiLintIssueKind =
   | "missing_source_citation"
   | "orphan_page"
   | "concept_gap"
+  | "high_value_concept_gap"
+  | "evidence_contract_gap"
+  | "semantic_alias_candidate"
+  | "scope_drift"
   | "duplicate_page_title"
   | "near_duplicate_page"
   | "duplicate_section"
@@ -30,12 +46,27 @@ export interface PaperWikiLintIssue {
   target?: string;
   concept?: string;
   count?: number;
+  sourceCount?: number;
+  score?: number;
   reason: string;
 }
 
 export interface PaperWikiLintOptions {
   workspaceDir: string;
   maxItems?: number;
+  goal?: string;
+  focus?: string[];
+  includeCoverage?: boolean;
+  includeQualityAudit?: boolean;
+  includeAliasCandidates?: boolean;
+}
+
+export interface PaperWikiLintReports {
+  coverage?: WikiCoverageMapResult;
+  conceptTriage?: ConceptGapTriageResult;
+  pageQuality?: PageEvidenceContractAuditResult;
+  aliasCandidates?: SemanticAliasSuggestionResult;
+  scopeDrift?: ScopeDriftAuditResult;
 }
 
 export interface PaperWikiLintResult {
@@ -45,6 +76,7 @@ export interface PaperWikiLintResult {
   summary: Record<PaperWikiLintIssueKind, number>;
   issues: PaperWikiLintIssue[];
   actions: string[];
+  reports?: PaperWikiLintReports;
 }
 
 const ISSUE_KINDS: PaperWikiLintIssueKind[] = [
@@ -53,6 +85,10 @@ const ISSUE_KINDS: PaperWikiLintIssueKind[] = [
   "missing_source_citation",
   "orphan_page",
   "concept_gap",
+  "high_value_concept_gap",
+  "evidence_contract_gap",
+  "semantic_alias_candidate",
+  "scope_drift",
   "duplicate_page_title",
   "near_duplicate_page",
   "duplicate_section",
@@ -222,25 +258,40 @@ function extractRenderedWikiLinkTargets(markdown: string): string[] {
 }
 
 function summarizeActions(issues: PaperWikiLintIssue[]): string[] {
-  const counts = new Map<PaperWikiLintIssueKind, number>();
-  for (const issue of issues) {
-    counts.set(issue.kind, (counts.get(issue.kind) ?? 0) + 1);
-  }
-  return [
+  const actionText = new Map<PaperWikiLintIssueKind, string>([
     ["stale_index", "Rebuild index.md so every synthesis page is discoverable."],
     ["broken_wiki_link", "Fix or regenerate markdown links that point to missing wiki files."],
     ["missing_source_citation", "Repair synthesis page source citations or regenerate the page from source summaries."],
     ["orphan_page", "Add related_pages or links from another page so synthesis pages form a navigable graph."],
     ["concept_gap", "Promote repeated source tags into durable topic pages with build_wiki_page."],
+    ["high_value_concept_gap", "Build high-priority concept pages identified by maintenance triage."],
+    ["evidence_contract_gap", "Add explicit source citations or scope notes to pages with weak evidence contracts."],
+    ["semantic_alias_candidate", "Review semantic alias candidates and merge aliases into canonical pages."],
+    ["scope_drift", "Update stale page framing so central sections match the current wiki goal."],
     ["duplicate_page_title", "Merge duplicate-title synthesis pages or convert secondary pages into aliases."],
     ["near_duplicate_page", "Review near-duplicate concept pages and add aliases when one page is canonical."],
     ["duplicate_section", "Normalize synthesis pages so each section title appears once."],
     ["weak_synthesis_page", "Convert short uncited pages into aliases or rebuild them with source-backed evidence."],
     ["rendered_wiki_link", "Fix double-bracket wiki links that render to missing local pages."]
-  ].flatMap(([kind, text]) => {
-    const count = counts.get(kind as PaperWikiLintIssueKind) ?? 0;
-    return count > 0 ? [`${count}: ${text}`] : [];
-  });
+  ]);
+  const counts = new Map<PaperWikiLintIssueKind, number>();
+  for (const issue of issues) {
+    counts.set(issue.kind, (counts.get(issue.kind) ?? 0) + 1);
+  }
+  const seen = new Set<PaperWikiLintIssueKind>();
+  const actions: string[] = [];
+  for (const issue of issues) {
+    if (seen.has(issue.kind)) {
+      continue;
+    }
+    seen.add(issue.kind);
+    const text = actionText.get(issue.kind);
+    const count = counts.get(issue.kind) ?? 0;
+    if (text && count > 0) {
+      actions.push(`${count}: ${text}`);
+    }
+  }
+  return actions;
 }
 
 function issueRank(issue: PaperWikiLintIssue): number {
@@ -467,6 +518,80 @@ export async function lintPaperWiki(options: PaperWikiLintOptions): Promise<Pape
     }
   }
 
+  const reports: PaperWikiLintReports = {};
+  reports.conceptTriage = await rankConceptGaps({
+    workspaceDir,
+    ...(options.goal !== undefined ? { goal: options.goal } : {}),
+    ...(options.focus !== undefined ? { focus: options.focus } : {})
+  });
+  const hasOptimizationIntent = Boolean(options.goal?.trim()) ||
+    (options.focus?.some((item) => item.trim().length > 0) ?? false);
+  if (hasOptimizationIntent) {
+    for (const concept of reports.conceptTriage.rankedConcepts) {
+      if (concept.priority === "high" && concept.recommendedAction === "build_page") {
+        issues.push({
+          kind: "high_value_concept_gap",
+          severity: "medium",
+          concept: concept.concept,
+          count: concept.sourceCount,
+          sourceCount: concept.sourceCount,
+          score: concept.score,
+          target: path.join(relativeToWorkspace(workspaceDir, getPaperWikiPagesDir(workspaceDir)), `${concept.concept}.md`),
+          reason: concept.rationale
+        });
+      }
+    }
+  }
+
+  if (options.includeCoverage) {
+    reports.coverage = await buildWikiCoverageMap({ workspaceDir });
+  }
+
+  if (options.includeQualityAudit) {
+    reports.pageQuality = await auditPageEvidenceContracts({ workspaceDir });
+    for (const gap of reports.pageQuality.evidenceContractGaps) {
+      issues.push({
+        kind: "evidence_contract_gap",
+        severity: gap.inferredContract === "unverified" ? "medium" : "low",
+        path: gap.path,
+        target: gap.pageKey,
+        count: gap.sourceCount,
+        sourceCount: gap.sourceCount,
+        reason: gap.reason
+      });
+    }
+
+    const staleTerms = ["million-qubit", "million qubit"];
+    reports.scopeDrift = await auditScopeDrift({
+      workspaceDir,
+      staleTerms,
+      ...(options.goal !== undefined ? { preferredFraming: options.goal } : {})
+    });
+    for (const drift of reports.scopeDrift.findings) {
+      issues.push({
+        kind: "scope_drift",
+        severity: drift.severity,
+        path: drift.path,
+        target: drift.pageKey,
+        reason: drift.evidence.join(" ")
+      });
+    }
+  }
+
+  if (options.includeAliasCandidates) {
+    reports.aliasCandidates = await suggestSemanticAliases({ workspaceDir });
+    for (const suggestion of reports.aliasCandidates.suggestions) {
+      issues.push({
+        kind: "semantic_alias_candidate",
+        severity: suggestion.risk === "low" ? "low" : "medium",
+        path: `knowledge-base/wiki/pages/${suggestion.aliasPageKey}.md`,
+        target: suggestion.canonicalPageKey,
+        score: suggestion.score,
+        reason: suggestion.evidence.join("; ")
+      });
+    }
+  }
+
   const summary = Object.fromEntries(ISSUE_KINDS.map((kind) => [kind, 0])) as Record<PaperWikiLintIssueKind, number>;
   for (const issue of issues) {
     summary[issue.kind] += 1;
@@ -477,12 +602,16 @@ export async function lintPaperWiki(options: PaperWikiLintOptions): Promise<Pape
     (left.path ?? left.concept ?? "").localeCompare(right.path ?? right.concept ?? "")
   );
 
-  return {
+  const result: PaperWikiLintResult = {
     pageCount: pageFiles.length,
     sourceCount: sourceFiles.length,
     issueCount: issues.length,
     summary,
     issues: sortedIssues.slice(0, maxItems),
-    actions: summarizeActions(issues)
+    actions: summarizeActions(sortedIssues)
   };
+  if (Object.keys(reports).length > 0) {
+    result.reports = reports;
+  }
+  return result;
 }

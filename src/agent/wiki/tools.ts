@@ -112,7 +112,12 @@ const searchPaperWikiParameters = Type.Object({
 });
 
 const wikiLintParameters = Type.Object({
-  maxItems: Type.Optional(Type.Integer({ description: "Maximum wiki structure issues to return.", minimum: 1 }))
+  maxItems: Type.Optional(Type.Integer({ description: "Maximum wiki structure issues to return.", minimum: 1 })),
+  goal: Type.Optional(Type.String({ description: "Current wiki optimization goal used to rank concept gaps." })),
+  focus: Type.Optional(Type.Array(Type.String({ description: "Focus terms used to rank high-value concept gaps." }))),
+  includeCoverage: Type.Optional(Type.Boolean({ description: "Include source/page coverage diagnostics in reports." })),
+  includeQualityAudit: Type.Optional(Type.Boolean({ description: "Include page evidence-contract and scope-drift diagnostics." })),
+  includeAliasCandidates: Type.Optional(Type.Boolean({ description: "Include semantic alias candidate diagnostics." }))
 });
 
 const wikiStructurePlanParameters = Type.Object({
@@ -1158,7 +1163,12 @@ export function createWikiTools(input: {
     execute: async (_toolCallId: string, args: WikiLintParameters) => {
       const result = await lintPaperWikiImpl({
         workspaceDir: resolvedWorkspaceDir,
-        ...(args.maxItems !== undefined ? { maxItems: args.maxItems } : {})
+        ...(args.maxItems !== undefined ? { maxItems: args.maxItems } : {}),
+        ...(args.goal !== undefined ? { goal: args.goal } : {}),
+        ...(args.focus !== undefined ? { focus: args.focus } : {}),
+        ...(args.includeCoverage !== undefined ? { includeCoverage: args.includeCoverage } : {}),
+        ...(args.includeQualityAudit !== undefined ? { includeQualityAudit: args.includeQualityAudit } : {}),
+        ...(args.includeAliasCandidates !== undefined ? { includeAliasCandidates: args.includeAliasCandidates } : {})
       });
 
       return {

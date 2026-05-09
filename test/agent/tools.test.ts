@@ -276,7 +276,14 @@ type SearchPaperWikiTool = {
 type WikiLintTool = {
   execute: (
     toolCallId: string,
-    args: { maxItems?: number },
+    args: {
+      maxItems?: number;
+      goal?: string;
+      focus?: string[];
+      includeCoverage?: boolean;
+      includeQualityAudit?: boolean;
+      includeAliasCandidates?: boolean;
+    },
     signal: undefined,
   ) => Promise<ToolResult>;
 };
@@ -3405,6 +3412,10 @@ test("wiki_lint delegates to the injected wiki lint dependency and returns detai
             missing_source_citation: 0,
             orphan_page: 0,
             concept_gap: 1,
+            high_value_concept_gap: 0,
+            evidence_contract_gap: 0,
+            semantic_alias_candidate: 0,
+            scope_drift: 0,
             duplicate_page_title: 0,
             near_duplicate_page: 0,
             duplicate_section: 0,
@@ -3421,19 +3432,50 @@ test("wiki_lint delegates to the injected wiki lint dependency and returns detai
             },
           ],
           actions: ["1: Promote repeated source tags into durable topic pages with build_wiki_page."],
+          reports: {
+            conceptTriage: {
+              rankedConcepts: [
+                {
+                  concept: "qldpc",
+                  sourceCount: 2,
+                  sourcePaperKeys: ["source-a", "source-b"],
+                  priority: "high",
+                  score: 7,
+                  evidenceReadiness: "ready",
+                  recommendedAction: "build_page",
+                  representativeSources: [],
+                  rationale: "2 sources mention qldpc; goal overlap 2.",
+                },
+              ],
+            },
+          },
         };
       },
     });
 
     const result = await tool.execute("wiki-lint-call", {
       maxItems: 5,
+      goal: "superconducting qLDPC design",
+      focus: ["decoder hardware", "fault tolerance"],
+      includeCoverage: true,
+      includeQualityAudit: true,
+      includeAliasCandidates: true,
     }, undefined);
 
     assert.deepEqual(capturedCalls, [{
       workspaceDir: workspace,
       maxItems: 5,
+      goal: "superconducting qLDPC design",
+      focus: ["decoder hardware", "fault tolerance"],
+      includeCoverage: true,
+      includeQualityAudit: true,
+      includeAliasCandidates: true,
     }]);
     assert.equal((result.details as { issueCount?: number }).issueCount, 1);
+    assert.deepEqual(
+      (result.details as { reports?: { conceptTriage?: { rankedConcepts?: Array<{ concept?: string }> } } }).reports?.conceptTriage?.rankedConcepts?.map((item) => item.concept),
+      ["qldpc"]
+    );
   } finally {
     await rm(workspace, { recursive: true, force: true });
   }
@@ -3455,6 +3497,10 @@ test("wiki_structure_plan delegates to the injected planner and returns details"
             missing_source_citation: 0,
             orphan_page: 0,
             concept_gap: 0,
+            high_value_concept_gap: 0,
+            evidence_contract_gap: 0,
+            semantic_alias_candidate: 0,
+            scope_drift: 0,
             duplicate_page_title: 0,
             near_duplicate_page: 0,
             duplicate_section: 1,
@@ -4221,6 +4267,10 @@ Canonical content.
       missing_source_citation: 0,
       orphan_page: 0,
       concept_gap: 0,
+      high_value_concept_gap: 0,
+      evidence_contract_gap: 0,
+      semantic_alias_candidate: 0,
+      scope_drift: 0,
       duplicate_page_title: 0,
       near_duplicate_page: 0,
       duplicate_section: 0,

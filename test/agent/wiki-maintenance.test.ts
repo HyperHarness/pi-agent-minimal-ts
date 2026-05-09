@@ -4,6 +4,7 @@ import { mkdir, mkdtemp, rm, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import path from "node:path";
 
+import { lintPaperWiki } from "../../src/agent/wiki/lint.js";
 import {
   auditPageEvidenceContracts,
   auditScopeDrift,
@@ -358,6 +359,61 @@ test("auditScopeDrift reports stale central framing only in scoped page regions"
     assert.equal(drift[0]?.severity, "medium");
     assert.ok(drift[0]?.evidence.some((entry) => entry.includes("million-qubit")));
     assert.match(drift[0]?.suggestedScopeNote ?? "", /agentic chip design/);
+  } finally {
+    await rm(workspace, { recursive: true, force: true });
+  }
+});
+
+test("lintPaperWiki emits rich maintenance issues and optional reports", async () => {
+  const workspace = await createMaintenanceFixture();
+
+  try {
+    const result = await lintPaperWiki({
+      workspaceDir: workspace,
+      goal: "superconducting chip design",
+      focus: ["frequency planning", "fixed frequency transmons"],
+      includeCoverage: true,
+      includeQualityAudit: true,
+      includeAliasCandidates: true,
+      maxItems: 50
+    });
+
+    const highValueGap = result.issues.find(
+      (issue) => issue.kind === "high_value_concept_gap" && issue.concept === "fixed-frequency-transmons"
+    );
+    assert.equal(highValueGap?.severity, "medium");
+    assert.equal(highValueGap?.count, 2);
+    assert.equal(highValueGap?.sourceCount, 2);
+    assert.ok((highValueGap?.score ?? 0) >= 8);
+    assert.match(highValueGap?.target ?? "", /knowledge-base\/wiki\/pages\/fixed-frequency-transmons\.md$/);
+    assert.match(highValueGap?.reason ?? "", /2 sources mention fixed-frequency-transmons/);
+
+    const evidenceGap = result.issues.find(
+      (issue) => issue.kind === "evidence_contract_gap" && issue.target === "agentic-chip-design"
+    );
+    assert.equal(evidenceGap?.severity, "low");
+    assert.match(evidenceGap?.reason ?? "", /no source citations/);
+    const aliasCandidate = result.issues.find((issue) => issue.kind === "semantic_alias_candidate");
+    assert.equal(aliasCandidate?.path, "knowledge-base/wiki/pages/autonomous-agentic-quantum-eda.md");
+    assert.equal(aliasCandidate?.target, "agentic-autonomous-quantum-eda");
+    const scopeDrift = result.issues.find((issue) => issue.kind === "scope_drift" && issue.target === "agentic-chip-design");
+    assert.equal(scopeDrift?.severity, "medium");
+    assert.match(scopeDrift?.reason ?? "", /central framing contains stale term: million-qubit/);
+
+    assert.equal(result.reports?.conceptTriage?.rankedConcepts[0]?.concept, "fixed-frequency-transmons");
+    assert.equal(result.reports?.coverage?.sourceCount, 4);
+    assert.ok(result.reports?.pageQuality?.evidenceContractGaps.some((issue) => issue.pageKey === "agentic-chip-design"));
+    assert.equal(result.reports?.aliasCandidates?.suggestions[0]?.aliasPageKey, "autonomous-agentic-quantum-eda");
+    assert.equal(result.reports?.scopeDrift?.findings[0]?.pageKey, "agentic-chip-design");
+
+    const defaultResult = await lintPaperWiki({
+      workspaceDir: workspace,
+      goal: "",
+      focus: [],
+      maxItems: 50
+    });
+    assert.equal(defaultResult.summary.high_value_concept_gap, 0);
+    assert.ok(!defaultResult.issues.some((issue) => issue.kind === "high_value_concept_gap"));
   } finally {
     await rm(workspace, { recursive: true, force: true });
   }
