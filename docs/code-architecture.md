@@ -41,7 +41,7 @@ agent runtime + worker router
 | `npm run agent` | `src/pi-agent.ts` -> `src/agent/agent-cli.ts` | 构建后启动本地 REPL/chat。 |
 | `npm run agent:rpc` | `src/pi-agent.ts --mode rpc` -> `src/agent/agent-cli.ts` | JSONL RPC agent，供 Feishu bridge 或其它桥接进程驱动。 |
 | `npm run feishu-bridge` | `src/feishu-bridge/index.ts` | 启动 Feishu 长连接桥，并按配置启动/复用 RPC agent。 |
-| `npm run wiki:web` | `scripts/wiki-web.mjs` | 本地 wiki 和 graph 浏览器，不在 `src/**` 内，但读取 `knowledge-base/wiki`。 |
+| `npm run wiki:web` | `scripts/wiki-web.mjs` | 本地 wiki 和 graph 浏览器，不在 `src/**` 内，但读取 `knowledge-base`。 |
 | `npm run paper-extension-host` | `src/paper-extension-host.ts` -> `src/agent/paper/extension/paper-extension-host.ts` | 浏览器 native messaging host 的 Node 入口。 |
 
 顶层入口文件：

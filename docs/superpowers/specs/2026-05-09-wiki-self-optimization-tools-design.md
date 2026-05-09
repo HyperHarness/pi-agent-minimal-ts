@@ -248,7 +248,7 @@ Supported write actions:
 - `fix_duplicate_section`
 - `create_alias`, implemented by delegating to the same alias-writing logic as `merge_wiki_aliases`
 - `rebuild_index`, using the existing deterministic index rewrite behavior
-- `update_scope_note`, limited to adding or replacing exactly one `## Scope Note` section in `knowledge-base/wiki/pages/*.md`
+- `update_scope_note`, limited to adding or replacing exactly one `## Scope Note` section in `knowledge-base/pages/*.md`
 
 Unsupported by apply:
 
@@ -301,7 +301,7 @@ The public boundary remains:
 - `wiki-evidence-worker`: source summaries and relations.
 - `paper-writing-worker`: retrieval and writing only.
 
-No worker should receive unrestricted raw writes to `knowledge-base/wiki/pages/`.
+No worker should receive unrestricted raw writes to `knowledge-base/pages/`.
 
 ## Suggested Maintenance Loop
 

@@ -28,7 +28,7 @@ test('formatAgentToolStatus shows wiki tool progress messages', () => {
       content: [{ type: 'text', text: 'Writing wiki page for superconducting qubits.' }],
       details: {
         progress: {
-          message: 'Writing page knowledge-base/wiki/pages/superconducting-qubits.md.',
+          message: 'Writing page knowledge-base/pages/superconducting-qubits.md.',
         },
       },
     },

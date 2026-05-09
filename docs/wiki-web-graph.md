@@ -9,7 +9,7 @@ Use this when the user wants a browser-based view of the WSL-native wiki, especi
 The source of truth is the WSL wiki directory:
 
 ```text
-knowledge-base/wiki
+knowledge-base
 ```
 
 All paths in this document are relative to the repository root unless an environment variable explicitly says otherwise.
@@ -34,7 +34,7 @@ Expected startup output:
 
 ```text
 Wiki web viewer: http://127.0.0.1:4177
-Serving: <repo-root>/knowledge-base/wiki
+Serving: <repo-root>/knowledge-base
 ```
 
 Open these URLs from the Windows browser:
@@ -49,7 +49,7 @@ Use `/` for the Markdown wiki reader. Use `/graph` for concept relationships.
 ## Main Endpoints
 
 ```text
-/                         Render wiki/index.md
+/                         Render index.md
 /graph                    Interactive concept graph
 /graph-data.json          Machine-readable graph JSON
 /view/<path>.md           Render a Markdown file
@@ -72,7 +72,7 @@ The graph is a concept-page graph, not a semantic embedding graph.
 Nodes are wiki synthesis pages under:
 
 ```text
-knowledge-base/wiki/pages/*.md
+knowledge-base/pages/*.md
 ```
 
 Node fields in `/graph-data.json`:
@@ -139,7 +139,7 @@ Default settings:
 ```text
 WIKI_HOST=127.0.0.1
 WIKI_PORT=4177
-PI_WIKI_DIR=<repo-root>/knowledge-base/wiki
+PI_WIKI_DIR=<repo-root>/knowledge-base
 ```
 
 Override them only when needed:
@@ -197,7 +197,7 @@ Use `--noproxy '*'` because proxy environment variables can interfere with loopb
 Check that durable pages exist:
 
 ```sh
-find knowledge-base/wiki/pages -maxdepth 1 -type f -name '*.md' | wc -l
+find knowledge-base/pages -maxdepth 1 -type f -name '*.md' | wc -l
 ```
 
 Check graph data directly:
@@ -232,7 +232,7 @@ package.json -> scripts.wiki:web
 
 If changing graph extraction, preserve these properties:
 
-- Read directly from `knowledge-base/wiki` by default.
+- Read directly from `knowledge-base` by default.
 - Keep `/graph-data.json` stable enough for agents to inspect.
 - Do not require network dependencies or a frontend build step.
 - Do not copy the wiki into `D:` or another Windows directory unless the user explicitly asks for a mirror.

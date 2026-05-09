@@ -56,7 +56,7 @@ test("buildPaperSummaryEvidence returns bounded parsed markdown for a clean summ
     assert.equal(evidence.engine, "plain-text-baseline");
     assert.equal(evidence.markdown.length, 1000);
     assert.equal(evidence.truncated, true);
-    assert.equal(evidence.paths.parseMarkdown, "knowledge-base/wiki/sources/arxiv-2601.01001/parses/plain-text-baseline/document.md");
+    assert.equal(evidence.paths.parseMarkdown, "knowledge-base/sources/arxiv-2601.01001/parses/plain-text-baseline/document.md");
   } finally {
     await rm(workspace, { recursive: true, force: true });
   }
@@ -102,7 +102,7 @@ test("generatePaperWikiSummary writes a wiki source through an injected summary 
     assert.equal(result.status, "written");
     assert.equal(receivedEvidence.length, 1);
     assert.match(receivedEvidence[0], /stabilizer measurements/);
-    assert.equal(result.source?.sourcePath, "knowledge-base/wiki/sources/arxiv-2601.01002.md");
+    assert.equal(result.source?.sourcePath, "knowledge-base/sources/arxiv-2601.01002.md");
     const markdown = await readFile(path.join(workspace, result.source!.sourcePath), "utf8");
     assert.match(markdown, /paper-source-summary/);
     assert.match(markdown, /Repeated stabilizer measurements/);
@@ -200,7 +200,7 @@ test("generatePaperWikiSummary can include related-paper candidates in worker ev
 test("generatePaperWikiSummary prefers a good parse over a low-quality webpage parse", async () => {
   const workspace = await createWorkspace();
   const paperKey = "aps-10.1103-example-summary";
-  const sourceRoot = path.join(workspace, "knowledge-base", "wiki", "sources", paperKey);
+  const sourceRoot = path.join(workspace, "knowledge-base", "sources", paperKey);
   const webpageDir = path.join(sourceRoot, "parses", "webpage");
   const localDir = path.join(sourceRoot, "parses", "opendataloader-local");
   const receivedEngines: string[] = [];

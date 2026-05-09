@@ -29,7 +29,7 @@ export function resolvePaperLibraryPaths(workspaceDir: string): PaperLibraryPath
   const resolvedWorkspaceDir = path.resolve(workspaceDir);
   const libraryRoot = resolvePaperLibraryRoot(resolvedWorkspaceDir);
   const rawRoot = path.join(libraryRoot, "raw");
-  const wikiRoot = path.join(libraryRoot, "wiki");
+  const wikiRoot = libraryRoot;
 
   return {
     workspaceDir: resolvedWorkspaceDir,

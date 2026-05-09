@@ -50,10 +50,10 @@ The important idea is not the exact directory names. The important idea is lifec
 For `pi-agent-minimal-ts`, the `knowledge-base` structure preserves this by treating:
 
 - `raw/pdfs/` as immutable original PDFs
-- `wiki/sources/<paper-key>/` as parser evidence for each paper source
-- `wiki/sources/<paper-key>.md` as the retrieval source summary layer
-- `wiki/pages/` as higher-level synthesis
-- `wiki/state/` as future WAL/status state if needed
+- `sources/<paper-key>/` as parser evidence for each paper source
+- `sources/<paper-key>.md` as the retrieval source summary layer
+- `pages/` as higher-level synthesis
+- `state/` as future WAL/status state if needed
 
 ### 2. Typed Path Resolver
 
@@ -202,7 +202,7 @@ This is useful later, but not the immediate priority for `pi-agent-minimal-ts`. 
 ### Phase 2: Introduce Typed Markdown Source Pages
 
 - [ ] Define a `PaperWikiPage` type with frontmatter validation.
-- [ ] Start with `page_type: "paper-source"` for files under `wiki/sources/`.
+- [ ] Start with `page_type: "paper-source"` for files under `sources/`.
 - [ ] Require `paper_key`, `title`, `pdf_sha256`, `parse_engine`, `source_refs`, `tags`, `updated_at`, and `citations`.
 - [ ] Replace regex-only frontmatter reads with a small parser/validator adapted from `wiki_agent`.
 - [ ] Keep markdown human-editable and compact.
@@ -218,7 +218,7 @@ This is useful later, but not the immediate priority for `pi-agent-minimal-ts`. 
 
 ### Phase 4: Add Operation WAL for Multi-File Writes
 
-- [ ] Add `wiki/state/wal.md` and keep `wiki/log.md` as human chronology.
+- [ ] Add `state/wal.md` and keep `log.md` as human chronology.
 - [ ] Record planned files before parse/write/repair operations that mutate more than one file.
 - [ ] Mark operations completed after all writes succeed.
 - [ ] Make `paper_wiki_status` surface interrupted operations.

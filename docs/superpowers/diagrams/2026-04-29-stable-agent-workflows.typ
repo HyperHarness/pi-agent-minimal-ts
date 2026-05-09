@@ -67,7 +67,7 @@
     node("Search or URL", "search_papers or a direct article / arXiv URL", fill: blue),
     node("Download / Queue", "download_paper uses arXiv direct paths or extension bridge for publishers", fill: amber),
     node("Parse / Webpage capture", "Preferred readable source: webpage / TeX / PDF parser artifacts", fill: green),
-    node("Acquisition state", "wiki/sources/<paperKey>/acquisition.json plus raw PDFs and parse manifests", fill: gray),
+    node("Acquisition state", "sources/<paperKey>/acquisition.json plus raw PDFs and parse manifests", fill: gray),
     node("Ready for reading", "inspect_paper, read_paper_section, search_paper_text", fill: violet),
     labels: ("select", "acquire", "persist", "read"),
   )
@@ -78,7 +78,7 @@
     node("Parsed paper", "Good parse or webpage artifact is available", fill: green),
     node("Evidence package", "Bounded Markdown, quality report, sections, related candidates", fill: blue),
     node("Clean worker", "generate_paper_wiki_summary runs a no-history subagent", fill: violet),
-    node("Source summary", "wiki/sources/<paper-key>.md with provenance and tags", fill: amber),
+    node("Source summary", "sources/<paper-key>.md with provenance and tags", fill: amber),
     labels: ("build", "summarize", "write"),
   )
 ]

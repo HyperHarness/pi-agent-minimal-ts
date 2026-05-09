@@ -228,7 +228,7 @@ test("parsePaper writes reading artifacts and reuses a same-hash cache", async (
       "arxiv-2406.06015.pdf",
       "Abstract superconducting qubits introduction methods results conclusion"
     );
-    const sourcePath = path.join(workspace, "knowledge-base", "wiki", "sources", "arxiv-2406.06015", "source.json");
+    const sourcePath = path.join(workspace, "knowledge-base", "sources", "arxiv-2406.06015", "source.json");
     await writeJson(sourcePath, {
       schemaVersion: 2,
       paperKey: "arxiv-2406.06015",
@@ -242,8 +242,8 @@ test("parsePaper writes reading artifacts and reuses a same-hash cache", async (
       arxivId: "2406.06015",
       citationStatus: "complete",
       missingFields: [],
-      acquisitionPath: "knowledge-base/wiki/sources/arxiv-2406.06015/acquisition.json",
-      recordPath: "knowledge-base/wiki/sources/arxiv-2406.06015/acquisition.json"
+      acquisitionPath: "knowledge-base/sources/arxiv-2406.06015/acquisition.json",
+      recordPath: "knowledge-base/sources/arxiv-2406.06015/acquisition.json"
     });
 
     const first = await parsePaper({
@@ -255,7 +255,7 @@ test("parsePaper writes reading artifacts and reuses a same-hash cache", async (
     assert.equal(first.paperKey, "arxiv-2406.06015");
     assert.equal(first.engine, "plain-text-baseline");
     assert.equal(first.sections[0]?.title, "arxiv-2406.06015");
-    assert.match(first.artifacts.markdownPath, /knowledge-base\/wiki\/sources\/arxiv-2406\.06015\/parses\/plain-text-baseline\/document\.md$/);
+    assert.match(first.artifacts.markdownPath, /knowledge-base\/sources\/arxiv-2406\.06015\/parses\/plain-text-baseline\/document\.md$/);
 
     const second = await parsePaper({
       workspaceDir: workspace,
@@ -382,11 +382,11 @@ test("writePaperWikiSource saves an LLM source summary and searchPaperWiki finds
       keyFindings: ["Neutral atom arrays are the central experimental platform."]
     });
 
-    assert.equal(source.sourcePath, "knowledge-base/wiki/sources/arxiv-2601.00003.md");
-    assert.equal(source.indexPath, "knowledge-base/wiki/index.md");
+    assert.equal(source.sourcePath, "knowledge-base/sources/arxiv-2601.00003.md");
+    assert.equal(source.indexPath, "knowledge-base/index.md");
     const markdown = await readFile(path.join(workspace, source.sourcePath), "utf8");
     assert.match(markdown, /type: "paper-source-summary"/);
-    assert.match(markdown, /parse_markdown: "knowledge-base\/wiki\/sources\/arxiv-2601\.00003\/parses\/plain-text-baseline\/document\.md"/);
+    assert.match(markdown, /parse_markdown: "knowledge-base\/sources\/arxiv-2601\.00003\/parses\/plain-text-baseline\/document\.md"/);
     const log = await readFile(path.join(workspace, source.logPath), "utf8");
     assert.doesNotMatch(log, /source \|/);
     assert.doesNotMatch(log, /arxiv-2601\.00003/);
@@ -410,7 +410,7 @@ test("writePaperWikiSource saves an LLM source summary and searchPaperWiki finds
 
 test("searchPaperWiki expands Chinese domain questions into weighted paper evidence", async () => {
   const workspace = await createWorkspace();
-  const sourcesDir = path.join(workspace, "knowledge-base", "wiki", "sources");
+  const sourcesDir = path.join(workspace, "knowledge-base", "sources");
 
   try {
     await mkdir(sourcesDir, { recursive: true });
@@ -470,12 +470,12 @@ test("writePaperWikiPage saves a synthesis page and updates the wiki index", asy
         {
           paperKey: "arxiv-2507.09690",
           title: "Small Quantum LDPC Codes",
-          path: "knowledge-base/wiki/sources/arxiv-2507.09690.md"
+          path: "knowledge-base/sources/arxiv-2507.09690.md"
         }
       ]
     });
 
-    assert.equal(page.pagePath, "knowledge-base/wiki/pages/qldpc-superconducting-chips.md");
+    assert.equal(page.pagePath, "knowledge-base/pages/qldpc-superconducting-chips.md");
     assert.equal(page.sourceCount, 1);
     const markdown = await readFile(path.join(workspace, page.pagePath), "utf8");
     assert.match(markdown, /type: "wiki-synthesis-page"/);
@@ -488,7 +488,7 @@ test("writePaperWikiPage saves a synthesis page and updates the wiki index", asy
     assert.match(index, /qldpc-superconducting-chips/);
     const log = await readFile(path.join(workspace, page.logPath), "utf8");
     assert.match(log, /page \| qLDPC on Superconducting Chips/);
-    assert.match(log, /knowledge-base\/wiki\/pages\/qldpc-superconducting-chips\.md/);
+    assert.match(log, /knowledge-base\/pages\/qldpc-superconducting-chips\.md/);
   } finally {
     await rm(workspace, { recursive: true, force: true });
   }
@@ -508,7 +508,7 @@ test("searchPaperWiki searches synthesis pages as durable wiki evidence", async 
         {
           paperKey: "arxiv-2507.09690",
           title: "Small Quantum LDPC Codes",
-          path: "knowledge-base/wiki/sources/arxiv-2507.09690.md"
+          path: "knowledge-base/sources/arxiv-2507.09690.md"
         }
       ]
     });
@@ -530,7 +530,7 @@ test("searchPaperWiki searches synthesis pages as durable wiki evidence", async 
 test("lintPaperWiki reports structural wiki gaps", async () => {
   const workspace = await createWorkspace();
   try {
-    const sourcesDir = path.join(workspace, "knowledge-base", "wiki", "sources");
+    const sourcesDir = path.join(workspace, "knowledge-base", "sources");
     await mkdir(sourcesDir, { recursive: true });
     await writeFile(path.join(sourcesDir, "source-a.md"), `---
 type: "paper-source-summary"
@@ -561,16 +561,16 @@ More evidence about qLDPC.
       topic: "Broken page",
       pageKey: "broken-page",
       title: "Broken Page",
-      pageMarkdown: "This page links to [missing](knowledge-base/wiki/pages/missing.md).",
+      pageMarkdown: "This page links to [missing](knowledge-base/pages/missing.md).",
       sourceCitations: [
         {
           paperKey: "missing-source",
           title: "Missing Source",
-          path: "knowledge-base/wiki/sources/missing-source.md"
+          path: "knowledge-base/sources/missing-source.md"
         }
       ]
     });
-    await writeFile(path.join(workspace, "knowledge-base", "wiki", "index.md"), "# Paper LLM Wiki Index\n", "utf8");
+    await writeFile(path.join(workspace, "knowledge-base", "index.md"), "# Paper LLM Wiki Index\n", "utf8");
 
     const lint = await lintPaperWiki({
       workspaceDir: workspace,
@@ -591,9 +591,9 @@ More evidence about qLDPC.
 test("lintPaperWiki reports duplicate titles, weak pages, duplicate sections, and rendered wiki links", async () => {
   const workspace = await mkdtemp(path.join(os.tmpdir(), "pi-agent-wiki-lint-"));
   try {
-    await mkdir(path.join(workspace, "knowledge-base/wiki/pages"), { recursive: true });
-    await mkdir(path.join(workspace, "knowledge-base/wiki/sources"), { recursive: true });
-    await writeFile(path.join(workspace, "knowledge-base/wiki/index.md"), [
+    await mkdir(path.join(workspace, "knowledge-base/pages"), { recursive: true });
+    await mkdir(path.join(workspace, "knowledge-base/sources"), { recursive: true });
+    await writeFile(path.join(workspace, "knowledge-base/index.md"), [
       "# Paper LLM Wiki Index",
       "",
       "## Knowledge Entries",
@@ -602,7 +602,7 @@ test("lintPaperWiki reports duplicate titles, weak pages, duplicate sections, an
       "- [Surface Codes](pages/surface-codes.md)",
       "- [Spec](pages/spec.md)"
     ].join("\n"));
-    await writeFile(path.join(workspace, "knowledge-base/wiki/pages/surface-code.md"), [
+    await writeFile(path.join(workspace, "knowledge-base/pages/surface-code.md"), [
       "---",
       "title: \"Surface Code\"",
       "source_citations: []",
@@ -618,7 +618,7 @@ test("lintPaperWiki reports duplicate titles, weak pages, duplicate sections, an
       "",
       "- Second question."
     ].join("\n"));
-    await writeFile(path.join(workspace, "knowledge-base/wiki/pages/surface-codes.md"), [
+    await writeFile(path.join(workspace, "knowledge-base/pages/surface-codes.md"), [
       "---",
       "title: \"Surface Codes\"",
       "source_citations: []",
@@ -628,7 +628,7 @@ test("lintPaperWiki reports duplicate titles, weak pages, duplicate sections, an
       "",
       "Alias-like short page."
     ].join("\n"));
-    await writeFile(path.join(workspace, "knowledge-base/wiki/pages/spec.md"), [
+    await writeFile(path.join(workspace, "knowledge-base/pages/spec.md"), [
       "---",
       "title: \"Minimal [[12,2,3]] Spec\"",
       "source_citations: []",
@@ -653,16 +653,16 @@ test("lintPaperWiki reports duplicate titles, weak pages, duplicate sections, an
 test("planWikiStructure turns lint findings into low-risk structure actions", async () => {
   const workspace = await mkdtemp(path.join(os.tmpdir(), "pi-agent-wiki-plan-"));
   try {
-    await mkdir(path.join(workspace, "knowledge-base/wiki/pages"), { recursive: true });
-    await mkdir(path.join(workspace, "knowledge-base/wiki/sources"), { recursive: true });
-    await writeFile(path.join(workspace, "knowledge-base/wiki/index.md"), [
+    await mkdir(path.join(workspace, "knowledge-base/pages"), { recursive: true });
+    await mkdir(path.join(workspace, "knowledge-base/sources"), { recursive: true });
+    await writeFile(path.join(workspace, "knowledge-base/index.md"), [
       "# Paper LLM Wiki Index",
       "",
       "## Knowledge Entries",
       "",
       "- [Spec](pages/spec.md)"
     ].join("\n"));
-    await writeFile(path.join(workspace, "knowledge-base/wiki/pages/spec.md"), [
+    await writeFile(path.join(workspace, "knowledge-base/pages/spec.md"), [
       "---",
       "title: \"Minimal [[12,2,3]] Spec\"",
       "source_citations: []",
@@ -689,7 +689,7 @@ test("planWikiStructure turns lint findings into low-risk structure actions", as
     assert.equal(plan.status, "planned");
     const duplicateSectionAction = plan.actions.find((action) => action.type === "fix_duplicate_section");
     assert.ok(duplicateSectionAction);
-    assert.equal(duplicateSectionAction.path, "knowledge-base/wiki/pages/spec.md");
+    assert.equal(duplicateSectionAction.path, "knowledge-base/pages/spec.md");
     assert.equal(duplicateSectionAction.target, "Open Questions");
     assert.equal("recommendedArgs" in duplicateSectionAction, false);
     assert.ok(plan.actions.some((action) => action.type === "fix_rendered_wiki_link"));
@@ -702,16 +702,16 @@ test("planWikiStructure turns lint findings into low-risk structure actions", as
 test("applyWikiStructurePlan dry-runs and applies low-risk duplicate section cleanup", async () => {
   const workspace = await mkdtemp(path.join(os.tmpdir(), "pi-agent-wiki-apply-"));
   try {
-    await mkdir(path.join(workspace, "knowledge-base/wiki/pages"), { recursive: true });
-    await mkdir(path.join(workspace, "knowledge-base/wiki/sources"), { recursive: true });
-    await writeFile(path.join(workspace, "knowledge-base/wiki/index.md"), [
+    await mkdir(path.join(workspace, "knowledge-base/pages"), { recursive: true });
+    await mkdir(path.join(workspace, "knowledge-base/sources"), { recursive: true });
+    await writeFile(path.join(workspace, "knowledge-base/index.md"), [
       "# Paper LLM Wiki Index",
       "",
       "## Knowledge Entries",
       "",
       "- [Spec](pages/spec.md)"
     ].join("\n"));
-    const pagePath = path.join(workspace, "knowledge-base/wiki/pages/spec.md");
+    const pagePath = path.join(workspace, "knowledge-base/pages/spec.md");
     const originalPage = [
       "---",
       "title: \"Spec\"",
@@ -740,7 +740,7 @@ test("applyWikiStructurePlan dry-runs and applies low-risk duplicate section cle
     const applied = await applyWikiStructurePlan({ workspaceDir: workspace, actions, dryRun: false });
     const updatedPage = await readFile(pagePath, "utf8");
     assert.equal(applied.status, "applied");
-    assert.deepEqual(applied.changedFiles, ["knowledge-base/wiki/pages/spec.md"]);
+    assert.deepEqual(applied.changedFiles, ["knowledge-base/pages/spec.md"]);
     assert.match(updatedPage, /Keep this broader question/);
     assert.doesNotMatch(updatedPage, /Remove this template question/);
     assert.equal(applied.verification?.lintAfter?.summary.duplicate_section, 0);
@@ -752,7 +752,7 @@ test("applyWikiStructurePlan dry-runs and applies low-risk duplicate section cle
 test("bootstrapPaperWikiPageEvidence searches sources, expands related papers, and reports missing summaries", async () => {
   const workspace = await createWorkspace();
   try {
-    const sourcesDir = path.join(workspace, "knowledge-base", "wiki", "sources");
+    const sourcesDir = path.join(workspace, "knowledge-base", "sources");
     await mkdir(sourcesDir, { recursive: true });
     await writeFile(path.join(sourcesDir, "arxiv-seed.md"), `---
 type: "paper-source-summary"
@@ -805,7 +805,7 @@ This source summary discusses auxiliary constraints.
             matches: [
               {
                 field: "parsed_markdown",
-                path: "knowledge-base/wiki/sources/arxiv-missing-summary/parses/tex-source/document.md",
+                path: "knowledge-base/sources/arxiv-missing-summary/parses/tex-source/document.md",
                 engine: "tex-source",
                 snippet: "qLDPC parsed fallback evidence",
               },
@@ -853,7 +853,7 @@ test("parsePaper resolves downloaded paper records", async () => {
   const workspace = await createWorkspace();
   try {
     const pdfPath = await writePdf(workspace, "arxiv-2401.01234.pdf", "record backed paper");
-    const recordPath = path.join(workspace, "knowledge-base", "wiki", "sources", "arxiv-2401.01234", "acquisition.json");
+    const recordPath = path.join(workspace, "knowledge-base", "sources", "arxiv-2401.01234", "acquisition.json");
     await mkdir(path.dirname(recordPath), { recursive: true });
     await writeFile(recordPath, `${JSON.stringify({
       source: "arxiv",
@@ -949,7 +949,7 @@ test("inspectPaper resolves extension job ids and finds PDFs registered after we
     });
     const pdfPath = await writePdf(workspace, "aps-10.1103-nv7d-k3wr.pdf", "aps downloaded pdf");
     const uncPdfPath = `\\\\wsl.localhost\\Ubuntu-24.04\\${pdfPath.slice(1).split(path.sep).join("\\")}`;
-    const recordPath = path.join(workspace, "knowledge-base", "wiki", "sources", "aps-10.1103-nv7d-k3wr", "acquisition.json");
+    const recordPath = path.join(workspace, "knowledge-base", "sources", "aps-10.1103-nv7d-k3wr", "acquisition.json");
     await mkdir(path.dirname(recordPath), { recursive: true });
     await writeFile(recordPath, `${JSON.stringify({
       source: "aps",
@@ -1001,7 +1001,7 @@ test("parsePaper tex-source uses LaTeXML HTML followed by pandoc markdown", asyn
   const workspace = await createWorkspace();
   try {
     const pdfPath = await writePdf(workspace, "arxiv-2507.09690.pdf", "tex source companion pdf");
-    const recordPath = path.join(workspace, "knowledge-base", "wiki", "sources", "arxiv-2507.09690", "acquisition.json");
+    const recordPath = path.join(workspace, "knowledge-base", "sources", "arxiv-2507.09690", "acquisition.json");
     await mkdir(path.dirname(recordPath), { recursive: true });
     await writeFile(recordPath, `${JSON.stringify({
       source: "arxiv",
@@ -1075,7 +1075,7 @@ test("paper reading tools resolve bare publisher canonical ids to parsed paper k
       "nature-s41467-025-63214-7.pdf",
       "Abstract localized statistics decoding for quantum low-density parity-check codes"
     );
-    const recordPath = path.join(workspace, "knowledge-base", "wiki", "sources", "nature-s41467-025-63214-7", "acquisition.json");
+    const recordPath = path.join(workspace, "knowledge-base", "sources", "nature-s41467-025-63214-7", "acquisition.json");
     await mkdir(path.dirname(recordPath), { recursive: true });
     await writeFile(recordPath, `${JSON.stringify({
       source: "nature",
@@ -1130,7 +1130,7 @@ test("readPaperSection prefers a good PDF parse over an incomplete publisher web
       "nature-s41534-026-01233-y.pdf",
       "Introduction PDF full text Methods Results Discussion Conclusion ".repeat(80)
     );
-    const recordPath = path.join(workspace, "knowledge-base", "wiki", "sources", "nature-s41534-026-01233-y", "acquisition.json");
+    const recordPath = path.join(workspace, "knowledge-base", "sources", "nature-s41534-026-01233-y", "acquisition.json");
     await mkdir(path.dirname(recordPath), { recursive: true });
     await writeFile(recordPath, `${JSON.stringify({
       source: "nature",

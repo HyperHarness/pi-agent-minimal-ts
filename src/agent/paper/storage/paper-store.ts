@@ -1259,7 +1259,7 @@ function assertRecordPathInsideAcquisitionStore(input: { workspaceDir: string; r
     path.basename(recordPath) === "acquisition.json" &&
     isPathInsideDirectory(sourceArtifactsRoot, recordPath);
   if (!isSourceAcquisitionPath) {
-    throw new Error("recordPath must be inside knowledge-base/wiki/sources/*/acquisition.json.");
+    throw new Error("recordPath must be inside knowledge-base/sources/*/acquisition.json.");
   }
   return recordPath;
 }

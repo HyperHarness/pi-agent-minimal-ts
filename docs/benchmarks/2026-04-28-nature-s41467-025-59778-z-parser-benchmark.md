@@ -8,7 +8,7 @@ Benchmark article:
 - DOI: 10.1038/s41467-025-59778-z
 - Article URL: https://www.nature.com/articles/s41467-025-59778-z
 - Local PDF: `knowledge-base/raw/pdfs/nature-s41467-025-59778-z.pdf`
-- Record: `knowledge-base/wiki/sources/nature-s41467-025-59778-z/acquisition.json`
+- Record: `knowledge-base/sources/nature-s41467-025-59778-z/acquisition.json`
 - Raw benchmark JSON: `/tmp/pi-agent-benchmarks/nature-s41467-025-59778-z-parser-benchmark.json`
 
 ## Scope
@@ -77,7 +77,7 @@ Noise checks:
 - Base64 image tokens: 0.
 - Navigation tokens: 0.
 
-Docling is slower than the plain text baseline, but it preserves much more semantic structure. For the LLM wiki design, this is the best canonical source for `knowledge-base/wiki/sources/...`.
+Docling is slower than the plain text baseline, but it preserves much more semantic structure. For the LLM wiki design, this is the best canonical source for `knowledge-base/sources/...`.
 
 ## Plain Text Baseline PDF
 

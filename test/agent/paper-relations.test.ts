@@ -11,7 +11,7 @@ import {
 
 async function createWorkspace(): Promise<string> {
   const workspace = await mkdtemp(path.join(os.tmpdir(), "pi-paper-relations-"));
-  await mkdir(path.join(workspace, "knowledge-base", "wiki", "sources"), { recursive: true });
+  await mkdir(path.join(workspace, "knowledge-base", "sources"), { recursive: true });
   return workspace;
 }
 
@@ -30,7 +30,7 @@ async function writeParsedPaper(workspace: string, input: {
   title: string;
   text: string;
 }): Promise<void> {
-  const sourceRoot = path.join(workspace, "knowledge-base", "wiki", "sources", input.paperKey);
+  const sourceRoot = path.join(workspace, "knowledge-base", "sources", input.paperKey);
   const parseRoot = path.join(sourceRoot, "parses", "webpage");
   await writeJson(path.join(sourceRoot, "source.json"), {
     paperKey: input.paperKey,
@@ -93,7 +93,7 @@ test("updatePaperWikiRelations writes related_papers into an existing summary", 
   const workspace = await createWorkspace();
 
   try {
-    const summaryPath = path.join(workspace, "knowledge-base", "wiki", "sources", "aps-target.md");
+    const summaryPath = path.join(workspace, "knowledge-base", "sources", "aps-target.md");
     await writeText(summaryPath, `---
 type: "paper-source-summary"
 paper_key: "aps-target"
@@ -118,7 +118,7 @@ Summary.
     const markdown = await readFile(summaryPath, "utf8");
     assert.match(markdown, /updated_at: ".+?"/);
     assert.match(markdown, /related_papers:\s*\n  - "aps-related"\n  - "aps-second"/);
-    const log = await readFile(path.join(workspace, "knowledge-base", "wiki", "log.md"), "utf8");
+    const log = await readFile(path.join(workspace, "knowledge-base", "log.md"), "utf8");
     assert.doesNotMatch(log, /relations \| aps-target/);
     assert.doesNotMatch(log, /aps-related/);
   } finally {
@@ -140,7 +140,7 @@ test("paperWikiRelations returns candidates and applies confirmed links when req
       title: "Superconducting Bell network",
       text: "A Bell network uses superconducting qubits and device-independent tests."
     });
-    await writeText(path.join(workspace, "knowledge-base", "wiki", "sources", "aps-target.md"), `---
+    await writeText(path.join(workspace, "knowledge-base", "sources", "aps-target.md"), `---
 paper_key: "aps-target"
 related_papers: []
 ---

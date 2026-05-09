@@ -6,7 +6,7 @@ Keep this separate from `knowledge-base/design-records/`:
 
 - `design-projects/` contains executable design code, reusable Python packages, scripts, simulation setup, generated-layout code, and project-local tests.
 - `knowledge-base/design-records/` contains design records, verification reports, failure records, and benchmark cases written through `write_design_artifact`.
-- `knowledge-base/wiki/` contains durable knowledge pages and evidence summaries that inform design work, but it should not own design code.
+- `knowledge-base/` contains durable knowledge pages and evidence summaries that inform design work, but it should not own design code.
 
 Recommended repo-manager configuration for the first design workspace:
 
@@ -39,7 +39,7 @@ Keep the package responsibilities narrow:
 - run local verification checks that can be repeated by the design subagent
 - export files needed by downstream EDA tools
 
-Do not put literature summaries, benchmark conclusions, or design failure narratives in the Python package. Those belong in `knowledge-base/wiki/` or `knowledge-base/design-records/`.
+Do not put literature summaries, benchmark conclusions, or design failure narratives in the Python package. Those belong in `knowledge-base/` or `knowledge-base/design-records/`.
 
 ## Python Development Environment
 

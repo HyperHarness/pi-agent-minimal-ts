@@ -241,7 +241,7 @@ const buildWikiPageParameters = Type.Object({
     Type.Union([
       Type.Literal("draft"),
       Type.Literal("write")
-    ], { description: "Build a draft only or write knowledge-base/wiki/pages/<page-key>.md. Defaults to write." })
+    ], { description: "Build a draft only or write knowledge-base/pages/<page-key>.md. Defaults to write." })
   ),
   maxLocalResults: Type.Optional(
     Type.Integer({ description: "Maximum local wiki evidence items to return. Defaults to 8.", minimum: 1 })
@@ -938,7 +938,7 @@ function buildResearchTopicMap(input: {
   ], input.maxSeedQueries);
   const nextActions = [
     "Run expand_research_topic in search mode to collect external paper candidates even if the local wiki already has evidence.",
-    "Download, parse, and summarize the highest-value candidates into knowledge-base/wiki/sources/ before turning them into claims.",
+    "Download, parse, and summarize the highest-value candidates into knowledge-base/sources/ before turning them into claims.",
     "Use build_wiki_page for the root page and the highest-priority suggestedPages once enough citeable source summaries exist.",
     "Repeat expansion from gaps and from newly discovered references until suggestedPages have source-backed pages and wiki_lint no longer reports major concept gaps."
   ];
@@ -1113,7 +1113,7 @@ export function createWikiTools(input: {
     name: "write_paper_wiki_source",
     label: "Write Paper Wiki Source",
     description:
-      "Saves an LLM-authored, provenance-tracked paper summary into knowledge-base/wiki/sources/ for later knowledge retrieval. Use after download_paper has produced reading Markdown and the paper has been grounded with read_paper_section/search_paper_text.",
+      "Saves an LLM-authored, provenance-tracked paper summary into knowledge-base/sources/ for later knowledge retrieval. Use after download_paper has produced reading Markdown and the paper has been grounded with read_paper_section/search_paper_text.",
     parameters: writePaperWikiSourceParameters,
     executionMode: "sequential",
     execute: async (_toolCallId: string, args: WritePaperWikiSourceParameters) => {
@@ -1200,7 +1200,7 @@ export function createWikiTools(input: {
     name: "search_paper_wiki",
     label: "Search Paper Wiki",
     description:
-      "Searches LLM-authored paper source summaries and synthesis pages under knowledge-base/wiki/. Use this for knowledge retrieval after paper summaries or wiki pages have been written.",
+      "Searches LLM-authored paper source summaries and synthesis pages under knowledge-base/. Use this for knowledge retrieval after paper summaries or wiki pages have been written.",
     parameters: searchPaperWikiParameters,
     execute: async (_toolCallId: string, args: SearchPaperWikiParameters) => {
       const result = await searchPaperWikiImpl({
@@ -1632,7 +1632,7 @@ export function createWikiTools(input: {
     name: "build_wiki_page",
     label: "Build Wiki Page",
     description:
-      "Builds a higher-level synthesis page under knowledge-base/wiki/pages/ from evidence-first research results. Use this when the user wants the agent to organize accumulated paper evidence into a durable topic wiki page.",
+      "Builds a higher-level synthesis page under knowledge-base/pages/ from evidence-first research results. Use this when the user wants the agent to organize accumulated paper evidence into a durable topic wiki page.",
     parameters: buildWikiPageParameters,
     executionMode: "sequential",
     execute: async (
@@ -1875,7 +1875,7 @@ export function createWikiTools(input: {
     name: "merge_wiki_aliases",
     label: "Merge Wiki Aliases",
     description:
-      "Creates or updates lightweight alias pages under knowledge-base/wiki/pages/ that point duplicate names, acronyms, plural forms, or synonyms to an existing canonical synthesis page. Use this instead of write_file when the user asks to handle wiki synonyms or duplicate concepts. It refuses to overwrite existing non-alias synthesis pages unless replaceExisting=true.",
+      "Creates or updates lightweight alias pages under knowledge-base/pages/ that point duplicate names, acronyms, plural forms, or synonyms to an existing canonical synthesis page. Use this instead of write_file when the user asks to handle wiki synonyms or duplicate concepts. It refuses to overwrite existing non-alias synthesis pages unless replaceExisting=true.",
     parameters: mergeWikiAliasesParameters,
     executionMode: "sequential",
     execute: async (_toolCallId: string, args: MergeWikiAliasesParameters) => {

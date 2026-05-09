@@ -26,8 +26,8 @@ Feishu bridge / CLI / RPC
 main chat agent / wiki-agent coordinator
         |
         +--> paper-download-subagent  -> acquisition files, PDFs, webpages, parses
-        +--> wiki-evidence-worker     -> wiki/sources/*.md and fixed-evidence page drafts
-        +--> wiki-agent               -> wiki/pages/*.md and aliases
+        +--> wiki-evidence-worker     -> sources/*.md and fixed-evidence page drafts
+        +--> wiki-agent               -> pages/*.md and aliases
         +--> design-subagent          -> knowledge-base/design-records/*.md
         +--> paper-writing-worker     -> manuscript project files
         |
@@ -90,10 +90,10 @@ The intended workflow is:
 
 ```text
 paper-download-subagent -> wiki-evidence-worker -> wiki-agent -> design-subagent -> wiki-agent -> paper-writing-worker
-acquisition/raw/parses  -> wiki/sources/*.md + page drafts -> wiki/pages/*.md -> design records  -> curated wiki -> manuscript files
+acquisition/raw/parses  -> sources/*.md + page drafts -> pages/*.md -> design records  -> curated wiki -> manuscript files
 ```
 
-For model benchmarks, give workers fixed `wiki/sources` fixtures and evaluate page synthesis without allowing autonomous evidence acquisition.
+For model benchmarks, give workers fixed `sources` fixtures and evaluate page synthesis without allowing autonomous evidence acquisition.
 
 ## Usage Modes
 
@@ -230,7 +230,7 @@ http://localhost:4177/
 http://localhost:4177/graph
 ```
 
-The viewer reads `knowledge-base/wiki` by default. Set `PI_WIKI_DIR` or `WIKI_PORT` to change the wiki directory or port. Operational details are in [docs/wiki-web-graph.md](docs/wiki-web-graph.md).
+The viewer reads `knowledge-base` by default. Set `PI_WIKI_DIR` or `WIKI_PORT` to change the wiki directory or port. Operational details are in [docs/wiki-web-graph.md](docs/wiki-web-graph.md).
 
 ## Built-In Tools
 
@@ -240,7 +240,7 @@ The default chat agent exposes a compact tool profile. Development and benchmark
 
 - `list_files`: lists files and directories under the workspace
 - `read_file`: reads bounded UTF-8 text-file segments inside the workspace; use `offsetBytes` / `maxBytes` and the returned `nextOffsetBytes` to page through large files
-- `write_file`: writes workspace text files, but refuses `knowledge-base/wiki/pages/`; use `build_wiki_page` for durable wiki pages
+- `write_file`: writes workspace text files, but refuses `knowledge-base/pages/`; use `build_wiki_page` for durable wiki pages
 - `replace_file_text`: replaces a unique exact text block, useful for precise edits to existing files and wiki pages
 - `delete_file`: deletes a workspace text, script, or LaTeX-related file after path-safety checks
 - `compile_latex`: compiles a LaTeX project file and reports the output PDF or build errors
@@ -285,7 +285,7 @@ Publisher and external URLs use the browser extension bridge by default when con
 - `answer_paper_wiki_question`: local-wiki-only Q&A over wiki source summaries and synthesis pages
 - `answer_research_question`: evidence-first research workflow; checks local wiki first, then acquires external evidence only when needed
 - `bootstrap_wiki_page_evidence`: prepares source evidence for a new topic page before a page exists
-- `build_wiki_page`: writes durable synthesis pages under `knowledge-base/wiki/pages/` from local source-summary evidence. It supports explicit evidence contracts, minimum source counts, required source keys, external-evidence blocking, and optional write-after lint verification.
+- `build_wiki_page`: writes durable synthesis pages under `knowledge-base/pages/` from local source-summary evidence. It supports explicit evidence contracts, minimum source counts, required source keys, external-evidence blocking, and optional write-after lint verification.
 - `merge_wiki_aliases`: creates alias pages for acronyms, plurals, and duplicate concept names
 - `clarify_research_topic`: turns an ambiguous research request into concrete subtopics and evidence needs
 - `research_topic_bootstrap`: creates an initial evidence plan for a research topic
@@ -295,7 +295,7 @@ Publisher and external URLs use the browser extension bridge by default when con
 - `generate_paper_wiki_summary`: full-mode clean-context source summary generation
 - `paper_wiki_relations`: full-mode relation discovery and `related_papers` maintenance
 
-The key distinction is that `wiki/sources/*.md` are evidence summaries for individual papers, while `wiki/pages/*.md` are durable cross-paper concept pages.
+The key distinction is that `sources/*.md` are evidence summaries for individual papers, while `pages/*.md` are durable cross-paper concept pages.
 
 ### Wiki Maintenance Tools
 
@@ -308,7 +308,7 @@ The key distinction is that `wiki/sources/*.md` are evidence summaries for indiv
 ### Wiki Evidence Tools
 
 - `generate_paper_wiki_summary`: builds a bounded evidence package from parsed paper Markdown and sends it through the `wiki-evidence-worker` summary pass
-- `write_paper_wiki_source`: writes grounded per-paper source summaries under `wiki/sources/*.md`
+- `write_paper_wiki_source`: writes grounded per-paper source summaries under `sources/*.md`
 - `paper_wiki_relations`: proposes or applies related-paper links among local source summaries
 
 `paper-summary-worker` and `wiki-page-worker` are not separate runtime roles. Their clean-context behavior is implemented as `wiki-evidence-worker` subtasks: one summary pass for per-paper evidence and one fixed-evidence page-draft pass used by the wiki agent before final page promotion.

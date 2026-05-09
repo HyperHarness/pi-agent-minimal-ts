@@ -273,9 +273,7 @@ test("fetchPaperWebPage downloads direct HTML image assets", async () => {
     assert.doesNotMatch(markdown, /assets\/assets\//);
     const assetPath = path.join(
       workspace,
-      "knowledge-base",
-      "wiki",
-      "sources",
+      "knowledge-base", "sources",
       "arxiv-2601.00425",
       "parses",
       "webpage",
@@ -865,9 +863,9 @@ test("savePaperWebPageParse writes webpage artifacts under wiki sources", async 
     assert.equal(result.status, "parsed");
     assert.equal(result.paperKey, "nature-s41467-025-59778-z");
     assert.equal(result.engine, "webpage");
-    assert.match(result.artifacts.markdownPath, /knowledge-base\/wiki\/sources\/nature-s41467-025-59778-z\/parses\/webpage\/document\.md$/);
-    assert.match(result.artifacts.parsePath, /knowledge-base\/wiki\/sources\/nature-s41467-025-59778-z\/parses\/webpage\/parse\.json$/);
-    assert.match(result.artifacts.chunksPath, /knowledge-base\/wiki\/sources\/nature-s41467-025-59778-z\/chunks\/webpage\.jsonl$/);
+    assert.match(result.artifacts.markdownPath, /knowledge-base\/sources\/nature-s41467-025-59778-z\/parses\/webpage\/document\.md$/);
+    assert.match(result.artifacts.parsePath, /knowledge-base\/sources\/nature-s41467-025-59778-z\/parses\/webpage\/parse\.json$/);
+    assert.match(result.artifacts.chunksPath, /knowledge-base\/sources\/nature-s41467-025-59778-z\/chunks\/webpage\.jsonl$/);
 
     const markdown = await readFile(result.artifacts.markdownPath, "utf8");
     assert.match(markdown, /## Methods/);
@@ -975,9 +973,7 @@ test("savePaperWebPageParse writes extension-captured webpage images as local as
     assert.match(markdown, /!\[Inline icon]\(assets\/asset-002\.svg\)/);
     const assetPath = path.join(
       workspace,
-      "knowledge-base",
-      "wiki",
-      "sources",
+      "knowledge-base", "sources",
       "nature-s41567-022-01591-2",
       "parses",
       "webpage",

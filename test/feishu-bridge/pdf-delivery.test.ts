@@ -73,7 +73,7 @@ test('extractDownloadedPdfAttachment ignores queued or non-PDF results', () => {
         result: {
           details: {
             status: 'downloaded',
-            path: 'knowledge-base/wiki/sources/arxiv-2401.01234/acquisition.json',
+            path: 'knowledge-base/sources/arxiv-2401.01234/acquisition.json',
           },
         },
       },
@@ -112,7 +112,7 @@ test('extractPdfAttachmentsFromText resolves PDF paths in final replies', () => 
       '本地 PDF 路径：`\\\\wsl.localhost\\Ubuntu-24.04\\home\\ququan2\\pi-agent-minimal-ts\\knowledge-base\\raw\\pdfs\\nature-s41586-025-09061-4.pdf`',
       '备用：knowledge-base/raw/pdfs/arxiv-2401.01234.pdf',
       '论文：paper-projects/million-superconducting-qubits/manuscript/main.pdf',
-      '解析文本：knowledge-base/wiki/sources/nature/parses/webpage/document.md',
+      '解析文本：knowledge-base/sources/nature/parses/webpage/document.md',
     ].join('\n'),
     '/home/ququan2/pi-agent-minimal-ts',
   );

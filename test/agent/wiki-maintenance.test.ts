@@ -25,11 +25,11 @@ async function writeMarkdown(filePath: string, content: string): Promise<void> {
 }
 
 async function writeSource(workspaceDir: string, paperKey: string, content: string): Promise<void> {
-  await writeMarkdown(path.join(workspaceDir, "knowledge-base", "wiki", "sources", `${paperKey}.md`), content);
+  await writeMarkdown(path.join(workspaceDir, "knowledge-base", "sources", `${paperKey}.md`), content);
 }
 
 async function writePage(workspaceDir: string, pageKey: string, content: string): Promise<void> {
-  await writeMarkdown(path.join(workspaceDir, "knowledge-base", "wiki", "pages", `${pageKey}.md`), content);
+  await writeMarkdown(path.join(workspaceDir, "knowledge-base", "pages", `${pageKey}.md`), content);
 }
 
 async function createMaintenanceFixture(): Promise<string> {
@@ -116,7 +116,7 @@ tags:
 sources:
   - paper_key: paper-c
     title: Qubit Calibration Drift Study
-    path: knowledge-base/wiki/sources/paper-c.md
+    path: knowledge-base/sources/paper-c.md
 ---
 
 # Qubit Calibration
@@ -136,7 +136,7 @@ tags:
 sources:
   - paper_key: paper-a
     title: Frequency Planning for Tunable Coupler Processors
-    path: knowledge-base/wiki/sources/paper-a.md
+    path: knowledge-base/sources/paper-a.md
 ---
 
 # Tunable Coupler
@@ -194,7 +194,7 @@ tags:
 sources:
   - paper_key: paper-d
     title: Autonomous Quantum EDA Agents
-    path: knowledge-base/wiki/sources/paper-d.md
+    path: knowledge-base/sources/paper-d.md
 ---
 
 # Agentic Autonomous Quantum EDA
@@ -214,7 +214,7 @@ tags:
 sources:
   - paper_key: paper-d
     title: Autonomous Quantum EDA Agents
-    path: knowledge-base/wiki/sources/paper-d.md
+    path: knowledge-base/sources/paper-d.md
 ---
 
 # Autonomous Agentic Quantum EDA
@@ -386,7 +386,7 @@ test("lintPaperWiki emits rich maintenance issues and optional reports", async (
     assert.equal(highValueGap?.count, 2);
     assert.equal(highValueGap?.sourceCount, 2);
     assert.ok((highValueGap?.score ?? 0) >= 8);
-    assert.match(highValueGap?.target ?? "", /knowledge-base\/wiki\/pages\/fixed-frequency-transmons\.md$/);
+    assert.match(highValueGap?.target ?? "", /knowledge-base\/pages\/fixed-frequency-transmons\.md$/);
     assert.match(highValueGap?.reason ?? "", /2 sources mention fixed-frequency-transmons/);
 
     const evidenceGap = result.issues.find(
@@ -395,7 +395,7 @@ test("lintPaperWiki emits rich maintenance issues and optional reports", async (
     assert.equal(evidenceGap?.severity, "low");
     assert.match(evidenceGap?.reason ?? "", /no source citations/);
     const aliasCandidate = result.issues.find((issue) => issue.kind === "semantic_alias_candidate");
-    assert.equal(aliasCandidate?.path, "knowledge-base/wiki/pages/autonomous-agentic-quantum-eda.md");
+    assert.equal(aliasCandidate?.path, "knowledge-base/pages/autonomous-agentic-quantum-eda.md");
     assert.equal(aliasCandidate?.target, "agentic-autonomous-quantum-eda");
     const scopeDrift = result.issues.find((issue) => issue.kind === "scope_drift" && issue.target === "agentic-chip-design");
     assert.equal(scopeDrift?.severity, "medium");
@@ -626,7 +626,7 @@ test("planWikiStructure maps and budgets semantic alias and scope drift growth a
     assert.equal(scope?.owner, "wiki-agent");
     assert.equal(scope?.recommendedTool, "wiki_apply_structure_plan");
     assert.deepEqual(scope?.recommendedArgs, {
-      pagePath: "knowledge-base/wiki/pages/agentic-chip-design.md",
+      pagePath: "knowledge-base/pages/agentic-chip-design.md",
       scopeNote: "Scope note: Reframe this page around agentic chip design and keep stale roadmap language as context."
     });
 
@@ -670,7 +670,7 @@ title: Tunable Coupler
 sources:
   - paper_key: paper-a
     title: Evidence
-    path: knowledge-base/wiki/sources/paper-a.md
+    path: knowledge-base/sources/paper-a.md
 ---
 
 # Tunable Coupler
@@ -679,7 +679,7 @@ Coupler page.
 
 ## Sources
 
-- \`paper-a\` - Evidence (knowledge-base/wiki/sources/paper-a.md)
+- \`paper-a\` - Evidence (knowledge-base/sources/paper-a.md)
 `
     );
 
@@ -696,7 +696,7 @@ Coupler page.
           risk: "low",
           issueKind: "semantic_alias_candidate",
           owner: "wiki-agent",
-          path: "knowledge-base/wiki/pages/tunable-couplers.md",
+          path: "knowledge-base/pages/tunable-couplers.md",
           target: "tunable-coupler",
           reason: "Plural alias.",
           recommendedTool: "merge_wiki_aliases",
@@ -711,11 +711,11 @@ Coupler page.
           risk: "low",
           issueKind: "scope_drift",
           owner: "wiki-agent",
-          path: "knowledge-base/wiki/pages/tunable-coupler.md",
+          path: "knowledge-base/pages/tunable-coupler.md",
           reason: "Add scope note.",
           recommendedTool: "wiki_apply_structure_plan",
           recommendedArgs: {
-            pagePath: "knowledge-base/wiki/pages/tunable-coupler.md",
+            pagePath: "knowledge-base/pages/tunable-coupler.md",
             scopeNote: "This page focuses on tunable couplers for superconducting chip design."
           }
         }
@@ -726,12 +726,12 @@ Coupler page.
     assert.equal(result.applied.length, 2);
     assert.deepEqual(result.changedFiles, []);
     assert.deepEqual(result.applied[0]?.changedFiles, [
-      "knowledge-base/wiki/pages/tunable-couplers.md",
-      "knowledge-base/wiki/index.md",
-      "knowledge-base/wiki/log.md"
+      "knowledge-base/pages/tunable-couplers.md",
+      "knowledge-base/index.md",
+      "knowledge-base/log.md"
     ]);
-    await assert.rejects(readFile(path.join(workspace, "knowledge-base/wiki/pages/tunable-couplers.md"), "utf8"));
-    const canonical = await readFile(path.join(workspace, "knowledge-base/wiki/pages/tunable-coupler.md"), "utf8");
+    await assert.rejects(readFile(path.join(workspace, "knowledge-base/pages/tunable-couplers.md"), "utf8"));
+    const canonical = await readFile(path.join(workspace, "knowledge-base/pages/tunable-coupler.md"), "utf8");
     assert.doesNotMatch(canonical, /## Scope Note/);
   } finally {
     await rm(workspace, { recursive: true, force: true });
@@ -751,7 +751,7 @@ title: Tunable Coupler
 sources:
   - paper_key: paper-a
     title: Evidence
-    path: knowledge-base/wiki/sources/paper-a.md
+    path: knowledge-base/sources/paper-a.md
 ---
 
 # Tunable Coupler
@@ -760,7 +760,7 @@ Coupler page.
 
 ## Sources
 
-- \`paper-a\` - Evidence (knowledge-base/wiki/sources/paper-a.md)
+- \`paper-a\` - Evidence (knowledge-base/sources/paper-a.md)
 `
     );
 
@@ -777,7 +777,7 @@ Coupler page.
           risk: "low",
           issueKind: "semantic_alias_candidate",
           owner: "wiki-agent",
-          path: "knowledge-base/wiki/pages/tunable-couplers.md",
+          path: "knowledge-base/pages/tunable-couplers.md",
           target: "tunable-coupler",
           reason: "Plural alias.",
           recommendedTool: "merge_wiki_aliases",
@@ -792,11 +792,11 @@ Coupler page.
           risk: "low",
           issueKind: "scope_drift",
           owner: "wiki-agent",
-          path: "knowledge-base/wiki/pages/tunable-coupler.md",
+          path: "knowledge-base/pages/tunable-coupler.md",
           reason: "Add scope note.",
           recommendedTool: "wiki_apply_structure_plan",
           recommendedArgs: {
-            pagePath: "knowledge-base/wiki/pages/tunable-coupler.md",
+            pagePath: "knowledge-base/pages/tunable-coupler.md",
             scopeNote: "This page focuses on tunable couplers for superconducting chip design."
           }
         }
@@ -804,13 +804,13 @@ Coupler page.
     });
 
     assert.equal(result.status, "applied");
-    assert.ok(result.changedFiles.includes("knowledge-base/wiki/pages/tunable-couplers.md"));
-    assert.ok(result.changedFiles.includes("knowledge-base/wiki/pages/tunable-coupler.md"));
-    assert.ok(result.changedFiles.includes("knowledge-base/wiki/index.md"));
-    assert.ok(result.changedFiles.includes("knowledge-base/wiki/log.md"));
-    const alias = await readFile(path.join(workspace, "knowledge-base/wiki/pages/tunable-couplers.md"), "utf8");
+    assert.ok(result.changedFiles.includes("knowledge-base/pages/tunable-couplers.md"));
+    assert.ok(result.changedFiles.includes("knowledge-base/pages/tunable-coupler.md"));
+    assert.ok(result.changedFiles.includes("knowledge-base/index.md"));
+    assert.ok(result.changedFiles.includes("knowledge-base/log.md"));
+    const alias = await readFile(path.join(workspace, "knowledge-base/pages/tunable-couplers.md"), "utf8");
     assert.match(alias, /canonical_page: "tunable-coupler"/);
-    const canonical = await readFile(path.join(workspace, "knowledge-base/wiki/pages/tunable-coupler.md"), "utf8");
+    const canonical = await readFile(path.join(workspace, "knowledge-base/pages/tunable-coupler.md"), "utf8");
     assert.match(canonical, /## Scope Note/);
     assert.match(canonical, /superconducting chip design/);
     assert.match(canonical, /## Sources/);
@@ -838,11 +838,11 @@ test("applyWikiStructurePlan rejects page actions that escape wiki pages directo
           risk: "low",
           issueKind: "scope_drift",
           owner: "wiki-agent",
-          path: "knowledge-base/wiki/pages/../../../README.md",
+          path: "knowledge-base/pages/../../../README.md",
           reason: "Escaping path.",
           recommendedTool: "wiki_apply_structure_plan",
           recommendedArgs: {
-            pagePath: "knowledge-base/wiki/pages/../../../README.md",
+            pagePath: "knowledge-base/pages/../../../README.md",
             scopeNote: "Should not write outside wiki pages."
           }
         }]
@@ -861,8 +861,8 @@ test("applyWikiStructurePlan refuses to write wiki pages through symlinks", asyn
   try {
     const outsideTarget = path.join(outside, "outside.md");
     await writeMarkdown(outsideTarget, "# Outside");
-    await mkdir(path.join(workspace, "knowledge-base/wiki/pages"), { recursive: true });
-    await symlink(outsideTarget, path.join(workspace, "knowledge-base/wiki/pages/symlink-page.md"));
+    await mkdir(path.join(workspace, "knowledge-base/pages"), { recursive: true });
+    await symlink(outsideTarget, path.join(workspace, "knowledge-base/pages/symlink-page.md"));
 
     const { applyWikiStructurePlan } = await import("../../src/agent/wiki/structure-apply.js");
     await assert.rejects(
@@ -877,11 +877,11 @@ test("applyWikiStructurePlan refuses to write wiki pages through symlinks", asyn
           risk: "low",
           issueKind: "scope_drift",
           owner: "wiki-agent",
-          path: "knowledge-base/wiki/pages/symlink-page.md",
+          path: "knowledge-base/pages/symlink-page.md",
           reason: "Symlinked page.",
           recommendedTool: "wiki_apply_structure_plan",
           recommendedArgs: {
-            pagePath: "knowledge-base/wiki/pages/symlink-page.md",
+            pagePath: "knowledge-base/pages/symlink-page.md",
             scopeNote: "Should not write outside wiki pages."
           }
         }]
@@ -902,9 +902,9 @@ test("applyWikiStructurePlan refuses wiki roots that resolve outside the workspa
   const outside = await mkdtemp(path.join(tmpdir(), "pi-wiki-outside-"));
 
   try {
-    await mkdir(path.join(outside, "knowledge-base/wiki/pages"), { recursive: true });
+    await mkdir(path.join(outside, "knowledge-base/pages"), { recursive: true });
     await writeMarkdown(
-      path.join(outside, "knowledge-base/wiki/pages/external-page.md"),
+      path.join(outside, "knowledge-base/pages/external-page.md"),
       `
 ---
 title: External Page
@@ -928,11 +928,11 @@ title: External Page
           risk: "low",
           issueKind: "scope_drift",
           owner: "wiki-agent",
-          path: "knowledge-base/wiki/pages/external-page.md",
+          path: "knowledge-base/pages/external-page.md",
           reason: "Symlinked wiki root.",
           recommendedTool: "wiki_apply_structure_plan",
           recommendedArgs: {
-            pagePath: "knowledge-base/wiki/pages/external-page.md",
+            pagePath: "knowledge-base/pages/external-page.md",
             scopeNote: "Should not write outside workspace."
           }
         }]
@@ -940,7 +940,7 @@ title: External Page
       /escapes the workspace/
     );
 
-    const outsideMarkdown = await readFile(path.join(outside, "knowledge-base/wiki/pages/external-page.md"), "utf8");
+    const outsideMarkdown = await readFile(path.join(outside, "knowledge-base/pages/external-page.md"), "utf8");
     assert.doesNotMatch(outsideMarkdown, /Scope Note/);
   } finally {
     await rm(workspace, { recursive: true, force: true });
@@ -988,7 +988,7 @@ title: Existing Synthesis
           risk: "low",
           issueKind: "semantic_alias_candidate",
           owner: "wiki-agent",
-          path: "knowledge-base/wiki/pages/missing-canonical-alias.md",
+          path: "knowledge-base/pages/missing-canonical-alias.md",
           target: "missing-canonical",
           reason: "Missing canonical.",
           recommendedTool: "merge_wiki_aliases",
@@ -1003,7 +1003,7 @@ title: Existing Synthesis
           risk: "low",
           issueKind: "semantic_alias_candidate",
           owner: "wiki-agent",
-          path: "knowledge-base/wiki/pages/canonical.md",
+          path: "knowledge-base/pages/canonical.md",
           target: "canonical",
           reason: "Self alias.",
           recommendedTool: "merge_wiki_aliases",
@@ -1018,7 +1018,7 @@ title: Existing Synthesis
           risk: "low",
           issueKind: "semantic_alias_candidate",
           owner: "wiki-agent",
-          path: "knowledge-base/wiki/pages/existing-synthesis.md",
+          path: "knowledge-base/pages/existing-synthesis.md",
           target: "canonical",
           reason: "Existing synthesis.",
           recommendedTool: "merge_wiki_aliases",
@@ -1080,7 +1080,7 @@ title: Existing Synthesis
         risk: "low",
         issueKind: "semantic_alias_candidate",
         owner: "wiki-agent",
-        path: "knowledge-base/wiki/pages/good-alias.md",
+        path: "knowledge-base/pages/good-alias.md",
         target: "canonical",
         reason: "Mixed alias batch.",
         recommendedTool: "merge_wiki_aliases",
@@ -1100,11 +1100,11 @@ title: Existing Synthesis
     assert.equal(result.skipped.length, 0);
     assert.deepEqual(result.changedFiles, []);
     assert.deepEqual(result.applied[0]?.changedFiles, [
-      "knowledge-base/wiki/pages/good-alias.md",
-      "knowledge-base/wiki/index.md",
-      "knowledge-base/wiki/log.md"
+      "knowledge-base/pages/good-alias.md",
+      "knowledge-base/index.md",
+      "knowledge-base/log.md"
     ]);
-    await assert.rejects(readFile(path.join(workspace, "knowledge-base/wiki/pages/good-alias.md"), "utf8"));
+    await assert.rejects(readFile(path.join(workspace, "knowledge-base/pages/good-alias.md"), "utf8"));
   } finally {
     await rm(workspace, { recursive: true, force: true });
   }
@@ -1128,9 +1128,9 @@ title: Canonical
     );
     const outsideTarget = path.join(outside, "index.md");
     await writeMarkdown(outsideTarget, "# Outside Index");
-    await writeMarkdown(path.join(workspace, "knowledge-base/wiki/log.md"), "# Log");
-    await rm(path.join(workspace, "knowledge-base/wiki/index.md"), { force: true });
-    await symlink(outsideTarget, path.join(workspace, "knowledge-base/wiki/index.md"));
+    await writeMarkdown(path.join(workspace, "knowledge-base/log.md"), "# Log");
+    await rm(path.join(workspace, "knowledge-base/index.md"), { force: true });
+    await symlink(outsideTarget, path.join(workspace, "knowledge-base/index.md"));
 
     const { applyWikiStructurePlan } = await import("../../src/agent/wiki/structure-apply.js");
     const result = await applyWikiStructurePlan({
@@ -1144,7 +1144,7 @@ title: Canonical
         risk: "low",
         issueKind: "semantic_alias_candidate",
         owner: "wiki-agent",
-        path: "knowledge-base/wiki/pages/good-alias.md",
+        path: "knowledge-base/pages/good-alias.md",
         target: "canonical",
         reason: "Alias with unsafe index.",
         recommendedTool: "merge_wiki_aliases",
@@ -1157,7 +1157,7 @@ title: Canonical
     assert.equal(result.status, "blocked");
     assert.equal(result.applied.length, 0);
     assert.match(result.skipped[0]?.reason ?? "", /symlink/);
-    await assert.rejects(readFile(path.join(workspace, "knowledge-base/wiki/pages/good-alias.md"), "utf8"));
+    await assert.rejects(readFile(path.join(workspace, "knowledge-base/pages/good-alias.md"), "utf8"));
     const outsideMarkdown = await readFile(outsideTarget, "utf8");
     assert.equal(outsideMarkdown.trim(), "# Outside Index");
   } finally {
@@ -1184,7 +1184,7 @@ title: Canonical
     );
     const outsideTarget = path.join(outside, "unsafe-alias.md");
     await writeMarkdown(outsideTarget, "# Outside Alias");
-    await symlink(outsideTarget, path.join(workspace, "knowledge-base/wiki/pages/unsafe-alias.md"));
+    await symlink(outsideTarget, path.join(workspace, "knowledge-base/pages/unsafe-alias.md"));
 
     const { mergePaperWikiAliases } = await import("../../src/agent/wiki/content.js");
     await assert.rejects(
@@ -1198,7 +1198,7 @@ title: Canonical
       /symlink/
     );
 
-    await assert.rejects(readFile(path.join(workspace, "knowledge-base/wiki/pages/safe-alias.md"), "utf8"));
+    await assert.rejects(readFile(path.join(workspace, "knowledge-base/pages/safe-alias.md"), "utf8"));
     const outsideMarkdown = await readFile(outsideTarget, "utf8");
     assert.equal(outsideMarkdown.trim(), "# Outside Alias");
   } finally {
@@ -1250,18 +1250,18 @@ Old paragraph two.
         risk: "low",
         issueKind: "scope_drift",
         owner: "wiki-agent",
-        path: "knowledge-base/wiki/pages/scoped-page.md",
+        path: "knowledge-base/pages/scoped-page.md",
         reason: "Replace stale scope note.",
         recommendedTool: "wiki_apply_structure_plan",
         recommendedArgs: {
-          pagePath: "knowledge-base/wiki/pages/scoped-page.md",
+          pagePath: "knowledge-base/pages/scoped-page.md",
           scopeNote: "New focused scope note."
         }
       }]
     });
 
     assert.equal(result.status, "applied");
-    const page = await readFile(path.join(workspace, "knowledge-base/wiki/pages/scoped-page.md"), "utf8");
+    const page = await readFile(path.join(workspace, "knowledge-base/pages/scoped-page.md"), "utf8");
     assert.match(page, /## Scope Note\n\nNew focused scope note\.\n\n## Sources/);
     assert.doesNotMatch(page, /Old paragraph/);
     assert.doesNotMatch(page, /stale bullet/);
@@ -1295,7 +1295,7 @@ title: Tunable Coupler
 sources:
   - paper_key: paper-a
     title: Evidence
-    path: knowledge-base/wiki/sources/paper-a.md
+    path: knowledge-base/sources/paper-a.md
 ---
 
 # Tunable Coupler
@@ -1303,7 +1303,7 @@ sources:
 Coupler page.
 `
     );
-    await writeMarkdown(path.join(workspace, "knowledge-base/wiki/index.md"), "# Stale Index");
+    await writeMarkdown(path.join(workspace, "knowledge-base/index.md"), "# Stale Index");
 
     const { applyWikiStructurePlan } = await import("../../src/agent/wiki/structure-apply.js");
     const result = await applyWikiStructurePlan({
@@ -1317,15 +1317,15 @@ Coupler page.
         risk: "low",
         issueKind: "stale_index",
         owner: "wiki-agent",
-        path: "knowledge-base/wiki/index.md",
+        path: "knowledge-base/index.md",
         reason: "Index is stale.",
         recommendedTool: "wiki_apply_structure_plan"
       }]
     });
 
     assert.equal(result.status, "applied");
-    assert.deepEqual(result.changedFiles, ["knowledge-base/wiki/index.md"]);
-    const index = await readFile(path.join(workspace, "knowledge-base/wiki/index.md"), "utf8");
+    assert.deepEqual(result.changedFiles, ["knowledge-base/index.md"]);
+    const index = await readFile(path.join(workspace, "knowledge-base/index.md"), "utf8");
     assert.match(index, /# Paper LLM Wiki Index/);
     assert.match(index, /\[Tunable Coupler\]\(pages\/tunable-coupler\.md\)/);
     assert.match(index, /Source summaries: 1/);
@@ -1365,8 +1365,8 @@ title: Tunable Coupler
 
     const outsideTarget = path.join(outside, "index.md");
     await writeMarkdown(outsideTarget, "# Outside Index");
-    await rm(path.join(workspace, "knowledge-base/wiki/index.md"), { force: true });
-    await symlink(outsideTarget, path.join(workspace, "knowledge-base/wiki/index.md"));
+    await rm(path.join(workspace, "knowledge-base/index.md"), { force: true });
+    await symlink(outsideTarget, path.join(workspace, "knowledge-base/index.md"));
 
     const { applyWikiStructurePlan } = await import("../../src/agent/wiki/structure-apply.js");
     await assert.rejects(
@@ -1381,7 +1381,7 @@ title: Tunable Coupler
           risk: "low",
           issueKind: "stale_index",
           owner: "wiki-agent",
-          path: "knowledge-base/wiki/index.md",
+          path: "knowledge-base/index.md",
           reason: "Index is stale.",
           recommendedTool: "wiki_apply_structure_plan"
         }]
@@ -1416,8 +1416,8 @@ Evidence summary.
     );
     const outsideTarget = path.join(outside, "index.md");
     await writeMarkdown(outsideTarget, "# Outside Index");
-    await rm(path.join(workspace, "knowledge-base/wiki/index.md"), { force: true });
-    await symlink(outsideTarget, path.join(workspace, "knowledge-base/wiki/index.md"));
+    await rm(path.join(workspace, "knowledge-base/index.md"), { force: true });
+    await symlink(outsideTarget, path.join(workspace, "knowledge-base/index.md"));
 
     const { applyWikiStructurePlan } = await import("../../src/agent/wiki/structure-apply.js");
     await assert.rejects(
@@ -1432,7 +1432,7 @@ Evidence summary.
           risk: "low",
           issueKind: "stale_index",
           owner: "wiki-agent",
-          path: "knowledge-base/wiki/index.md",
+          path: "knowledge-base/index.md",
           reason: "Index is stale.",
           recommendedTool: "wiki_apply_structure_plan"
         }]

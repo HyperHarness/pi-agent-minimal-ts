@@ -13,7 +13,7 @@ The current paper wiki already implements the core storage layout from the LLM w
 
 ## Plan
 
-- [x] Extend paper wiki search to include `wiki/pages/*.md`.
+- [x] Extend paper wiki search to include `pages/*.md`.
 - [x] Preserve compatibility with existing source-summary search callers.
 - [x] Add `wiki_lint` for stale index entries, broken links, missing citations, orphan pages, and repeated concept tags without pages.
 - [x] Keep `wiki_health` focused on paper acquisition/parse/summary health.
@@ -28,4 +28,4 @@ The current paper wiki already implements the core storage layout from the LLM w
 - No embedding database.
 - No LLM contradiction checker.
 - No automatic page rewrite/repair beyond existing `build_wiki_page`.
-- No new directory hierarchy beyond existing `wiki/pages/`.
+- No new directory hierarchy beyond existing `pages/`.

@@ -1032,7 +1032,7 @@ test("consumePromptLines reuses one session across multiple stdin lines", async 
 
 test("agent chat session stats summarize downloads, queues, and wiki page writes", async () => {
   const workspace = await mkdtemp(path.join(tmpdir(), "pi-agent-session-stats-"));
-  const pagesDir = path.join(workspace, "knowledge-base", "wiki", "pages");
+  const pagesDir = path.join(workspace, "knowledge-base", "pages");
   await mkdir(pagesDir, { recursive: true });
   await writeFile(path.join(pagesDir, "existing-page.md"), "# Existing\n", "utf8");
 
@@ -1107,13 +1107,13 @@ test("agent chat session stats summarize downloads, queues, and wiki page writes
     recordToolEnd("build_wiki_page", {
       status: "written",
       page: {
-        pagePath: "knowledge-base/wiki/pages/existing-page.md"
+        pagePath: "knowledge-base/pages/existing-page.md"
       }
     });
     recordToolEnd("build_wiki_page", {
       status: "written",
       page: {
-        pagePath: "knowledge-base/wiki/pages/new-page.md"
+        pagePath: "knowledge-base/pages/new-page.md"
       }
     });
 
@@ -1135,8 +1135,8 @@ test("agent chat session stats summarize downloads, queues, and wiki page writes
 
     assert.equal(stats.downloadedPapers.size, 4);
     assert.equal(piAgent.getPendingDownloadQueueCount(stats), 0);
-    assert.deepEqual([...stats.modifiedWikiPages], ["knowledge-base/wiki/pages/existing-page.md"]);
-    assert.deepEqual([...stats.createdWikiPages], ["knowledge-base/wiki/pages/new-page.md"]);
+    assert.deepEqual([...stats.modifiedWikiPages], ["knowledge-base/pages/existing-page.md"]);
+    assert.deepEqual([...stats.createdWikiPages], ["knowledge-base/pages/new-page.md"]);
 
     const output = formatStats!(stats);
     assert.match(output, /本次聊天下载论文: 4/);

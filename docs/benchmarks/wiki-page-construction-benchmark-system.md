@@ -47,7 +47,7 @@ Every model receives the same `PaperWikiPageWorkerInput` shape:
       "key": "source-a",
       "paperKey": "source-a",
       "title": "Source A",
-      "path": "knowledge-base/wiki/sources/source-a.md",
+      "path": "knowledge-base/sources/source-a.md",
       "snippet": "..."
     }
   ]
@@ -207,7 +207,7 @@ Use this mode for model leaderboards.
 This tests the full harness around `build_wiki_page`.
 
 - Create a temporary workspace.
-- Install fixture source summaries into `knowledge-base/wiki/sources/`.
+- Install fixture source summaries into `knowledge-base/sources/`.
 - Inject or mock retrieval so every model receives the same evidence.
 - Use `createToolsForBoundary(workspaceDir, "wiki-agent")` so the benchmarked agent cannot call paper download, web search, or source-summary generation tools.
 - Run `build_wiki_page` in `draft` or `write` mode.
@@ -219,7 +219,7 @@ Use this mode to optimize the harness, tool schemas, prompt wrappers, and page-w
 
 This mode samples the real local wiki.
 
-- Use current `knowledge-base/wiki/sources/` and `pages/`.
+- Use current `knowledge-base/sources/` and `pages/`.
 - Record snapshot metadata.
 - Do not compare model leaderboard scores across different wiki snapshots.
 
@@ -437,7 +437,7 @@ This phase is enough to compare LLMs under the same synthesis harness.
 Extend the script to:
 
 1. Create a temp workspace per case.
-2. Write fixture evidence into `knowledge-base/wiki/sources/`.
+2. Write fixture evidence into `knowledge-base/sources/`.
 3. Inject deterministic `searchPaperWiki` results.
 4. Run `build_wiki_page` in `draft` and optionally `write`.
 5. Run `wiki_lint`.

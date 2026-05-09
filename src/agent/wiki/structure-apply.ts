@@ -78,7 +78,7 @@ function normalizeSectionTitle(value: string): string {
 }
 
 function hasSourceCitation(markdown: string): boolean {
-  return /knowledge-base\/wiki\/sources\/|source_citations?:|source summary|paper-source-summary/i.test(markdown);
+  return /knowledge-base\/sources\/|source_citations?:|source summary|paper-source-summary/i.test(markdown);
 }
 
 function asRecord(value: unknown): Record<string, unknown> | undefined {
@@ -112,7 +112,7 @@ function isAliasMarkdown(markdown: string): boolean {
 
 function resolveWikiPagePath(workspaceDir: string, relativePath: string): string {
   const normalized = relativePath.split(path.sep).join("/");
-  if (!normalized.startsWith("knowledge-base/wiki/pages/") || !normalized.endsWith(".md")) {
+  if (!normalized.startsWith("knowledge-base/pages/") || !normalized.endsWith(".md")) {
     throw new Error("Structure apply actions must target wiki synthesis pages.");
   }
 

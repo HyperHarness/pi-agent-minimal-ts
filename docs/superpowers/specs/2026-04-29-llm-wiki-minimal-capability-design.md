@@ -27,8 +27,8 @@ The agent already has paper acquisition, parsing, source summaries, wiki pages, 
 
 Extend `searchPaperWiki` so it searches:
 
-- `knowledge-base/wiki/sources/<paper-key>.md`
-- `knowledge-base/wiki/pages/<page-key>.md`
+- `knowledge-base/sources/<paper-key>.md`
+- `knowledge-base/pages/<page-key>.md`
 
 Results carry a `kind` of `source` or `page`, plus a stable key. Existing source-summary callers continue to work.
 
@@ -46,7 +46,7 @@ This is intentionally separate from `wiki_health`, which remains responsible for
 
 ### Index
 
-Keep `knowledge-base/wiki/index.md` as a knowledge-entry table of contents over `pages/`. It may report source-summary counts and link to `sources/`, but it should not enumerate every paper source. The full source layer remains searchable through `search_paper_wiki` and citeable from synthesis pages.
+Keep `knowledge-base/index.md` as a knowledge-entry table of contents over `pages/`. It may report source-summary counts and link to `sources/`, but it should not enumerate every paper source. The full source layer remains searchable through `search_paper_wiki` and citeable from synthesis pages.
 
 ### Build
 

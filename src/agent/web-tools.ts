@@ -40,13 +40,13 @@ const fetchPaperWebpageParameters = Type.Object({
   paperKey: Type.Optional(
     Type.String({
       description:
-        "Optional paper key to use under knowledge-base/wiki/sources/. Defaults to a publisher-derived key such as nature-s41467-025-59778-z."
+        "Optional paper key to use under knowledge-base/sources/. Defaults to a publisher-derived key such as nature-s41467-025-59778-z."
     })
   ),
   save: Type.Optional(
     Type.Boolean({
       description:
-        "Whether to save the extracted webpage parse under knowledge-base/wiki/sources/. Defaults to true."
+        "Whether to save the extracted webpage parse under knowledge-base/sources/. Defaults to true."
     })
   ),
   force: Type.Optional(Type.Boolean({ description: "Re-fetch and overwrite the cached webpage parse." })),
@@ -284,7 +284,7 @@ export function createWebTools(input: {
     name: "fetch_paper_webpage",
     label: "Fetch Paper Webpage",
     description:
-      "Fetches a scientific paper article page, saves the full cleaned article markdown under knowledge-base/wiki/sources, and returns compact metadata, a markdown preview, and saved artifact paths. Prefer this over fetch_url when reading a publisher article webpage.",
+      "Fetches a scientific paper article page, saves the full cleaned article markdown under knowledge-base/sources, and returns compact metadata, a markdown preview, and saved artifact paths. Prefer this over fetch_url when reading a publisher article webpage.",
     parameters: fetchPaperWebpageParameters,
     execute: async (_toolCallId: string, args: FetchPaperWebpageParameters) => {
       try {

@@ -5,7 +5,7 @@ import path from "node:path";
 import { fileURLToPath } from "node:url";
 
 const repoRoot = path.resolve(path.dirname(fileURLToPath(import.meta.url)), "..");
-const wikiRoot = path.resolve(process.env.PI_WIKI_DIR || path.join(repoRoot, "knowledge-base/wiki"));
+const wikiRoot = path.resolve(process.env.PI_WIKI_DIR || path.join(repoRoot, "knowledge-base"));
 const host = process.env.WIKI_HOST || "127.0.0.1";
 const port = Number(process.env.WIKI_PORT || 4177);
 

@@ -2,7 +2,7 @@
 
 > **For agentic workers:** REQUIRED SUB-SKILL: Use superpowers:subagent-driven-development (recommended) or superpowers:executing-plans to implement this plan task-by-task. Steps use checkbox (`- [ ]`) syntax for tracking.
 
-**Goal:** Add wiki-structure governance tools so the wiki-agent can diagnose and plan wiki cleanup through controlled tools instead of direct ad hoc edits to `knowledge-base/wiki`.
+**Goal:** Add wiki-structure governance tools so the wiki-agent can diagnose and plan wiki cleanup through controlled tools instead of direct ad hoc edits to `knowledge-base`.
 
 **Architecture:** Keep `wiki_lint` as the structural health checker, add a pure planning module under `src/agent/wiki/structure-plan.ts`, and expose a new `wiki_structure_plan` tool through `src/agent/wiki/tools.ts`. The first phase is deliberately conservative: it reports duplicate pages, alias candidates, repeated sections, weak/empty synthesis pages, bad rendered wiki links, and prioritized concept gaps, but it does not rewrite wiki content.
 
@@ -180,7 +180,7 @@ function extractRenderedWikiLinkTargets(markdown: string): string[] {
   return [...markdown.matchAll(/\[\[([^\]]+)\]\]/g)]
     .map((match) => match[1]?.trim())
     .filter((value): value is string => Boolean(value))
-    .map((value) => `knowledge-base/wiki/pages/${sanitizeWikiFilename(value)}.md`);
+    .map((value) => `knowledge-base/pages/${sanitizeWikiFilename(value)}.md`);
 }
 ```
 
@@ -315,9 +315,9 @@ In `test/agent/paper-reader.test.ts`, add a test after the existing `lintPaperWi
 test("lintPaperWiki reports duplicate titles, weak pages, duplicate sections, and rendered wiki links", async () => {
   const workspace = await mkdtemp(path.join(tmpdir(), "pi-agent-wiki-lint-"));
   try {
-    await mkdir(path.join(workspace, "knowledge-base/wiki/pages"), { recursive: true });
-    await mkdir(path.join(workspace, "knowledge-base/wiki/sources"), { recursive: true });
-    await writeFile(path.join(workspace, "knowledge-base/wiki/index.md"), [
+    await mkdir(path.join(workspace, "knowledge-base/pages"), { recursive: true });
+    await mkdir(path.join(workspace, "knowledge-base/sources"), { recursive: true });
+    await writeFile(path.join(workspace, "knowledge-base/index.md"), [
       "# Paper LLM Wiki Index",
       "",
       "## Knowledge Entries",
@@ -326,7 +326,7 @@ test("lintPaperWiki reports duplicate titles, weak pages, duplicate sections, an
       "- [Surface Codes](pages/surface-codes.md)",
       "- [Spec](pages/spec.md)"
     ].join("\n"));
-    await writeFile(path.join(workspace, "knowledge-base/wiki/pages/surface-code.md"), [
+    await writeFile(path.join(workspace, "knowledge-base/pages/surface-code.md"), [
       "---",
       "title: \"Surface Code\"",
       "source_citations: []",
@@ -342,7 +342,7 @@ test("lintPaperWiki reports duplicate titles, weak pages, duplicate sections, an
       "",
       "- Second question."
     ].join("\n"));
-    await writeFile(path.join(workspace, "knowledge-base/wiki/pages/surface-codes.md"), [
+    await writeFile(path.join(workspace, "knowledge-base/pages/surface-codes.md"), [
       "---",
       "title: \"Surface Codes\"",
       "source_citations: []",
@@ -352,7 +352,7 @@ test("lintPaperWiki reports duplicate titles, weak pages, duplicate sections, an
       "",
       "Alias-like short page."
     ].join("\n"));
-    await writeFile(path.join(workspace, "knowledge-base/wiki/pages/spec.md"), [
+    await writeFile(path.join(workspace, "knowledge-base/pages/spec.md"), [
       "---",
       "title: \"Minimal [[12,2,3]] Spec\"",
       "source_citations: []",
@@ -592,16 +592,16 @@ Add a test after the lint expansion test:
 test("planWikiStructure turns lint findings into low-risk structure actions", async () => {
   const workspace = await mkdtemp(path.join(tmpdir(), "pi-agent-wiki-plan-"));
   try {
-    await mkdir(path.join(workspace, "knowledge-base/wiki/pages"), { recursive: true });
-    await mkdir(path.join(workspace, "knowledge-base/wiki/sources"), { recursive: true });
-    await writeFile(path.join(workspace, "knowledge-base/wiki/index.md"), [
+    await mkdir(path.join(workspace, "knowledge-base/pages"), { recursive: true });
+    await mkdir(path.join(workspace, "knowledge-base/sources"), { recursive: true });
+    await writeFile(path.join(workspace, "knowledge-base/index.md"), [
       "# Paper LLM Wiki Index",
       "",
       "## Knowledge Entries",
       "",
       "- [Spec](pages/spec.md)"
     ].join("\n"));
-    await writeFile(path.join(workspace, "knowledge-base/wiki/pages/spec.md"), [
+    await writeFile(path.join(workspace, "knowledge-base/pages/spec.md"), [
       "---",
       "title: \"Minimal [[12,2,3]] Spec\"",
       "source_citations: []",
@@ -801,7 +801,7 @@ test("wiki_structure_plan delegates to the injected planner and returns details"
               priority: "medium",
               risk: "low",
               issueKind: "duplicate_section",
-              path: "knowledge-base/wiki/pages/example.md",
+              path: "knowledge-base/pages/example.md",
               reason: "Section appears twice.",
               recommendedTool: "replace_file_text"
             }

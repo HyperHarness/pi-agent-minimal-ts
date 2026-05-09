@@ -63,6 +63,27 @@ const invalidExternalSearchSource = {
   // @ts-expect-error external search sources must not expose supported-source identifiers
 } satisfies PaperSearchSource;
 
+test("resolvePaperLibraryPaths uses knowledge-base as the wiki root", async () => {
+  const workspaceDir = await mkdtemp(path.join(os.tmpdir(), "paper-store-paths-"));
+  try {
+    const paths = resolvePaperLibraryPaths(workspaceDir);
+
+    assert.equal(paths.libraryRoot, path.join(workspaceDir, "knowledge-base"));
+    assert.equal(paths.wikiRoot, path.join(workspaceDir, "knowledge-base"));
+    assert.equal(paths.rawRoot, path.join(workspaceDir, "knowledge-base", "raw"));
+    assert.equal(paths.sourcesRoot, path.join(workspaceDir, "knowledge-base", "sources"));
+    assert.equal(paths.sourceArtifactsRoot, path.join(workspaceDir, "knowledge-base", "sources"));
+    assert.equal(paths.pagesRoot, path.join(workspaceDir, "knowledge-base", "pages"));
+    assert.equal(paths.assetsRoot, path.join(workspaceDir, "knowledge-base", "assets"));
+    assert.equal(paths.manifestsRoot, path.join(workspaceDir, "knowledge-base", "manifests"));
+    assert.equal(paths.stateRoot, path.join(workspaceDir, "knowledge-base", "state"));
+    assert.equal(paths.indexPath, path.join(workspaceDir, "knowledge-base", "index.md"));
+    assert.equal(paths.logPath, path.join(workspaceDir, "knowledge-base", "log.md"));
+  } finally {
+    await rm(workspaceDir, { recursive: true, force: true });
+  }
+});
+
 const manualFallbackPaperRecord = {
   source: "science",
   canonicalId: "10.1126/science.adz8659",
@@ -116,7 +137,7 @@ const manualFallbackResult = {
   canonicalId: "10.1126/science.adz8659",
   articleUrl: "https://www.science.org/doi/10.1126/science.adz8659",
   fallbackUrl: "https://www.science.org/doi/10.1126/science.adz8659",
-  recordPath: "knowledge-base/wiki/sources/science-10.1126-science.adz8659/acquisition.json",
+  recordPath: "knowledge-base/sources/science-10.1126-science.adz8659/acquisition.json",
   failure: {
     code: "PAYWALL",
     message: "Opened article in browser."
@@ -212,7 +233,7 @@ test("knowledge base paths can be moved outside the code workspace", async () =>
         canonicalId: "2401.01234",
         articleUrl: "https://arxiv.org/abs/2401.01234"
       }),
-      path.join(libraryDir, "wiki", "sources", "arxiv-2401.01234", "acquisition.json")
+      path.join(libraryDir, "sources", "arxiv-2401.01234", "acquisition.json")
     );
   } finally {
     if (previousLibraryDir === undefined) {
@@ -248,7 +269,7 @@ test("resolvePaperRecordPath uses canonical ids for supported sources and hostna
         canonicalId: "10.1126/science.adz8659",
         articleUrl: "https://www.science.org/doi/10.1126/science.adz8659"
       }),
-      path.join(workspaceDir, "knowledge-base", "wiki", "sources", "science-10.1126-science.adz8659", "acquisition.json")
+      path.join(workspaceDir, "knowledge-base", "sources", "science-10.1126-science.adz8659", "acquisition.json")
     );
 
     const externalRecordPath = resolvePaperRecordPath({
@@ -258,7 +279,7 @@ test("resolvePaperRecordPath uses canonical ids for supported sources and hostna
     });
 
     assert.equal(
-      externalRecordPath.startsWith(path.join(workspaceDir, "knowledge-base", "wiki", "sources")),
+      externalRecordPath.startsWith(path.join(workspaceDir, "knowledge-base", "sources")),
       true
     );
     assert.equal(path.basename(path.dirname(externalRecordPath)).startsWith("external-example.com-"), true);
@@ -298,7 +319,7 @@ test("writePaperRecord persists external_opened records under the source acquisi
 
     const saved = JSON.parse(await readFile(recordPath, "utf8"));
 
-    assert.equal(recordPath.startsWith(path.join(workspaceDir, "knowledge-base", "wiki", "sources")), true);
+    assert.equal(recordPath.startsWith(path.join(workspaceDir, "knowledge-base", "sources")), true);
     assert.equal(path.basename(path.dirname(recordPath)).startsWith("external-example.com-"), true);
     assert.equal(saved.status, "external_opened");
     assert.equal(saved.source, "external");
@@ -320,7 +341,7 @@ test("writePaperRecord persists supported source records with pretty-printed fai
 
     assert.equal(
       recordPath,
-      path.join(workspaceDir, "knowledge-base", "wiki", "sources", "science-10.1126-science.adz8659", "acquisition.json")
+      path.join(workspaceDir, "knowledge-base", "sources", "science-10.1126-science.adz8659", "acquisition.json")
     );
     assert.match(saved, /\n  "failure": \{\n    "code": "PAYWALL",\n    "message": "Browser session required\."\n  \},\n/);
     const savedRecord = JSON.parse(saved);
@@ -371,8 +392,8 @@ test("writePaperRecord merges citation metadata into source.json next to acquisi
     assert.equal(source.downloadStatus, "manual_fallback_opened");
     assert.equal(source.citationStatus, "incomplete");
     assert.deepEqual(source.missingFields, ["authors", "year", "venue"]);
-    assert.equal(source.acquisitionPath, "knowledge-base/wiki/sources/science-10.1126-science.adz8659/acquisition.json");
-    assert.equal(source.recordPath, "knowledge-base/wiki/sources/science-10.1126-science.adz8659/acquisition.json");
+    assert.equal(source.acquisitionPath, "knowledge-base/sources/science-10.1126-science.adz8659/acquisition.json");
+    assert.equal(source.recordPath, "knowledge-base/sources/science-10.1126-science.adz8659/acquisition.json");
   } finally {
     await rm(workspaceDir, { recursive: true, force: true });
   }
@@ -454,7 +475,7 @@ test("writePaperSourceMetadataForRecord falls back to Crossref bibliographic sea
           canonicalId: "2411.15039",
           articleUrl: "https://arxiv.org/abs/2411.15039",
           pdfUrl: "https://arxiv.org/pdf/2411.15039",
-          recordPath: path.join(workspaceDir, "knowledge-base/wiki/sources/arxiv-2411.15039/acquisition.json"),
+          recordPath: path.join(workspaceDir, "knowledge-base/sources/arxiv-2411.15039/acquisition.json"),
           downloadPath: path.join(workspaceDir, "knowledge-base/raw/pdfs/arxiv-2411.15039.pdf"),
           status: "downloaded"
         },
@@ -556,10 +577,10 @@ test("updatePaperRecordParseManifest records ready markdown artifacts in the pap
       engine: "webpage",
       sourceSha256: "webpage-hash",
       artifacts: {
-        markdownPath: path.join(workspaceDir, "knowledge-base/wiki/sources/arxiv-2401.01234/parses/webpage/document.md"),
-        parsePath: path.join(workspaceDir, "knowledge-base/wiki/sources/arxiv-2401.01234/parses/webpage/parse.json"),
-        qualityPath: path.join(workspaceDir, "knowledge-base/wiki/sources/arxiv-2401.01234/parses/webpage/quality.json"),
-        chunksPath: path.join(workspaceDir, "knowledge-base/wiki/sources/arxiv-2401.01234/chunks/webpage.jsonl")
+        markdownPath: path.join(workspaceDir, "knowledge-base/sources/arxiv-2401.01234/parses/webpage/document.md"),
+        parsePath: path.join(workspaceDir, "knowledge-base/sources/arxiv-2401.01234/parses/webpage/parse.json"),
+        qualityPath: path.join(workspaceDir, "knowledge-base/sources/arxiv-2401.01234/parses/webpage/quality.json"),
+        chunksPath: path.join(workspaceDir, "knowledge-base/sources/arxiv-2401.01234/chunks/webpage.jsonl")
       },
       quality: {
         status: "good",
@@ -573,10 +594,10 @@ test("updatePaperRecordParseManifest records ready markdown artifacts in the pap
 
     const saved = await readPaperRecordByPath({ workspaceDir, recordPath });
     assert.equal(saved?.record.webpage?.status, "parsed");
-    assert.equal(saved?.record.webpage?.markdownPath, "knowledge-base/wiki/sources/arxiv-2401.01234/parses/webpage/document.md");
+    assert.equal(saved?.record.webpage?.markdownPath, "knowledge-base/sources/arxiv-2401.01234/parses/webpage/document.md");
     assert.equal(saved?.record.reading?.status, "ready");
     assert.equal(saved?.record.reading?.preferredSource, "webpage");
-    assert.equal(saved?.record.reading?.markdownPath, "knowledge-base/wiki/sources/arxiv-2401.01234/parses/webpage/document.md");
+    assert.equal(saved?.record.reading?.markdownPath, "knowledge-base/sources/arxiv-2401.01234/parses/webpage/document.md");
   } finally {
     await rm(workspaceDir, { recursive: true, force: true });
   }
@@ -591,7 +612,7 @@ test("updatePaperRecordParseManifest backfills citation metadata from local pars
   });
   const parsePath = path.join(
     workspaceDir,
-    "knowledge-base/wiki/sources/aps-10.1103-PhysRevA.111.012619/parses/webpage/parse.json"
+    "knowledge-base/sources/aps-10.1103-PhysRevA.111.012619/parses/webpage/parse.json"
   );
 
   try {
@@ -657,10 +678,10 @@ test("updatePaperRecordParseManifest backfills citation metadata from local pars
       engine: "webpage",
       sourceSha256: "webpage-hash",
       artifacts: {
-        markdownPath: path.join(workspaceDir, "knowledge-base/wiki/sources/aps-10.1103-PhysRevA.111.012619/parses/webpage/document.md"),
+        markdownPath: path.join(workspaceDir, "knowledge-base/sources/aps-10.1103-PhysRevA.111.012619/parses/webpage/document.md"),
         parsePath,
-        qualityPath: path.join(workspaceDir, "knowledge-base/wiki/sources/aps-10.1103-PhysRevA.111.012619/parses/webpage/quality.json"),
-        chunksPath: path.join(workspaceDir, "knowledge-base/wiki/sources/aps-10.1103-PhysRevA.111.012619/chunks/webpage.jsonl")
+        qualityPath: path.join(workspaceDir, "knowledge-base/sources/aps-10.1103-PhysRevA.111.012619/parses/webpage/quality.json"),
+        chunksPath: path.join(workspaceDir, "knowledge-base/sources/aps-10.1103-PhysRevA.111.012619/chunks/webpage.jsonl")
       },
       quality: {
         status: "good",
@@ -719,10 +740,10 @@ test("updatePaperRecordReadingFailure preserves an existing ready webpage readin
       engine: "webpage",
       sourceSha256: "webpage-hash",
       artifacts: {
-        markdownPath: path.join(workspaceDir, "knowledge-base/wiki/sources/nature-s41567-025-03102-5/parses/webpage/document.md"),
-        parsePath: path.join(workspaceDir, "knowledge-base/wiki/sources/nature-s41567-025-03102-5/parses/webpage/parse.json"),
-        qualityPath: path.join(workspaceDir, "knowledge-base/wiki/sources/nature-s41567-025-03102-5/parses/webpage/quality.json"),
-        chunksPath: path.join(workspaceDir, "knowledge-base/wiki/sources/nature-s41567-025-03102-5/chunks/webpage.jsonl")
+        markdownPath: path.join(workspaceDir, "knowledge-base/sources/nature-s41567-025-03102-5/parses/webpage/document.md"),
+        parsePath: path.join(workspaceDir, "knowledge-base/sources/nature-s41567-025-03102-5/parses/webpage/parse.json"),
+        qualityPath: path.join(workspaceDir, "knowledge-base/sources/nature-s41567-025-03102-5/parses/webpage/quality.json"),
+        chunksPath: path.join(workspaceDir, "knowledge-base/sources/nature-s41567-025-03102-5/chunks/webpage.jsonl")
       },
       quality: {
         status: "good",

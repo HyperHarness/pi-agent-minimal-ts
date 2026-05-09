@@ -325,8 +325,8 @@ export function relativeWorkspacePath(workspaceDir: string, filePath: string): s
 }
 
 function isWikiSynthesisPagePath(relativePath: string): boolean {
-  return relativePath === "knowledge-base/wiki/pages" ||
-    relativePath.startsWith("knowledge-base/wiki/pages/");
+  return relativePath === "knowledge-base/pages" ||
+    relativePath.startsWith("knowledge-base/pages/");
 }
 
 function countOccurrences(text: string, search: string): number {
@@ -817,7 +817,7 @@ export function createFileTools(input: {
     name: "write_file",
     label: "Write File",
     description:
-      "Creates or overwrites a UTF-8 text file inside the workspace. Use this when the user asks you to actually edit a local writing project or manuscript file. This tool does not write knowledge-base/wiki/pages/ synthesis pages; use build_wiki_page for evidence-grounded wiki page writes or read_file plus replace_file_text for a precise edit to an existing page.",
+      "Creates or overwrites a UTF-8 text file inside the workspace. Use this when the user asks you to actually edit a local writing project or manuscript file. This tool does not write knowledge-base/pages/ synthesis pages; use build_wiki_page for evidence-grounded wiki page writes or read_file plus replace_file_text for a precise edit to an existing page.",
     parameters: writeFileParameters,
     executionMode: "sequential",
     execute: async (_toolCallId: string, args: WriteFileParameters) => {
@@ -825,7 +825,7 @@ export function createFileTools(input: {
       const relativePath = relativeWorkspacePath(resolvedWorkspaceDir, resolvedPath);
       if (isWikiSynthesisPagePath(relativePath)) {
         throw new Error(
-          "write_file cannot create or overwrite synthesis wiki pages under knowledge-base/wiki/pages/. Use build_wiki_page for evidence-grounded wiki page writes, or read_file plus replace_file_text for a precise edit to an existing page."
+          "write_file cannot create or overwrite synthesis wiki pages under knowledge-base/pages/. Use build_wiki_page for evidence-grounded wiki page writes, or read_file plus replace_file_text for a precise edit to an existing page."
         );
       }
       await writeFile(resolvedPath, args.content, "utf8");

@@ -180,7 +180,7 @@ function extractMarkdownLinks(markdown: string): string[] {
   const links = new Set<string>();
   for (const match of markdown.matchAll(/\[[^\]]+\]\(([^)]+)\)/g)) {
     const target = match[1]?.trim();
-    if (target?.startsWith("knowledge-base/wiki/")) {
+    if (target?.startsWith("knowledge-base/")) {
       links.add(target);
     }
   }
@@ -252,7 +252,7 @@ function extractRenderedWikiLinkTargets(markdown: string): string[] {
         .toLowerCase()
         .replace(/[^a-z0-9\u4e00-\u9fff]+/g, "-")
         .replace(/^-|-$/g, "");
-      return slug ? `knowledge-base/wiki/pages/${slug}.md` : undefined;
+      return slug ? `knowledge-base/pages/${slug}.md` : undefined;
     })
     .filter((value): value is string => Boolean(value));
 }
@@ -354,7 +354,7 @@ export async function lintPaperWiki(options: PaperWikiLintOptions): Promise<Pape
           reason: "Markdown link points to a missing wiki file."
         });
       }
-      const pageMatch = target.match(/knowledge-base\/wiki\/pages\/([^/]+)\.md$/);
+      const pageMatch = target.match(/knowledge-base\/pages\/([^/]+)\.md$/);
       if (pageMatch?.[1]) {
         incomingPageLinks.set(pageMatch[1], (incomingPageLinks.get(pageMatch[1]) ?? 0) + 1);
       }
@@ -450,7 +450,7 @@ export async function lintPaperWiki(options: PaperWikiLintOptions): Promise<Pape
           reason: "Markdown link points to a missing wiki file."
         });
       }
-      const pageMatch = target.match(/knowledge-base\/wiki\/pages\/([^/]+)\.md$/);
+      const pageMatch = target.match(/knowledge-base\/pages\/([^/]+)\.md$/);
       if (pageMatch?.[1]) {
         incomingPageLinks.set(pageMatch[1], (incomingPageLinks.get(pageMatch[1]) ?? 0) + 1);
       }
@@ -584,7 +584,7 @@ export async function lintPaperWiki(options: PaperWikiLintOptions): Promise<Pape
       issues.push({
         kind: "semantic_alias_candidate",
         severity: suggestion.risk === "low" ? "low" : "medium",
-        path: `knowledge-base/wiki/pages/${suggestion.aliasPageKey}.md`,
+        path: `knowledge-base/pages/${suggestion.aliasPageKey}.md`,
         target: suggestion.canonicalPageKey,
         score: suggestion.score,
         reason: suggestion.evidence.join("; ")

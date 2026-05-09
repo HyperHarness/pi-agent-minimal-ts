@@ -327,7 +327,7 @@ test("handleExtensionHostMessage restores prior webpage reading artifacts when P
   const workspaceDir = await createWorkspaceDir();
   const articleUrl = "https://www.nature.com/articles/s41567-025-03102-5";
   const paperKey = "nature-s41567-025-03102-5";
-  const sourceRoot = path.join(workspaceDir, "knowledge-base", "wiki", "sources", paperKey);
+  const sourceRoot = path.join(workspaceDir, "knowledge-base", "sources", paperKey);
   const markdownPath = path.join(sourceRoot, "parses", "webpage", "document.md");
   const parsePath = path.join(sourceRoot, "parses", "webpage", "parse.json");
   const qualityPath = path.join(sourceRoot, "parses", "webpage", "quality.json");
@@ -794,10 +794,10 @@ test("handleExtensionHostMessage registers webpage snapshots as parsed wiki arti
     assert.equal(response.jobId, "job-webpage");
     assert.equal(response.articleUrl, articleUrl);
     assert.equal(response.paperKey, "science-10.1126-science.adz8659");
-    assert.match(response.markdownPath, /knowledge-base\/wiki\/sources\/science-10\.1126-science\.adz8659\/parses\/webpage\/document\.md$/);
-    assert.match(response.parsePath, /knowledge-base\/wiki\/sources\/science-10\.1126-science\.adz8659\/parses\/webpage\/parse\.json$/);
-    assert.match(response.qualityPath, /knowledge-base\/wiki\/sources\/science-10\.1126-science\.adz8659\/parses\/webpage\/quality\.json$/);
-    assert.match(response.chunksPath, /knowledge-base\/wiki\/sources\/science-10\.1126-science\.adz8659\/chunks\/webpage\.jsonl$/);
+    assert.match(response.markdownPath, /knowledge-base\/sources\/science-10\.1126-science\.adz8659\/parses\/webpage\/document\.md$/);
+    assert.match(response.parsePath, /knowledge-base\/sources\/science-10\.1126-science\.adz8659\/parses\/webpage\/parse\.json$/);
+    assert.match(response.qualityPath, /knowledge-base\/sources\/science-10\.1126-science\.adz8659\/parses\/webpage\/quality\.json$/);
+    assert.match(response.chunksPath, /knowledge-base\/sources\/science-10\.1126-science\.adz8659\/chunks\/webpage\.jsonl$/);
     assert.ok(response.quality);
     assert.equal(response.quality.status, "poor");
     assert.ok(response.quality.score < 0.7);

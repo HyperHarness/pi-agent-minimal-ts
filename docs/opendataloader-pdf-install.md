@@ -170,7 +170,7 @@ arxiv-2406.06015 good 35
 After downloading a paper:
 
 ```text
-parse_paper with recordPath knowledge-base/wiki/sources/arxiv-2406.06015/acquisition.json
+parse_paper with recordPath knowledge-base/sources/arxiv-2406.06015/acquisition.json
 inspect_paper with paperKey arxiv-2406.06015
 search_paper_text with paperKey arxiv-2406.06015 and query superconducting
 read_paper_section with paperKey arxiv-2406.06015 and sectionId section-0003

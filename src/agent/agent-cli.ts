@@ -183,14 +183,14 @@ function normalizeRelativePath(value: string): string {
 }
 
 async function readInitialWikiPagePaths(workspaceDir: string): Promise<Set<string>> {
-  const pagesDir = path.join(workspaceDir, "knowledge-base", "wiki", "pages");
+  const pagesDir = path.join(workspaceDir, "knowledge-base", "pages");
 
   try {
     const entries = await readdir(pagesDir, { withFileTypes: true });
     return new Set(
       entries
         .filter((entry) => entry.isFile() && entry.name.endsWith(".md"))
-        .map((entry) => normalizeRelativePath(path.join("knowledge-base", "wiki", "pages", entry.name)))
+        .map((entry) => normalizeRelativePath(path.join("knowledge-base", "pages", entry.name)))
     );
   } catch {
     return new Set();

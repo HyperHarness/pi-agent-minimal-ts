@@ -1244,7 +1244,7 @@ test("write_file rejects synthesis wiki page writes", async () => {
     await assert.rejects(
       () => writeFileTool.execute(
         "call-write-wiki-page",
-        { path: "knowledge-base/wiki/pages/eda.md", content: "# EDA\n" },
+        { path: "knowledge-base/pages/eda.md", content: "# EDA\n" },
         undefined,
       ),
       /cannot create or overwrite synthesis wiki pages/i,
@@ -1252,7 +1252,7 @@ test("write_file rejects synthesis wiki page writes", async () => {
     await assert.rejects(
       () => writeFileTool.execute(
         "call-write-wiki-page-absolute",
-        { path: path.join(workspace, "knowledge-base/wiki/pages/eda.md"), content: "# EDA\n" },
+        { path: path.join(workspace, "knowledge-base/pages/eda.md"), content: "# EDA\n" },
         undefined,
       ),
       /cannot create or overwrite synthesis wiki pages/i,
@@ -1959,11 +1959,11 @@ test("fetch_paper_webpage saves full article text but returns compact JSON for m
           engine: "webpage",
           pdfSha256: "web-sha",
           artifacts: {
-            sourcePath: path.join(workspace, "knowledge-base/wiki/sources/example-paper/source.json"),
-            parsePath: path.join(workspace, "knowledge-base/wiki/sources/example-paper/parses/webpage/parse.json"),
-            markdownPath: path.join(workspace, "knowledge-base/wiki/sources/example-paper/parses/webpage/document.md"),
-            qualityPath: path.join(workspace, "knowledge-base/wiki/sources/example-paper/parses/webpage/quality.json"),
-            chunksPath: path.join(workspace, "knowledge-base/wiki/sources/example-paper/chunks/webpage.jsonl"),
+            sourcePath: path.join(workspace, "knowledge-base/sources/example-paper/source.json"),
+            parsePath: path.join(workspace, "knowledge-base/sources/example-paper/parses/webpage/parse.json"),
+            markdownPath: path.join(workspace, "knowledge-base/sources/example-paper/parses/webpage/document.md"),
+            qualityPath: path.join(workspace, "knowledge-base/sources/example-paper/parses/webpage/quality.json"),
+            chunksPath: path.join(workspace, "knowledge-base/sources/example-paper/chunks/webpage.jsonl"),
           },
           quality: {
             status: "good",
@@ -2019,11 +2019,11 @@ test("fetch_paper_webpage saves full article text but returns compact JSON for m
         engine: "webpage",
         pdfSha256: "web-sha",
         artifacts: {
-          sourcePath: path.join(workspace, "knowledge-base/wiki/sources/example-paper/source.json"),
-          parsePath: path.join(workspace, "knowledge-base/wiki/sources/example-paper/parses/webpage/parse.json"),
-          markdownPath: path.join(workspace, "knowledge-base/wiki/sources/example-paper/parses/webpage/document.md"),
-          qualityPath: path.join(workspace, "knowledge-base/wiki/sources/example-paper/parses/webpage/quality.json"),
-          chunksPath: path.join(workspace, "knowledge-base/wiki/sources/example-paper/chunks/webpage.jsonl"),
+          sourcePath: path.join(workspace, "knowledge-base/sources/example-paper/source.json"),
+          parsePath: path.join(workspace, "knowledge-base/sources/example-paper/parses/webpage/parse.json"),
+          markdownPath: path.join(workspace, "knowledge-base/sources/example-paper/parses/webpage/document.md"),
+          qualityPath: path.join(workspace, "knowledge-base/sources/example-paper/parses/webpage/quality.json"),
+          chunksPath: path.join(workspace, "knowledge-base/sources/example-paper/chunks/webpage.jsonl"),
         },
         quality: {
           status: "good",
@@ -2207,11 +2207,11 @@ test("download_paper prefers arXiv HTML webpage markdown before TeX source and P
           engine: "webpage",
           pdfSha256: "webpage-hash",
           artifacts: {
-            sourcePath: path.join(workspace, "knowledge-base/wiki/sources/arxiv-2601.00425/source.json"),
-            parsePath: path.join(workspace, "knowledge-base/wiki/sources/arxiv-2601.00425/parses/webpage/parse.json"),
-            markdownPath: path.join(workspace, "knowledge-base/wiki/sources/arxiv-2601.00425/parses/webpage/document.md"),
-            qualityPath: path.join(workspace, "knowledge-base/wiki/sources/arxiv-2601.00425/parses/webpage/quality.json"),
-            chunksPath: path.join(workspace, "knowledge-base/wiki/sources/arxiv-2601.00425/chunks/webpage.jsonl"),
+            sourcePath: path.join(workspace, "knowledge-base/sources/arxiv-2601.00425/source.json"),
+            parsePath: path.join(workspace, "knowledge-base/sources/arxiv-2601.00425/parses/webpage/parse.json"),
+            markdownPath: path.join(workspace, "knowledge-base/sources/arxiv-2601.00425/parses/webpage/document.md"),
+            qualityPath: path.join(workspace, "knowledge-base/sources/arxiv-2601.00425/parses/webpage/quality.json"),
+            chunksPath: path.join(workspace, "knowledge-base/sources/arxiv-2601.00425/chunks/webpage.jsonl"),
           },
           quality: {
             status: "good",
@@ -2300,11 +2300,11 @@ test("download_paper falls back from arxiv.org HTML to ar5iv labs HTML before Te
           engine: "webpage",
           pdfSha256: "webpage-hash",
           artifacts: {
-            sourcePath: path.join(workspace, "knowledge-base/wiki/sources/arxiv-2601.00425/source.json"),
-            parsePath: path.join(workspace, "knowledge-base/wiki/sources/arxiv-2601.00425/parses/webpage/parse.json"),
-            markdownPath: path.join(workspace, "knowledge-base/wiki/sources/arxiv-2601.00425/parses/webpage/document.md"),
-            qualityPath: path.join(workspace, "knowledge-base/wiki/sources/arxiv-2601.00425/parses/webpage/quality.json"),
-            chunksPath: path.join(workspace, "knowledge-base/wiki/sources/arxiv-2601.00425/chunks/webpage.jsonl"),
+            sourcePath: path.join(workspace, "knowledge-base/sources/arxiv-2601.00425/source.json"),
+            parsePath: path.join(workspace, "knowledge-base/sources/arxiv-2601.00425/parses/webpage/parse.json"),
+            markdownPath: path.join(workspace, "knowledge-base/sources/arxiv-2601.00425/parses/webpage/document.md"),
+            qualityPath: path.join(workspace, "knowledge-base/sources/arxiv-2601.00425/parses/webpage/quality.json"),
+            chunksPath: path.join(workspace, "knowledge-base/sources/arxiv-2601.00425/chunks/webpage.jsonl"),
           },
           quality: {
             status: "good",
@@ -2375,11 +2375,11 @@ test("download_paper falls back to arXiv TeX source before PDF parsing when HTML
           engine: "tex-source",
           pdfSha256: "pdf-hash",
           artifacts: {
-            sourcePath: path.join(workspace, "knowledge-base/wiki/sources/arxiv-2601.00425/source.json"),
-            parsePath: path.join(workspace, "knowledge-base/wiki/sources/arxiv-2601.00425/parses/tex-source/parse.json"),
-            markdownPath: path.join(workspace, "knowledge-base/wiki/sources/arxiv-2601.00425/parses/tex-source/document.md"),
-            qualityPath: path.join(workspace, "knowledge-base/wiki/sources/arxiv-2601.00425/parses/tex-source/quality.json"),
-            chunksPath: path.join(workspace, "knowledge-base/wiki/sources/arxiv-2601.00425/chunks/tex-source.jsonl"),
+            sourcePath: path.join(workspace, "knowledge-base/sources/arxiv-2601.00425/source.json"),
+            parsePath: path.join(workspace, "knowledge-base/sources/arxiv-2601.00425/parses/tex-source/parse.json"),
+            markdownPath: path.join(workspace, "knowledge-base/sources/arxiv-2601.00425/parses/tex-source/document.md"),
+            qualityPath: path.join(workspace, "knowledge-base/sources/arxiv-2601.00425/parses/tex-source/quality.json"),
+            chunksPath: path.join(workspace, "knowledge-base/sources/arxiv-2601.00425/chunks/tex-source.jsonl"),
           },
           quality: {
             status: "good",
@@ -2449,10 +2449,10 @@ test("download_paper reuses ready record manifests without re-fetching publisher
       engine: "webpage",
       sourceSha256: "webpage-hash",
       artifacts: {
-        markdownPath: path.join(workspace, "knowledge-base/wiki/sources/nature-s41586-019-1666-5/parses/webpage/document.md"),
-        parsePath: path.join(workspace, "knowledge-base/wiki/sources/nature-s41586-019-1666-5/parses/webpage/parse.json"),
-        qualityPath: path.join(workspace, "knowledge-base/wiki/sources/nature-s41586-019-1666-5/parses/webpage/quality.json"),
-        chunksPath: path.join(workspace, "knowledge-base/wiki/sources/nature-s41586-019-1666-5/chunks/webpage.jsonl")
+        markdownPath: path.join(workspace, "knowledge-base/sources/nature-s41586-019-1666-5/parses/webpage/document.md"),
+        parsePath: path.join(workspace, "knowledge-base/sources/nature-s41586-019-1666-5/parses/webpage/parse.json"),
+        qualityPath: path.join(workspace, "knowledge-base/sources/nature-s41586-019-1666-5/parses/webpage/quality.json"),
+        chunksPath: path.join(workspace, "knowledge-base/sources/nature-s41586-019-1666-5/chunks/webpage.jsonl")
       },
       quality: {
         status: "good",
@@ -2494,7 +2494,7 @@ test("download_paper reuses ready record manifests without re-fetching publisher
     assert.equal((result.details as { reading?: { strategy?: string } }).reading?.strategy, "webpage");
     assert.equal(
       (result.details as { reading?: { markdownPath?: string } }).reading?.markdownPath,
-      "knowledge-base/wiki/sources/nature-s41586-019-1666-5/parses/webpage/document.md"
+      "knowledge-base/sources/nature-s41586-019-1666-5/parses/webpage/document.md"
     );
   } finally {
     await rm(workspace, { recursive: true, force: true });
@@ -2784,7 +2784,7 @@ test("download_paper uses the injected paper manager client for supported-publis
       canonicalId: "10.1126/science.adz8659",
       articleUrl: "https://www.science.org/doi/10.1126/science.adz8659",
       fallbackUrl: "https://www.science.org/doi/10.1126/science.adz8659",
-      recordPath: path.join(workspace, "knowledge-base", "wiki", "sources", "science-10.1126-science.adz8659", "acquisition.json"),
+      recordPath: path.join(workspace, "knowledge-base", "sources", "science-10.1126-science.adz8659", "acquisition.json"),
       failure: {
         code: "manual_login_required",
         message: "The browser session needs manual login or verification for this publisher.",
@@ -2849,7 +2849,7 @@ test("download_paper opens manual fallback when the manager client download is n
       canonicalId: "10.1126/science.adz8659",
       articleUrl,
       fallbackUrl: articleUrl,
-      recordPath: path.join(workspace, "knowledge-base", "wiki", "sources", "science-10.1126-science.adz8659", "acquisition.json"),
+      recordPath: path.join(workspace, "knowledge-base", "sources", "science-10.1126-science.adz8659", "acquisition.json"),
       failure: {
         code: "download_failed",
         message: "Downloaded file is not a valid PDF.",
@@ -2902,7 +2902,7 @@ test("download_paper opens manual fallback when the manager client returns a cod
       canonicalId: "10.1103/PhysRevLett.134.090601",
       articleUrl,
       fallbackUrl: articleUrl,
-      recordPath: path.join(workspace, "knowledge-base", "wiki", "sources", "aps-10.1103-PhysRevLett.134.090601", "acquisition.json"),
+      recordPath: path.join(workspace, "knowledge-base", "sources", "aps-10.1103-PhysRevLett.134.090601", "acquisition.json"),
       failure: {
         code: "download_failed",
         message: "Timed out waiting for PDF download.",
@@ -2963,7 +2963,7 @@ test("download_paper opens manual fallback when canonicalId cannot be derived fr
       canonicalId: fallbackCanonicalId,
       articleUrl,
       fallbackUrl: articleUrl,
-      recordPath: path.join(workspace, "knowledge-base", "wiki", "sources", `science-${fallbackCanonicalId}`, "acquisition.json"),
+      recordPath: path.join(workspace, "knowledge-base", "sources", `science-${fallbackCanonicalId}`, "acquisition.json"),
       failure: {
         code: "download_failed",
         message: "Unable to resolve a canonical paper identifier from the publisher article URL.",
@@ -3025,11 +3025,11 @@ test("parse_paper delegates to the injected paper reader dependency and returns 
         engine: options.engine === "plain-text-baseline" ? "plain-text-baseline" as const : "opendataloader-local" as const,
         pdfSha256: "abc123",
         artifacts: {
-          sourcePath: path.join(options.workspaceDir, "knowledge-base/wiki/sources/arxiv-2406.06015/source.json"),
-          parsePath: path.join(options.workspaceDir, "knowledge-base/wiki/sources/arxiv-2406.06015/parses/plain-text-baseline/parse.json"),
-          markdownPath: path.join(options.workspaceDir, "knowledge-base/wiki/sources/arxiv-2406.06015/parses/plain-text-baseline/document.md"),
-          qualityPath: path.join(options.workspaceDir, "knowledge-base/wiki/sources/arxiv-2406.06015/parses/plain-text-baseline/quality.json"),
-          chunksPath: path.join(options.workspaceDir, "knowledge-base/wiki/sources/arxiv-2406.06015/chunks/plain-text-baseline.jsonl"),
+          sourcePath: path.join(options.workspaceDir, "knowledge-base/sources/arxiv-2406.06015/source.json"),
+          parsePath: path.join(options.workspaceDir, "knowledge-base/sources/arxiv-2406.06015/parses/plain-text-baseline/parse.json"),
+          markdownPath: path.join(options.workspaceDir, "knowledge-base/sources/arxiv-2406.06015/parses/plain-text-baseline/document.md"),
+          qualityPath: path.join(options.workspaceDir, "knowledge-base/sources/arxiv-2406.06015/parses/plain-text-baseline/quality.json"),
+          chunksPath: path.join(options.workspaceDir, "knowledge-base/sources/arxiv-2406.06015/chunks/plain-text-baseline.jsonl"),
         },
         quality: {
           status: "good" as const,
@@ -3174,9 +3174,9 @@ test("write_paper_wiki_source delegates to the injected wiki dependency and retu
         return {
           paperKey: options.paperKey,
           title: options.title ?? "Paper title",
-          sourcePath: "knowledge-base/wiki/sources/arxiv-2406.06015.md",
-          indexPath: "knowledge-base/wiki/index.md",
-          logPath: "knowledge-base/wiki/log.md",
+          sourcePath: "knowledge-base/sources/arxiv-2406.06015.md",
+          indexPath: "knowledge-base/index.md",
+          logPath: "knowledge-base/log.md",
         };
       },
     });
@@ -3195,7 +3195,7 @@ test("write_paper_wiki_source delegates to the injected wiki dependency and retu
         tags: ["quantum"],
       },
     ]);
-    assert.equal((result.details as { sourcePath?: string }).sourcePath, "knowledge-base/wiki/sources/arxiv-2406.06015.md");
+    assert.equal((result.details as { sourcePath?: string }).sourcePath, "knowledge-base/sources/arxiv-2406.06015.md");
   } finally {
     await rm(workspace, { recursive: true, force: true });
   }
@@ -3353,7 +3353,7 @@ test("paper_wiki_relations delegates to the injected relation dependency and ret
           ],
           update: options.relatedPaperKeys ? {
             paperKey: options.paperKey,
-            sourcePath: "knowledge-base/wiki/sources/aps-target.md",
+            sourcePath: "knowledge-base/sources/aps-target.md",
             previousRelatedPaperKeys: [],
             relatedPaperKeys: options.relatedPaperKeys,
             mode: options.mode ?? "append",
@@ -3394,7 +3394,7 @@ test("search_paper_wiki delegates to the injected wiki search dependency and ret
           {
             paperKey: "arxiv-2406.06015",
             title: "Paper title",
-            path: "knowledge-base/wiki/sources/arxiv-2406.06015.md",
+            path: "knowledge-base/sources/arxiv-2406.06015.md",
             snippet: "query match",
           },
         ],
@@ -3534,7 +3534,7 @@ test("wiki_structure_plan delegates to the injected planner and returns details"
               risk: "low",
               issueKind: "duplicate_section",
               owner: "wiki-agent",
-              path: "knowledge-base/wiki/pages/example.md",
+              path: "knowledge-base/pages/example.md",
               reason: "Section appears twice.",
               recommendedTool: "replace_file_text",
             },
@@ -3677,7 +3677,7 @@ test("wiki_apply_structure_plan delegates to the injected applier and returns de
         priority: "medium",
         risk: "low",
         issueKind: "duplicate_section",
-        path: "knowledge-base/wiki/pages/example.md",
+        path: "knowledge-base/pages/example.md",
         target: "Open Questions",
         reason: "Section appears twice.",
         recommendedTool: "wiki_apply_structure_plan",
@@ -3720,7 +3720,7 @@ test("answer_paper_wiki_question builds a citeable wiki evidence package", async
             {
               paperKey: "arxiv-2406.06015",
               title: "Paper title",
-              path: "knowledge-base/wiki/sources/arxiv-2406.06015.md",
+              path: "knowledge-base/sources/arxiv-2406.06015.md",
               snippet: "query match from the source summary",
             },
           ],
@@ -3744,8 +3744,8 @@ test("answer_paper_wiki_question builds a citeable wiki evidence package", async
       maxResults: 2,
     }]);
     assert.equal(details.status, "has_wiki_evidence");
-    assert.equal(details.evidence?.[0]?.citation, "arxiv-2406.06015 (knowledge-base/wiki/sources/arxiv-2406.06015.md)");
-    assert.equal(details.evidence?.[0]?.path, "knowledge-base/wiki/sources/arxiv-2406.06015.md");
+    assert.equal(details.evidence?.[0]?.citation, "arxiv-2406.06015 (knowledge-base/sources/arxiv-2406.06015.md)");
+    assert.equal(details.evidence?.[0]?.path, "knowledge-base/sources/arxiv-2406.06015.md");
     assert.deepEqual(details.fallbackMatches, []);
   } finally {
     await rm(workspace, { recursive: true, force: true });
@@ -3778,7 +3778,7 @@ test("answer_paper_wiki_question reports local fallback matches as non-wiki evid
             matches: [
               {
                 field: "parsed_markdown",
-                path: "knowledge-base/wiki/sources/aps-target/parses/opendataloader-local/document.md",
+                path: "knowledge-base/sources/aps-target/parses/opendataloader-local/document.md",
                 engine: "opendataloader-local",
                 snippet: "raw parsed match",
               },
@@ -3817,7 +3817,7 @@ test("answer_research_question stops after local wiki evidence is found", async 
           {
             paperKey: "arxiv-local",
             title: "Local evidence",
-            path: "knowledge-base/wiki/sources/arxiv-local.md",
+            path: "knowledge-base/sources/arxiv-local.md",
             snippet: "local wiki evidence",
           },
         ],
@@ -3846,7 +3846,7 @@ test("answer_research_question stops after local wiki evidence is found", async 
 
 test("answer_research_question can download, parse, summarize, and refresh wiki evidence", async () => {
   const workspace = await mkdtemp(path.join(tmpdir(), "pi-agent-tools-"));
-  const recordPath = path.join(workspace, "knowledge-base", "wiki", "sources", "arxiv-2601.00425", "acquisition.json");
+  const recordPath = path.join(workspace, "knowledge-base", "sources", "arxiv-2601.00425", "acquisition.json");
   const pdfPath = path.join(workspace, "knowledge-base", "raw", "pdfs", "arxiv-2601.00425.pdf");
   let wikiSearchCalls = 0;
 
@@ -3861,7 +3861,7 @@ test("answer_research_question can download, parse, summarize, and refresh wiki 
                 {
                   paperKey: "arxiv-2601.00425",
                   title: "Newly summarized paper",
-                  path: "knowledge-base/wiki/sources/arxiv-2601.00425.md",
+                  path: "knowledge-base/sources/arxiv-2601.00425.md",
                   snippet: "newly written wiki evidence",
                 },
               ]
@@ -3909,11 +3909,11 @@ test("answer_research_question can download, parse, summarize, and refresh wiki 
         engine: "tex-source" as const,
         pdfSha256: "pdf-hash",
         artifacts: {
-          sourcePath: path.join(workspace, "knowledge-base/wiki/sources/arxiv-2601.00425/source.json"),
-          parsePath: path.join(workspace, "knowledge-base/wiki/sources/arxiv-2601.00425/parses/tex-source/parse.json"),
-          markdownPath: path.join(workspace, "knowledge-base/wiki/sources/arxiv-2601.00425/parses/tex-source/document.md"),
-          qualityPath: path.join(workspace, "knowledge-base/wiki/sources/arxiv-2601.00425/parses/tex-source/quality.json"),
-          chunksPath: path.join(workspace, "knowledge-base/wiki/sources/arxiv-2601.00425/chunks/tex-source.jsonl"),
+          sourcePath: path.join(workspace, "knowledge-base/sources/arxiv-2601.00425/source.json"),
+          parsePath: path.join(workspace, "knowledge-base/sources/arxiv-2601.00425/parses/tex-source/parse.json"),
+          markdownPath: path.join(workspace, "knowledge-base/sources/arxiv-2601.00425/parses/tex-source/document.md"),
+          qualityPath: path.join(workspace, "knowledge-base/sources/arxiv-2601.00425/parses/tex-source/quality.json"),
+          chunksPath: path.join(workspace, "knowledge-base/sources/arxiv-2601.00425/chunks/tex-source.jsonl"),
         },
         quality: {
           status: "good" as const,
@@ -3950,9 +3950,9 @@ test("answer_research_question can download, parse, summarize, and refresh wiki 
         source: {
           paperKey: options.paperKey,
           title: "Newly summarized paper",
-          sourcePath: "knowledge-base/wiki/sources/arxiv-2601.00425.md",
-          indexPath: "knowledge-base/wiki/index.md",
-          logPath: "knowledge-base/wiki/log.md",
+          sourcePath: "knowledge-base/sources/arxiv-2601.00425.md",
+          indexPath: "knowledge-base/index.md",
+          logPath: "knowledge-base/log.md",
         },
       }),
       paperSummaryWorker: async () => ({
@@ -4004,7 +4004,7 @@ test("bootstrap_wiki_page_evidence generates missing source summaries and refres
                   key: "arxiv-2507.09690",
                   paperKey: "arxiv-2507.09690",
                   title: "Small Quantum LDPC Codes",
-                  path: "knowledge-base/wiki/sources/arxiv-2507.09690.md",
+                  path: "knowledge-base/sources/arxiv-2507.09690.md",
                   snippet: "source summary evidence",
                   origin: "seed_search",
                 },
@@ -4017,7 +4017,7 @@ test("bootstrap_wiki_page_evidence generates missing source summaries and refres
               paperKey: "arxiv-2507.09690",
               title: "Small Quantum LDPC Codes",
               field: "parsed_markdown",
-              path: "knowledge-base/wiki/sources/arxiv-2507.09690/parses/tex-source/document.md",
+              path: "knowledge-base/sources/arxiv-2507.09690/parses/tex-source/document.md",
               snippet: "parsed qLDPC evidence",
             },
           ],
@@ -4058,9 +4058,9 @@ test("bootstrap_wiki_page_evidence generates missing source summaries and refres
           source: {
             paperKey: options.paperKey,
             title: "Small Quantum LDPC Codes",
-            sourcePath: "knowledge-base/wiki/sources/arxiv-2507.09690.md",
-            indexPath: "knowledge-base/wiki/index.md",
-            logPath: "knowledge-base/wiki/log.md",
+            sourcePath: "knowledge-base/sources/arxiv-2507.09690.md",
+            indexPath: "knowledge-base/index.md",
+            logPath: "knowledge-base/log.md",
           },
         };
       },
@@ -4135,7 +4135,7 @@ test("research_topic_bootstrap maps local evidence into gaps and suggested pages
             key: "nature-s41586-024-08449-y",
             paperKey: "nature-s41586-024-08449-y",
             title: "Quantum error correction below the surface code threshold",
-            path: "knowledge-base/wiki/sources/nature-s41586-024-08449-y.md",
+            path: "knowledge-base/sources/nature-s41586-024-08449-y.md",
             snippet: "surface code threshold on superconducting processors",
             origin: "seed_search",
           },
@@ -4186,7 +4186,7 @@ test("expand_research_topic searches externally even when local wiki evidence ex
             key: "science-10.1126-science.1231930",
             paperKey: "science-10.1126-science.1231930",
             title: "Superconducting Circuits for Quantum Information",
-            path: "knowledge-base/wiki/sources/science-10.1126-science.1231930.md",
+            path: "knowledge-base/sources/science-10.1126-science.1231930.md",
             snippet: "local evidence exists",
             origin: "seed_search",
           },
@@ -4197,7 +4197,7 @@ test("expand_research_topic searches externally even when local wiki evidence ex
             key: "superconducting-quantum-computing",
             pageKey: "superconducting-quantum-computing",
             title: "超导量子计算",
-            path: "knowledge-base/wiki/pages/superconducting-quantum-computing.md",
+            path: "knowledge-base/pages/superconducting-quantum-computing.md",
             snippet: "existing synthesis page",
             origin: "seed_search",
           },
@@ -4264,7 +4264,7 @@ test("build_wiki_page writes a synthesis page from local wiki evidence", async (
           {
             paperKey: "arxiv-2507.09690",
             title: "Small Quantum LDPC Codes",
-            path: "knowledge-base/wiki/sources/arxiv-2507.09690.md",
+            path: "knowledge-base/sources/arxiv-2507.09690.md",
             snippet: "LDPC implementation evidence",
           },
         ],
@@ -4290,16 +4290,16 @@ test("build_wiki_page writes a synthesis page from local wiki evidence", async (
     };
 
     assert.equal(details.status, "written");
-    assert.equal(details.page?.pagePath, "knowledge-base/wiki/pages/qldpc-superconducting-chips.md");
+    assert.equal(details.page?.pagePath, "knowledge-base/pages/qldpc-superconducting-chips.md");
     assert.equal(details.page?.sourceCount, 1);
     assert.equal(details.evidence?.length, 1);
 
-    const page = await readFile(path.join(workspace, "knowledge-base/wiki/pages/qldpc-superconducting-chips.md"), "utf8");
+    const page = await readFile(path.join(workspace, "knowledge-base/pages/qldpc-superconducting-chips.md"), "utf8");
     assert.match(page, /type: "wiki-synthesis-page"/);
     assert.match(page, /qLDPC on Superconducting Chips/);
     assert.match(page, /arxiv-2507\.09690/);
 
-    const index = await readFile(path.join(workspace, "knowledge-base/wiki/index.md"), "utf8");
+    const index = await readFile(path.join(workspace, "knowledge-base/index.md"), "utf8");
     assert.match(index, /## Knowledge Entries/);
     assert.match(index, /\[qLDPC on Superconducting Chips\]\(pages\/qldpc-superconducting-chips\.md\)/);
     assert.match(index, /qldpc-superconducting-chips/);
@@ -4318,7 +4318,7 @@ test("build_wiki_page refuses write mode when minSources is not met", async () =
         results: [{
           paperKey: "paper-a",
           title: "Single Evidence",
-          path: "knowledge-base/wiki/sources/paper-a.md",
+          path: "knowledge-base/sources/paper-a.md",
           snippet: "single source",
         }],
       }),
@@ -4338,7 +4338,7 @@ test("build_wiki_page refuses write mode when minSources is not met", async () =
 
     assert.equal(details.status, "needs_evidence");
     assert.match(details.message ?? "", /minimum source count/i);
-    await assert.rejects(readFile(path.join(workspace, "knowledge-base/wiki/pages/tunable-coupler.md"), "utf8"));
+    await assert.rejects(readFile(path.join(workspace, "knowledge-base/pages/tunable-coupler.md"), "utf8"));
   } finally {
     await rm(workspace, { recursive: true, force: true });
   }
@@ -4354,7 +4354,7 @@ test("build_wiki_page does not let non-paper contracts bypass minSources", async
         results: [{
           paperKey: "paper-a",
           title: "Single Evidence",
-          path: "knowledge-base/wiki/sources/paper-a.md",
+          path: "knowledge-base/sources/paper-a.md",
           snippet: "single source",
         }],
       }),
@@ -4375,7 +4375,7 @@ test("build_wiki_page does not let non-paper contracts bypass minSources", async
 
     assert.equal(details.status, "needs_evidence");
     assert.match(details.message ?? "", /minimum source count/i);
-    await assert.rejects(readFile(path.join(workspace, "knowledge-base/wiki/pages/design-backed-topic.md"), "utf8"));
+    await assert.rejects(readFile(path.join(workspace, "knowledge-base/pages/design-backed-topic.md"), "utf8"));
   } finally {
     await rm(workspace, { recursive: true, force: true });
   }
@@ -4392,13 +4392,13 @@ test("build_wiki_page counts unique source paper keys for minSources", async () 
           {
             paperKey: "paper-a",
             title: "Evidence A",
-            path: "knowledge-base/wiki/sources/paper-a.md",
+            path: "knowledge-base/sources/paper-a.md",
             snippet: "source A",
           },
           {
             paperKey: "Paper-A",
             title: "Evidence A Duplicate",
-            path: "knowledge-base/wiki/sources/paper-a-duplicate.md",
+            path: "knowledge-base/sources/paper-a-duplicate.md",
             snippet: "duplicate source A",
           },
         ],
@@ -4419,7 +4419,7 @@ test("build_wiki_page counts unique source paper keys for minSources", async () 
 
     assert.equal(details.status, "needs_evidence");
     assert.match(details.message ?? "", /minimum source count 2 is not met; found 1/i);
-    await assert.rejects(readFile(path.join(workspace, "knowledge-base/wiki/pages/duplicate-evidence-topic.md"), "utf8"));
+    await assert.rejects(readFile(path.join(workspace, "knowledge-base/pages/duplicate-evidence-topic.md"), "utf8"));
   } finally {
     await rm(workspace, { recursive: true, force: true });
   }
@@ -4436,13 +4436,13 @@ test("build_wiki_page writes evidence contract and verifies after write", async 
           {
             paperKey: "paper-a",
             title: "Evidence A",
-            path: "knowledge-base/wiki/sources/paper-a.md",
+            path: "knowledge-base/sources/paper-a.md",
             snippet: "source A",
           },
           {
             paperKey: "paper-b",
             title: "Evidence B",
-            path: "knowledge-base/wiki/sources/paper-b.md",
+            path: "knowledge-base/sources/paper-b.md",
             snippet: "source B",
           },
         ],
@@ -4467,7 +4467,7 @@ test("build_wiki_page writes evidence contract and verifies after write", async 
 
     assert.equal(details.status, "written");
     assert.equal(typeof details.verification?.lintAfter?.issueCount, "number");
-    const page = await readFile(path.join(workspace, "knowledge-base/wiki/pages/tunable-coupler.md"), "utf8");
+    const page = await readFile(path.join(workspace, "knowledge-base/pages/tunable-coupler.md"), "utf8");
     assert.match(page, /evidence_contract: "paper-backed"/);
   } finally {
     await rm(workspace, { recursive: true, force: true });
@@ -4476,8 +4476,8 @@ test("build_wiki_page writes evidence contract and verifies after write", async 
 
 test("merge_wiki_aliases writes alias pages and refreshes the wiki index", async () => {
   const workspace = await mkdtemp(path.join(tmpdir(), "pi-agent-tools-"));
-  const pagesDir = path.join(workspace, "knowledge-base/wiki/pages");
-  const sourcesDir = path.join(workspace, "knowledge-base/wiki/sources");
+  const pagesDir = path.join(workspace, "knowledge-base/pages");
+  const sourcesDir = path.join(workspace, "knowledge-base/sources");
   await mkdir(pagesDir, { recursive: true });
   await mkdir(sourcesDir, { recursive: true });
   await writeFile(path.join(sourcesDir, "eda-source.md"), "# EDA Source\n\nSource-backed evidence.", "utf8");
@@ -4489,7 +4489,7 @@ tags: []
 sources:
   - paper_key: "eda-source"
     title: "EDA Source"
-    path: "knowledge-base/wiki/sources/eda-source.md"
+    path: "knowledge-base/sources/eda-source.md"
 related_pages: []
 ---
 
@@ -4526,16 +4526,16 @@ Canonical content.
         aliasPageKey: "eda",
         canonicalPageKey: "electronic-design-automation",
         status: "written",
-        pagePath: "knowledge-base/wiki/pages/eda.md",
+        pagePath: "knowledge-base/pages/eda.md",
       },
     ]);
 
     const aliasPage = await readFile(path.join(pagesDir, "eda.md"), "utf8");
     assert.match(aliasPage, /type: "wiki-alias-page"/);
     assert.match(aliasPage, /canonical_page: "electronic-design-automation"/);
-    assert.match(aliasPage, /\[Electronic Design Automation\]\(knowledge-base\/wiki\/pages\/electronic-design-automation\.md\)/);
+    assert.match(aliasPage, /\[Electronic Design Automation\]\(knowledge-base\/pages\/electronic-design-automation\.md\)/);
 
-    const index = await readFile(path.join(workspace, "knowledge-base/wiki/index.md"), "utf8");
+    const index = await readFile(path.join(workspace, "knowledge-base/index.md"), "utf8");
     assert.match(index, /\[EDA\]\(pages\/eda\.md\)/);
     assert.match(index, /\[Electronic Design Automation\]\(pages\/electronic-design-automation\.md\)/);
 
@@ -4563,7 +4563,7 @@ Canonical content.
 
 test("merge_wiki_aliases refuses to replace existing synthesis pages unless requested", async () => {
   const workspace = await mkdtemp(path.join(tmpdir(), "pi-agent-tools-"));
-  const pagesDir = path.join(workspace, "knowledge-base/wiki/pages");
+  const pagesDir = path.join(workspace, "knowledge-base/pages");
   await mkdir(pagesDir, { recursive: true });
   await writeFile(path.join(pagesDir, "surface-code.md"), `---
 type: "wiki-synthesis-page"
@@ -4631,7 +4631,7 @@ test("build_wiki_page can return a draft without writing the page", async () => 
           {
             paperKey: "arxiv-local",
             title: "Local source",
-            path: "knowledge-base/wiki/sources/arxiv-local.md",
+            path: "knowledge-base/sources/arxiv-local.md",
             snippet: "local evidence",
           },
         ],

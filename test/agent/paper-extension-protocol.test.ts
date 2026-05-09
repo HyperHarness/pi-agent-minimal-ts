@@ -216,10 +216,10 @@ test("parseExtensionHostResponse accepts webpage_registered responses", () => {
     jobId: "job-webpage",
     articleUrl: "https://www.science.org/doi/10.1126/science.adz8659",
     paperKey: "science-10.1126-science.adz8659",
-    markdownPath: "knowledge-base/wiki/sources/science-10.1126-science.adz8659/parses/webpage/document.md",
-    parsePath: "knowledge-base/wiki/sources/science-10.1126-science.adz8659/parses/webpage/parse.json",
-    qualityPath: "knowledge-base/wiki/sources/science-10.1126-science.adz8659/parses/webpage/quality.json",
-    chunksPath: "knowledge-base/wiki/sources/science-10.1126-science.adz8659/chunks/webpage.jsonl",
+    markdownPath: "knowledge-base/sources/science-10.1126-science.adz8659/parses/webpage/document.md",
+    parsePath: "knowledge-base/sources/science-10.1126-science.adz8659/parses/webpage/parse.json",
+    qualityPath: "knowledge-base/sources/science-10.1126-science.adz8659/parses/webpage/quality.json",
+    chunksPath: "knowledge-base/sources/science-10.1126-science.adz8659/chunks/webpage.jsonl",
     quality: {
       status: "good",
       score: 1,
@@ -235,10 +235,10 @@ test("parseExtensionHostResponse accepts webpage_registered responses", () => {
     jobId: "job-webpage",
     articleUrl: "https://www.science.org/doi/10.1126/science.adz8659",
     paperKey: "science-10.1126-science.adz8659",
-    markdownPath: "knowledge-base/wiki/sources/science-10.1126-science.adz8659/parses/webpage/document.md",
-    parsePath: "knowledge-base/wiki/sources/science-10.1126-science.adz8659/parses/webpage/parse.json",
-    qualityPath: "knowledge-base/wiki/sources/science-10.1126-science.adz8659/parses/webpage/quality.json",
-    chunksPath: "knowledge-base/wiki/sources/science-10.1126-science.adz8659/chunks/webpage.jsonl",
+    markdownPath: "knowledge-base/sources/science-10.1126-science.adz8659/parses/webpage/document.md",
+    parsePath: "knowledge-base/sources/science-10.1126-science.adz8659/parses/webpage/parse.json",
+    qualityPath: "knowledge-base/sources/science-10.1126-science.adz8659/parses/webpage/quality.json",
+    chunksPath: "knowledge-base/sources/science-10.1126-science.adz8659/chunks/webpage.jsonl",
     quality: {
       status: "good",
       score: 1,
@@ -274,7 +274,7 @@ test("parseExtensionHostResponse accepts registered responses", () => {
     jobId: "job-123",
     articleUrl: "https://example.com/paper",
     downloadPath: "knowledge-base/raw/pdfs/external-paper.pdf",
-    recordPath: "knowledge-base/wiki/sources/external-paper/acquisition.json",
+    recordPath: "knowledge-base/sources/external-paper/acquisition.json",
     fileSha256: "abc123",
     title: "External Paper"
   });
@@ -284,7 +284,7 @@ test("parseExtensionHostResponse accepts registered responses", () => {
     jobId: "job-123",
     articleUrl: "https://example.com/paper",
     downloadPath: "knowledge-base/raw/pdfs/external-paper.pdf",
-    recordPath: "knowledge-base/wiki/sources/external-paper/acquisition.json",
+    recordPath: "knowledge-base/sources/external-paper/acquisition.json",
     fileSha256: "abc123",
     title: "External Paper"
   });

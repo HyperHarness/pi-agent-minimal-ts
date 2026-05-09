@@ -630,7 +630,7 @@ related_pages:
 
 # ${title}
 
-This page is an alias for [${canonicalTitle}](knowledge-base/wiki/pages/${canonicalPageKey}.md).
+This page is an alias for [${canonicalTitle}](knowledge-base/pages/${canonicalPageKey}.md).
 
 Use the canonical page for maintained synthesis content.
 
