@@ -407,6 +407,11 @@ type BuildWikiPageTool = {
       maxDownloads?: number;
       autoDownload?: boolean;
       autoSummarize?: boolean;
+      evidenceContract?: "paper-backed" | "design-backed" | "code-backed" | "mixed";
+      minSources?: number;
+      requiredSourceKeys?: string[];
+      forbidExternalEvidence?: boolean;
+      verifyAfterWrite?: boolean;
     },
     signal: undefined,
   ) => Promise<ToolResult>;
@@ -4296,6 +4301,172 @@ test("build_wiki_page writes a synthesis page from local wiki evidence", async (
     assert.match(index, /## Knowledge Entries/);
     assert.match(index, /\[qLDPC on Superconducting Chips\]\(pages\/qldpc-superconducting-chips\.md\)/);
     assert.match(index, /qldpc-superconducting-chips/);
+  } finally {
+    await rm(workspace, { recursive: true, force: true });
+  }
+});
+
+test("build_wiki_page refuses write mode when minSources is not met", async () => {
+  const workspace = await mkdtemp(path.join(tmpdir(), "pi-agent-tools-"));
+
+  try {
+    const tool = getBuildWikiPageTool(workspace, {
+      searchPaperWiki: async (options) => ({
+        query: options.query,
+        results: [{
+          paperKey: "paper-a",
+          title: "Single Evidence",
+          path: "knowledge-base/wiki/sources/paper-a.md",
+          snippet: "single source",
+        }],
+      }),
+      paperWikiPageWorker: async () => ({
+        title: "Tunable Coupler",
+        pageMarkdown: "## Overview\n\nOne-source draft.",
+        confidence: "high",
+      }),
+    });
+
+    const result = await tool.execute("build-page-min-sources", {
+      topic: "tunable coupler",
+      pageKey: "tunable-coupler",
+      minSources: 2,
+    }, undefined);
+    const details = result.details as { status?: string; message?: string };
+
+    assert.equal(details.status, "needs_evidence");
+    assert.match(details.message ?? "", /minimum source count/i);
+    await assert.rejects(readFile(path.join(workspace, "knowledge-base/wiki/pages/tunable-coupler.md"), "utf8"));
+  } finally {
+    await rm(workspace, { recursive: true, force: true });
+  }
+});
+
+test("build_wiki_page does not let non-paper contracts bypass minSources", async () => {
+  const workspace = await mkdtemp(path.join(tmpdir(), "pi-agent-tools-"));
+
+  try {
+    const tool = getBuildWikiPageTool(workspace, {
+      searchPaperWiki: async (options) => ({
+        query: options.query,
+        results: [{
+          paperKey: "paper-a",
+          title: "Single Evidence",
+          path: "knowledge-base/wiki/sources/paper-a.md",
+          snippet: "single source",
+        }],
+      }),
+      paperWikiPageWorker: async () => ({
+        title: "Design Backed Page",
+        pageMarkdown: "## Overview\n\nOne-source draft.",
+        confidence: "high",
+      }),
+    });
+
+    const result = await tool.execute("build-page-contract-min-sources", {
+      topic: "design backed topic",
+      pageKey: "design-backed-topic",
+      evidenceContract: "design-backed",
+      minSources: 2,
+    }, undefined);
+    const details = result.details as { status?: string; message?: string };
+
+    assert.equal(details.status, "needs_evidence");
+    assert.match(details.message ?? "", /minimum source count/i);
+    await assert.rejects(readFile(path.join(workspace, "knowledge-base/wiki/pages/design-backed-topic.md"), "utf8"));
+  } finally {
+    await rm(workspace, { recursive: true, force: true });
+  }
+});
+
+test("build_wiki_page counts unique source paper keys for minSources", async () => {
+  const workspace = await mkdtemp(path.join(tmpdir(), "pi-agent-tools-"));
+
+  try {
+    const tool = getBuildWikiPageTool(workspace, {
+      searchPaperWiki: async (options) => ({
+        query: options.query,
+        results: [
+          {
+            paperKey: "paper-a",
+            title: "Evidence A",
+            path: "knowledge-base/wiki/sources/paper-a.md",
+            snippet: "source A",
+          },
+          {
+            paperKey: "Paper-A",
+            title: "Evidence A Duplicate",
+            path: "knowledge-base/wiki/sources/paper-a-duplicate.md",
+            snippet: "duplicate source A",
+          },
+        ],
+      }),
+      paperWikiPageWorker: async () => ({
+        title: "Duplicate Evidence Page",
+        pageMarkdown: "## Overview\n\nDuplicate-source draft.",
+        confidence: "high",
+      }),
+    });
+
+    const result = await tool.execute("build-page-duplicate-min-sources", {
+      topic: "duplicate evidence topic",
+      pageKey: "duplicate-evidence-topic",
+      minSources: 2,
+    }, undefined);
+    const details = result.details as { status?: string; message?: string };
+
+    assert.equal(details.status, "needs_evidence");
+    assert.match(details.message ?? "", /minimum source count 2 is not met; found 1/i);
+    await assert.rejects(readFile(path.join(workspace, "knowledge-base/wiki/pages/duplicate-evidence-topic.md"), "utf8"));
+  } finally {
+    await rm(workspace, { recursive: true, force: true });
+  }
+});
+
+test("build_wiki_page writes evidence contract and verifies after write", async () => {
+  const workspace = await mkdtemp(path.join(tmpdir(), "pi-agent-tools-"));
+
+  try {
+    const tool = getBuildWikiPageTool(workspace, {
+      searchPaperWiki: async (options) => ({
+        query: options.query,
+        results: [
+          {
+            paperKey: "paper-a",
+            title: "Evidence A",
+            path: "knowledge-base/wiki/sources/paper-a.md",
+            snippet: "source A",
+          },
+          {
+            paperKey: "paper-b",
+            title: "Evidence B",
+            path: "knowledge-base/wiki/sources/paper-b.md",
+            snippet: "source B",
+          },
+        ],
+      }),
+      paperWikiPageWorker: async () => ({
+        title: "Tunable Coupler",
+        pageMarkdown: "## Overview\n\nTwo-source synthesis.",
+        confidence: "high",
+      }),
+    });
+
+    const result = await tool.execute("build-page-contract", {
+      topic: "tunable coupler",
+      pageKey: "tunable-coupler",
+      minSources: 2,
+      requiredSourceKeys: ["paper-a"],
+      evidenceContract: "paper-backed",
+      forbidExternalEvidence: true,
+      verifyAfterWrite: true,
+    }, undefined);
+    const details = result.details as { status?: string; verification?: { lintAfter?: { issueCount?: number } } };
+
+    assert.equal(details.status, "written");
+    assert.equal(typeof details.verification?.lintAfter?.issueCount, "number");
+    const page = await readFile(path.join(workspace, "knowledge-base/wiki/pages/tunable-coupler.md"), "utf8");
+    assert.match(page, /evidence_contract: "paper-backed"/);
   } finally {
     await rm(workspace, { recursive: true, force: true });
   }

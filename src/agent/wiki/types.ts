@@ -101,6 +101,8 @@ export interface PaperWikiPageSourceCitation {
   path: string;
 }
 
+export type PaperWikiEvidenceContract = "paper-backed" | "design-backed" | "code-backed" | "mixed";
+
 export interface PaperWikiPageInput {
   workspaceDir: string;
   topic: string;
@@ -111,6 +113,7 @@ export interface PaperWikiPageInput {
   sourceCitations: PaperWikiPageSourceCitation[];
   openQuestions?: string[];
   relatedPageKeys?: string[];
+  evidenceContract?: PaperWikiEvidenceContract;
 }
 
 export interface PaperWikiPageResult {

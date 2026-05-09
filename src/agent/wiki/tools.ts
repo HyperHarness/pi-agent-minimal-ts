@@ -257,6 +257,25 @@ const buildWikiPageParameters = Type.Object({
   ),
   autoSummarize: Type.Optional(
     Type.Boolean({ description: "Whether to write missing source summaries before building the page. Defaults to true." })
+  ),
+  evidenceContract: Type.Optional(Type.Union([
+    Type.Literal("paper-backed"),
+    Type.Literal("design-backed"),
+    Type.Literal("code-backed"),
+    Type.Literal("mixed")
+  ], { description: "Evidence contract to write into page frontmatter." })),
+  minSources: Type.Optional(Type.Integer({
+    description: "Minimum citeable source summaries required before writing. Defaults to 1.",
+    minimum: 0
+  })),
+  requiredSourceKeys: Type.Optional(Type.Array(Type.String({
+    description: "Paper keys that must be present in selected source evidence before writing."
+  }))),
+  forbidExternalEvidence: Type.Optional(
+    Type.Boolean({ description: "Do not fall back to external evidence acquisition even outside wiki-agent boundary. Defaults to false." })
+  ),
+  verifyAfterWrite: Type.Optional(
+    Type.Boolean({ description: "Run wiki_lint after writing and include verification summary. Defaults to false." })
   )
 });
 
@@ -464,6 +483,9 @@ type BuildWikiPageDetails = {
   message: string;
   draft?: PaperWikiPageWorkerOutput;
   page?: Awaited<ReturnType<typeof writePaperWikiPage>>;
+  verification?: {
+    lintAfter?: Awaited<ReturnType<typeof lintPaperWiki>>;
+  };
   evidence: Array<{
     kind: "source" | "page";
     key: string;
@@ -698,6 +720,24 @@ function emitToolProgress(
   });
 }
 
+function normalizePaperEvidenceKey(value: string): string {
+  return value.trim().toLowerCase();
+}
+
+function uniqueSourceEvidenceByPaperKey<T extends { paperKey: string }>(items: T[]): T[] {
+  const seen = new Set<string>();
+  const unique: T[] = [];
+  for (const item of items) {
+    const key = normalizePaperEvidenceKey(item.paperKey);
+    if (!key || seen.has(key)) {
+      continue;
+    }
+    seen.add(key);
+    unique.push(item);
+  }
+  return unique;
+}
+
 function compactBuildWikiPageResult(result: BuildWikiPageDetails): Record<string, unknown> {
   return {
     topic: result.topic,
@@ -717,6 +757,7 @@ function compactBuildWikiPageResult(result: BuildWikiPageDetails): Record<string
     } : {}),
     ...(result.research ? { researchStatus: result.research.status } : {}),
     ...(result.page ? { page: result.page } : {}),
+    ...(result.verification?.lintAfter ? { verification: { lintAfter: result.verification.lintAfter } } : {}),
     ...(result.draft && result.mode === "draft" ? { draft: result.draft } : {}),
     ...(result.draft && result.mode !== "draft"
       ? {
@@ -1615,7 +1656,8 @@ export function createWikiTools(input: {
         item.kind === "source" && typeof item.paperKey === "string" && item.paperKey.length > 0
       );
 
-      const allowExternalEvidence = dependencies.allowBuildWikiPageExternalEvidence ?? true;
+      const allowExternalEvidence =
+        (dependencies.allowBuildWikiPageExternalEvidence ?? true) && args.forbidExternalEvidence !== true;
       const needsExternalEvidenceForWrite = sourceEvidence.length === 0 && mode !== "draft";
       const needsAnyEvidenceForDraft = evidence.length === 0 && mode === "draft";
 
@@ -1654,6 +1696,12 @@ export function createWikiTools(input: {
         );
       }
 
+      sourceEvidence = uniqueSourceEvidenceByPaperKey(sourceEvidence);
+      evidence = [
+        ...sourceEvidence,
+        ...evidence.filter((item) => item.kind !== "source")
+      ];
+
       if (evidence.length === 0) {
         const result: BuildWikiPageDetails = {
           topic: args.topic,
@@ -1682,6 +1730,45 @@ export function createWikiTools(input: {
           status: "needs_evidence",
           message:
             "Cannot write a wiki page because the available local evidence came from synthesis pages only; regenerate from citeable source summaries or run in draft mode.",
+          evidence
+        };
+        return {
+          content: [{ type: "text", text: JSON.stringify(compactBuildWikiPageResult(result)) }],
+          details: result
+        };
+      }
+
+      const minSources = Math.max(0, Math.trunc(args.minSources ?? 1));
+      const requiredSourceKeys = new Set((args.requiredSourceKeys ?? []).map(normalizePaperEvidenceKey));
+      const presentSourceKeys = new Set(sourceEvidence.map((item) => normalizePaperEvidenceKey(item.paperKey)));
+      const missingRequiredSourceKeys = [...requiredSourceKeys]
+        .filter((paperKey) => !presentSourceKeys.has(paperKey));
+      const evidenceContract = args.evidenceContract;
+      if (mode !== "draft" && sourceEvidence.length < minSources) {
+        const result: BuildWikiPageDetails = {
+          topic: args.topic,
+          ...(args.question ? { question: args.question } : {}),
+          mode,
+          bootstrap,
+          ...(research ? { research } : {}),
+          status: "needs_evidence",
+          message: `Cannot write a wiki page because minimum source count ${minSources} is not met; found ${sourceEvidence.length}.`,
+          evidence
+        };
+        return {
+          content: [{ type: "text", text: JSON.stringify(compactBuildWikiPageResult(result)) }],
+          details: result
+        };
+      }
+      if (mode !== "draft" && missingRequiredSourceKeys.length > 0) {
+        const result: BuildWikiPageDetails = {
+          topic: args.topic,
+          ...(args.question ? { question: args.question } : {}),
+          mode,
+          bootstrap,
+          ...(research ? { research } : {}),
+          status: "needs_evidence",
+          message: `Cannot write a wiki page because required source keys are missing: ${missingRequiredSourceKeys.join(", ")}.`,
           evidence
         };
         return {
@@ -1754,12 +1841,16 @@ export function createWikiTools(input: {
         ...(draft.tags ? { tags: draft.tags } : {}),
         ...(draft.openQuestions ? { openQuestions: draft.openQuestions } : {}),
         ...(draft.relatedPageKeys ? { relatedPageKeys: draft.relatedPageKeys } : {}),
+        ...(evidenceContract ? { evidenceContract } : {}),
         sourceCitations: sourceEvidence.map((item) => ({
           paperKey: item.paperKey,
           title: item.title,
           path: item.path
         }))
       });
+      const verification = args.verifyAfterWrite
+        ? { lintAfter: await lintPaperWiki({ workspaceDir: resolvedWorkspaceDir, maxItems: 100 }) }
+        : undefined;
       const result: BuildWikiPageDetails = {
         topic: args.topic,
         ...(args.question ? { question: args.question } : {}),
@@ -1770,6 +1861,7 @@ export function createWikiTools(input: {
         message: `Wrote wiki page ${page.pagePath}.`,
         draft,
         page,
+        ...(verification ? { verification } : {}),
         evidence
       };
       return {

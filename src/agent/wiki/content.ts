@@ -478,6 +478,7 @@ type: "wiki-synthesis-page"
 page_key: ${quoteYaml(pageKey)}
 title: ${quoteYaml(title)}
 topic: ${quoteYaml(input.topic)}
+evidence_contract: ${quoteYaml(input.evidenceContract ?? "paper-backed")}
 created_at: ${quoteYaml(now)}
 updated_at: ${quoteYaml(now)}
 tags: ${yamlList(input.tags)}
