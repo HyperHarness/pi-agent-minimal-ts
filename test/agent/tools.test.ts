@@ -1676,6 +1676,8 @@ test("createTools full profile exposes every built-in tool", async () => {
     const tools = createTools(workspace, { toolProfile: "full" });
     const toolNames = tools.map((tool) => tool.name);
     assert.deepEqual(toolNames, [...EXPECTED_FULL_TOOL_NAMES]);
+    assert.ok(!tools.some((tool) => tool.name === "wiki_coverage_map"));
+    assert.ok(!tools.some((tool) => tool.name === "wiki_concept_triage"));
   } finally {
     await rm(workspace, { recursive: true, force: true });
   }

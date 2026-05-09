@@ -285,7 +285,7 @@ Publisher and external URLs use the browser extension bridge by default when con
 - `answer_paper_wiki_question`: local-wiki-only Q&A over wiki source summaries and synthesis pages
 - `answer_research_question`: evidence-first research workflow; checks local wiki first, then acquires external evidence only when needed
 - `bootstrap_wiki_page_evidence`: prepares source evidence for a new topic page before a page exists
-- `build_wiki_page`: writes durable synthesis pages under `knowledge-base/wiki/pages/`
+- `build_wiki_page`: writes durable synthesis pages under `knowledge-base/wiki/pages/` from local source-summary evidence. It supports explicit evidence contracts, minimum source counts, required source keys, external-evidence blocking, and optional write-after lint verification.
 - `merge_wiki_aliases`: creates alias pages for acronyms, plurals, and duplicate concept names
 - `clarify_research_topic`: turns an ambiguous research request into concrete subtopics and evidence needs
 - `research_topic_bootstrap`: creates an initial evidence plan for a research topic
@@ -301,9 +301,9 @@ The key distinction is that `wiki/sources/*.md` are evidence summaries for indiv
 
 - `wiki_health`: reports acquisition state, downloads, authorization state, parse quality, incomplete `source.json` citation metadata, missing summaries, and missing artifacts
 - `wiki_health_fix`: orchestrates supported repairs. Download and citation-metadata repairs go through the paper-download-subagent boundary; citation refresh first reuses local parse artifacts, then uses arXiv/Crossref metadata when an identifier is available. Parsing stays in the ingestion path; missing summaries go through the `wiki-evidence-worker` summary pass.
-- `wiki_lint`: checks wiki structure, stale index entries, broken links, missing citations, orphan pages, repeated tags that should become pages, duplicate titles, repeated sections, weak uncited pages, and rendered wiki-link failures
-- `wiki_structure_plan`: turns `wiki_lint` findings into a reviewable structure-maintenance plan. It suggests low-risk actions by default and does not rewrite wiki content.
-- `wiki_apply_structure_plan`: applies approved `wiki_structure_plan` actions with dry-run and low-risk safeguards. The first implementation only performs deterministic duplicate-section cleanup and skips unsupported or risky actions.
+- `wiki_lint`: checks wiki structure, source-to-page coverage, repeated concept gaps, evidence-contract gaps, semantic alias candidates, scope drift, stale index entries, broken links, missing citations, orphan pages, duplicate titles, repeated sections, weak uncited pages, and rendered wiki-link failures. Goal/focus options can prioritize concept gaps for a current research direction.
+- `wiki_structure_plan`: turns `wiki_lint` findings into a reviewable, budgeted, goal-aware maintenance plan with owner, risk, recommended tool args, and verification actions. It suggests low-risk actions by default and does not rewrite wiki content.
+- `wiki_apply_structure_plan`: applies approved low-risk `wiki_structure_plan` actions with dry-run and verification safeguards. Supported writes are deterministic duplicate-section cleanup, safe alias creation, deterministic index rebuild, and constrained `## Scope Note` updates.
 
 ### Wiki Evidence Tools
 

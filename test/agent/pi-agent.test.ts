@@ -80,6 +80,7 @@ test("default system prompt requires wiki evidence for scientific questions", ()
   assert.match(DEFAULT_SYSTEM_PROMPT, /clarify_research_topic/);
   assert.match(DEFAULT_SYSTEM_PROMPT, /user is the research lead/i);
   assert.match(DEFAULT_SYSTEM_PROMPT, /local wiki/i);
+  assert.match(DEFAULT_SYSTEM_PROMPT, /wiki_lint/);
   assert.match(DEFAULT_SYSTEM_PROMPT, /wiki_structure_plan/);
   assert.match(DEFAULT_SYSTEM_PROMPT, /wiki_apply_structure_plan/);
   assert.match(DEFAULT_SYSTEM_PROMPT, /cite/i);
