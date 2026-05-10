@@ -1,5 +1,6 @@
 export * from "./types.js";
 export * from "./workspace-contract.js";
+export * from "./page-schema.js";
 export * from "./store.js";
 export * from "./manifest-store.js";
 export * from "./journal.js";
