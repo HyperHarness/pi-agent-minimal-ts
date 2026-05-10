@@ -123,6 +123,8 @@ export interface PaperWikiPageResult {
   pageKey: string;
   title: string;
   pagePath: string;
+  operationId: string;
+  operationJournalPath: string;
   indexPath: string;
   logPath: string;
   sourceCount: number;
@@ -153,6 +155,8 @@ export interface PaperWikiAliasMergeItem {
 export interface PaperWikiAliasMergeResult {
   status: "written" | "partial" | "blocked";
   aliases: PaperWikiAliasMergeItem[];
+  operationId?: string;
+  operationJournalPath?: string;
   indexPath: string;
   logPath: string;
 }

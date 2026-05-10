@@ -1,6 +1,6 @@
 import test from "node:test";
 import assert from "node:assert/strict";
-import { chmod, mkdir, mkdtemp, readFile, rm, writeFile } from "node:fs/promises";
+import { chmod, mkdir, mkdtemp, readFile, rm, symlink, writeFile } from "node:fs/promises";
 import os from "node:os";
 import path from "node:path";
 import { deflateSync } from "node:zlib";
@@ -436,6 +436,43 @@ test("writePaperWikiSource saves an LLM source summary and searchPaperWiki finds
   }
 });
 
+test("writePaperWikiSource refuses symlinked targets before journaling", async () => {
+  const workspace = await createWorkspace();
+  const outside = await mkdtemp(path.join(os.tmpdir(), "pi-paper-reader-outside-"));
+  try {
+    const pdfPath = await writePdf(
+      workspace,
+      "raw/arxiv-2601.00004.pdf",
+      "Abstract preflight source summary target"
+    );
+    const parsed = await parsePaper({
+      workspaceDir: workspace,
+      path: pdfPath,
+      engine: "plain-text-baseline"
+    });
+    const outsideTarget = path.join(outside, "summary.md");
+    await writeFile(outsideTarget, "# Outside Summary\n", "utf8");
+    const summaryPath = path.join(workspace, "knowledge-base", "sources", parsed.paperKey, "summary.md");
+    await mkdir(path.dirname(summaryPath), { recursive: true });
+    await symlink(outsideTarget, summaryPath);
+
+    await assert.rejects(
+      writePaperWikiSource({
+        workspaceDir: workspace,
+        paperKey: parsed.paperKey,
+        summaryMarkdown: "This write should be blocked before journaling."
+      }),
+      /symlink/
+    );
+
+    await assert.rejects(readFile(path.join(workspace, "knowledge-base/state/wiki-operations.jsonl"), "utf8"));
+    assert.equal((await readFile(outsideTarget, "utf8")).trim(), "# Outside Summary");
+  } finally {
+    await rm(workspace, { recursive: true, force: true });
+    await rm(outside, { recursive: true, force: true });
+  }
+});
+
 test("searchPaperWiki expands Chinese domain questions into weighted paper evidence", async () => {
   const workspace = await createWorkspace();
   try {
@@ -542,6 +579,7 @@ test("writePaperWikiPage saves a synthesis page and updates the wiki index", asy
     });
 
     assert.equal(page.pagePath, "knowledge-base/pages/qldpc-superconducting-chips.md");
+    assert.equal(page.operationJournalPath, "knowledge-base/state/wiki-operations.jsonl");
     assert.equal(page.sourceCount, 1);
     const markdown = await readFile(path.join(workspace, page.pagePath), "utf8");
     assert.match(markdown, /type: "wiki-synthesis-page"/);
@@ -555,8 +593,54 @@ test("writePaperWikiPage saves a synthesis page and updates the wiki index", asy
     const log = await readFile(path.join(workspace, page.logPath), "utf8");
     assert.match(log, /page \| qLDPC on Superconducting Chips/);
     assert.match(log, /knowledge-base\/pages\/qldpc-superconducting-chips\.md/);
+
+    const journal = (await readFile(path.join(workspace, page.operationJournalPath), "utf8"))
+      .trim()
+      .split("\n")
+      .map((line) => JSON.parse(line) as Record<string, unknown>);
+    const begin = journal.find((event) => event.phase === "begin" && event.operationId === page.operationId);
+    const complete = journal.find((event) => event.phase === "complete" && event.operationId === page.operationId);
+    assert.equal(begin?.intent, "write_synthesis_page");
+    assert.deepEqual(begin?.plannedFiles, [
+      "knowledge-base/pages/qldpc-superconducting-chips.md",
+      "knowledge-base/index.md",
+      "knowledge-base/log.md"
+    ]);
+    assert.equal(complete?.operationId, page.operationId);
   } finally {
     await rm(workspace, { recursive: true, force: true });
+  }
+});
+
+test("writePaperWikiPage refuses symlinked targets before journaling", async () => {
+  const workspace = await createWorkspace();
+  const outside = await mkdtemp(path.join(os.tmpdir(), "pi-paper-reader-outside-"));
+  try {
+    const outsideTarget = path.join(outside, "page.md");
+    await writeFile(outsideTarget, "# Outside Page\n", "utf8");
+    const pagePath = path.join(workspace, "knowledge-base", "pages", "unsafe-page.md");
+    await mkdir(path.dirname(pagePath), { recursive: true });
+    await symlink(outsideTarget, pagePath);
+
+    await assert.rejects(
+      writePaperWikiPage({
+        workspaceDir: workspace,
+        topic: "Unsafe Page",
+        pageKey: "unsafe-page",
+        pageMarkdown: "## Overview\n\nThis should not write.",
+        sourceCitations: [{
+          paperKey: "paper-a",
+          path: "knowledge-base/sources/paper-a/summary.md"
+        }]
+      }),
+      /symlink/
+    );
+
+    await assert.rejects(readFile(path.join(workspace, "knowledge-base/state/wiki-operations.jsonl"), "utf8"));
+    assert.equal((await readFile(outsideTarget, "utf8")).trim(), "# Outside Page");
+  } finally {
+    await rm(workspace, { recursive: true, force: true });
+    await rm(outside, { recursive: true, force: true });
   }
 });
 

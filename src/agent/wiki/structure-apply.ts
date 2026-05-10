@@ -1,6 +1,7 @@
 import { readFile, writeFile } from "node:fs/promises";
 import path from "node:path";
 import { assertSafePaperWikiWriteTarget, mergePaperWikiAliases, rewritePaperWikiIndex } from "./content.js";
+import { beginWikiOperation, completeWikiOperation } from "./journal.js";
 import { lintPaperWiki, type PaperWikiLintResult } from "./lint.js";
 import {
   getPaperWikiIndexPath,
@@ -39,6 +40,8 @@ export interface ApplyWikiStructurePlanResult {
   applied: AppliedWikiStructureAction[];
   skipped: SkippedWikiStructureAction[];
   changedFiles: string[];
+  operationId?: string;
+  operationJournalPath?: string;
   verification?: {
     lintBefore?: PaperWikiLintResult;
     lintAfter?: PaperWikiLintResult;
@@ -424,32 +427,58 @@ export async function applyWikiStructurePlan(options: ApplyWikiStructurePlanOpti
   const requireLowRisk = options.requireLowRisk ?? true;
   const maxActions = Math.max(1, Math.trunc(options.maxActions ?? 10));
   const runVerification = options.runVerification ?? true;
-  const applied: AppliedWikiStructureAction[] = [];
-  const skipped: SkippedWikiStructureAction[] = [];
   const lintBefore = runVerification ? await lintPaperWiki({ workspaceDir, maxItems: 200 }) : undefined;
+  const selectedActions = options.actions.slice(0, maxActions);
 
-  for (const action of options.actions.slice(0, maxActions)) {
-    if (requireLowRisk && action.risk !== "low") {
-      skipped.push({ action, reason: "Skipped because requireLowRisk=true and action risk is not low." });
-      continue;
+  async function runActions(actionDryRun: boolean): Promise<{
+    applied: AppliedWikiStructureAction[];
+    skipped: SkippedWikiStructureAction[];
+  }> {
+    const applied: AppliedWikiStructureAction[] = [];
+    const skipped: SkippedWikiStructureAction[] = [];
+    for (const action of selectedActions) {
+      if (requireLowRisk && action.risk !== "low") {
+        skipped.push({ action, reason: "Skipped because requireLowRisk=true and action risk is not low." });
+        continue;
+      }
+      const result =
+        action.type === "fix_duplicate_section"
+          ? await applyDuplicateSectionAction({ workspaceDir, action, dryRun: actionDryRun })
+          : action.type === "create_alias"
+            ? await applyAliasAction({ workspaceDir, action, dryRun: actionDryRun })
+            : action.type === "update_scope_note"
+              ? await applyScopeNoteAction({ workspaceDir, action, dryRun: actionDryRun })
+              : action.type === "rebuild_index"
+                ? await applyIndexRebuildAction({ workspaceDir, action, dryRun: actionDryRun })
+                : { action, reason: `Action type ${action.type} is not supported by wiki_apply_structure_plan.` };
+      if ("changedFiles" in result) {
+        applied.push(result);
+      } else {
+        skipped.push(result);
+      }
     }
-    const result =
-      action.type === "fix_duplicate_section"
-        ? await applyDuplicateSectionAction({ workspaceDir, action, dryRun })
-        : action.type === "create_alias"
-          ? await applyAliasAction({ workspaceDir, action, dryRun })
-          : action.type === "update_scope_note"
-            ? await applyScopeNoteAction({ workspaceDir, action, dryRun })
-            : action.type === "rebuild_index"
-              ? await applyIndexRebuildAction({ workspaceDir, action, dryRun })
-              : { action, reason: `Action type ${action.type} is not supported by wiki_apply_structure_plan.` };
-    if ("changedFiles" in result) {
-      applied.push(result);
-    } else {
-      skipped.push(result);
-    }
+    return { applied, skipped };
   }
 
+  const preview = dryRun ? undefined : await runActions(true);
+  const plannedFiles = preview
+    ? [...new Set(preview.applied.flatMap((item) => item.changedFiles))]
+    : [];
+  const operation = !dryRun && plannedFiles.length > 0
+    ? await beginWikiOperation({
+      workspaceDir,
+      intent: "apply_structure_plan",
+      owner: "wiki-agent",
+      plannedFiles,
+      inputs: {
+        actionIds: selectedActions.map((action) => action.id),
+        maxActions,
+        requireLowRisk
+      }
+    })
+    : undefined;
+
+  const { applied, skipped } = await runActions(dryRun);
   const changedFiles = [...new Set(applied.flatMap((item) => item.changedFiles))];
   const lintAfter = runVerification ? await lintPaperWiki({ workspaceDir, maxItems: 200 }) : undefined;
   const status = dryRun
@@ -460,11 +489,23 @@ export async function applyWikiStructurePlan(options: ApplyWikiStructurePlanOpti
         ? "partially_applied"
         : "applied";
 
+  if (operation) {
+    await completeWikiOperation({
+      workspaceDir,
+      operationId: operation.operationId,
+      writtenFiles: changedFiles
+    });
+  }
+
   return {
     status,
     applied,
     skipped,
     changedFiles: dryRun ? [] : changedFiles,
+    ...(operation ? {
+      operationId: operation.operationId,
+      operationJournalPath: operation.journalPath
+    } : {}),
     ...(runVerification ? { verification: { lintBefore, lintAfter } } : {})
   };
 }

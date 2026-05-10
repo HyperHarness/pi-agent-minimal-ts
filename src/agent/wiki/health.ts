@@ -14,6 +14,7 @@ import {
   getPaperWikiSourceManifestPath,
   relativeToWorkspace
 } from "./store.js";
+import { readWikiOperationEvents } from "./journal.js";
 import { listTypedWikiPages, type WikiPageDiagnostic } from "./typed-store.js";
 import {
   readPaperDownloadJobEvents,
@@ -46,7 +47,8 @@ export type WikiHealthIssueKind =
   | "download_blocked"
   | "citation_incomplete"
   | "wiki_page_malformed"
-  | "wiki_page_evidence_weak";
+  | "wiki_page_evidence_weak"
+  | "wiki_operation_interrupted";
 
 export type WikiHealthSeverity = "high" | "medium" | "low";
 
@@ -60,6 +62,7 @@ export interface WikiHealthIssue {
   articleUrl?: string;
   recordPath?: string;
   path?: string;
+  operationId?: string;
   reason: string;
   paths?: string[];
   metadata?: {
@@ -178,7 +181,8 @@ const ISSUE_KINDS: WikiHealthIssueKind[] = [
   "download_blocked",
   "citation_incomplete",
   "wiki_page_malformed",
-  "wiki_page_evidence_weak"
+  "wiki_page_evidence_weak",
+  "wiki_operation_interrupted"
 ];
 
 const DEFAULT_MAX_ITEMS = 20;
@@ -568,11 +572,47 @@ function summarizeActions(issues: WikiHealthIssue[]): string[] {
     ["download_blocked", "No repair needed for download-blocklisted papers unless the paper is removed from the local download blocklist."],
     ["citation_incomplete", "Refresh source citation metadata through the paper-download-subagent metadata pass."],
     ["wiki_page_malformed", "Repair malformed typed wiki page frontmatter before relying on the page in retrieval or synthesis."],
-    ["wiki_page_evidence_weak", "Add source_refs to paper-backed typed wiki pages or weaken the evidence contract."]
+    ["wiki_page_evidence_weak", "Add source_refs to paper-backed typed wiki pages or weaken the evidence contract."],
+    ["wiki_operation_interrupted", "Inspect the wiki operation journal and rerun or repair interrupted multi-file wiki writes."]
   ].flatMap(([kind, text]) => {
     const count = counts.get(kind as WikiHealthIssueKind) ?? 0;
     return count > 0 ? [`${count}: ${text}`] : [];
   });
+}
+
+async function interruptedWikiOperationIssues(workspaceDir: string): Promise<WikiHealthIssue[]> {
+  const events = await readWikiOperationEvents(workspaceDir);
+  const groups = new Map<string, {
+    begin?: Extract<(typeof events)[number], { phase: "begin" }>;
+    complete?: Extract<(typeof events)[number], { phase: "complete" }>;
+  }>();
+
+  for (const event of events) {
+    const group = groups.get(event.operationId) ?? {};
+    if (event.phase === "begin") {
+      group.begin = event;
+    } else if (event.phase === "complete") {
+      group.complete = event;
+    }
+    groups.set(event.operationId, group);
+  }
+
+  const issues: WikiHealthIssue[] = [];
+  for (const [operationId, group] of groups) {
+    if (!group.begin || group.complete) {
+      continue;
+    }
+    issues.push({
+      kind: "wiki_operation_interrupted",
+      severity: "medium",
+      paperKey: operationId,
+      operationId,
+      path: "knowledge-base/state/wiki-operations.jsonl",
+      paths: ["knowledge-base/state/wiki-operations.jsonl", ...group.begin.plannedFiles],
+      reason: `Wiki operation ${operationId} (${group.begin.intent}) began at ${group.begin.startedAt} but has no complete event.`
+    });
+  }
+  return issues;
 }
 
 export async function checkWikiHealth(options: WikiHealthOptions): Promise<WikiHealthResult> {
@@ -723,6 +763,8 @@ export async function checkWikiHealth(options: WikiHealthOptions): Promise<WikiH
       });
     }
   }
+
+  issues.push(...await interruptedWikiOperationIssues(workspaceDir));
 
   const summary = Object.fromEntries(ISSUE_KINDS.map((kind) => [kind, 0])) as Record<string, number>;
   for (const issue of issues) {
@@ -1294,6 +1336,7 @@ function createDefaultPaperDownloadWorker(input: {
 
 export async function fixWikiHealth(options: WikiHealthFixOptions): Promise<WikiHealthFixResult> {
   const workspaceDir = path.resolve(options.workspaceDir);
+  const maxItems = Math.max(1, Math.trunc(options.maxItems ?? DEFAULT_MAX_ITEMS));
   const threshold = options.lowQualityScoreThreshold ?? DEFAULT_LOW_QUALITY_SCORE_THRESHOLD;
   const paperDownloadWorker =
     options.paperDownloadWorker ??
@@ -1302,9 +1345,13 @@ export async function fixWikiHealth(options: WikiHealthFixOptions): Promise<Wiki
     stage: "checking_health",
     message: "Checking wiki health before repair."
   });
-  const checked = await checkWikiHealth(options);
+  const checked = await checkWikiHealth({
+    ...options,
+    maxItems: Number.MAX_SAFE_INTEGER
+  });
   const selectedKinds = options.issueKinds ? new Set(options.issueKinds) : undefined;
-  const issues = checked.issues.filter((issue) => isIssueKindSelected(issue, selectedKinds));
+  const selectedIssues = checked.issues.filter((issue) => isIssueKindSelected(issue, selectedKinds));
+  const issues = selectedIssues.slice(0, maxItems);
   const summaryIssues = issues.filter((issue) => issue.kind === "summary_missing");
   let summaryIssueIndex = 0;
   await options.onProgress?.({

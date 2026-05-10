@@ -13,8 +13,10 @@ import {
   getPaperWikiDir,
   getPaperWikiIndexPath,
   getPaperWikiLogPath,
+  getPaperWikiManifestsDir,
   getPaperWikiPagePath,
   getPaperWikiPagesDir,
+  getPaperWikiSourcesDir,
   getPaperWikiSourceManifestPath,
   getPaperWikiSourcePath,
   listPaperWikiPageFiles,
@@ -411,7 +413,6 @@ export async function writePaperWikiSource(input: PaperWikiSourceInput): Promise
     throw new Error("summaryMarkdown is required.");
   }
 
-  await ensurePaperWikiScaffold(input.workspaceDir);
   const engine = await resolveWikiEngine(input);
   const [source, document] = await Promise.all([
     readPaperSourceByKey({ workspaceDir: input.workspaceDir, paperKey: input.paperKey }),
@@ -434,6 +435,36 @@ export async function writePaperWikiSource(input: PaperWikiSourceInput): Promise
   const sourcePathRelative = relativeToWorkspace(input.workspaceDir, sourcePath);
   const manifestPathRelative = relativeToWorkspace(input.workspaceDir, manifestPath);
   const indexPathRelative = relativeToWorkspace(input.workspaceDir, indexPath);
+  const logPathRelative = relativeToWorkspace(input.workspaceDir, getPaperWikiLogPath(input.workspaceDir));
+  await Promise.all([
+    mkdir(getPaperWikiSourcesDir(input.workspaceDir), { recursive: true }),
+    mkdir(getPaperWikiManifestsDir(input.workspaceDir), { recursive: true }),
+    mkdir(getPaperWikiDir(input.workspaceDir), { recursive: true })
+  ]);
+  await assertSafePaperWikiWriteTarget({
+    workspaceDir: input.workspaceDir,
+    filePath: sourcePath,
+    allowedRoot: getPaperWikiSourcesDir(input.workspaceDir),
+    label: "wiki source summary"
+  });
+  await assertSafePaperWikiWriteTarget({
+    workspaceDir: input.workspaceDir,
+    filePath: manifestPath,
+    allowedRoot: getPaperWikiManifestsDir(input.workspaceDir),
+    label: "wiki source manifest"
+  });
+  await assertSafePaperWikiWriteTarget({
+    workspaceDir: input.workspaceDir,
+    filePath: indexPath,
+    allowedRoot: getPaperWikiDir(input.workspaceDir),
+    label: "wiki index"
+  });
+  await assertSafePaperWikiWriteTarget({
+    workspaceDir: input.workspaceDir,
+    filePath: getPaperWikiLogPath(input.workspaceDir),
+    allowedRoot: getPaperWikiDir(input.workspaceDir),
+    label: "wiki log"
+  });
   const operation = await beginWikiOperation({
     workspaceDir: input.workspaceDir,
     intent: "write_source_summary",
@@ -441,7 +472,8 @@ export async function writePaperWikiSource(input: PaperWikiSourceInput): Promise
     plannedFiles: [
       sourcePathRelative,
       manifestPathRelative,
-      indexPathRelative
+      indexPathRelative,
+      logPathRelative
     ],
     inputs: {
       paperKey: input.paperKey,
@@ -449,6 +481,7 @@ export async function writePaperWikiSource(input: PaperWikiSourceInput): Promise
       title
     }
   });
+  await ensurePaperWikiScaffold(input.workspaceDir);
 
   const markdown = `---
 type: "paper-source-summary"
@@ -521,7 +554,8 @@ ${sectionList("Open Questions", input.openQuestions)}
     writtenFiles: [
       sourcePathRelative,
       manifestPathRelative,
-      indexPathRelative
+      indexPathRelative,
+      logPathRelative
     ]
   });
 
@@ -533,7 +567,7 @@ ${sectionList("Open Questions", input.openQuestions)}
     operationId: operation.operationId,
     operationJournalPath: operation.journalPath,
     indexPath: indexPathRelative,
-    logPath: relativeToWorkspace(input.workspaceDir, getPaperWikiLogPath(input.workspaceDir))
+    logPath: logPathRelative
   };
 }
 
@@ -546,11 +580,54 @@ export async function writePaperWikiPage(input: PaperWikiPageInput): Promise<Pap
     throw new Error("sourceCitations must include at least one source summary.");
   }
 
-  await ensurePaperWikiScaffold(input.workspaceDir);
   const pageKey = sanitizeWikiFilename(input.pageKey ?? input.topic);
   const pagePath = getPaperWikiPagePath(input.workspaceDir, pageKey);
+  const indexPath = getPaperWikiIndexPath(input.workspaceDir);
+  const logPath = getPaperWikiLogPath(input.workspaceDir);
   const title = input.title?.trim() || input.topic.trim() || pageKey;
   const now = new Date().toISOString();
+  const pagePathRelative = relativeToWorkspace(input.workspaceDir, pagePath);
+  const indexPathRelative = relativeToWorkspace(input.workspaceDir, indexPath);
+  const logPathRelative = relativeToWorkspace(input.workspaceDir, logPath);
+  await Promise.all([
+    mkdir(getPaperWikiPagesDir(input.workspaceDir), { recursive: true }),
+    mkdir(getPaperWikiDir(input.workspaceDir), { recursive: true })
+  ]);
+  await assertSafePaperWikiWriteTarget({
+    workspaceDir: input.workspaceDir,
+    filePath: pagePath,
+    allowedRoot: getPaperWikiPagesDir(input.workspaceDir),
+    label: "wiki page"
+  });
+  await assertSafePaperWikiWriteTarget({
+    workspaceDir: input.workspaceDir,
+    filePath: indexPath,
+    allowedRoot: getPaperWikiDir(input.workspaceDir),
+    label: "wiki index"
+  });
+  await assertSafePaperWikiWriteTarget({
+    workspaceDir: input.workspaceDir,
+    filePath: logPath,
+    allowedRoot: getPaperWikiDir(input.workspaceDir),
+    label: "wiki log"
+  });
+  const operation = await beginWikiOperation({
+    workspaceDir: input.workspaceDir,
+    intent: "write_synthesis_page",
+    owner: "wiki-agent",
+    plannedFiles: [
+      pagePathRelative,
+      indexPathRelative,
+      logPathRelative
+    ],
+    inputs: {
+      pageKey,
+      title,
+      topic: input.topic,
+      sourceCount: input.sourceCitations.length
+    }
+  });
+  await ensurePaperWikiScaffold(input.workspaceDir);
   const markdown = `---
 type: "wiki-synthesis-page"
 page_key: ${quoteYaml(pageKey)}
@@ -578,17 +655,28 @@ ${input.sourceCitations.map((source) =>
   await writeFile(pagePath, markdown.trimEnd() + "\n", "utf8");
   await rewriteWikiIndex(input.workspaceDir);
   await appendFile(
-    getPaperWikiLogPath(input.workspaceDir),
-    `\n## [${now.slice(0, 10)}] page | ${title}\n\n- pageKey: \`${pageKey}\`\n- path: \`${relativeToWorkspace(input.workspaceDir, pagePath)}\`\n- sources: ${input.sourceCitations.map((source) => `\`${source.paperKey}\``).join(", ")}\n`,
+    logPath,
+    `\n## [${now.slice(0, 10)}] page | ${title}\n\n- pageKey: \`${pageKey}\`\n- path: \`${pagePathRelative}\`\n- sources: ${input.sourceCitations.map((source) => `\`${source.paperKey}\``).join(", ")}\n`,
     "utf8"
   );
+  await completeWikiOperation({
+    workspaceDir: input.workspaceDir,
+    operationId: operation.operationId,
+    writtenFiles: [
+      pagePathRelative,
+      indexPathRelative,
+      logPathRelative
+    ]
+  });
 
   return {
     pageKey,
     title,
-    pagePath: relativeToWorkspace(input.workspaceDir, pagePath),
-    indexPath: relativeToWorkspace(input.workspaceDir, getPaperWikiIndexPath(input.workspaceDir)),
-    logPath: relativeToWorkspace(input.workspaceDir, getPaperWikiLogPath(input.workspaceDir)),
+    pagePath: pagePathRelative,
+    operationId: operation.operationId,
+    operationJournalPath: operation.journalPath,
+    indexPath: indexPathRelative,
+    logPath: logPathRelative,
     sourceCount: input.sourceCitations.length
   };
 }
@@ -617,7 +705,10 @@ export async function mergePaperWikiAliases(input: PaperWikiAliasMergeInput): Pr
     throw new Error("At least one alias mapping is required.");
   }
 
-  await ensurePaperWikiScaffold(input.workspaceDir);
+  await Promise.all([
+    mkdir(getPaperWikiPagesDir(input.workspaceDir), { recursive: true }),
+    mkdir(getPaperWikiDir(input.workspaceDir), { recursive: true })
+  ]);
   const now = new Date().toISOString();
   const pageFiles = await listPaperWikiPageFiles(input.workspaceDir);
   const pageKeys = new Set(pageFiles.map((filePath) => path.basename(filePath, ".md")));
@@ -728,7 +819,26 @@ ${note ? `- Note: ${note}\n` : ""}`;
     });
   }
 
-  if (items.some((item) => item.status === "written")) {
+  const writtenItems = items.filter((item) => item.status === "written");
+  let operation: Awaited<ReturnType<typeof beginWikiOperation>> | undefined;
+  if (writtenItems.length > 0) {
+    operation = await beginWikiOperation({
+      workspaceDir: input.workspaceDir,
+      intent: "merge_aliases",
+      owner: "wiki-agent",
+      plannedFiles: [
+        ...writtenItems.map((item) => item.pagePath),
+        relativeToWorkspace(input.workspaceDir, getPaperWikiIndexPath(input.workspaceDir)),
+        relativeToWorkspace(input.workspaceDir, getPaperWikiLogPath(input.workspaceDir))
+      ],
+      inputs: {
+        aliases: writtenItems.map((item) => ({
+          aliasPageKey: item.aliasPageKey,
+          canonicalPageKey: item.canonicalPageKey
+        }))
+      }
+    });
+    await ensurePaperWikiScaffold(input.workspaceDir);
     for (const alias of writableAliases) {
       await writeFile(alias.pagePath, alias.markdown, "utf8");
     }
@@ -747,12 +857,25 @@ ${note ? `- Note: ${note}\n` : ""}`;
         .join("\n")}\n`,
       "utf8"
     );
+    await completeWikiOperation({
+      workspaceDir: input.workspaceDir,
+      operationId: operation.operationId,
+      writtenFiles: [
+        ...writtenItems.map((item) => item.pagePath),
+        relativeToWorkspace(input.workspaceDir, getPaperWikiIndexPath(input.workspaceDir)),
+        relativeToWorkspace(input.workspaceDir, getPaperWikiLogPath(input.workspaceDir))
+      ]
+    });
   }
 
-  const writtenCount = items.filter((item) => item.status === "written").length;
+  const writtenCount = writtenItems.length;
   return {
     status: writtenCount === 0 ? "blocked" : writtenCount === items.length ? "written" : "partial",
     aliases: items,
+    ...(operation ? {
+      operationId: operation.operationId,
+      operationJournalPath: operation.journalPath
+    } : {}),
     indexPath: relativeToWorkspace(input.workspaceDir, getPaperWikiIndexPath(input.workspaceDir)),
     logPath: relativeToWorkspace(input.workspaceDir, getPaperWikiLogPath(input.workspaceDir))
   };

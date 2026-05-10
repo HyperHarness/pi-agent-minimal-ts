@@ -1,4 +1,4 @@
-import { appendFile, mkdir } from "node:fs/promises";
+import { appendFile, mkdir, readFile } from "node:fs/promises";
 import path from "node:path";
 import {
   getPaperWikiOperationJournalPath,
@@ -7,8 +7,9 @@ import {
 
 export type WikiOperationIntent =
   | "write_source_summary"
-  | "write_wiki_page"
+  | "write_synthesis_page"
   | "merge_aliases"
+  | "apply_structure_plan"
   | "rebuild_index"
   | "repair";
 
@@ -87,4 +88,94 @@ export async function completeWikiOperation(input: {
     completedAt: new Date().toISOString(),
     writtenFiles: input.writtenFiles
   });
+}
+
+function isWikiOperationIntent(value: unknown): value is WikiOperationIntent {
+  return value === "write_source_summary" ||
+    value === "write_synthesis_page" ||
+    value === "merge_aliases" ||
+    value === "apply_structure_plan" ||
+    value === "rebuild_index" ||
+    value === "repair";
+}
+
+function isWikiOperationOwner(value: unknown): value is WikiOperationOwner {
+  return value === "wiki-agent" ||
+    value === "wiki-evidence-worker" ||
+    value === "paper-download-subagent";
+}
+
+function stringArray(value: unknown): string[] | undefined {
+  return Array.isArray(value) && value.every((item) => typeof item === "string") ? value : undefined;
+}
+
+function normalizeWikiOperationEvent(value: unknown): WikiOperationEvent | undefined {
+  if (typeof value !== "object" || value === null) {
+    return undefined;
+  }
+  const record = value as Record<string, unknown>;
+  if (record.schemaVersion !== 1 || typeof record.operationId !== "string") {
+    return undefined;
+  }
+  if (record.phase === "begin") {
+    const plannedFiles = stringArray(record.plannedFiles);
+    if (
+      !isWikiOperationIntent(record.intent) ||
+      !isWikiOperationOwner(record.owner) ||
+      typeof record.startedAt !== "string" ||
+      !plannedFiles
+    ) {
+      return undefined;
+    }
+    return {
+      schemaVersion: 1,
+      operationId: record.operationId,
+      phase: "begin",
+      intent: record.intent,
+      owner: record.owner,
+      startedAt: record.startedAt,
+      plannedFiles,
+      ...(record.inputs !== undefined ? { inputs: record.inputs } : {})
+    };
+  }
+  if (record.phase === "complete") {
+    const writtenFiles = stringArray(record.writtenFiles);
+    if (typeof record.completedAt !== "string" || !writtenFiles) {
+      return undefined;
+    }
+    return {
+      schemaVersion: 1,
+      operationId: record.operationId,
+      phase: "complete",
+      completedAt: record.completedAt,
+      writtenFiles
+    };
+  }
+  return undefined;
+}
+
+export async function readWikiOperationEvents(workspaceDir: string): Promise<WikiOperationEvent[]> {
+  const journalPath = getPaperWikiOperationJournalPath(workspaceDir);
+  const raw = await readFile(journalPath, "utf8").catch((error: unknown) => {
+    if ((error as NodeJS.ErrnoException).code === "ENOENT") {
+      return "";
+    }
+    throw error;
+  });
+  const events: WikiOperationEvent[] = [];
+  for (const line of raw.split(/\r?\n/)) {
+    const trimmed = line.trim();
+    if (!trimmed) {
+      continue;
+    }
+    try {
+      const parsed = normalizeWikiOperationEvent(JSON.parse(trimmed));
+      if (parsed) {
+        events.push(parsed);
+      }
+    } catch {
+      continue;
+    }
+  }
+  return events;
 }

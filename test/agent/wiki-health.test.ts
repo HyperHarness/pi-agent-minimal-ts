@@ -222,10 +222,77 @@ test("checkWikiHealth initializes typed wiki page summary counts", async () => {
 
     assert.equal(result.summary.wiki_page_malformed, 0);
     assert.equal(result.summary.wiki_page_evidence_weak, 0);
+    assert.equal(result.summary.wiki_operation_interrupted, 0);
   } finally {
     await rm(workspace, { recursive: true, force: true });
   }
 });
+
+test("checkWikiHealth reports interrupted wiki operations", async () => {
+  const workspace = await createWorkspace();
+  try {
+    await writeText(path.join(workspace, "knowledge-base", "state", "wiki-operations.jsonl"), JSON.stringify({
+      schemaVersion: 1,
+      phase: "begin",
+      operationId: "wiki-op-test",
+      intent: "write_synthesis_page",
+      owner: "wiki-agent",
+      startedAt: "2026-05-10T00:00:00.000Z",
+      plannedFiles: ["knowledge-base/pages/test.md"],
+      inputs: {}
+    }) + "\n");
+
+    const result = await checkWikiHealth({ workspaceDir: workspace });
+
+    assert.equal(result.summary.wiki_operation_interrupted, 1);
+    assert.ok(result.issues.some((issue) => issue.kind === "wiki_operation_interrupted"));
+  } finally {
+    await rm(workspace, { recursive: true, force: true });
+  }
+});
+
+test("checkWikiHealth ignores malformed journal events without hiding interrupted operations", async () => {
+  const workspace = await createWorkspace();
+  try {
+    await writeText(path.join(workspace, "knowledge-base", "state", "wiki-operations.jsonl"), [
+      "not json",
+      JSON.stringify({
+        schemaVersion: 1,
+        phase: "begin",
+        operationId: "malformed-begin",
+        intent: "write_synthesis_page",
+        owner: "wiki-agent",
+        startedAt: "2026-05-10T00:00:00.000Z",
+        inputs: {}
+      }),
+      JSON.stringify({
+        schemaVersion: 1,
+        phase: "begin",
+        operationId: "interrupted-op",
+        intent: "write_synthesis_page",
+        owner: "wiki-agent",
+        startedAt: "2026-05-10T00:01:00.000Z",
+        plannedFiles: ["knowledge-base/pages/interrupted.md"],
+        inputs: {}
+      }),
+      JSON.stringify({
+        schemaVersion: 1,
+        phase: "complete",
+        operationId: "interrupted-op",
+        completedAt: "2026-05-10T00:02:00.000Z"
+      })
+    ].join("\n") + "\n");
+
+    const result = await checkWikiHealth({ workspaceDir: workspace });
+
+    assert.equal(result.summary.wiki_operation_interrupted, 1);
+    const issue = result.issues.find((candidate) => candidate.kind === "wiki_operation_interrupted");
+    assert.equal(issue?.operationId, "interrupted-op");
+  } finally {
+    await rm(workspace, { recursive: true, force: true });
+  }
+});
+
 
 test("checkWikiHealth reports malformed typed wiki pages", async () => {
   const workspace = await createWorkspace();
@@ -1491,6 +1558,80 @@ test("fixWikiHealth generates missing summaries when a summary worker is availab
     assert.ok(progressMessages.some((message) => message.includes("Generating summary 1/1")));
     assert.ok(progressMessages.some((message) => message.includes("Summary 1/1: Running wiki-evidence-worker summary pass")));
     assert.ok(progressMessages.some((message) => message.includes("Finished summary 1/1")));
+  } finally {
+    await rm(workspace, { recursive: true, force: true });
+  }
+});
+
+test("fixWikiHealth selects requested issue kinds beyond the health page cap", async () => {
+  const workspace = await createWorkspace();
+  const generated: string[] = [];
+
+  try {
+    for (let index = 0; index < 5; index += 1) {
+      await writeJson(path.join(workspace, "knowledge-base", "sources", `missing-${index}`, "acquisition.json"), {
+        source: "arxiv",
+        articleUrl: `https://arxiv.org/abs/2501.0000${index}`,
+        recordedAt: "2026-05-10T00:00:00.000Z",
+        handlingMethod: "direct_http",
+        status: "failed",
+        canonicalId: `2501.0000${index}`
+      });
+    }
+
+    for (const paperKey of ["arxiv-2501.99998", "arxiv-2501.99999"]) {
+      const parsedDir = path.join(workspace, "knowledge-base", "sources", paperKey, "parses", "plain-text-baseline");
+      await writeJson(path.join(workspace, "knowledge-base", "sources", paperKey, "source.json"), {
+        paperKey,
+        source: "arxiv",
+        canonicalId: paperKey.replace("arxiv-", ""),
+        articleUrl: `https://arxiv.org/abs/${paperKey.replace("arxiv-", "")}`
+      });
+      await writeText(path.join(parsedDir, "document.md"), "# Paper\n\nThis parsed paper needs a source summary.");
+      await writeJson(path.join(parsedDir, "parse.json"), {
+        paperKey,
+        engine: "plain-text-baseline",
+        pdfSha256: `sha-summary-cap-${paperKey}`,
+        createdAt: "2026-05-10T00:00:00.000Z",
+        pages: 1,
+        elements: [],
+        sections: []
+      });
+      await writeJson(path.join(parsedDir, "quality.json"), {
+        status: "good",
+        score: 0.95,
+        pages: 1,
+        totalTextLength: 1200,
+        emptyPageCount: 0,
+        headingCount: 1,
+        tableCount: 0,
+        figureOrCaptionCount: 0,
+        warnings: []
+      });
+      await writeText(
+        path.join(workspace, "knowledge-base", "sources", paperKey, "chunks", "plain-text-baseline.jsonl"),
+        "{\"id\":\"chunk-1\"}\n"
+      );
+    }
+
+    const result = await fixWikiHealth({
+      workspaceDir: workspace,
+      maxItems: 1,
+      issueKinds: ["summary_missing"],
+      paperSummaryWorker: async ({ evidence }) => {
+        generated.push(evidence.paperKey);
+        return {
+          summaryMarkdown: "A summary selected beyond the normal health page cap.",
+          confidence: "high"
+        };
+      }
+    });
+
+    assert.deepEqual(generated, ["arxiv-2501.99998"]);
+    assert.equal(result.attempted, 1);
+    assert.equal(result.fixed, 1);
+    assert.equal(result.checked.summary.summary_missing, 2);
+    assert.equal(result.results[0]?.issue.kind, "summary_missing");
   } finally {
     await rm(workspace, { recursive: true, force: true });
   }

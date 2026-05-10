@@ -926,6 +926,7 @@ Coupler page.
     });
 
     assert.equal(result.status, "applied");
+    assert.equal(result.operationJournalPath, "knowledge-base/state/wiki-operations.jsonl");
     assert.ok(result.changedFiles.includes("knowledge-base/pages/tunable-couplers.md"));
     assert.ok(result.changedFiles.includes("knowledge-base/pages/tunable-coupler.md"));
     assert.ok(result.changedFiles.includes("knowledge-base/index.md"));
@@ -936,6 +937,14 @@ Coupler page.
     assert.match(canonical, /## Scope Note/);
     assert.match(canonical, /superconducting chip design/);
     assert.match(canonical, /## Sources/);
+    const journal = (await readFile(path.join(workspace, result.operationJournalPath), "utf8"))
+      .trim()
+      .split("\n")
+      .map((line) => JSON.parse(line) as Record<string, unknown>);
+    const begin = journal.find((event) => event.phase === "begin" && event.operationId === result.operationId);
+    const complete = journal.find((event) => event.phase === "complete" && event.operationId === result.operationId);
+    assert.equal(begin?.intent, "apply_structure_plan");
+    assert.equal(complete?.operationId, result.operationId);
   } finally {
     await rm(workspace, { recursive: true, force: true });
   }
