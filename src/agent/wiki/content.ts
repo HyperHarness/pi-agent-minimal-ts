@@ -27,6 +27,7 @@ import {
   writeWikiSourceManifest,
   type WikiSourceManifest
 } from "./manifest-store.js";
+import { searchWikiEvidence, type WikiEvidenceSearchResult } from "./retrieval-search.js";
 import {
   beginWikiOperation,
   completeWikiOperation
@@ -757,13 +758,12 @@ ${note ? `- Note: ${note}\n` : ""}`;
   };
 }
 
-export async function searchPaperWiki(options: PaperWikiSearchOptions): Promise<PaperWikiSearchResult> {
+async function searchPaperWikiWithLegacyScoring(options: PaperWikiSearchOptions): Promise<PaperWikiSearchResult> {
   const query = options.query.trim();
   if (!query) {
     throw new Error("query is required.");
   }
 
-  await ensurePaperWikiScaffold(options.workspaceDir);
   const maxResults = Math.max(1, Math.trunc(options.maxResults ?? DEFAULT_WIKI_SEARCH_RESULTS));
   const [sourceFiles, pageFiles] = await Promise.all([
     listPaperWikiSourceFiles(options.workspaceDir),
@@ -824,4 +824,48 @@ export async function searchPaperWiki(options: PaperWikiSearchOptions): Promise<
       .slice(0, maxResults)
       .map(({ score: _score, ...result }) => result)
   };
+}
+
+function isMeaningfulStructuredSearchResult(result: WikiEvidenceSearchResult): boolean {
+  if (result.matchReasons.some((reason) => reason !== "body")) {
+    return true;
+  }
+  return result.score >= 2;
+}
+
+export async function searchPaperWiki(options: PaperWikiSearchOptions): Promise<PaperWikiSearchResult> {
+  const query = options.query.trim();
+  if (!query) {
+    throw new Error("query is required.");
+  }
+
+  await ensurePaperWikiScaffold(options.workspaceDir);
+  const maxResults = Math.max(1, Math.trunc(options.maxResults ?? DEFAULT_WIKI_SEARCH_RESULTS));
+  const structured = await searchWikiEvidence({
+    workspaceDir: options.workspaceDir,
+    query,
+    preferredKinds: ["source", "page"],
+    maxResults
+  });
+
+  if (structured.status === "ready" && structured.results.some(isMeaningfulStructuredSearchResult)) {
+    const meaningfulResults = structured.results.filter(isMeaningfulStructuredSearchResult);
+    return {
+      query,
+      results: meaningfulResults.map((result) => ({
+        kind: result.item.kind,
+        key: result.item.key,
+        ...(result.item.kind === "source" ? { paperKey: result.item.key } : { pageKey: result.item.key }),
+        title: result.item.title,
+        path: result.item.relativePath,
+        snippet: createBestSnippet(result.item.body, query, buildWikiSearchTerms(query))
+      }))
+    };
+  }
+
+  return searchPaperWikiWithLegacyScoring({
+    workspaceDir: options.workspaceDir,
+    query,
+    maxResults
+  });
 }

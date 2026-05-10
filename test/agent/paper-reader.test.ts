@@ -481,6 +481,47 @@ This paper studies microwave control of superconducting qubits.
   }
 });
 
+test("searchPaperWiki falls back when structured search only finds weak common-word body hits", async () => {
+  const workspace = await createWorkspace();
+  try {
+    await writeSourceSummary(workspace, "aaa-common-words", `---
+type: "paper-source-summary"
+paper_key: "aaa-common-words"
+title: "Unrelated Common Words"
+tags: []
+---
+
+# Unrelated Common Words
+
+What are the ordinary words in this unrelated note.
+`);
+    await writeSourceSummary(workspace, "source-b", `---
+type: "paper-source-summary"
+paper_key: "source-b"
+title: "qLDPC Hardware Constraints"
+tags:
+  - "qldpc"
+---
+
+# qLDPC Hardware Constraints
+
+This source discusses non-local connectivity, long-range couplers, crosstalk,
+leakage, and measurement overhead.
+`);
+
+    const search = await searchPaperWiki({
+      workspaceDir: workspace,
+      query: "what are the implementation barriers",
+      maxResults: 1
+    });
+
+    assert.equal(search.results[0]?.paperKey, "source-b");
+    assert.match(search.results[0]?.snippet ?? "", /crosstalk|long-range|measurement overhead/i);
+  } finally {
+    await rm(workspace, { recursive: true, force: true });
+  }
+});
+
 test("writePaperWikiPage saves a synthesis page and updates the wiki index", async () => {
   const workspace = await createWorkspace();
   try {

@@ -7,6 +7,7 @@ import {
   listWikiEvidenceItems,
   readWikiEvidenceItem
 } from "../../src/agent/wiki/retrieval-contract.js";
+import { searchWikiEvidence } from "../../src/agent/wiki/retrieval-search.js";
 import { writeTypedWikiPage } from "../../src/agent/wiki/typed-store.js";
 
 async function withWorkspace(
@@ -55,6 +56,174 @@ function sourceManifest(paperKey: string): Record<string, unknown> {
     synthesisPageKeys: []
   };
 }
+
+async function writeLegacySourceWithManifest(input: {
+  workspace: string;
+  paperKey: string;
+  title: string;
+  summaryMarkdown: string;
+  tags: string[];
+}): Promise<void> {
+  await writeWorkspaceFile(
+    input.workspace,
+    `knowledge-base/sources/${input.paperKey}/summary.md`,
+    input.summaryMarkdown
+  );
+  await writeWorkspaceFile(
+    input.workspace,
+    `knowledge-base/manifests/${input.paperKey}.json`,
+    `${JSON.stringify({
+      ...sourceManifest(input.paperKey),
+      title: input.title,
+      tags: input.tags
+    }, null, 2)}\n`
+  );
+}
+
+test("searchWikiEvidence returns match reasons and insufficient evidence status", async () => {
+  const workspace = await mkdtemp(path.join(tmpdir(), "wiki-structured-search-"));
+  try {
+    const empty = await searchWikiEvidence({
+      workspaceDir: workspace,
+      query: "frequency allocation",
+      preferredKinds: ["source"],
+      maxResults: 5
+    });
+    assert.equal(empty.status, "insufficient_evidence");
+    assert.equal(empty.results.length, 0);
+
+    // Write fixture evidence directly; this contract test must not depend on parsing or downloading.
+    await writeLegacySourceWithManifest({
+      workspace,
+      paperKey: "arxiv-2601.00003",
+      title: "Frequency allocation in qubits",
+      summaryMarkdown: "# Frequency allocation in qubits\n\nKey findings mention frequency collisions.",
+      tags: ["frequency-allocation"]
+    });
+
+    const result = await searchWikiEvidence({
+      workspaceDir: workspace,
+      query: "frequency allocation",
+      preferredKinds: ["source"],
+      maxResults: 5
+    });
+
+    assert.equal(result.status, "ready");
+    assert.equal(result.results[0].item.key, "arxiv-2601.00003");
+    assert.ok(result.results[0].matchReasons.includes("title"));
+    assert.ok(result.results[0].matchReasons.includes("tag"));
+  } finally {
+    await rm(workspace, { recursive: true, force: true });
+  }
+});
+
+test("searchWikiEvidence uses preferredKinds for sorting without filtering page evidence", async () => {
+  await withWorkspace("wiki-structured-search-preference-", async (workspaceDir) => {
+    await writeTypedWikiPage({
+      workspaceDir,
+      page: {
+        metadata: {
+          schema_version: 1,
+          type: "concept",
+          key: "frequency-allocation",
+          title: "Frequency allocation",
+          aliases: [],
+          tags: ["control-stack"],
+          evidence_contract: "paper-backed",
+          source_refs: ["arxiv-2601.00003"],
+          created_at: "2026-05-10T00:00:00.000Z",
+          updated_at: "2026-05-10T00:00:00.000Z"
+        },
+        body: "# Frequency allocation\n\nPage-only evidence."
+      }
+    });
+
+    const result = await searchWikiEvidence({
+      workspaceDir,
+      query: "frequency allocation",
+      preferredKinds: ["source"],
+      maxResults: 5
+    });
+
+    assert.equal(result.status, "ready");
+    assert.equal(result.results[0].item.kind, "page");
+    assert.equal(result.results[0].item.key, "frequency-allocation");
+  });
+});
+
+test("searchWikiEvidence ranks stronger score before preferred evidence kind", async () => {
+  await withWorkspace("wiki-structured-search-score-first-", async (workspaceDir) => {
+    await writeLegacySourceWithManifest({
+      workspace: workspaceDir,
+      paperKey: "arxiv-weak-source",
+      title: "Weak source",
+      summaryMarkdown: "# Weak source\n\nFrequency appears once in a broad source body.",
+      tags: []
+    });
+    await writeTypedWikiPage({
+      workspaceDir,
+      page: {
+        metadata: {
+          schema_version: 1,
+          type: "concept",
+          key: "frequency-allocation",
+          title: "Frequency allocation",
+          aliases: [],
+          tags: [],
+          evidence_contract: "paper-backed",
+          source_refs: ["arxiv-2601.00003"],
+          created_at: "2026-05-10T00:00:00.000Z",
+          updated_at: "2026-05-10T00:00:00.000Z"
+        },
+        body: "# Frequency allocation\n\nPage body."
+      }
+    });
+
+    const result = await searchWikiEvidence({
+      workspaceDir,
+      query: "frequency allocation",
+      preferredKinds: ["source"],
+      maxResults: 2
+    });
+
+    assert.equal(result.status, "ready");
+    assert.equal(result.results[0].item.kind, "page");
+    assert.equal(result.results[0].item.key, "frequency-allocation");
+  });
+});
+
+test("searchWikiEvidence includes two-letter query terms", async () => {
+  await withWorkspace("wiki-structured-search-short-term-", async (workspaceDir) => {
+    await writeTypedWikiPage({
+      workspaceDir,
+      page: {
+        metadata: {
+          schema_version: 1,
+          type: "concept",
+          key: "model-governance",
+          title: "Model governance",
+          aliases: [],
+          tags: ["AI"],
+          evidence_contract: "paper-backed",
+          source_refs: ["arxiv-2601.00010"],
+          created_at: "2026-05-10T00:00:00.000Z",
+          updated_at: "2026-05-10T00:00:00.000Z"
+        },
+        body: "# Model governance\n\nControls for frontier model deployment."
+      }
+    });
+
+    const result = await searchWikiEvidence({
+      workspaceDir,
+      query: "AI safety",
+      maxResults: 5
+    });
+
+    assert.equal(result.status, "ready");
+    assert.equal(result.results[0].item.key, "model-governance");
+    assert.ok(result.results[0].matchReasons.includes("tag"));
+  });
+});
 
 test("retrieval contract reads source evidence by key from legacy summary and manifest", async () => {
   await withWorkspace("wiki-retrieval-source-", async (workspaceDir) => {
