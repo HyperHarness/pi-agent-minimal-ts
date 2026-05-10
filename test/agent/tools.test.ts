@@ -3836,11 +3836,17 @@ test("answer_research_question stops after local wiki evidence is found", async 
     const details = result.details as {
       status?: string;
       localEvidence?: { evidence?: unknown[] };
+      evidenceStatus?: string;
+      localEvidenceItems?: unknown[];
+      newEvidence?: unknown[];
       externalCandidates?: unknown[];
     };
 
     assert.equal(details.status, "answered_from_wiki");
     assert.equal(details.localEvidence?.evidence?.length, 1);
+    assert.equal(details.evidenceStatus, "local_evidence");
+    assert.equal(details.localEvidenceItems?.length, 1);
+    assert.deepEqual(details.newEvidence, []);
     assert.deepEqual(details.externalCandidates, []);
   } finally {
     await rm(workspace, { recursive: true, force: true });
@@ -3973,16 +3979,141 @@ test("answer_research_question can download, parse, summarize, and refresh wiki 
     }, undefined);
     const details = result.details as {
       status?: string;
+      evidenceStatus?: string;
       downloaded?: Array<{ paperKey?: string; readingStatus?: string }>;
       summariesWritten?: Array<{ paperKey?: string; status?: string }>;
       refreshedEvidence?: { evidence?: unknown[] };
+      newEvidence?: unknown[];
     };
 
     assert.equal(details.status, "expanded_with_new_sources");
+    assert.equal(details.evidenceStatus, "newly_acquired_evidence");
     assert.equal(details.downloaded?.[0]?.paperKey, "arxiv-2601.00425");
     assert.equal(details.downloaded?.[0]?.readingStatus, "parsed");
     assert.equal(details.summariesWritten?.[0]?.status, "written");
     assert.equal(details.refreshedEvidence?.evidence?.length, 1);
+    assert.ok((details.newEvidence?.length ?? 0) >= 1);
+  } finally {
+    await rm(workspace, { recursive: true, force: true });
+  }
+});
+
+test("answer_research_question reports insufficient evidence when auto download is disabled", async () => {
+  const workspace = await mkdtemp(path.join(tmpdir(), "pi-agent-tools-"));
+
+  try {
+    const tool = getAnswerResearchQuestionTool(workspace, {
+      searchPaperWiki: async (options) => ({
+        query: options.query,
+        results: [],
+      }),
+      searchLocalPapers: async (options) => ({
+        query: options.query,
+        count: 0,
+        results: [],
+      }),
+      searchPapers: async () => [
+        {
+          title: "Candidate only paper",
+          authors: ["A. Author"],
+          summary: "Candidate summary",
+          primarySource: "arxiv",
+          primaryAction: "direct_download",
+          sources: [
+            {
+              source: "arxiv",
+              action: "direct_download",
+              canonicalId: "2601.00426",
+              articleUrl: "https://arxiv.org/abs/2601.00426",
+              pdfUrl: "https://arxiv.org/pdf/2601.00426.pdf",
+            },
+          ],
+        },
+      ],
+      downloadPaper: async () => {
+        throw new Error("download should not run when autoDownload is false");
+      },
+    });
+
+    const result = await tool.execute("research-call", {
+      query: "candidate only topic",
+      autoDownload: false,
+      maxDownloads: 1,
+    }, undefined);
+    const details = result.details as {
+      status?: string;
+      evidenceStatus?: string;
+      localEvidenceItems?: unknown[];
+      newEvidence?: unknown[];
+      limitations?: string[];
+      externalCandidates?: unknown[];
+      downloaded?: unknown[];
+    };
+
+    assert.equal(details.status, "insufficient_evidence");
+    assert.equal(details.evidenceStatus, "insufficient_evidence");
+    assert.equal(details.localEvidenceItems?.length, 0);
+    assert.equal(details.newEvidence?.length, 0);
+    assert.equal(details.externalCandidates?.length, 1);
+    assert.deepEqual(details.downloaded, []);
+    assert.ok(details.limitations?.some((item) => /local wiki/i.test(item) || /insufficient/i.test(item)));
+  } finally {
+    await rm(workspace, { recursive: true, force: true });
+  }
+});
+
+test("answer_research_question reports blocked acquisition when download fails", async () => {
+  const workspace = await mkdtemp(path.join(tmpdir(), "pi-agent-tools-"));
+
+  try {
+    const tool = getAnswerResearchQuestionTool(workspace, {
+      searchPaperWiki: async (options) => ({
+        query: options.query,
+        results: [],
+      }),
+      searchLocalPapers: async (options) => ({
+        query: options.query,
+        count: 0,
+        results: [],
+      }),
+      searchPapers: async () => [
+        {
+          title: "Blocked candidate paper",
+          authors: ["A. Author"],
+          summary: "Candidate summary",
+          primarySource: "arxiv",
+          primaryAction: "direct_download",
+          sources: [
+            {
+              source: "arxiv",
+              action: "direct_download",
+              canonicalId: "2601.00427",
+              articleUrl: "https://arxiv.org/abs/2601.00427",
+              pdfUrl: "https://arxiv.org/pdf/2601.00427.pdf",
+            },
+          ],
+        },
+      ],
+      downloadPaper: async () => {
+        throw new Error("publisher denied access");
+      },
+    });
+
+    const result = await tool.execute("research-call", {
+      query: "blocked topic",
+      maxDownloads: 1,
+    }, undefined);
+    const details = result.details as {
+      status?: string;
+      evidenceStatus?: string;
+      blocked?: unknown[];
+      limitations?: string[];
+    };
+
+    assert.equal(details.status, "needs_user_action");
+    assert.equal(details.evidenceStatus, "blocked_acquisition");
+    assert.ok((details.blocked?.length ?? 0) >= 1);
+    assert.ok((details.limitations?.length ?? 0) >= 1);
   } finally {
     await rm(workspace, { recursive: true, force: true });
   }

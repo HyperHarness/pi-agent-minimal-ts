@@ -420,6 +420,11 @@ type ResearchQuestionStatus =
   | "expanded_with_new_sources"
   | "needs_user_action"
   | "insufficient_evidence";
+type ResearchEvidenceStatus =
+  | "local_evidence"
+  | "newly_acquired_evidence"
+  | "blocked_acquisition"
+  | "insufficient_evidence";
 type ResearchExternalCandidate = {
   title: string;
   source: PaperSearchResult["primarySource"];
@@ -456,6 +461,10 @@ type AnswerResearchQuestionDetails = {
   status: ResearchQuestionStatus;
   localEvidence: AnswerPaperWikiQuestionDetails;
   refreshedEvidence?: AnswerPaperWikiQuestionDetails;
+  evidenceStatus: ResearchEvidenceStatus;
+  localEvidenceItems: AnswerPaperWikiQuestionDetails["evidence"];
+  newEvidence: AnswerPaperWikiQuestionDetails["evidence"];
+  limitations: string[];
   externalCandidates: ResearchExternalCandidate[];
   downloaded: ResearchDownloadedPaper[];
   summariesWritten: ResearchWrittenSummary[];
@@ -609,6 +618,30 @@ function compactPreviewText(value: string | undefined, maxLength = MAX_SEARCH_PR
   return compacted.length > maxLength
     ? `${compacted.slice(0, Math.max(0, maxLength - 1)).trimEnd()}...`
     : compacted;
+}
+
+function describeResearchBlockedItem(item: ResearchBlockedItem): string {
+  const subject = item.title ?? item.paperKey ?? item.articleUrl;
+  const stage = item.stage.replace(/_/g, " ");
+  return subject
+    ? `${stage}: ${subject} - ${item.reason}`
+    : `${stage}: ${item.reason}`;
+}
+
+function buildResearchLimitations(
+  blocked: ResearchBlockedItem[],
+  localEvidence: AnswerPaperWikiQuestionDetails,
+  refreshedEvidence?: AnswerPaperWikiQuestionDetails
+): string[] {
+  if (localEvidence.evidence.length > 0 || (refreshedEvidence?.evidence.length ?? 0) > 0) {
+    return [];
+  }
+  if (blocked.length > 0) {
+    return blocked.map(describeResearchBlockedItem);
+  }
+  return [
+    "Local wiki search found no citeable evidence, and acquisition produced no newly summarized wiki evidence."
+  ];
 }
 
 async function buildPaperWikiQuestionEvidence(input: {
@@ -1353,6 +1386,10 @@ export function createWikiTools(input: {
           query: args.query,
           status: "answered_from_wiki",
           localEvidence,
+          evidenceStatus: "local_evidence",
+          localEvidenceItems: localEvidence.evidence,
+          newEvidence: [],
+          limitations: [],
           externalCandidates: [],
           downloaded: [],
           summariesWritten: [],
@@ -1574,11 +1611,24 @@ export function createWikiTools(input: {
           : blocked.length > 0
             ? "needs_user_action"
             : "insufficient_evidence";
+      const newEvidence = refreshedEvidence?.status === "has_wiki_evidence"
+        ? refreshedEvidence.evidence
+        : [];
+      const hasRefreshedEvidence = newEvidence.length > 0;
+      const evidenceStatus: ResearchEvidenceStatus = hasRefreshedEvidence
+        ? "newly_acquired_evidence"
+        : blocked.length > 0
+          ? "blocked_acquisition"
+          : "insufficient_evidence";
       const result: AnswerResearchQuestionDetails = {
         query: args.query,
         status,
         localEvidence,
         ...(refreshedEvidence ? { refreshedEvidence } : {}),
+        evidenceStatus,
+        localEvidenceItems: localEvidence.evidence,
+        newEvidence,
+        limitations: buildResearchLimitations(blocked, localEvidence, refreshedEvidence),
         externalCandidates,
         downloaded,
         summariesWritten,
