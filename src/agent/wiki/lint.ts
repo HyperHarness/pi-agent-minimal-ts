@@ -26,6 +26,7 @@ export type PaperWikiLintIssueKind =
   | "stale_index"
   | "broken_wiki_link"
   | "missing_source_citation"
+  | "source_without_synthesis_coverage"
   | "orphan_page"
   | "concept_gap"
   | "high_value_concept_gap"
@@ -85,6 +86,7 @@ const ISSUE_KINDS: PaperWikiLintIssueKind[] = [
   "stale_index",
   "broken_wiki_link",
   "missing_source_citation",
+  "source_without_synthesis_coverage",
   "orphan_page",
   "concept_gap",
   "high_value_concept_gap",
@@ -301,6 +303,7 @@ function summarizeActions(issues: PaperWikiLintIssue[]): string[] {
     ["stale_index", "Rebuild index.md so every synthesis page is discoverable."],
     ["broken_wiki_link", "Fix or regenerate markdown links that point to missing wiki files."],
     ["missing_source_citation", "Repair synthesis page source citations or regenerate the page from source summaries."],
+    ["source_without_synthesis_coverage", "Promote or cite ready sources that are not referenced by any synthesis page."],
     ["orphan_page", "Add related_pages or links from another page so synthesis pages form a navigable graph."],
     ["concept_gap", "Promote repeated source tags into durable topic pages with build_wiki_page."],
     ["high_value_concept_gap", "Build high-priority concept pages identified by maintenance triage."],
@@ -350,6 +353,13 @@ async function diagnosticOptsIntoTypedSchema(diagnostic: WikiPageDiagnostic): Pr
 
 function diagnosticHasOnlyMissingSourceRefs(diagnostic: WikiPageDiagnostic): boolean {
   return diagnostic.errors.length > 0 && diagnostic.errors.every((error) => error.code === "missing_source_refs");
+}
+
+function hasConceptGapIssue(issues: PaperWikiLintIssue[], concept: string): boolean {
+  return issues.some((issue) =>
+    (issue.kind === "concept_gap" || issue.kind === "high_value_concept_gap") &&
+    issue.concept === concept
+  );
 }
 
 export async function lintPaperWiki(options: PaperWikiLintOptions): Promise<PaperWikiLintResult> {
@@ -584,6 +594,23 @@ export async function lintPaperWiki(options: PaperWikiLintOptions): Promise<Pape
     ...(options.goal !== undefined ? { goal: options.goal } : {}),
     ...(options.focus !== undefined ? { focus: options.focus } : {})
   });
+  for (const concept of reports.conceptTriage.rankedConcepts) {
+    if (
+      concept.sourceCount >= 2 &&
+      concept.recommendedAction === "build_page" &&
+      !hasConceptGapIssue(issues, concept.concept)
+    ) {
+      issues.push({
+        kind: "concept_gap",
+        severity: "low",
+        concept: concept.concept,
+        count: concept.sourceCount,
+        sourceCount: concept.sourceCount,
+        target: path.join(relativeToWorkspace(workspaceDir, getPaperWikiPagesDir(workspaceDir)), `${concept.concept}.md`),
+        reason: "Repeated source tag has no durable synthesis page."
+      });
+    }
+  }
   const hasOptimizationIntent = Boolean(options.goal?.trim()) ||
     (options.focus?.some((item) => item.trim().length > 0) ?? false);
   if (hasOptimizationIntent) {
@@ -605,6 +632,15 @@ export async function lintPaperWiki(options: PaperWikiLintOptions): Promise<Pape
 
   if (options.includeCoverage) {
     reports.coverage = await buildWikiCoverageMap({ workspaceDir });
+    for (const source of reports.coverage.uncoveredSources) {
+      issues.push({
+        kind: "source_without_synthesis_coverage",
+        severity: "medium",
+        path: source.path,
+        target: source.paperKey,
+        reason: "Ready source is not referenced by any synthesis or typed page source citation."
+      });
+    }
   }
 
   if (options.includeQualityAudit) {

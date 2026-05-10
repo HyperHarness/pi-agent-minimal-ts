@@ -220,6 +220,7 @@ test("checkWikiHealth initializes typed wiki page summary counts", async () => {
   try {
     const result = await checkWikiHealth({ workspaceDir: workspace });
 
+    assert.equal(result.summary.source_manifest_artifact_missing, 0);
     assert.equal(result.summary.wiki_page_malformed, 0);
     assert.equal(result.summary.wiki_page_evidence_weak, 0);
     assert.equal(result.summary.wiki_operation_interrupted, 0);
@@ -446,6 +447,119 @@ test("checkWikiHealth reports source summaries without manifests", async () => {
     ));
   } finally {
     await rm(workspace, { recursive: true, force: true });
+  }
+});
+
+test("checkWikiHealth reports source_manifest_artifact_missing for manifest paths", async () => {
+  const workspace = await createWorkspace();
+
+  try {
+    const paperKey = "arxiv-2601.00042";
+    await writeJson(path.join(workspace, "knowledge-base", "manifests", `${paperKey}.json`), {
+      schemaVersion: 1,
+      kind: "paper-source",
+      paperKey,
+      title: "Missing manifest artifacts",
+      status: "ready",
+      createdAt: "2026-05-10T00:00:00.000Z",
+      updatedAt: "2026-05-10T00:00:00.000Z",
+      sourceSummaryPath: `knowledge-base/sources/${paperKey}/summary.md`,
+      provenance: {
+        rawPdfPath: `knowledge-base/raw/pdfs/${paperKey}.pdf`
+      },
+      parse: {
+        engine: "plain-text-baseline",
+        markdownPath: `knowledge-base/sources/${paperKey}/parses/plain-text-baseline/document.md`,
+        jsonPath: `knowledge-base/sources/${paperKey}/parses/plain-text-baseline/parse.json`,
+        qualityPath: `knowledge-base/sources/${paperKey}/parses/plain-text-baseline/quality.json`
+      },
+      tags: ["manifest-health"],
+      relatedPaperKeys: [],
+      synthesisPageKeys: []
+    });
+    await writeText(path.join(workspace, "knowledge-base", "manifests", "malformed.json"), "{not json");
+
+    const result = await checkWikiHealth({ workspaceDir: workspace });
+
+    assert.equal(result.summary.source_manifest_artifact_missing, 1);
+    assert.ok(result.issues.some((issue) =>
+      issue.kind === "source_manifest_artifact_missing" &&
+      issue.paperKey === paperKey
+    ));
+  } finally {
+    await rm(workspace, { recursive: true, force: true });
+  }
+});
+
+test("checkWikiHealth reports source_manifest_artifact_missing for unsafe manifest paths", async () => {
+  const workspace = await createWorkspace();
+  const outside = await createWorkspace();
+
+  try {
+    const absolutePaperKey = "arxiv-2601.absolute";
+    const traversalPaperKey = "arxiv-2601-traversal";
+    const outsideAbsolutePath = path.join(outside, "absolute-summary.md");
+    const outsideTraversalPath = path.join(path.dirname(workspace), "outside-summary.md");
+    await writeText(outsideAbsolutePath, "outside absolute file exists");
+    await writeText(outsideTraversalPath, "outside traversal file exists");
+
+    await writeJson(path.join(workspace, "knowledge-base", "manifests", `${absolutePaperKey}.json`), {
+      schemaVersion: 1,
+      kind: "paper-source",
+      paperKey: absolutePaperKey,
+      title: "Absolute manifest path",
+      status: "ready",
+      createdAt: "2026-05-10T00:00:00.000Z",
+      updatedAt: "2026-05-10T00:00:00.000Z",
+      sourceSummaryPath: outsideAbsolutePath,
+      provenance: {},
+      parse: {
+        engine: "plain-text-baseline",
+        markdownPath: "knowledge-base/sources/arxiv-2601.absolute/parses/plain-text-baseline/document.md",
+        jsonPath: "knowledge-base/sources/arxiv-2601.absolute/parses/plain-text-baseline/parse.json",
+        qualityPath: "knowledge-base/sources/arxiv-2601.absolute/parses/plain-text-baseline/quality.json"
+      },
+      tags: [],
+      relatedPaperKeys: [],
+      synthesisPageKeys: []
+    });
+    await writeJson(path.join(workspace, "knowledge-base", "manifests", `${traversalPaperKey}.json`), {
+      schemaVersion: 1,
+      kind: "paper-source",
+      paperKey: traversalPaperKey,
+      title: "Traversal manifest path",
+      status: "ready",
+      createdAt: "2026-05-10T00:00:00.000Z",
+      updatedAt: "2026-05-10T00:00:00.000Z",
+      sourceSummaryPath: "../outside-summary.md",
+      provenance: {},
+      parse: {
+        engine: "plain-text-baseline",
+        markdownPath: "knowledge-base/sources/arxiv-2601-traversal/parses/plain-text-baseline/document.md",
+        jsonPath: "knowledge-base/sources/arxiv-2601-traversal/parses/plain-text-baseline/parse.json",
+        qualityPath: "knowledge-base/sources/arxiv-2601-traversal/parses/plain-text-baseline/quality.json"
+      },
+      tags: [],
+      relatedPaperKeys: [],
+      synthesisPageKeys: []
+    });
+
+    const result = await checkWikiHealth({ workspaceDir: workspace });
+
+    assert.ok(result.summary.source_manifest_artifact_missing >= 2);
+    assert.ok(result.issues.some((issue) =>
+      issue.kind === "source_manifest_artifact_missing" &&
+      issue.paperKey === absolutePaperKey &&
+      issue.reason.includes("workspace-relative")
+    ));
+    assert.ok(result.issues.some((issue) =>
+      issue.kind === "source_manifest_artifact_missing" &&
+      issue.paperKey === traversalPaperKey &&
+      issue.reason.includes("workspace-relative")
+    ));
+  } finally {
+    await rm(workspace, { recursive: true, force: true });
+    await rm(outside, { recursive: true, force: true });
   }
 });
 

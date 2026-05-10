@@ -29,12 +29,40 @@ async function writeText(filePath: string, content: string): Promise<void> {
   await writeFile(filePath, content, "utf8");
 }
 
+async function writeJson(filePath: string, value: unknown): Promise<void> {
+  await mkdir(path.dirname(filePath), { recursive: true });
+  await writeFile(filePath, `${JSON.stringify(value, null, 2)}\n`, "utf8");
+}
+
 async function writeSource(workspaceDir: string, paperKey: string, content: string): Promise<void> {
   await writeMarkdown(path.join(workspaceDir, "knowledge-base", "sources", paperKey, "summary.md"), content);
 }
 
 async function writePage(workspaceDir: string, pageKey: string, content: string): Promise<void> {
   await writeMarkdown(path.join(workspaceDir, "knowledge-base", "pages", `${pageKey}.md`), content);
+}
+
+async function writeReadySourceManifest(workspaceDir: string, paperKey: string, tags: string[] = []): Promise<void> {
+  await writeJson(path.join(workspaceDir, "knowledge-base", "manifests", `${paperKey}.json`), {
+    schemaVersion: 1,
+    kind: "paper-source",
+    paperKey,
+    title: `${paperKey} Evidence`,
+    status: "ready",
+    createdAt: "2026-05-10T00:00:00.000Z",
+    updatedAt: "2026-05-10T00:00:00.000Z",
+    sourceSummaryPath: `knowledge-base/sources/${paperKey}/summary.md`,
+    provenance: {},
+    parse: {
+      engine: "plain-text-baseline",
+      markdownPath: `knowledge-base/sources/${paperKey}/parses/plain-text-baseline/document.md`,
+      jsonPath: `knowledge-base/sources/${paperKey}/parses/plain-text-baseline/parse.json`,
+      qualityPath: `knowledge-base/sources/${paperKey}/parses/plain-text-baseline/quality.json`
+    },
+    tags,
+    relatedPaperKeys: [],
+    synthesisPageKeys: []
+  });
 }
 
 async function createMaintenanceFixture(): Promise<string> {
@@ -281,6 +309,76 @@ test("buildWikiCoverageMap reports source coverage, tag clusters, and weak pages
   }
 });
 
+test("readWikiMaintenanceDocuments uses typed key instead of page filename", async () => {
+  const workspace = await createWorkspace();
+
+  try {
+    await writePage(
+      workspace,
+      "different-file",
+      `
+---
+schema_version: 1
+type: "synthesis"
+key: "typed-canonical-key"
+title: "Typed Canonical Key"
+aliases: []
+tags: []
+evidence_contract: "none"
+source_refs: []
+created_at: "2026-05-10T00:00:00.000Z"
+updated_at: "2026-05-10T00:00:00.000Z"
+---
+
+# Typed Canonical Key
+`
+    );
+
+    const documents = await readWikiMaintenanceDocuments(workspace);
+    const page = documents.pages.find((candidate) => candidate.path === "knowledge-base/pages/different-file.md");
+
+    assert.equal(page?.pageKey, "typed-canonical-key");
+  } finally {
+    await rm(workspace, { recursive: true, force: true });
+  }
+});
+
+test("readWikiMaintenanceDocuments recognizes typed alias canonical page", async () => {
+  const workspace = await createWorkspace();
+
+  try {
+    await writePage(
+      workspace,
+      "typed-alias",
+      `
+---
+schema_version: 1
+type: "alias"
+key: "typed-alias"
+title: "Typed Alias"
+aliases: []
+tags: []
+evidence_contract: "none"
+source_refs: []
+canonical_page: "typed-canonical-key"
+created_at: "2026-05-10T00:00:00.000Z"
+updated_at: "2026-05-10T00:00:00.000Z"
+---
+
+# Typed Alias
+`
+    );
+
+    const documents = await readWikiMaintenanceDocuments(workspace);
+    const alias = documents.pages.find((page) => page.pageKey === "typed-alias");
+
+    assert.equal(alias?.isAlias, true);
+    assert.equal(alias?.canonicalPageKey, "typed-canonical-key");
+  } finally {
+    await rm(workspace, { recursive: true, force: true });
+  }
+});
+
 test("rankConceptGaps prioritizes ready high-value concepts and defers existing pages", async () => {
   const workspace = await createMaintenanceFixture();
 
@@ -420,6 +518,148 @@ test("lintPaperWiki emits rich maintenance issues and optional reports", async (
     });
     assert.equal(defaultResult.summary.high_value_concept_gap, 0);
     assert.ok(!defaultResult.issues.some((issue) => issue.kind === "high_value_concept_gap"));
+  } finally {
+    await rm(workspace, { recursive: true, force: true });
+  }
+});
+
+test("lintPaperWiki reports source_without_synthesis_coverage for ready sources", async () => {
+  const workspace = await createWorkspace();
+
+  try {
+    const paperKey = "paper-uncovered";
+    await writeReadySourceManifest(workspace, paperKey, ["uncovered-topic"]);
+    await writeSource(
+      workspace,
+      paperKey,
+      `
+---
+paper_key: ${paperKey}
+title: Uncovered Source
+tags:
+  - uncovered-topic
+---
+
+No synthesis page cites this source.
+`
+    );
+
+    const result = await lintPaperWiki({
+      workspaceDir: workspace,
+      includeCoverage: true,
+      maxItems: 50
+    });
+
+    assert.equal(result.summary.source_without_synthesis_coverage, 1);
+    assert.ok(result.issues.some((issue) =>
+      issue.kind === "source_without_synthesis_coverage" &&
+      issue.target === paperKey
+    ));
+  } finally {
+    await rm(workspace, { recursive: true, force: true });
+  }
+});
+
+test("lintPaperWiki skips manifest-only sources with unsafe sourceSummaryPath", async () => {
+  const workspace = await createWorkspace();
+  const outside = await createWorkspace();
+
+  try {
+    const paperKey = "paper-unsafe-manifest-path";
+    const outsideSummaryPath = path.join(outside, "summary.md");
+    await writeText(outsideSummaryPath, "outside summary exists");
+    await writeJson(path.join(workspace, "knowledge-base", "manifests", `${paperKey}.json`), {
+      schemaVersion: 1,
+      kind: "paper-source",
+      paperKey,
+      title: "Unsafe Manifest Source",
+      status: "ready",
+      createdAt: "2026-05-10T00:00:00.000Z",
+      updatedAt: "2026-05-10T00:00:00.000Z",
+      sourceSummaryPath: outsideSummaryPath,
+      provenance: {},
+      parse: {
+        engine: "plain-text-baseline",
+        markdownPath: `knowledge-base/sources/${paperKey}/parses/plain-text-baseline/document.md`,
+        jsonPath: `knowledge-base/sources/${paperKey}/parses/plain-text-baseline/parse.json`,
+        qualityPath: `knowledge-base/sources/${paperKey}/parses/plain-text-baseline/quality.json`
+      },
+      tags: ["unsafe-manifest-path"],
+      relatedPaperKeys: [],
+      synthesisPageKeys: []
+    });
+
+    const result = await lintPaperWiki({
+      workspaceDir: workspace,
+      includeCoverage: true,
+      maxItems: 50
+    });
+
+    assert.ok(!result.issues.some((issue) =>
+      issue.kind === "source_without_synthesis_coverage" &&
+      issue.target === paperKey
+    ));
+  } finally {
+    await rm(workspace, { recursive: true, force: true });
+    await rm(outside, { recursive: true, force: true });
+  }
+});
+
+test("typed source_refs mark sources as covered in coverage diagnostics", async () => {
+  const workspace = await createWorkspace();
+
+  try {
+    const paperKey = "paper-covered";
+    await writeReadySourceManifest(workspace, paperKey, ["covered-topic"]);
+    await writeSource(
+      workspace,
+      paperKey,
+      `
+---
+paper_key: ${paperKey}
+title: Covered Source
+tags:
+  - covered-topic
+---
+
+Typed pages cite this source by source_refs.
+`
+    );
+    await writePage(
+      workspace,
+      "typed-covered-page",
+      `
+---
+schema_version: 1
+type: "synthesis"
+key: "typed-covered-page"
+title: "Typed Covered Page"
+aliases: []
+tags: []
+evidence_contract: "paper-backed"
+source_refs:
+  - "${paperKey}"
+created_at: "2026-05-10T00:00:00.000Z"
+updated_at: "2026-05-10T00:00:00.000Z"
+---
+
+# Typed Covered Page
+
+This page cites a ready source by typed source refs.
+`
+    );
+
+    const result = await lintPaperWiki({
+      workspaceDir: workspace,
+      includeCoverage: true,
+      maxItems: 50
+    });
+
+    assert.ok(!result.issues.some((issue) =>
+      issue.kind === "source_without_synthesis_coverage" &&
+      issue.target === paperKey
+    ));
+    assert.equal(result.reports?.coverage?.coveredSourceCount, 1);
   } finally {
     await rm(workspace, { recursive: true, force: true });
   }
@@ -602,6 +842,31 @@ Tunable coupler calibration evidence.
   }
 });
 
+test("planWikiStructure promotes concepts from repeated typed source tags", async () => {
+  const workspace = await createWorkspace();
+
+  try {
+    await writeReadySourceManifest(workspace, "typed-source-a", ["cryogenic-routing"]);
+    await writeReadySourceManifest(workspace, "typed-source-b", ["cryogenic-routing"]);
+
+    const result = await planWikiStructure({
+      workspaceDir: workspace,
+      includeMediumRisk: true,
+      includeGrowthActions: true,
+      goal: "superconducting chip design",
+      focus: ["cryogenic routing"],
+      budget: { maxPagesToBuild: 1, maxAliasesToCreate: 0, maxScopeNotes: 0 }
+    });
+
+    assert.ok(result.actions.some((action) =>
+      action.type === "promote_concept" &&
+      action.concept === "cryogenic-routing"
+    ));
+  } finally {
+    await rm(workspace, { recursive: true, force: true });
+  }
+});
+
 test("planWikiStructure does not request high-value concept gaps unless growth actions are enabled", async () => {
   const workspace = await createWorkspace();
 
@@ -774,6 +1039,76 @@ test("planWikiStructure maps and budgets semantic alias and scope drift growth a
     });
     assert.ok(tinyCap.actions.length <= 1);
     assert.ok(!tinyCap.actions.some((action) => action.recommendedTool && action.recommendedTool !== "wiki_lint" && action.recommendedTool !== "wiki_health"));
+  } finally {
+    await rm(workspace, { recursive: true, force: true });
+  }
+});
+
+test("planWikiStructure creates aliases from typed pages with shared source_refs", async () => {
+  const workspace = await createWorkspace();
+
+  try {
+    await writeReadySourceManifest(workspace, "paper-alias", ["surface-code-routing"]);
+    await writePage(
+      workspace,
+      "surface-code-routing",
+      `
+---
+schema_version: 1
+type: "concept"
+key: "surface-code-routing"
+title: "Surface Code Routing"
+aliases: []
+tags:
+  - "surface-code-routing"
+evidence_contract: "paper-backed"
+source_refs:
+  - "paper-alias"
+created_at: "2026-05-10T00:00:00.000Z"
+updated_at: "2026-05-10T00:00:00.000Z"
+---
+
+# Surface Code Routing
+
+Shared source evidence.
+`
+    );
+    await writePage(
+      workspace,
+      "routing-for-surface-codes",
+      `
+---
+schema_version: 1
+type: "concept"
+key: "routing-for-surface-codes"
+title: "Routing for Surface Codes"
+aliases: []
+tags:
+  - "surface-code-routing"
+evidence_contract: "paper-backed"
+source_refs:
+  - "paper-alias"
+created_at: "2026-05-10T00:00:00.000Z"
+updated_at: "2026-05-10T00:00:00.000Z"
+---
+
+# Routing for Surface Codes
+
+Shared source evidence.
+`
+    );
+
+    const result = await planWikiStructure({
+      workspaceDir: workspace,
+      includeMediumRisk: true,
+      includeGrowthActions: true,
+      budget: { maxPagesToBuild: 0, maxAliasesToCreate: 1, maxScopeNotes: 0 }
+    });
+
+    assert.ok(result.actions.some((action) =>
+      action.type === "create_alias" &&
+      action.issueKind === "semantic_alias_candidate"
+    ));
   } finally {
     await rm(workspace, { recursive: true, force: true });
   }

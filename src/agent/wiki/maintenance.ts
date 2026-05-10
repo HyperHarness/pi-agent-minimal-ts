@@ -1,6 +1,8 @@
-import { readFile } from "node:fs/promises";
+import { access, readdir, readFile } from "node:fs/promises";
 import path from "node:path";
 import {
+  getPaperWikiManifestsDir,
+  getPaperWikiSourcePath,
   listPaperWikiPageFiles,
   listPaperWikiSourceFiles,
   paperKeyFromPaperWikiSourcePath,
@@ -167,13 +169,18 @@ type ParsedMarkdown = {
 };
 
 export async function readWikiMaintenanceDocuments(workspaceDir: string): Promise<WikiMaintenanceDocuments> {
-  const [sourceFiles, pageFiles] = await Promise.all([
+  const [sourceFiles, manifestFiles, pageFiles] = await Promise.all([
     listPaperWikiSourceFiles(workspaceDir),
+    listSourceManifestFiles(workspaceDir),
     listPaperWikiPageFiles(workspaceDir)
   ]);
 
-  const sources = await Promise.all(sourceFiles.map((filePath) => readSourceDocument(workspaceDir, filePath)));
+  const [summarySources, manifestSources] = await Promise.all([
+    Promise.all(sourceFiles.map((filePath) => readSourceDocument(workspaceDir, filePath))),
+    Promise.all(manifestFiles.map((filePath) => readSourceManifestDocument(workspaceDir, filePath)))
+  ]);
   const pages = await Promise.all(pageFiles.map((filePath) => readPageDocument(workspaceDir, filePath)));
+  const sources = mergeSourceDocuments(summarySources, manifestSources.filter((source): source is WikiMaintenanceSourceDocument => Boolean(source)));
   return { workspaceDir, sources, pages };
 }
 
@@ -423,16 +430,135 @@ async function readSourceDocument(workspaceDir: string, filePath: string): Promi
   };
 }
 
+async function listSourceManifestFiles(workspaceDir: string): Promise<string[]> {
+  try {
+    const manifestsDir = getPaperWikiManifestsDir(workspaceDir);
+    const entries = await readdir(manifestsDir, { withFileTypes: true });
+    return entries
+      .filter((entry) => entry.isFile() && entry.name.endsWith(".json"))
+      .map((entry) => path.join(manifestsDir, entry.name))
+      .sort((left, right) => left.localeCompare(right));
+  } catch {
+    return [];
+  }
+}
+
+async function pathExists(filePath: string): Promise<boolean> {
+  try {
+    await access(filePath);
+    return true;
+  } catch {
+    return false;
+  }
+}
+
+function safeManifestWorkspaceRelativePath(workspaceDir: string, value: unknown): string | undefined {
+  if (typeof value !== "string" || value.trim().length === 0) {
+    return undefined;
+  }
+  const rawPath = value.trim();
+  if (path.isAbsolute(rawPath) || path.win32.isAbsolute(rawPath)) {
+    return undefined;
+  }
+  const absolutePath = path.resolve(workspaceDir, rawPath.split(/[\\/]+/).join(path.sep));
+  const relativePath = path.relative(workspaceDir, absolutePath);
+  if (relativePath.startsWith("..") || path.isAbsolute(relativePath)) {
+    return undefined;
+  }
+  return relativeToWorkspace(workspaceDir, absolutePath);
+}
+
+async function readSourceManifestDocument(
+  workspaceDir: string,
+  filePath: string
+): Promise<WikiMaintenanceSourceDocument | undefined> {
+  let manifest: unknown;
+  try {
+    manifest = JSON.parse(await readFile(filePath, "utf8"));
+  } catch {
+    return undefined;
+  }
+  if (!manifest || typeof manifest !== "object") {
+    return undefined;
+  }
+  const record = manifest as Record<string, unknown>;
+  if (stringValue(record.status) !== "ready") {
+    return undefined;
+  }
+  const paperKey = stringValue(record.paperKey) ?? stringValue(record.paper_key) ?? path.basename(filePath, ".json");
+  const fallbackSourceSummaryPath = getPaperWikiSourcePath(workspaceDir, paperKey);
+  const sourceSummaryPath =
+    safeManifestWorkspaceRelativePath(workspaceDir, record.sourceSummaryPath) ??
+    (await pathExists(fallbackSourceSummaryPath) ? relativeToWorkspace(workspaceDir, fallbackSourceSummaryPath) : undefined);
+  if (!sourceSummaryPath) {
+    return undefined;
+  }
+  return {
+    paperKey,
+    title: stringValue(record.title) ?? paperKey,
+    path: sourceSummaryPath,
+    tags: normalizeTags(listValue(record.tags)),
+    relatedPaperKeys: listValue(record.relatedPaperKeys ?? record.related_papers).map((value) =>
+      sanitizeWikiFilename(value.toLowerCase())
+    ),
+    body: "",
+    frontmatter: record
+  };
+}
+
+function mergeSourceDocuments(
+  summarySources: WikiMaintenanceSourceDocument[],
+  manifestSources: WikiMaintenanceSourceDocument[]
+): WikiMaintenanceSourceDocument[] {
+  const byPaperKey = new Map<string, WikiMaintenanceSourceDocument>();
+  for (const source of manifestSources) {
+    byPaperKey.set(source.paperKey, source);
+  }
+  for (const source of summarySources) {
+    const manifest = byPaperKey.get(source.paperKey);
+    if (!manifest) {
+      byPaperKey.set(source.paperKey, source);
+      continue;
+    }
+    byPaperKey.set(source.paperKey, {
+      ...source,
+      title: source.title || manifest.title,
+      tags: normalizeTags([...source.tags, ...manifest.tags]),
+      relatedPaperKeys: normalizeTags([...source.relatedPaperKeys, ...manifest.relatedPaperKeys]),
+      frontmatter: {
+        ...manifest.frontmatter,
+        ...source.frontmatter
+      }
+    });
+  }
+  return [...byPaperKey.values()].sort((left, right) => left.paperKey.localeCompare(right.paperKey));
+}
+
 async function readPageDocument(workspaceDir: string, filePath: string): Promise<WikiMaintenancePageDocument> {
   const parsed = parseMarkdown(await readFile(filePath, "utf8"));
   const fallbackKey = sanitizeWikiFilename(path.basename(filePath, ".md"));
-  const canonicalPageKey = stringValue(parsed.frontmatter.canonical_page ?? parsed.frontmatter.canonicalPage);
-  const sourceCitations = sourceCitationList(parsed.frontmatter.sources);
+  const typedPageKey = stringValue(parsed.frontmatter.key);
+  const legacyPageKey = stringValue(parsed.frontmatter.page_key ?? parsed.frontmatter.pageKey);
+  const pageKey = sanitizeWikiFilename((typedPageKey ?? legacyPageKey ?? fallbackKey).toLowerCase());
+  const pageType = stringValue(parsed.frontmatter.type);
+  const canonicalPageKey = stringValue(
+    parsed.frontmatter.canonical_page ??
+    parsed.frontmatter.canonicalPage ??
+    parsed.frontmatter.alias_of
+  );
+  const sourceCitations = [
+    ...sourceCitationList(parsed.frontmatter.sources),
+    ...sourceRefCitationList(parsed.frontmatter.source_refs)
+  ];
   return {
-    pageKey: fallbackKey,
+    pageKey,
     title: stringValue(parsed.frontmatter.title) ?? headingTitle(parsed.body) ?? fallbackKey,
     path: relativeToWorkspace(workspaceDir, filePath),
-    isAlias: Boolean(canonicalPageKey || parsed.frontmatter.alias_of || parsed.frontmatter.is_alias === "true"),
+    isAlias: Boolean(
+      (pageType === "alias" && canonicalPageKey) ||
+      canonicalPageKey ||
+      parsed.frontmatter.is_alias === "true"
+    ),
     ...(canonicalPageKey ? { canonicalPageKey: sanitizeWikiFilename(canonicalPageKey.toLowerCase()) } : {}),
     relatedPageKeys: listValue(parsed.frontmatter.related_pages ?? parsed.frontmatter.relatedPageKeys).map((value) =>
       sanitizeWikiFilename(value.toLowerCase())
@@ -575,6 +701,10 @@ function sourceCitationList(value: unknown): WikiMaintenanceSourceCitation[] {
       };
     })
     .filter((citation): citation is WikiMaintenanceSourceCitation => citation !== null);
+}
+
+function sourceRefCitationList(value: unknown): WikiMaintenanceSourceCitation[] {
+  return listValue(value).map((paperKey) => ({ paperKey }));
 }
 
 function listValue(value: unknown): string[] {

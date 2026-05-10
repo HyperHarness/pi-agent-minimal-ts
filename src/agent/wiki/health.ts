@@ -1,4 +1,5 @@
-import { access, readFile } from "node:fs/promises";
+import { access, readdir, readFile } from "node:fs/promises";
+import type { Dirent } from "node:fs";
 import path from "node:path";
 import { listLocalPapers, type LocalPaperEntry, type LocalPaperParseSummary } from "../paper/storage/local-paper-library.js";
 import { downloadPaper, type DownloadPaperOptions } from "../paper/acquisition/paper-manager.js";
@@ -11,6 +12,7 @@ import {
 } from "./summary.js";
 import { backfillWikiSourceManifestFromSummary } from "./manifest-store.js";
 import {
+  getPaperWikiManifestsDir,
   getPaperWikiSourceManifestPath,
   relativeToWorkspace
 } from "./store.js";
@@ -43,6 +45,7 @@ export type WikiHealthIssueKind =
   | "low_quality"
   | "summary_missing"
   | "source_manifest_missing"
+  | "source_manifest_artifact_missing"
   | "missing_artifact"
   | "download_blocked"
   | "citation_incomplete"
@@ -177,6 +180,7 @@ const ISSUE_KINDS: WikiHealthIssueKind[] = [
   "low_quality",
   "summary_missing",
   "source_manifest_missing",
+  "source_manifest_artifact_missing",
   "missing_artifact",
   "download_blocked",
   "citation_incomplete",
@@ -554,6 +558,123 @@ async function missingArtifactPaths(workspaceDir: string, entry: LocalPaperEntry
   return missing;
 }
 
+function readNestedString(value: unknown, pathParts: string[]): string | undefined {
+  const current = readNestedValue(value, pathParts);
+  return typeof current === "string" && current.trim() ? current.trim() : undefined;
+}
+
+function readNestedValue(value: unknown, pathParts: string[]): unknown {
+  let current = value;
+  for (const pathPart of pathParts) {
+    if (!current || typeof current !== "object") {
+      return undefined;
+    }
+    current = (current as Record<string, unknown>)[pathPart];
+  }
+  return current;
+}
+
+type WorkspaceRelativeManifestPath =
+  | { ok: true; rawPath: string; relativePath: string; absolutePath: string }
+  | { ok: false; rawPath: string; reason: string };
+
+function validateWorkspaceRelativeManifestPath(workspaceDir: string, value: unknown): WorkspaceRelativeManifestPath {
+  if (typeof value !== "string" || value.trim().length === 0) {
+    return {
+      ok: false,
+      rawPath: typeof value === "string" ? value : "",
+      reason: "path is empty; manifest artifact paths must be non-empty workspace-relative paths"
+    };
+  }
+  const rawPath = value.trim();
+  if (path.isAbsolute(rawPath) || path.win32.isAbsolute(rawPath)) {
+    return {
+      ok: false,
+      rawPath,
+      reason: "path is not workspace-relative"
+    };
+  }
+  const normalizedPath = rawPath.split(/[\\/]+/).join(path.sep);
+  const absolutePath = path.resolve(workspaceDir, normalizedPath);
+  const relativePath = path.relative(workspaceDir, absolutePath);
+  if (relativePath.startsWith("..") || path.isAbsolute(relativePath)) {
+    return {
+      ok: false,
+      rawPath,
+      reason: "path escapes the workspace; manifest artifact paths must be workspace-relative"
+    };
+  }
+  return {
+    ok: true,
+    rawPath,
+    absolutePath,
+    relativePath: relativeToWorkspace(workspaceDir, absolutePath)
+  };
+}
+
+async function sourceManifestArtifactIssues(workspaceDir: string): Promise<WikiHealthIssue[]> {
+  const manifestsDir = getPaperWikiManifestsDir(workspaceDir);
+  let entries: Dirent[];
+  try {
+    entries = await readdir(manifestsDir, { withFileTypes: true });
+  } catch {
+    return [];
+  }
+
+  const issues: WikiHealthIssue[] = [];
+  for (const entry of entries.filter((candidate) => candidate.isFile() && candidate.name.endsWith(".json"))) {
+    const manifestPath = path.join(manifestsDir, entry.name);
+    let manifest: unknown;
+    try {
+      manifest = JSON.parse(await readFile(manifestPath, "utf8"));
+    } catch {
+      continue;
+    }
+    const paperKey = readNestedString(manifest, ["paperKey"]) ?? entry.name.replace(/\.json$/i, "");
+    const title = readNestedString(manifest, ["title"]);
+    const candidatePaths = [
+      { name: "sourceSummaryPath", value: readNestedValue(manifest, ["sourceSummaryPath"]) },
+      { name: "parse.markdownPath", value: readNestedValue(manifest, ["parse", "markdownPath"]) },
+      { name: "parse.jsonPath", value: readNestedValue(manifest, ["parse", "jsonPath"]) },
+      { name: "parse.qualityPath", value: readNestedValue(manifest, ["parse", "qualityPath"]) },
+      { name: "provenance.rawPdfPath", value: readNestedValue(manifest, ["provenance", "rawPdfPath"]), optional: true }
+    ].filter((candidate) => !candidate.optional || candidate.value !== undefined);
+    const invalidPaths: string[] = [];
+    const missingPaths: string[] = [];
+    for (const candidatePath of candidatePaths) {
+      const validation = validateWorkspaceRelativeManifestPath(workspaceDir, candidatePath.value);
+      if (!validation.ok) {
+        invalidPaths.push(`${candidatePath.name}: ${validation.rawPath || "<empty>"} (${validation.reason})`);
+        continue;
+      }
+      if (!(await pathExists(validation.absolutePath))) {
+        missingPaths.push(validation.relativePath);
+      }
+    }
+    if (missingPaths.length === 0 && invalidPaths.length === 0) {
+      continue;
+    }
+    const reasons = [
+      ...(invalidPaths.length > 0
+        ? [`Source manifest contains invalid workspace-relative artifact path${invalidPaths.length === 1 ? "" : "s"}: ${invalidPaths.join(", ")}.`]
+        : []),
+      ...(missingPaths.length > 0
+        ? [`Source manifest points to missing artifact path${missingPaths.length === 1 ? "" : "s"}: ${missingPaths.join(", ")}.`]
+        : [])
+    ];
+    issues.push({
+      kind: "source_manifest_artifact_missing",
+      severity: "medium",
+      paperKey,
+      ...(title ? { title } : {}),
+      path: relativeToWorkspace(workspaceDir, manifestPath),
+      paths: [...invalidPaths, ...missingPaths],
+      reason: reasons.join(" ")
+    });
+  }
+  return issues;
+}
+
 function summarizeActions(issues: WikiHealthIssue[]): string[] {
   const counts = new Map<WikiHealthIssueKind, number>();
   for (const issue of issues) {
@@ -568,6 +689,7 @@ function summarizeActions(issues: WikiHealthIssue[]): string[] {
     ["parse_missing", "Parse downloaded papers that do not yet have reading artifacts."],
     ["summary_missing", "Write wiki source summaries for parsed papers without a summary page."],
     ["source_manifest_missing", "Backfill source manifests for existing wiki source summaries."],
+    ["source_manifest_artifact_missing", "Repair source manifests or regenerate the missing parse/source artifacts they reference."],
     ["missing_artifact", "Repair or regenerate acquisition files that point at missing files."],
     ["download_blocked", "No repair needed for download-blocklisted papers unless the paper is removed from the local download blocklist."],
     ["citation_incomplete", "Refresh source citation metadata through the paper-download-subagent metadata pass."],
@@ -765,6 +887,7 @@ export async function checkWikiHealth(options: WikiHealthOptions): Promise<WikiH
   }
 
   issues.push(...await interruptedWikiOperationIssues(workspaceDir));
+  issues.push(...await sourceManifestArtifactIssues(workspaceDir));
 
   const summary = Object.fromEntries(ISSUE_KINDS.map((kind) => [kind, 0])) as Record<string, number>;
   for (const issue of issues) {

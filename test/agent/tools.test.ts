@@ -4795,6 +4795,7 @@ Canonical content.
       stale_index: 0,
       broken_wiki_link: 0,
       missing_source_citation: 0,
+      source_without_synthesis_coverage: 0,
       orphan_page: 0,
       concept_gap: 0,
       high_value_concept_gap: 0,
