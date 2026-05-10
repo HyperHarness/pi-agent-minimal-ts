@@ -26,6 +26,11 @@ import { paperWikiRelations } from "./relations.js";
 import { applyWikiStructurePlan } from "./structure-apply.js";
 import { planWikiStructure } from "./structure-plan.js";
 import type { WikiStructurePlanAction } from "./structure-plan.js";
+import {
+  planWikiAgentWork,
+  type WikiAgentAction,
+  type WikiAgentCoordinationPlan
+} from "./coordinator.js";
 import type { PaperSearchResult, PaperSearchSource } from "../paper/types.js";
 import { searchLocalPapers } from "../paper/storage/local-paper-library.js";
 import {
@@ -459,6 +464,7 @@ type ResearchBlockedItem = {
 type AnswerResearchQuestionDetails = {
   query: string;
   status: ResearchQuestionStatus;
+  coordination: WikiAgentCoordinationPlan;
   localEvidence: AnswerPaperWikiQuestionDetails;
   refreshedEvidence?: AnswerPaperWikiQuestionDetails;
   evidenceStatus: ResearchEvidenceStatus;
@@ -476,6 +482,7 @@ type AnswerResearchQuestionTool = AgentTool<
   AnswerResearchQuestionDetails
 >;
 type BootstrapWikiPageEvidenceDetails = PaperWikiPageBootstrapResult & {
+  coordination: WikiAgentCoordinationPlan;
   summariesWritten: ResearchWrittenSummary[];
 };
 type BootstrapWikiPageEvidenceTool = AgentTool<
@@ -486,6 +493,7 @@ type BuildWikiPageDetails = {
   topic: string;
   question?: string;
   mode: "draft" | "write";
+  coordination: WikiAgentCoordinationPlan;
   bootstrap?: BootstrapWikiPageEvidenceDetails;
   research?: AnswerResearchQuestionDetails;
   status: "drafted" | "written" | "needs_evidence" | "needs_worker" | "skipped";
@@ -771,6 +779,75 @@ function uniqueSourceEvidenceByPaperKey<T extends { paperKey: string }>(items: T
   return unique;
 }
 
+function markCoordinationInsufficient(
+  coordination: WikiAgentCoordinationPlan,
+  reason: string,
+  handoff: Record<string, unknown> = {},
+  actions: WikiAgentAction[] = [
+    "search_local_evidence",
+    "summarize_remaining_risks"
+  ]
+): WikiAgentCoordinationPlan {
+  const existingSteps = new Map(coordination.steps.map((step) => [step.action, step]));
+  const steps = actions.map((action) => existingSteps.get(action) ?? {
+    action,
+    owner: coordinationOwnerForAction(action),
+    reason: action === "summarize_remaining_risks"
+      ? reason
+      : "Record the workflow step that ran before reporting remaining risks."
+  });
+
+  return {
+    ...coordination,
+    decision: "report_blocked_or_insufficient",
+    steps,
+    handoff: {
+      ...coordination.handoff,
+      ...handoff,
+      reason
+    }
+  };
+}
+
+function coordinationOwnerForAction(
+  action: WikiAgentAction
+): WikiAgentCoordinationPlan["steps"][number]["owner"] {
+  if (action === "search_external_candidates" || action === "download_candidate_papers") {
+    return "paper-download-subagent";
+  }
+  if (
+    action === "search_local_evidence" ||
+    action === "read_selected_evidence" ||
+    action === "generate_source_summaries" ||
+    action === "rerun_local_retrieval" ||
+    action === "bootstrap_topic_evidence"
+  ) {
+    return "wiki-evidence-worker";
+  }
+  if (action === "write_synthesis_page" || action === "produce_structure_plan") {
+    return "wiki-synthesis-worker";
+  }
+  return "wiki-agent";
+}
+
+function assertWikiCoordinationWorkerBoundaries(
+  coordination: WikiAgentCoordinationPlan
+): WikiAgentCoordinationPlan {
+  for (const step of coordination.steps) {
+    if (step.action === "download_candidate_papers" && step.owner !== "paper-download-subagent") {
+      throw new Error("Wiki coordination boundary violation: download_candidate_papers must be owned by paper-download-subagent.");
+    }
+    if (step.action === "generate_source_summaries" && step.owner !== "wiki-evidence-worker") {
+      throw new Error("Wiki coordination boundary violation: generate_source_summaries must be owned by wiki-evidence-worker.");
+    }
+    if (step.owner === "wiki-agent" && step.action === "download_candidate_papers") {
+      throw new Error("Wiki coordination boundary violation: wiki-agent cannot own download_candidate_papers.");
+    }
+  }
+
+  return coordination;
+}
+
 function compactBuildWikiPageResult(result: BuildWikiPageDetails): Record<string, unknown> {
   return {
     topic: result.topic,
@@ -778,6 +855,14 @@ function compactBuildWikiPageResult(result: BuildWikiPageDetails): Record<string
     mode: result.mode,
     status: result.status,
     message: result.message,
+    coordination: {
+      intent: result.coordination.intent,
+      decision: result.coordination.decision,
+      steps: result.coordination.steps.map((step) => ({
+        action: step.action,
+        owner: step.owner
+      }))
+    },
     ...(result.bootstrap ? {
       bootstrapStatus: result.bootstrap.status,
       seedQueries: result.bootstrap.seedQueries,
@@ -1103,8 +1188,18 @@ export function createWikiTools(input: {
       }
     }
 
+    const coordination = assertWikiCoordinationWorkerBoundaries(await planWikiAgentWork({
+      workspaceDir: resolvedWorkspaceDir,
+      intent: "build_topic_page",
+      topic: args.topic,
+      query: args.question ?? args.topic,
+      fixedEvidenceCount: bootstrap.sourceEvidence.length,
+      hasBlockedAcquisition: bootstrap.blocked.length > 0
+    }));
+
     return {
       ...bootstrap,
+      coordination,
       summariesWritten
     };
   };
@@ -1382,9 +1477,16 @@ export function createWikiTools(input: {
           query: args.query,
           message: `Found ${localEvidence.evidence.length} local wiki evidence item(s).`
         });
+        const coordination = assertWikiCoordinationWorkerBoundaries(await planWikiAgentWork({
+          workspaceDir: resolvedWorkspaceDir,
+          intent: "answer_scientific_question",
+          query: args.query,
+          localEvidenceCount: localEvidence.evidence.length
+        }));
         const result: AnswerResearchQuestionDetails = {
           query: args.query,
           status: "answered_from_wiki",
+          coordination,
           localEvidence,
           evidenceStatus: "local_evidence",
           localEvidenceItems: localEvidence.evidence,
@@ -1620,9 +1722,53 @@ export function createWikiTools(input: {
         : blocked.length > 0
           ? "blocked_acquisition"
           : "insufficient_evidence";
+      const acquisitionAttemptDisabled = !autoDownload || maxDownloads === 0;
+      const baseCoordination = assertWikiCoordinationWorkerBoundaries(await planWikiAgentWork({
+        workspaceDir: resolvedWorkspaceDir,
+        intent: "answer_scientific_question",
+        query: args.query,
+        localEvidenceCount: 0,
+        hasBlockedAcquisition: blocked.length > 0 && !hasRefreshedEvidence
+      }));
+      const downloadWasAttempted = downloaded.length > 0 || blocked.some((item) =>
+        item.stage === "download" ||
+        item.stage === "parse" ||
+        item.stage === "summary" ||
+        item.stage === "user_action"
+      );
+      const insufficientResearchActions: WikiAgentAction[] = [
+        "search_local_evidence",
+        "search_external_candidates",
+        ...(downloadWasAttempted ? ["download_candidate_papers" as const] : []),
+        ...(summariesWritten.length > 0 ? ["generate_source_summaries" as const] : []),
+        ...(refreshedEvidence ? ["rerun_local_retrieval" as const] : []),
+        "summarize_remaining_risks"
+      ];
+      const coordination = assertWikiCoordinationWorkerBoundaries(
+        !hasRefreshedEvidence
+          ? markCoordinationInsufficient(
+              baseCoordination,
+              acquisitionAttemptDisabled
+                ? !autoDownload
+                  ? "autoDownload is false; no paper download acquisition was attempted."
+                  : "maxDownloads is 0; no paper download acquisition was attempted."
+                : blocked.length > 0
+                  ? "Research workflow ended with blocked acquisition and no refreshed wiki evidence."
+                  : "Research workflow found insufficient evidence after local and external checks.",
+              acquisitionAttemptDisabled
+                ? {
+                    autoDownload,
+                    maxDownloads
+                  }
+                : {},
+              insufficientResearchActions
+            )
+          : baseCoordination
+      );
       const result: AnswerResearchQuestionDetails = {
         query: args.query,
         status,
+        coordination,
         localEvidence,
         ...(refreshedEvidence ? { refreshedEvidence } : {}),
         evidenceStatus,
@@ -1705,6 +1851,40 @@ export function createWikiTools(input: {
         bootstrap.sourceEvidence.filter((item): item is PaperWikiPageBootstrapResult["sourceEvidence"][number] & { paperKey: string } =>
         item.kind === "source" && typeof item.paperKey === "string" && item.paperKey.length > 0
       );
+      const buildCoordination = async (options: {
+        selectedEvidenceCount: number;
+        hasBlockedAcquisition?: boolean;
+        insufficientReason?: string;
+        handoff?: Record<string, unknown>;
+      }): Promise<WikiAgentCoordinationPlan> => {
+        const insufficientActions = (): WikiAgentAction[] => {
+          const actions: WikiAgentAction[] = ["bootstrap_topic_evidence"];
+          if (options.selectedEvidenceCount > 0) {
+            actions.push("read_selected_evidence");
+          }
+          if (research) {
+            for (const step of research.coordination.steps) {
+              if (step.action !== "answer_with_citations" && step.action !== "summarize_remaining_risks") {
+                actions.push(step.action);
+              }
+            }
+          }
+          actions.push("summarize_remaining_risks");
+          return [...new Set(actions)];
+        };
+        const plan = assertWikiCoordinationWorkerBoundaries(await planWikiAgentWork({
+          workspaceDir: resolvedWorkspaceDir,
+          intent: "build_topic_page",
+          topic: args.topic,
+          query,
+          fixedEvidenceCount: options.selectedEvidenceCount,
+          hasBlockedAcquisition: options.hasBlockedAcquisition ?? false
+        }));
+
+        return assertWikiCoordinationWorkerBoundaries(options.insufficientReason
+          ? markCoordinationInsufficient(plan, options.insufficientReason, options.handoff, insufficientActions())
+          : plan);
+      };
 
       const allowExternalEvidence =
         (dependencies.allowBuildWikiPageExternalEvidence ?? true) && args.forbidExternalEvidence !== true;
@@ -1712,10 +1892,23 @@ export function createWikiTools(input: {
       const needsAnyEvidenceForDraft = evidence.length === 0 && mode === "draft";
 
       if ((needsExternalEvidenceForWrite || needsAnyEvidenceForDraft) && !allowExternalEvidence) {
+        const coordination = await buildCoordination({
+          selectedEvidenceCount: evidence.length,
+          hasBlockedAcquisition: bootstrap.blocked.length > 0,
+          insufficientReason:
+            mode === "draft"
+              ? "External evidence acquisition is disabled and no local wiki evidence is available for a draft."
+              : "External evidence acquisition is disabled and no citeable source summaries are available for writing.",
+          handoff: {
+            allowExternalEvidence: false,
+            forbidExternalEvidence: args.forbidExternalEvidence === true
+          }
+        });
         const result: BuildWikiPageDetails = {
           topic: args.topic,
           ...(args.question ? { question: args.question } : {}),
           mode,
+          coordination,
           bootstrap,
           status: "needs_evidence",
           message:
@@ -1753,10 +1946,16 @@ export function createWikiTools(input: {
       ];
 
       if (evidence.length === 0) {
+        const coordination = await buildCoordination({
+          selectedEvidenceCount: 0,
+          hasBlockedAcquisition: (research?.blocked.length ?? bootstrap.blocked.length) > 0,
+          insufficientReason: "No citeable local wiki evidence is available after bootstrap and research workflows."
+        });
         const result: BuildWikiPageDetails = {
           topic: args.topic,
           ...(args.question ? { question: args.question } : {}),
           mode,
+          coordination,
           bootstrap,
           ...(research ? { research } : {}),
           status: "needs_evidence",
@@ -1771,10 +1970,16 @@ export function createWikiTools(input: {
       }
 
       if (mode !== "draft" && sourceEvidence.length === 0) {
+        const coordination = await buildCoordination({
+          selectedEvidenceCount: evidence.length,
+          hasBlockedAcquisition: (research?.blocked.length ?? bootstrap.blocked.length) > 0,
+          insufficientReason: "Available evidence came from synthesis pages only; source citations are required before writing."
+        });
         const result: BuildWikiPageDetails = {
           topic: args.topic,
           ...(args.question ? { question: args.question } : {}),
           mode,
+          coordination,
           bootstrap,
           ...(research ? { research } : {}),
           status: "needs_evidence",
@@ -1795,10 +2000,20 @@ export function createWikiTools(input: {
         .filter((paperKey) => !presentSourceKeys.has(paperKey));
       const evidenceContract = args.evidenceContract;
       if (mode !== "draft" && sourceEvidence.length < minSources) {
+        const coordination = await buildCoordination({
+          selectedEvidenceCount: evidence.length,
+          hasBlockedAcquisition: (research?.blocked.length ?? bootstrap.blocked.length) > 0,
+          insufficientReason: `Minimum source count ${minSources} is not met; found ${sourceEvidence.length}.`,
+          handoff: {
+            minSources,
+            sourceEvidenceCount: sourceEvidence.length
+          }
+        });
         const result: BuildWikiPageDetails = {
           topic: args.topic,
           ...(args.question ? { question: args.question } : {}),
           mode,
+          coordination,
           bootstrap,
           ...(research ? { research } : {}),
           status: "needs_evidence",
@@ -1811,10 +2026,19 @@ export function createWikiTools(input: {
         };
       }
       if (mode !== "draft" && missingRequiredSourceKeys.length > 0) {
+        const coordination = await buildCoordination({
+          selectedEvidenceCount: evidence.length,
+          hasBlockedAcquisition: (research?.blocked.length ?? bootstrap.blocked.length) > 0,
+          insufficientReason: `Required source keys are missing: ${missingRequiredSourceKeys.join(", ")}.`,
+          handoff: {
+            missingRequiredSourceKeys
+          }
+        });
         const result: BuildWikiPageDetails = {
           topic: args.topic,
           ...(args.question ? { question: args.question } : {}),
           mode,
+          coordination,
           bootstrap,
           ...(research ? { research } : {}),
           status: "needs_evidence",
@@ -1828,10 +2052,16 @@ export function createWikiTools(input: {
       }
 
       if (!dependencies.paperWikiPageWorker) {
+        const coordination = await buildCoordination({
+          selectedEvidenceCount: evidence.length,
+          hasBlockedAcquisition: (research?.blocked.length ?? bootstrap.blocked.length) > 0,
+          insufficientReason: "Wiki page worker is not configured; synthesis cannot be completed automatically."
+        });
         const result: BuildWikiPageDetails = {
           topic: args.topic,
           ...(args.question ? { question: args.question } : {}),
           mode,
+          coordination,
           bootstrap,
           ...(research ? { research } : {}),
           status: "needs_worker",
@@ -1860,10 +2090,15 @@ export function createWikiTools(input: {
         message: `Wiki page worker produced draft "${draft.title}".`
       });
       if (mode === "draft") {
+        const coordination = await buildCoordination({
+          selectedEvidenceCount: evidence.length,
+          hasBlockedAcquisition: (research?.blocked.length ?? bootstrap.blocked.length) > 0
+        });
         const result: BuildWikiPageDetails = {
           topic: args.topic,
           ...(args.question ? { question: args.question } : {}),
           mode,
+          coordination,
           bootstrap,
           ...(research ? { research } : {}),
           status: "drafted",
@@ -1905,6 +2140,10 @@ export function createWikiTools(input: {
         topic: args.topic,
         ...(args.question ? { question: args.question } : {}),
         mode,
+        coordination: await buildCoordination({
+          selectedEvidenceCount: evidence.length,
+          hasBlockedAcquisition: (research?.blocked.length ?? bootstrap.blocked.length) > 0
+        }),
         bootstrap,
         ...(research ? { research } : {}),
         status: "written",

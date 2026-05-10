@@ -3840,6 +3840,10 @@ test("answer_research_question stops after local wiki evidence is found", async 
       localEvidenceItems?: unknown[];
       newEvidence?: unknown[];
       externalCandidates?: unknown[];
+      coordination?: {
+        decision?: string;
+        steps: Array<{ action?: string }>;
+      };
     };
 
     assert.equal(details.status, "answered_from_wiki");
@@ -3848,6 +3852,12 @@ test("answer_research_question stops after local wiki evidence is found", async 
     assert.equal(details.localEvidenceItems?.length, 1);
     assert.deepEqual(details.newEvidence, []);
     assert.deepEqual(details.externalCandidates, []);
+    assert.equal(details.coordination?.decision, "answer_from_local_wiki");
+    assert.deepEqual(details.coordination?.steps.map((step) => step.action), [
+      "search_local_evidence",
+      "read_selected_evidence",
+      "answer_with_citations",
+    ]);
   } finally {
     await rm(workspace, { recursive: true, force: true });
   }
@@ -3984,6 +3994,10 @@ test("answer_research_question can download, parse, summarize, and refresh wiki 
       summariesWritten?: Array<{ paperKey?: string; status?: string }>;
       refreshedEvidence?: { evidence?: unknown[] };
       newEvidence?: unknown[];
+      coordination?: {
+        decision?: string;
+        steps: Array<{ owner?: string; action?: string }>;
+      };
     };
 
     assert.equal(details.status, "expanded_with_new_sources");
@@ -3993,6 +4007,12 @@ test("answer_research_question can download, parse, summarize, and refresh wiki 
     assert.equal(details.summariesWritten?.[0]?.status, "written");
     assert.equal(details.refreshedEvidence?.evidence?.length, 1);
     assert.ok((details.newEvidence?.length ?? 0) >= 1);
+    assert.equal(details.coordination?.decision, "acquire_then_summarize");
+    assert.ok(details.coordination?.steps.some((step) => step.owner === "paper-download-subagent"));
+    assert.ok(details.coordination?.steps.some((step) => step.owner === "wiki-evidence-worker"));
+    assert.ok(!details.coordination?.steps.some((step) =>
+      step.owner === "wiki-agent" && step.action === "download_candidate_papers"
+    ));
   } finally {
     await rm(workspace, { recursive: true, force: true });
   }
@@ -4048,6 +4068,10 @@ test("answer_research_question reports insufficient evidence when auto download 
       limitations?: string[];
       externalCandidates?: unknown[];
       downloaded?: unknown[];
+      coordination?: {
+        decision?: string;
+        steps?: Array<{ action?: string }>;
+      };
     };
 
     assert.equal(details.status, "insufficient_evidence");
@@ -4057,6 +4081,14 @@ test("answer_research_question reports insufficient evidence when auto download 
     assert.equal(details.externalCandidates?.length, 1);
     assert.deepEqual(details.downloaded, []);
     assert.ok(details.limitations?.some((item) => /local wiki/i.test(item) || /insufficient/i.test(item)));
+    assert.equal(details.coordination?.decision, "report_blocked_or_insufficient");
+    assert.deepEqual(details.coordination?.steps?.map((step) => step.action), [
+      "search_local_evidence",
+      "search_external_candidates",
+      "summarize_remaining_risks",
+    ]);
+    assert.ok(!details.coordination?.steps?.some((step) => step.action === "download_candidate_papers"));
+    assert.ok(!details.coordination?.steps?.some((step) => step.action === "generate_source_summaries"));
   } finally {
     await rm(workspace, { recursive: true, force: true });
   }
@@ -4218,12 +4250,18 @@ test("bootstrap_wiki_page_evidence generates missing source summaries and refres
       status?: string;
       sourceEvidence?: unknown[];
       summariesWritten?: Array<{ paperKey?: string; status?: string }>;
+      coordination?: {
+        intent?: string;
+        decision?: string;
+      };
     };
 
     assert.equal(details.status, "ready");
     assert.deepEqual(generatedSummaries, ["arxiv-2507.09690"]);
     assert.equal(details.summariesWritten?.[0]?.status, "written");
     assert.equal(details.sourceEvidence?.length, 1);
+    assert.equal(details.coordination?.intent, "build_topic_page");
+    assert.equal(details.coordination?.decision, "build_from_fixed_evidence");
   } finally {
     await rm(workspace, { recursive: true, force: true });
   }
@@ -4427,12 +4465,34 @@ test("build_wiki_page writes a synthesis page from local wiki evidence", async (
       status?: string;
       page?: { pagePath?: string; sourceCount?: number };
       evidence?: unknown[];
+      coordination?: {
+        intent?: string;
+        steps: Array<{ action?: string; owner?: string }>;
+      };
     };
 
     assert.equal(details.status, "written");
     assert.equal(details.page?.pagePath, "knowledge-base/pages/qldpc-superconducting-chips.md");
     assert.equal(details.page?.sourceCount, 1);
     assert.equal(details.evidence?.length, 1);
+    assert.equal(details.coordination?.intent, "build_topic_page");
+    assert.ok(details.coordination?.steps.some((step) =>
+      step.action === "write_synthesis_page" && step.owner === "wiki-synthesis-worker"
+    ));
+    const compactItem = result.content?.[0];
+    assert.equal(compactItem?.type, "text");
+    const compact = JSON.parse((compactItem as { type: "text"; text: string }).text) as {
+      coordination?: {
+        decision?: string;
+        intent?: string;
+        steps?: Array<{ action?: string; owner?: string }>;
+      };
+    };
+    assert.equal(compact.coordination?.decision, "build_from_fixed_evidence");
+    assert.equal(compact.coordination?.intent, "build_topic_page");
+    assert.ok(compact.coordination?.steps?.some((step) =>
+      step.action === "write_synthesis_page" && step.owner === "wiki-synthesis-worker"
+    ));
 
     const page = await readFile(path.join(workspace, "knowledge-base/pages/qldpc-superconducting-chips.md"), "utf8");
     assert.match(page, /type: "wiki-synthesis-page"/);
@@ -4474,11 +4534,62 @@ test("build_wiki_page refuses write mode when minSources is not met", async () =
       pageKey: "tunable-coupler",
       minSources: 2,
     }, undefined);
-    const details = result.details as { status?: string; message?: string };
+    const details = result.details as {
+      status?: string;
+      message?: string;
+      coordination?: {
+        steps?: Array<{ action?: string }>;
+      };
+    };
 
     assert.equal(details.status, "needs_evidence");
     assert.match(details.message ?? "", /minimum source count/i);
+    assert.ok(!details.coordination?.steps?.some((step) => step.action === "write_synthesis_page"));
+    const compactItem = result.content?.[0];
+    assert.equal(compactItem?.type, "text");
+    const compact = JSON.parse((compactItem as { type: "text"; text: string }).text) as {
+      coordination?: {
+        steps?: Array<{ action?: string }>;
+      };
+    };
+    assert.ok(!compact.coordination?.steps?.some((step) => step.action === "write_synthesis_page"));
     await assert.rejects(readFile(path.join(workspace, "knowledge-base/pages/tunable-coupler.md"), "utf8"));
+  } finally {
+    await rm(workspace, { recursive: true, force: true });
+  }
+});
+
+test("build_wiki_page reports missing page worker without write coordination", async () => {
+  const workspace = await mkdtemp(path.join(tmpdir(), "pi-agent-tools-"));
+
+  try {
+    const tool = getBuildWikiPageTool(workspace, {
+      searchPaperWiki: async (options) => ({
+        query: options.query,
+        results: [{
+          paperKey: "paper-a",
+          title: "Worker Evidence",
+          path: "knowledge-base/sources/paper-a/summary.md",
+          snippet: "worker evidence",
+        }],
+      }),
+    });
+
+    const result = await tool.execute("build-page-missing-worker", {
+      topic: "missing worker topic",
+      pageKey: "missing-worker-topic",
+    }, undefined);
+    const details = result.details as {
+      status?: string;
+      message?: string;
+      coordination?: {
+        steps?: Array<{ action?: string }>;
+      };
+    };
+
+    assert.equal(details.status, "needs_worker");
+    assert.match(details.message ?? "", /worker is not configured/i);
+    assert.ok(!details.coordination?.steps?.some((step) => step.action === "write_synthesis_page"));
   } finally {
     await rm(workspace, { recursive: true, force: true });
   }
