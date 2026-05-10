@@ -157,13 +157,13 @@ ${input.body}
 test("buildWikiCoverageMap reports covered sources, uncovered sources, weak pages, and tag clusters", async () => {
   const workspace = await createWorkspace();
   try {
-    await writeText(path.join(workspace, "knowledge-base/sources/paper-a.md"), sourceSummary({
+    await writeText(path.join(workspace, "knowledge-base/sources/paper-a/summary.md"), sourceSummary({
       paperKey: "paper-a",
       title: "Tunable Coupler Evidence",
       tags: ["tunable-coupler", "qubit-calibration"],
       body: "Evidence about tunable couplers and calibration."
     }));
-    await writeText(path.join(workspace, "knowledge-base/sources/paper-b.md"), sourceSummary({
+    await writeText(path.join(workspace, "knowledge-base/sources/paper-b/summary.md"), sourceSummary({
       paperKey: "paper-b",
       title: "Fixed Frequency Transmon Evidence",
       tags: ["fixed-frequency-transmons", "qubit-calibration"],
@@ -175,7 +175,7 @@ test("buildWikiCoverageMap reports covered sources, uncovered sources, weak page
       sources: [{
         paperKey: "paper-a",
         title: "Tunable Coupler Evidence",
-        path: "knowledge-base/sources/paper-a.md"
+        path: "knowledge-base/sources/paper-a/summary.md"
       }],
       body: "Calibration synthesis."
     }));
@@ -196,13 +196,13 @@ test("buildWikiCoverageMap reports covered sources, uncovered sources, weak page
 test("rankConceptGaps promotes goal-matching ready concepts before broad or existing concepts", async () => {
   const workspace = await createWorkspace();
   try {
-    await writeText(path.join(workspace, "knowledge-base/sources/paper-a.md"), sourceSummary({
+    await writeText(path.join(workspace, "knowledge-base/sources/paper-a/summary.md"), sourceSummary({
       paperKey: "paper-a",
       title: "Tunable Coupler Evidence",
       tags: ["tunable-coupler", "neutral-atoms"],
       body: "Tunable coupler frequency planning for superconducting chip design."
     }));
-    await writeText(path.join(workspace, "knowledge-base/sources/paper-b.md"), sourceSummary({
+    await writeText(path.join(workspace, "knowledge-base/sources/paper-b/summary.md"), sourceSummary({
       paperKey: "paper-b",
       title: "Coupler Calibration Evidence",
       tags: ["tunable-coupler", "qubit-calibration"],
@@ -214,7 +214,7 @@ test("rankConceptGaps promotes goal-matching ready concepts before broad or exis
       sources: [{
         paperKey: "paper-b",
         title: "Coupler Calibration Evidence",
-        path: "knowledge-base/sources/paper-b.md"
+        path: "knowledge-base/sources/paper-b/summary.md"
       }],
       body: "Existing calibration page."
     }));
@@ -248,7 +248,7 @@ test("auditPageEvidenceContracts distinguishes uncited synthesis pages from pape
       sources: [{
         paperKey: "paper-a",
         title: "Tunable Coupler Evidence",
-        path: "knowledge-base/sources/paper-a.md"
+        path: "knowledge-base/sources/paper-a/summary.md"
       }],
       body: "Paper-backed coupler synthesis."
     }));
@@ -272,13 +272,13 @@ test("suggestSemanticAliases reports strong long-title near duplicates without w
     await writeText(path.join(workspace, "knowledge-base/pages/agentic-quantum-eda-calibration-frequency-allocation-autonomous-discovery.md"), synthesisPage({
       pageKey: "agentic-quantum-eda-calibration-frequency-allocation-autonomous-discovery",
       title: "Agentic Quantum EDA Calibration and Frequency Allocation",
-      sources: [{ paperKey: "paper-a", title: "EDA Evidence", path: "knowledge-base/sources/paper-a.md" }],
+      sources: [{ paperKey: "paper-a", title: "EDA Evidence", path: "knowledge-base/sources/paper-a/summary.md" }],
       body: "Agentic EDA page."
     }));
     await writeText(path.join(workspace, "knowledge-base/pages/autonomous-agent-quantum-eda-calibration-frequency-allocation-llm-chip-design.md"), synthesisPage({
       pageKey: "autonomous-agent-quantum-eda-calibration-frequency-allocation-llm-chip-design",
       title: "Autonomous Agent Quantum EDA Calibration Frequency Allocation and LLM Chip Design",
-      sources: [{ paperKey: "paper-a", title: "EDA Evidence", path: "knowledge-base/sources/paper-a.md" }],
+      sources: [{ paperKey: "paper-a", title: "EDA Evidence", path: "knowledge-base/sources/paper-a/summary.md" }],
       body: "Overlapping agentic EDA page."
     }));
 
@@ -304,7 +304,7 @@ test("auditScopeDrift reports stale framing only in central page framing", async
     await writeText(path.join(workspace, "knowledge-base/pages/history.md"), synthesisPage({
       pageKey: "history",
       title: "Superconducting Chip Design History",
-      sources: [{ paperKey: "paper-a", title: "History Evidence", path: "knowledge-base/sources/paper-a.md" }],
+      sources: [{ paperKey: "paper-a", title: "History Evidence", path: "knowledge-base/sources/paper-a/summary.md" }],
       body: "Later work mentions million-qubit roadmaps as historical context in a lower section.\n\n## Background\n\nMillion-qubit systems are mentioned here."
     }));
 
@@ -1013,13 +1013,13 @@ Add a direct lint fixture test to `test/agent/wiki-maintenance.test.ts`:
 test("lintPaperWiki emits high value concept gaps and optional reports", async () => {
   const workspace = await createWorkspace();
   try {
-    await writeText(path.join(workspace, "knowledge-base/sources/paper-a.md"), sourceSummary({
+    await writeText(path.join(workspace, "knowledge-base/sources/paper-a/summary.md"), sourceSummary({
       paperKey: "paper-a",
       title: "Tunable Coupler Evidence",
       tags: ["tunable-coupler"],
       body: "Tunable coupler evidence for superconducting chip design."
     }));
-    await writeText(path.join(workspace, "knowledge-base/sources/paper-b.md"), sourceSummary({
+    await writeText(path.join(workspace, "knowledge-base/sources/paper-b/summary.md"), sourceSummary({
       paperKey: "paper-b",
       title: "Coupler Calibration Evidence",
       tags: ["tunable-coupler"],
@@ -1313,13 +1313,13 @@ Append to `test/agent/wiki-maintenance.test.ts`:
 test("planWikiStructure emits budgeted tool-call-shaped growth and verification actions", async () => {
   const workspace = await createWorkspace();
   try {
-    await writeText(path.join(workspace, "knowledge-base/sources/paper-a.md"), sourceSummary({
+    await writeText(path.join(workspace, "knowledge-base/sources/paper-a/summary.md"), sourceSummary({
       paperKey: "paper-a",
       title: "Tunable Coupler Evidence",
       tags: ["tunable-coupler"],
       body: "Tunable coupler evidence for superconducting chip design."
     }));
-    await writeText(path.join(workspace, "knowledge-base/sources/paper-b.md"), sourceSummary({
+    await writeText(path.join(workspace, "knowledge-base/sources/paper-b/summary.md"), sourceSummary({
       paperKey: "paper-b",
       title: "Coupler Calibration Evidence",
       tags: ["tunable-coupler"],
@@ -1644,7 +1644,7 @@ test("applyWikiStructurePlan dry-runs safe alias and scope note actions", async 
     await writeText(path.join(workspace, "knowledge-base/pages/tunable-coupler.md"), synthesisPage({
       pageKey: "tunable-coupler",
       title: "Tunable Coupler",
-      sources: [{ paperKey: "paper-a", title: "Evidence", path: "knowledge-base/sources/paper-a.md" }],
+      sources: [{ paperKey: "paper-a", title: "Evidence", path: "knowledge-base/sources/paper-a/summary.md" }],
       body: "Coupler page."
     }));
     const { applyWikiStructurePlan } = await import("../../src/agent/wiki/structure-apply.js");
@@ -1700,7 +1700,7 @@ test("applyWikiStructurePlan writes safe alias and scope note actions", async ()
     await writeText(path.join(workspace, "knowledge-base/pages/tunable-coupler.md"), synthesisPage({
       pageKey: "tunable-coupler",
       title: "Tunable Coupler",
-      sources: [{ paperKey: "paper-a", title: "Evidence", path: "knowledge-base/sources/paper-a.md" }],
+      sources: [{ paperKey: "paper-a", title: "Evidence", path: "knowledge-base/sources/paper-a/summary.md" }],
       body: "Coupler page."
     }));
     const { applyWikiStructurePlan } = await import("../../src/agent/wiki/structure-apply.js");
@@ -1928,7 +1928,7 @@ test("build_wiki_page refuses write mode when minSources is not met", async () =
         results: [{
           paperKey: "paper-a",
           title: "Single Evidence",
-          path: "knowledge-base/sources/paper-a.md",
+          path: "knowledge-base/sources/paper-a/summary.md",
           snippet: "single source",
         }],
       }),
@@ -1963,13 +1963,13 @@ test("build_wiki_page writes evidence contract and verifies after write", async 
           {
             paperKey: "paper-a",
             title: "Evidence A",
-            path: "knowledge-base/sources/paper-a.md",
+            path: "knowledge-base/sources/paper-a/summary.md",
             snippet: "source A",
           },
           {
             paperKey: "paper-b",
             title: "Evidence B",
-            path: "knowledge-base/sources/paper-b.md",
+            path: "knowledge-base/sources/paper-b/summary.md",
             snippet: "source B",
           },
         ],

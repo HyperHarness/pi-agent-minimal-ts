@@ -25,7 +25,7 @@ async function writeMarkdown(filePath: string, content: string): Promise<void> {
 }
 
 async function writeSource(workspaceDir: string, paperKey: string, content: string): Promise<void> {
-  await writeMarkdown(path.join(workspaceDir, "knowledge-base", "sources", `${paperKey}.md`), content);
+  await writeMarkdown(path.join(workspaceDir, "knowledge-base", "sources", paperKey, "summary.md"), content);
 }
 
 async function writePage(workspaceDir: string, pageKey: string, content: string): Promise<void> {
@@ -116,7 +116,7 @@ tags:
 sources:
   - paper_key: paper-c
     title: Qubit Calibration Drift Study
-    path: knowledge-base/sources/paper-c.md
+    path: knowledge-base/sources/paper-c/summary.md
 ---
 
 # Qubit Calibration
@@ -136,7 +136,7 @@ tags:
 sources:
   - paper_key: paper-a
     title: Frequency Planning for Tunable Coupler Processors
-    path: knowledge-base/sources/paper-a.md
+    path: knowledge-base/sources/paper-a/summary.md
 ---
 
 # Tunable Coupler
@@ -194,7 +194,7 @@ tags:
 sources:
   - paper_key: paper-d
     title: Autonomous Quantum EDA Agents
-    path: knowledge-base/sources/paper-d.md
+    path: knowledge-base/sources/paper-d/summary.md
 ---
 
 # Agentic Autonomous Quantum EDA
@@ -214,7 +214,7 @@ tags:
 sources:
   - paper_key: paper-d
     title: Autonomous Quantum EDA Agents
-    path: knowledge-base/sources/paper-d.md
+    path: knowledge-base/sources/paper-d/summary.md
 ---
 
 # Autonomous Agentic Quantum EDA
@@ -670,7 +670,7 @@ title: Tunable Coupler
 sources:
   - paper_key: paper-a
     title: Evidence
-    path: knowledge-base/sources/paper-a.md
+    path: knowledge-base/sources/paper-a/summary.md
 ---
 
 # Tunable Coupler
@@ -679,7 +679,7 @@ Coupler page.
 
 ## Sources
 
-- \`paper-a\` - Evidence (knowledge-base/sources/paper-a.md)
+- \`paper-a\` - Evidence (knowledge-base/sources/paper-a/summary.md)
 `
     );
 
@@ -751,7 +751,7 @@ title: Tunable Coupler
 sources:
   - paper_key: paper-a
     title: Evidence
-    path: knowledge-base/sources/paper-a.md
+    path: knowledge-base/sources/paper-a/summary.md
 ---
 
 # Tunable Coupler
@@ -760,7 +760,7 @@ Coupler page.
 
 ## Sources
 
-- \`paper-a\` - Evidence (knowledge-base/sources/paper-a.md)
+- \`paper-a\` - Evidence (knowledge-base/sources/paper-a/summary.md)
 `
     );
 
@@ -1295,7 +1295,7 @@ title: Tunable Coupler
 sources:
   - paper_key: paper-a
     title: Evidence
-    path: knowledge-base/sources/paper-a.md
+    path: knowledge-base/sources/paper-a/summary.md
 ---
 
 # Tunable Coupler

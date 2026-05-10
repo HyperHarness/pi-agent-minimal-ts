@@ -362,7 +362,7 @@ test("downloadPaper uses a local exact-title arXiv preprint before live arXiv se
       downloadPath: arxivPdfPath
     });
     await writeText(
-      path.join(workspaceDir, "knowledge-base", "sources", "arxiv-1709.06678.md"),
+      path.join(workspaceDir, "knowledge-base", "sources", "arxiv-1709.06678", "summary.md"),
       [
         "---",
         `title: "${title}"`,

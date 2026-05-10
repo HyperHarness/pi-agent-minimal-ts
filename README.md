@@ -26,7 +26,7 @@ Feishu bridge / CLI / RPC
 main chat agent / wiki-agent coordinator
         |
         +--> paper-download-subagent  -> acquisition files, PDFs, webpages, parses
-        +--> wiki-evidence-worker     -> sources/*.md and fixed-evidence page drafts
+        +--> wiki-evidence-worker     -> sources/*/summary.md and fixed-evidence page drafts
         +--> wiki-agent               -> pages/*.md and aliases
         +--> design-subagent          -> knowledge-base/design-records/*.md
         +--> paper-writing-worker     -> manuscript project files
@@ -90,7 +90,7 @@ The intended workflow is:
 
 ```text
 paper-download-subagent -> wiki-evidence-worker -> wiki-agent -> design-subagent -> wiki-agent -> paper-writing-worker
-acquisition/raw/parses  -> sources/*.md + page drafts -> pages/*.md -> design records  -> curated wiki -> manuscript files
+acquisition/raw/parses  -> sources/*/summary.md + page drafts -> pages/*.md -> design records  -> curated wiki -> manuscript files
 ```
 
 For model benchmarks, give workers fixed `sources` fixtures and evaluate page synthesis without allowing autonomous evidence acquisition.
@@ -295,7 +295,7 @@ Publisher and external URLs use the browser extension bridge by default when con
 - `generate_paper_wiki_summary`: full-mode clean-context source summary generation
 - `paper_wiki_relations`: full-mode relation discovery and `related_papers` maintenance
 
-The key distinction is that `sources/*.md` are evidence summaries for individual papers, while `pages/*.md` are durable cross-paper concept pages.
+The key distinction is that `sources/*/summary.md` are evidence summaries for individual papers, while `pages/*.md` are durable cross-paper concept pages.
 
 ### Wiki Maintenance Tools
 
@@ -308,7 +308,7 @@ The key distinction is that `sources/*.md` are evidence summaries for individual
 ### Wiki Evidence Tools
 
 - `generate_paper_wiki_summary`: builds a bounded evidence package from parsed paper Markdown and sends it through the `wiki-evidence-worker` summary pass
-- `write_paper_wiki_source`: writes grounded per-paper source summaries under `sources/*.md`
+- `write_paper_wiki_source`: writes grounded per-paper source summaries under `sources/*/summary.md`
 - `paper_wiki_relations`: proposes or applies related-paper links among local source summaries
 
 `paper-summary-worker` and `wiki-page-worker` are not separate runtime roles. Their clean-context behavior is implemented as `wiki-evidence-worker` subtasks: one summary pass for per-paper evidence and one fixed-evidence page-draft pass used by the wiki agent before final page promotion.
@@ -350,19 +350,18 @@ knowledge-base/
     verification-reports/
     failures/
     benchmark-cases/
-  wiki/
-    index.md                        # knowledge-entry catalog over pages/
-    log.md                          # page operation log
-    sources/<paper-key>.md          # LLM-authored paper source summary
-    sources/<paper-key>/
-      source.json                   # identity and citation metadata
-      acquisition.json              # download, access, parse, and reading state
-      parses/                       # parsed markdown, JSON, and quality reports
-      chunks/                       # searchable reading chunks
-    pages/                          # durable cross-paper topic pages
-    manifests/
-    assets/
-    state/
+  index.md                          # knowledge-entry catalog over pages/
+  log.md                            # page operation log
+  sources/<paper-key>/
+    summary.md                      # LLM-authored paper source summary
+    source.json                     # identity and citation metadata
+    acquisition.json                # download, access, parse, and reading state
+    parses/                         # parsed markdown, JSON, and quality reports
+    chunks/                         # searchable reading chunks
+  pages/                            # durable cross-paper topic pages
+  manifests/
+  assets/
+  state/
 ```
 
 ## Design Project Layout

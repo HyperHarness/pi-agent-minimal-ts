@@ -102,7 +102,7 @@ test("generatePaperWikiSummary writes a wiki source through an injected summary 
     assert.equal(result.status, "written");
     assert.equal(receivedEvidence.length, 1);
     assert.match(receivedEvidence[0], /stabilizer measurements/);
-    assert.equal(result.source?.sourcePath, "knowledge-base/sources/arxiv-2601.01002.md");
+    assert.equal(result.source?.sourcePath, "knowledge-base/sources/arxiv-2601.01002/summary.md");
     const markdown = await readFile(path.join(workspace, result.source!.sourcePath), "utf8");
     assert.match(markdown, /paper-source-summary/);
     assert.match(markdown, /Repeated stabilizer measurements/);

@@ -375,13 +375,16 @@ async function collectWikiSummaries(workspaceDir: string, entries: Map<string, L
   }
 
   for (const file of sourceFiles) {
-    if (!file.isFile() || !file.name.endsWith(".md")) {
+    if (!file.isDirectory()) {
       continue;
     }
-    const paperKey = path.basename(file.name, ".md");
+    const paperKey = file.name;
     const entry = entries.get(paperKey) ?? createEmptyEntry(paperKey);
-    const summaryPath = path.join(paths.sourcesRoot, file.name);
+    const summaryPath = path.join(paths.sourcesRoot, file.name, "summary.md");
     const summary = await readFile(summaryPath, "utf8").catch(() => undefined);
+    if (summary === undefined) {
+      continue;
+    }
     const title = summary?.match(/^title:\s*["']?(.+?)["']?\s*$/m)?.[1]?.trim();
     if (title) {
       entry.title = entry.title ?? title;

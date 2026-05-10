@@ -45,6 +45,12 @@ async function writeJson(filePath: string, value: unknown): Promise<void> {
   await writeFile(filePath, `${JSON.stringify(value, null, 2)}\n`, "utf8");
 }
 
+async function writeSourceSummary(workspace: string, paperKey: string, markdown: string): Promise<void> {
+  const summaryPath = path.join(workspace, "knowledge-base", "sources", paperKey, "summary.md");
+  await mkdir(path.dirname(summaryPath), { recursive: true });
+  await writeFile(summaryPath, markdown, "utf8");
+}
+
 async function writePdfWithFlateTextStream(workspace: string, filename: string): Promise<string> {
   const pdfPath = path.join(workspace, "knowledge-base", "raw", "pdfs", filename);
   const content = "BT /F1 1 Tf [(Cosmic-ray-induced)-220(correlated)-220(errors)]TJ T* [(superconducting)-220(qubit)-220(array)]TJ ET";
@@ -382,7 +388,7 @@ test("writePaperWikiSource saves an LLM source summary and searchPaperWiki finds
       keyFindings: ["Neutral atom arrays are the central experimental platform."]
     });
 
-    assert.equal(source.sourcePath, "knowledge-base/sources/arxiv-2601.00003.md");
+    assert.equal(source.sourcePath, "knowledge-base/sources/arxiv-2601.00003/summary.md");
     assert.equal(source.indexPath, "knowledge-base/index.md");
     const markdown = await readFile(path.join(workspace, source.sourcePath), "utf8");
     assert.match(markdown, /type: "paper-source-summary"/);
@@ -402,6 +408,7 @@ test("writePaperWikiSource saves an LLM source summary and searchPaperWiki finds
     });
     assert.equal(search.results.length, 1);
     assert.equal(search.results[0]?.paperKey, "arxiv-2601.00003");
+    assert.equal(search.results[0]?.path, "knowledge-base/sources/arxiv-2601.00003/summary.md");
     assert.match(search.results[0]?.snippet ?? "", /neutral atom/);
   } finally {
     await rm(workspace, { recursive: true, force: true });
@@ -410,11 +417,8 @@ test("writePaperWikiSource saves an LLM source summary and searchPaperWiki finds
 
 test("searchPaperWiki expands Chinese domain questions into weighted paper evidence", async () => {
   const workspace = await createWorkspace();
-  const sourcesDir = path.join(workspace, "knowledge-base", "sources");
-
   try {
-    await mkdir(sourcesDir, { recursive: true });
-    await writeFile(path.join(sourcesDir, "arxiv-2507.09690.md"), `---
+    await writeSourceSummary(workspace, "arxiv-2507.09690", `---
 type: "paper-source-summary"
 paper_key: "arxiv-2507.09690"
 title: "Small Quantum Low Density Parity Check Codes for Near-Term Experiments"
@@ -429,8 +433,8 @@ tags:
 This paper proposes small quantum LDPC codes for near-term experiments.
 It discusses a superconducting flip-chip architecture, non-local connectivity,
 long-range couplers, crosstalk, leakage, and measurement overhead as hardware challenges.
-`, "utf8");
-    await writeFile(path.join(sourcesDir, "aps-superconducting-control.md"), `---
+`);
+    await writeSourceSummary(workspace, "aps-superconducting-control", `---
 type: "paper-source-summary"
 paper_key: "aps-superconducting-control"
 title: "Control of Superconducting Qubits"
@@ -441,7 +445,7 @@ tags:
 # Control of Superconducting Qubits
 
 This paper studies microwave control of superconducting qubits.
-`, "utf8");
+`);
 
     const search = await searchPaperWiki({
       workspaceDir: workspace,
@@ -470,7 +474,7 @@ test("writePaperWikiPage saves a synthesis page and updates the wiki index", asy
         {
           paperKey: "arxiv-2507.09690",
           title: "Small Quantum LDPC Codes",
-          path: "knowledge-base/sources/arxiv-2507.09690.md"
+          path: "knowledge-base/sources/arxiv-2507.09690/summary.md"
         }
       ]
     });
@@ -508,7 +512,7 @@ test("searchPaperWiki searches synthesis pages as durable wiki evidence", async 
         {
           paperKey: "arxiv-2507.09690",
           title: "Small Quantum LDPC Codes",
-          path: "knowledge-base/sources/arxiv-2507.09690.md"
+          path: "knowledge-base/sources/arxiv-2507.09690/summary.md"
         }
       ]
     });
@@ -530,9 +534,7 @@ test("searchPaperWiki searches synthesis pages as durable wiki evidence", async 
 test("lintPaperWiki reports structural wiki gaps", async () => {
   const workspace = await createWorkspace();
   try {
-    const sourcesDir = path.join(workspace, "knowledge-base", "sources");
-    await mkdir(sourcesDir, { recursive: true });
-    await writeFile(path.join(sourcesDir, "source-a.md"), `---
+    await writeSourceSummary(workspace, "source-a", `---
 type: "paper-source-summary"
 paper_key: "source-a"
 title: "Source A"
@@ -543,8 +545,8 @@ tags:
 # Source A
 
 Evidence about qLDPC.
-`, "utf8");
-    await writeFile(path.join(sourcesDir, "source-b.md"), `---
+`);
+    await writeSourceSummary(workspace, "source-b", `---
 type: "paper-source-summary"
 paper_key: "source-b"
 title: "Source B"
@@ -555,7 +557,7 @@ tags:
 # Source B
 
 More evidence about qLDPC.
-`, "utf8");
+`);
     const page = await writePaperWikiPage({
       workspaceDir: workspace,
       topic: "Broken page",
@@ -566,7 +568,7 @@ More evidence about qLDPC.
         {
           paperKey: "missing-source",
           title: "Missing Source",
-          path: "knowledge-base/sources/missing-source.md"
+          path: "knowledge-base/sources/missing-source/summary.md"
         }
       ]
     });
@@ -752,9 +754,7 @@ test("applyWikiStructurePlan dry-runs and applies low-risk duplicate section cle
 test("bootstrapPaperWikiPageEvidence searches sources, expands related papers, and reports missing summaries", async () => {
   const workspace = await createWorkspace();
   try {
-    const sourcesDir = path.join(workspace, "knowledge-base", "sources");
-    await mkdir(sourcesDir, { recursive: true });
-    await writeFile(path.join(sourcesDir, "arxiv-seed.md"), `---
+    await writeSourceSummary(workspace, "arxiv-seed", `---
 type: "paper-source-summary"
 paper_key: "arxiv-seed"
 title: "Seed qLDPC Paper"
@@ -768,8 +768,8 @@ related_papers:
 # Seed qLDPC Paper
 
 This source summary discusses qLDPC implementation on superconducting chips.
-`, "utf8");
-    await writeFile(path.join(sourcesDir, "arxiv-related.md"), `---
+`);
+    await writeSourceSummary(workspace, "arxiv-related", `---
 type: "paper-source-summary"
 paper_key: "arxiv-related"
 title: "Auxiliary Constraints"
@@ -780,7 +780,7 @@ tags:
 # Auxiliary Constraints
 
 This source summary discusses auxiliary constraints.
-`, "utf8");
+`);
 
     const result = await bootstrapPaperWikiPageEvidence({
       workspaceDir: workspace,

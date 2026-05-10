@@ -51,7 +51,7 @@ For `pi-agent-minimal-ts`, the `knowledge-base` structure preserves this by trea
 
 - `raw/pdfs/` as immutable original PDFs
 - `sources/<paper-key>/` as parser evidence for each paper source
-- `sources/<paper-key>.md` as the retrieval source summary layer
+- `sources/<paper-key>/summary.md` as the retrieval source summary layer
 - `pages/` as higher-level synthesis
 - `state/` as future WAL/status state if needed
 
@@ -75,7 +75,7 @@ The current paper wiki code has path helpers in `paper-wiki-store.ts` and reader
 - selected assets
 - acquisition provenance
 
-This is highly relevant. The current paper reader stores `source.json`, `parse.json`, `quality.json`, and markdown intermediates, but the final `sources/<paper-key>.md` layer does not yet have a compact sibling manifest that explains all derived durable artifacts in one machine-readable place.
+This is highly relevant. The current paper reader stores `source.json`, `parse.json`, `quality.json`, and markdown intermediates, but the final `sources/<paper-key>/summary.md` layer does not yet have a compact sibling manifest that explains all derived durable artifacts in one machine-readable place.
 
 Borrowing this would make it easier to audit a paper, rebuild sources, and answer questions such as: which parser generated this source summary, which raw PDF hash was used, and which source summaries depend on this paper?
 
@@ -180,7 +180,7 @@ This is useful later, but not the immediate priority for `pi-agent-minimal-ts`. 
 ## Main Gaps in Current Paper LLM Wiki
 
 - Path helpers are split between reader and wiki modules rather than one paper workspace contract.
-- `sources/<paper-key>.md` is useful, but not validated against a typed source schema.
+- `sources/<paper-key>/summary.md` is useful, but not validated against a typed source schema.
 - There is no separate source manifest layer for final LLM-authored source summaries.
 - Search is currently simple substring search over source markdown.
 - There is no maintenance tool for stale, broken, duplicate, or low-quality paper wiki entries.
@@ -234,7 +234,7 @@ This is useful later, but not the immediate priority for `pi-agent-minimal-ts`. 
 
 ### Phase 6: Promote Cross-Paper Wiki Pages
 
-- [ ] Keep `sources/<paper-key>.md` as the atomic evidence source.
+- [ ] Keep `sources/<paper-key>/summary.md` as the atomic evidence source.
 - [ ] Add `wiki/concepts/`, `wiki/methods/`, `wiki/findings/`, `wiki/questions/`, and `wiki/syntheses/`.
 - [ ] Require every synthesis page to cite paper-source pages, not raw parser markdown.
 - [ ] Add index sections by page type, modeled after `wiki_agent`'s automatic index builder.
@@ -245,7 +245,7 @@ This is useful later, but not the immediate priority for `pi-agent-minimal-ts`. 
 - [ ] Add a high-level flow that can answer a scientific question by checking paper wiki sources first.
 - [ ] If insufficient, use existing paper search/download tools to acquire candidate papers.
 - [ ] Parse downloaded PDFs into `sources/<paper-key>/`.
-- [ ] Ask the LLM to write grounded `sources/<paper-key>.md` summaries.
+- [ ] Ask the LLM to write grounded `sources/<paper-key>/summary.md` summaries.
 - [ ] Re-run retrieval against the source layer.
 - [ ] Never cite downloaded metadata or raw search results directly as final scientific evidence.
 

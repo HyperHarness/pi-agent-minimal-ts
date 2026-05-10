@@ -47,7 +47,7 @@ Every model receives the same `PaperWikiPageWorkerInput` shape:
       "key": "source-a",
       "paperKey": "source-a",
       "title": "Source A",
-      "path": "knowledge-base/sources/source-a.md",
+      "path": "knowledge-base/sources/source-a/summary.md",
       "snippet": "..."
     }
   ]

@@ -3,6 +3,7 @@ import path from "node:path";
 import {
   listPaperWikiPageFiles,
   listPaperWikiSourceFiles,
+  paperKeyFromPaperWikiSourcePath,
   relativeToWorkspace,
   sanitizeWikiFilename
 } from "./store.js";
@@ -406,7 +407,7 @@ function auditScopeDriftFromDocuments(
 
 async function readSourceDocument(workspaceDir: string, filePath: string): Promise<WikiMaintenanceSourceDocument> {
   const parsed = parseMarkdown(await readFile(filePath, "utf8"));
-  const fallbackKey = sanitizeWikiFilename(path.basename(filePath, ".md"));
+  const fallbackKey = paperKeyFromPaperWikiSourcePath(filePath);
   const paperKey = stringValue(parsed.frontmatter.paper_key) ?? stringValue(parsed.frontmatter.paperKey) ?? fallbackKey;
   const title = stringValue(parsed.frontmatter.title) ?? paperKey;
   return {

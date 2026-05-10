@@ -78,7 +78,7 @@
     node("Parsed paper", "Good parse or webpage artifact is available", fill: green),
     node("Evidence package", "Bounded Markdown, quality report, sections, related candidates", fill: blue),
     node("Clean worker", "generate_paper_wiki_summary runs a no-history subagent", fill: violet),
-    node("Source summary", "sources/<paper-key>.md with provenance and tags", fill: amber),
+    node("Source summary", "sources/<paper-key>/summary.md with provenance and tags", fill: amber),
     labels: ("build", "summarize", "write"),
   )
 ]

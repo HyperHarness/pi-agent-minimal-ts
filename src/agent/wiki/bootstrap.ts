@@ -4,6 +4,7 @@ import { searchLocalPapers, type SearchLocalPapersResult } from "../paper/storag
 import { searchPaperWiki } from "./content.js";
 import {
   listPaperWikiSourceFiles,
+  paperKeyFromPaperWikiSourcePath,
   relativeToWorkspace,
   sanitizeWikiFilename
 } from "./store.js";
@@ -169,7 +170,7 @@ async function readSourceSummaryDocuments(workspaceDir: string): Promise<Map<str
     if (!markdown) {
       continue;
     }
-    const paperKey = path.basename(filePath, ".md");
+    const paperKey = paperKeyFromPaperWikiSourcePath(filePath);
     const frontmatter = extractFrontmatter(markdown);
     documents.set(paperKey, {
       paperKey,

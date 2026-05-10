@@ -1,4 +1,4 @@
-import { appendFile, lstat, readFile, realpath, writeFile } from "node:fs/promises";
+import { appendFile, lstat, mkdir, readFile, realpath, writeFile } from "node:fs/promises";
 import path from "node:path";
 import {
   listPaperParseEngines,
@@ -18,6 +18,7 @@ import {
   getPaperWikiSourcePath,
   listPaperWikiPageFiles,
   listPaperWikiSourceFiles,
+  paperKeyFromPaperWikiSourcePath,
   relativeToWorkspace,
   sanitizeWikiFilename
 } from "./store.js";
@@ -447,6 +448,7 @@ ${sectionList("Open Questions", input.openQuestions)}
 - Parsed markdown: \`${relativeToWorkspace(input.workspaceDir, artifacts.markdownPath)}\`
 `;
 
+  await mkdir(path.dirname(sourcePath), { recursive: true });
   await writeFile(sourcePath, markdown.trimEnd() + "\n", "utf8");
   await rewriteWikiIndex(input.workspaceDir);
 
@@ -705,7 +707,7 @@ export async function searchPaperWiki(options: PaperWikiSearchOptions): Promise<
   }> = [];
   for (const filePath of sourceFiles) {
     const markdown = await readFile(filePath, "utf8");
-    const paperKey = path.basename(filePath, ".md");
+    const paperKey = paperKeyFromPaperWikiSourcePath(filePath);
     const title = extractTitle(markdown, paperKey);
     const score = scoreWikiDocument(markdown, title, paperKey, query, searchTerms);
     if (score <= 0) {

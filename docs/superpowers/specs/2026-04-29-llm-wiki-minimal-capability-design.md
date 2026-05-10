@@ -27,7 +27,7 @@ The agent already has paper acquisition, parsing, source summaries, wiki pages, 
 
 Extend `searchPaperWiki` so it searches:
 
-- `knowledge-base/sources/<paper-key>.md`
+- `knowledge-base/sources/<paper-key>/summary.md`
 - `knowledge-base/pages/<page-key>.md`
 
 Results carry a `kind` of `source` or `page`, plus a stable key. Existing source-summary callers continue to work.

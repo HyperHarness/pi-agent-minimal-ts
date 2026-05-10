@@ -93,7 +93,7 @@ test("updatePaperWikiRelations writes related_papers into an existing summary", 
   const workspace = await createWorkspace();
 
   try {
-    const summaryPath = path.join(workspace, "knowledge-base", "sources", "aps-target.md");
+    const summaryPath = path.join(workspace, "knowledge-base", "sources", "aps-target", "summary.md");
     await writeText(summaryPath, `---
 type: "paper-source-summary"
 paper_key: "aps-target"
@@ -140,7 +140,7 @@ test("paperWikiRelations returns candidates and applies confirmed links when req
       title: "Superconducting Bell network",
       text: "A Bell network uses superconducting qubits and device-independent tests."
     });
-    await writeText(path.join(workspace, "knowledge-base", "sources", "aps-target.md"), `---
+    await writeText(path.join(workspace, "knowledge-base", "sources", "aps-target", "summary.md"), `---
 paper_key: "aps-target"
 related_papers: []
 ---

@@ -1,4 +1,4 @@
-import { mkdir, readdir, readFile, writeFile } from "node:fs/promises";
+import { access, mkdir, readdir, readFile, writeFile } from "node:fs/promises";
 import path from "node:path";
 import { resolvePaperLibraryPaths } from "../knowledge-base.js";
 
@@ -57,7 +57,14 @@ export function sanitizeWikiFilename(value: string): string {
 }
 
 export function getPaperWikiSourcePath(workspaceDir: string, paperKey: string): string {
-  return path.join(getPaperWikiSourcesDir(workspaceDir), `${sanitizeWikiFilename(paperKey)}.md`);
+  return path.join(getPaperWikiSourcesDir(workspaceDir), sanitizeWikiFilename(paperKey), "summary.md");
+}
+
+export function paperKeyFromPaperWikiSourcePath(filePath: string): string {
+  if (path.basename(filePath) !== "summary.md") {
+    throw new Error("paper source summary path must end with summary.md.");
+  }
+  return sanitizeWikiFilename(path.basename(path.dirname(filePath)));
 }
 
 export function getPaperWikiPagePath(workspaceDir: string, pageKey: string): string {
@@ -113,9 +120,19 @@ export async function listPaperWikiSourceFiles(workspaceDir: string): Promise<st
   const sourcesDir = getPaperWikiSourcesDir(workspaceDir);
   try {
     const entries = await readdir(sourcesDir, { withFileTypes: true });
-    return entries
-      .filter((entry) => entry.isFile() && entry.name.endsWith(".md"))
-      .map((entry) => path.join(sourcesDir, entry.name))
+    const summaryPaths = await Promise.all(entries
+      .filter((entry) => entry.isDirectory())
+      .map(async (entry) => {
+        const summaryPath = path.join(sourcesDir, entry.name, "summary.md");
+        try {
+          await access(summaryPath);
+          return summaryPath;
+        } catch {
+          return undefined;
+        }
+      }));
+    return summaryPaths
+      .filter((summaryPath): summaryPath is string => Boolean(summaryPath))
       .sort((left, right) => left.localeCompare(right));
   } catch {
     return [];

@@ -227,7 +227,7 @@ test("listLocalPapers reads missing titles from wiki source summaries", async ()
       downloadPath: pdfPath
     });
     await writeText(
-      path.join(workspace, "knowledge-base", "sources", "arxiv-1709.06678.md"),
+      path.join(workspace, "knowledge-base", "sources", "arxiv-1709.06678", "summary.md"),
       [
         "---",
         'title: "A blueprint for demonstrating quantum supremacy with superconducting qubits"',
@@ -244,6 +244,7 @@ test("listLocalPapers reads missing titles from wiki source summaries", async ()
       result.results[0]?.title,
       "A blueprint for demonstrating quantum supremacy with superconducting qubits"
     );
+    assert.equal(result.results[0]?.wikiSummaryPath, "knowledge-base/sources/arxiv-1709.06678/summary.md");
   } finally {
     await rm(workspace, { recursive: true, force: true });
   }
@@ -286,7 +287,7 @@ test("searchLocalPapers searches metadata, wiki summaries, and parsed markdown",
       warnings: []
     });
     await writeText(
-      path.join(workspace, "knowledge-base", "sources", "arxiv-2406.06015.md"),
+      path.join(workspace, "knowledge-base", "sources", "arxiv-2406.06015", "summary.md"),
       [
         "---",
         'title: "Quantum LDPC decoding with local statistics"',

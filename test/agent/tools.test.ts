@@ -3174,7 +3174,7 @@ test("write_paper_wiki_source delegates to the injected wiki dependency and retu
         return {
           paperKey: options.paperKey,
           title: options.title ?? "Paper title",
-          sourcePath: "knowledge-base/sources/arxiv-2406.06015.md",
+          sourcePath: "knowledge-base/sources/arxiv-2406.06015/summary.md",
           indexPath: "knowledge-base/index.md",
           logPath: "knowledge-base/log.md",
         };
@@ -3195,7 +3195,7 @@ test("write_paper_wiki_source delegates to the injected wiki dependency and retu
         tags: ["quantum"],
       },
     ]);
-    assert.equal((result.details as { sourcePath?: string }).sourcePath, "knowledge-base/sources/arxiv-2406.06015.md");
+    assert.equal((result.details as { sourcePath?: string }).sourcePath, "knowledge-base/sources/arxiv-2406.06015/summary.md");
   } finally {
     await rm(workspace, { recursive: true, force: true });
   }
@@ -3353,7 +3353,7 @@ test("paper_wiki_relations delegates to the injected relation dependency and ret
           ],
           update: options.relatedPaperKeys ? {
             paperKey: options.paperKey,
-            sourcePath: "knowledge-base/sources/aps-target.md",
+            sourcePath: "knowledge-base/sources/aps-target/summary.md",
             previousRelatedPaperKeys: [],
             relatedPaperKeys: options.relatedPaperKeys,
             mode: options.mode ?? "append",
@@ -3394,7 +3394,7 @@ test("search_paper_wiki delegates to the injected wiki search dependency and ret
           {
             paperKey: "arxiv-2406.06015",
             title: "Paper title",
-            path: "knowledge-base/sources/arxiv-2406.06015.md",
+            path: "knowledge-base/sources/arxiv-2406.06015/summary.md",
             snippet: "query match",
           },
         ],
@@ -3720,7 +3720,7 @@ test("answer_paper_wiki_question builds a citeable wiki evidence package", async
             {
               paperKey: "arxiv-2406.06015",
               title: "Paper title",
-              path: "knowledge-base/sources/arxiv-2406.06015.md",
+              path: "knowledge-base/sources/arxiv-2406.06015/summary.md",
               snippet: "query match from the source summary",
             },
           ],
@@ -3744,8 +3744,8 @@ test("answer_paper_wiki_question builds a citeable wiki evidence package", async
       maxResults: 2,
     }]);
     assert.equal(details.status, "has_wiki_evidence");
-    assert.equal(details.evidence?.[0]?.citation, "arxiv-2406.06015 (knowledge-base/sources/arxiv-2406.06015.md)");
-    assert.equal(details.evidence?.[0]?.path, "knowledge-base/sources/arxiv-2406.06015.md");
+    assert.equal(details.evidence?.[0]?.citation, "arxiv-2406.06015 (knowledge-base/sources/arxiv-2406.06015/summary.md)");
+    assert.equal(details.evidence?.[0]?.path, "knowledge-base/sources/arxiv-2406.06015/summary.md");
     assert.deepEqual(details.fallbackMatches, []);
   } finally {
     await rm(workspace, { recursive: true, force: true });
@@ -3817,7 +3817,7 @@ test("answer_research_question stops after local wiki evidence is found", async 
           {
             paperKey: "arxiv-local",
             title: "Local evidence",
-            path: "knowledge-base/sources/arxiv-local.md",
+            path: "knowledge-base/sources/arxiv-local/summary.md",
             snippet: "local wiki evidence",
           },
         ],
@@ -3861,7 +3861,7 @@ test("answer_research_question can download, parse, summarize, and refresh wiki 
                 {
                   paperKey: "arxiv-2601.00425",
                   title: "Newly summarized paper",
-                  path: "knowledge-base/sources/arxiv-2601.00425.md",
+                  path: "knowledge-base/sources/arxiv-2601.00425/summary.md",
                   snippet: "newly written wiki evidence",
                 },
               ]
@@ -3950,7 +3950,7 @@ test("answer_research_question can download, parse, summarize, and refresh wiki 
         source: {
           paperKey: options.paperKey,
           title: "Newly summarized paper",
-          sourcePath: "knowledge-base/sources/arxiv-2601.00425.md",
+          sourcePath: "knowledge-base/sources/arxiv-2601.00425/summary.md",
           indexPath: "knowledge-base/index.md",
           logPath: "knowledge-base/log.md",
         },
@@ -4004,7 +4004,7 @@ test("bootstrap_wiki_page_evidence generates missing source summaries and refres
                   key: "arxiv-2507.09690",
                   paperKey: "arxiv-2507.09690",
                   title: "Small Quantum LDPC Codes",
-                  path: "knowledge-base/sources/arxiv-2507.09690.md",
+                  path: "knowledge-base/sources/arxiv-2507.09690/summary.md",
                   snippet: "source summary evidence",
                   origin: "seed_search",
                 },
@@ -4058,7 +4058,7 @@ test("bootstrap_wiki_page_evidence generates missing source summaries and refres
           source: {
             paperKey: options.paperKey,
             title: "Small Quantum LDPC Codes",
-            sourcePath: "knowledge-base/sources/arxiv-2507.09690.md",
+            sourcePath: "knowledge-base/sources/arxiv-2507.09690/summary.md",
             indexPath: "knowledge-base/index.md",
             logPath: "knowledge-base/log.md",
           },
@@ -4135,7 +4135,7 @@ test("research_topic_bootstrap maps local evidence into gaps and suggested pages
             key: "nature-s41586-024-08449-y",
             paperKey: "nature-s41586-024-08449-y",
             title: "Quantum error correction below the surface code threshold",
-            path: "knowledge-base/sources/nature-s41586-024-08449-y.md",
+            path: "knowledge-base/sources/nature-s41586-024-08449-y/summary.md",
             snippet: "surface code threshold on superconducting processors",
             origin: "seed_search",
           },
@@ -4186,7 +4186,7 @@ test("expand_research_topic searches externally even when local wiki evidence ex
             key: "science-10.1126-science.1231930",
             paperKey: "science-10.1126-science.1231930",
             title: "Superconducting Circuits for Quantum Information",
-            path: "knowledge-base/sources/science-10.1126-science.1231930.md",
+            path: "knowledge-base/sources/science-10.1126-science.1231930/summary.md",
             snippet: "local evidence exists",
             origin: "seed_search",
           },
@@ -4264,7 +4264,7 @@ test("build_wiki_page writes a synthesis page from local wiki evidence", async (
           {
             paperKey: "arxiv-2507.09690",
             title: "Small Quantum LDPC Codes",
-            path: "knowledge-base/sources/arxiv-2507.09690.md",
+            path: "knowledge-base/sources/arxiv-2507.09690/summary.md",
             snippet: "LDPC implementation evidence",
           },
         ],
@@ -4318,7 +4318,7 @@ test("build_wiki_page refuses write mode when minSources is not met", async () =
         results: [{
           paperKey: "paper-a",
           title: "Single Evidence",
-          path: "knowledge-base/sources/paper-a.md",
+          path: "knowledge-base/sources/paper-a/summary.md",
           snippet: "single source",
         }],
       }),
@@ -4354,7 +4354,7 @@ test("build_wiki_page does not let non-paper contracts bypass minSources", async
         results: [{
           paperKey: "paper-a",
           title: "Single Evidence",
-          path: "knowledge-base/sources/paper-a.md",
+          path: "knowledge-base/sources/paper-a/summary.md",
           snippet: "single source",
         }],
       }),
@@ -4392,13 +4392,13 @@ test("build_wiki_page counts unique source paper keys for minSources", async () 
           {
             paperKey: "paper-a",
             title: "Evidence A",
-            path: "knowledge-base/sources/paper-a.md",
+            path: "knowledge-base/sources/paper-a/summary.md",
             snippet: "source A",
           },
           {
             paperKey: "Paper-A",
             title: "Evidence A Duplicate",
-            path: "knowledge-base/sources/paper-a-duplicate.md",
+            path: "knowledge-base/sources/paper-a-duplicate/summary.md",
             snippet: "duplicate source A",
           },
         ],
@@ -4436,13 +4436,13 @@ test("build_wiki_page writes evidence contract and verifies after write", async 
           {
             paperKey: "paper-a",
             title: "Evidence A",
-            path: "knowledge-base/sources/paper-a.md",
+            path: "knowledge-base/sources/paper-a/summary.md",
             snippet: "source A",
           },
           {
             paperKey: "paper-b",
             title: "Evidence B",
-            path: "knowledge-base/sources/paper-b.md",
+            path: "knowledge-base/sources/paper-b/summary.md",
             snippet: "source B",
           },
         ],
@@ -4479,8 +4479,8 @@ test("merge_wiki_aliases writes alias pages and refreshes the wiki index", async
   const pagesDir = path.join(workspace, "knowledge-base/pages");
   const sourcesDir = path.join(workspace, "knowledge-base/sources");
   await mkdir(pagesDir, { recursive: true });
-  await mkdir(sourcesDir, { recursive: true });
-  await writeFile(path.join(sourcesDir, "eda-source.md"), "# EDA Source\n\nSource-backed evidence.", "utf8");
+  await mkdir(path.join(sourcesDir, "eda-source"), { recursive: true });
+  await writeFile(path.join(sourcesDir, "eda-source", "summary.md"), "# EDA Source\n\nSource-backed evidence.", "utf8");
   await writeFile(path.join(pagesDir, "electronic-design-automation.md"), `---
 type: "wiki-synthesis-page"
 page_key: "electronic-design-automation"
@@ -4489,7 +4489,7 @@ tags: []
 sources:
   - paper_key: "eda-source"
     title: "EDA Source"
-    path: "knowledge-base/sources/eda-source.md"
+    path: "knowledge-base/sources/eda-source/summary.md"
 related_pages: []
 ---
 
@@ -4631,7 +4631,7 @@ test("build_wiki_page can return a draft without writing the page", async () => 
           {
             paperKey: "arxiv-local",
             title: "Local source",
-            path: "knowledge-base/sources/arxiv-local.md",
+            path: "knowledge-base/sources/arxiv-local/summary.md",
             snippet: "local evidence",
           },
         ],
