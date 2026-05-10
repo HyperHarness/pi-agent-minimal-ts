@@ -1,53 +1,57 @@
 import { access, mkdir, readdir, readFile, writeFile } from "node:fs/promises";
 import path from "node:path";
-import { resolvePaperLibraryPaths } from "../knowledge-base.js";
+import { resolveWikiWorkspaceContract, wikiPathForLifecycle } from "./workspace-contract.js";
 
 export function getPapersDir(workspaceDir: string): string {
-  return resolvePaperLibraryPaths(workspaceDir).libraryRoot;
+  return path.dirname(resolveWikiWorkspaceContract(workspaceDir).roots.sourceRecords.absolutePath);
 }
 
 export function getRawPapersDir(workspaceDir: string): string {
-  return resolvePaperLibraryPaths(workspaceDir).rawPdfRoot;
+  return resolveWikiWorkspaceContract(workspaceDir).roots.rawInputs.absolutePath;
 }
 
 export function getPaperWikiDir(workspaceDir: string): string {
-  return resolvePaperLibraryPaths(workspaceDir).wikiRoot;
+  return path.dirname(resolveWikiWorkspaceContract(workspaceDir).files.index.absolutePath);
 }
 
 export function getPaperWikiSourcesDir(workspaceDir: string): string {
-  return resolvePaperLibraryPaths(workspaceDir).sourcesRoot;
+  return resolveWikiWorkspaceContract(workspaceDir).roots.sourceSummaries.absolutePath;
 }
 
 export function getPaperWikiPagesDir(workspaceDir: string): string {
-  return resolvePaperLibraryPaths(workspaceDir).pagesRoot;
+  return resolveWikiWorkspaceContract(workspaceDir).roots.synthesisPages.absolutePath;
 }
 
 export function getPaperWikiAssetsDir(workspaceDir: string): string {
-  return resolvePaperLibraryPaths(workspaceDir).assetsRoot;
+  return resolveWikiWorkspaceContract(workspaceDir).roots.assets.absolutePath;
 }
 
 export function getPaperWikiManifestsDir(workspaceDir: string): string {
-  return resolvePaperLibraryPaths(workspaceDir).manifestsRoot;
+  return resolveWikiWorkspaceContract(workspaceDir).roots.manifests.absolutePath;
 }
 
 export function getPaperWikiStateDir(workspaceDir: string): string {
-  return resolvePaperLibraryPaths(workspaceDir).stateRoot;
+  return resolveWikiWorkspaceContract(workspaceDir).roots.runtimeState.absolutePath;
 }
 
 export function getPaperWikiSourceManifestPath(workspaceDir: string, paperKey: string): string {
-  return path.join(getPaperWikiManifestsDir(workspaceDir), `${sanitizeWikiFilename(paperKey)}.json`);
+  return wikiPathForLifecycle(
+    resolveWikiWorkspaceContract(workspaceDir),
+    "manifests",
+    `${sanitizeWikiFilename(paperKey)}.json`
+  ).absolutePath;
 }
 
 export function getPaperWikiOperationJournalPath(workspaceDir: string): string {
-  return path.join(getPaperWikiStateDir(workspaceDir), "wiki-operations.jsonl");
+  return resolveWikiWorkspaceContract(workspaceDir).files.operationJournal.absolutePath;
 }
 
 export function getPaperWikiIndexPath(workspaceDir: string): string {
-  return resolvePaperLibraryPaths(workspaceDir).indexPath;
+  return resolveWikiWorkspaceContract(workspaceDir).files.index.absolutePath;
 }
 
 export function getPaperWikiLogPath(workspaceDir: string): string {
-  return resolvePaperLibraryPaths(workspaceDir).logPath;
+  return resolveWikiWorkspaceContract(workspaceDir).files.humanLog.absolutePath;
 }
 
 export function sanitizeWikiFilename(value: string): string {
