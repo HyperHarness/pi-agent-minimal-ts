@@ -20,6 +20,7 @@ import {
   relativeToWorkspace,
   sanitizeWikiFilename
 } from "./store.js";
+import { listTypedWikiPages, type WikiPageDiagnostic } from "./typed-store.js";
 
 export type PaperWikiLintIssueKind =
   | "stale_index"
@@ -35,7 +36,8 @@ export type PaperWikiLintIssueKind =
   | "near_duplicate_page"
   | "duplicate_section"
   | "weak_synthesis_page"
-  | "rendered_wiki_link";
+  | "rendered_wiki_link"
+  | "weak_evidence_contract";
 
 export type PaperWikiLintSeverity = "high" | "medium" | "low";
 
@@ -73,7 +75,7 @@ export interface PaperWikiLintResult {
   pageCount: number;
   sourceCount: number;
   issueCount: number;
-  summary: Record<PaperWikiLintIssueKind, number>;
+  summary: Record<string, number>;
   issues: PaperWikiLintIssue[];
   actions: string[];
   reports?: PaperWikiLintReports;
@@ -93,9 +95,21 @@ const ISSUE_KINDS: PaperWikiLintIssueKind[] = [
   "near_duplicate_page",
   "duplicate_section",
   "weak_synthesis_page",
-  "rendered_wiki_link"
+  "rendered_wiki_link",
+  "weak_evidence_contract"
 ];
 const DEFAULT_MAX_ITEMS = 30;
+const TYPED_WIKI_PAGE_TYPES = new Set([
+  "paper-source",
+  "synthesis",
+  "concept",
+  "method",
+  "finding",
+  "dataset",
+  "question",
+  "design-record",
+  "alias"
+]);
 
 async function pathExists(filePath: string): Promise<boolean> {
   try {
@@ -108,6 +122,31 @@ async function pathExists(filePath: string): Promise<boolean> {
 
 function extractFrontmatter(markdown: string): string {
   return markdown.match(/^---\n([\s\S]*?)\n---\n/)?.[1] ?? "";
+}
+
+function parseFrontmatterScalar(frontmatter: string, key: string): string | undefined {
+  const rawValue = frontmatter
+    .split("\n")
+    .find((line) => line.startsWith(`${key}:`))
+    ?.slice(key.length + 1)
+    .trim();
+  if (!rawValue) {
+    return undefined;
+  }
+  try {
+    const parsed = JSON.parse(rawValue);
+    return typeof parsed === "string" ? parsed : String(parsed);
+  } catch {
+    return rawValue.replace(/^"|"$/g, "").trim();
+  }
+}
+
+function frontmatterOptsIntoTypedSchema(frontmatter: string): boolean {
+  if (/^schema_version:/m.test(frontmatter)) {
+    return true;
+  }
+  const type = parseFrontmatterScalar(frontmatter, "type");
+  return Boolean(type && TYPED_WIKI_PAGE_TYPES.has(type));
 }
 
 function extractYamlStringValues(frontmatter: string, key: string): string[] {
@@ -272,7 +311,8 @@ function summarizeActions(issues: PaperWikiLintIssue[]): string[] {
     ["near_duplicate_page", "Review near-duplicate concept pages and add aliases when one page is canonical."],
     ["duplicate_section", "Normalize synthesis pages so each section title appears once."],
     ["weak_synthesis_page", "Convert short uncited pages into aliases or rebuild them with source-backed evidence."],
-    ["rendered_wiki_link", "Fix double-bracket wiki links that render to missing local pages."]
+    ["rendered_wiki_link", "Fix double-bracket wiki links that render to missing local pages."],
+    ["weak_evidence_contract", "Add source_refs to paper-backed typed wiki pages or weaken the evidence contract."]
   ]);
   const counts = new Map<PaperWikiLintIssueKind, number>();
   for (const issue of issues) {
@@ -297,6 +337,19 @@ function summarizeActions(issues: PaperWikiLintIssue[]): string[] {
 function issueRank(issue: PaperWikiLintIssue): number {
   const rank: Record<PaperWikiLintSeverity, number> = { high: 0, medium: 1, low: 2 };
   return rank[issue.severity];
+}
+
+function diagnosticReason(diagnostic: WikiPageDiagnostic): string {
+  return diagnostic.errors.map((error) => error.message).join(" ");
+}
+
+async function diagnosticOptsIntoTypedSchema(diagnostic: WikiPageDiagnostic): Promise<boolean> {
+  const markdown = await readFile(diagnostic.path, "utf8").catch(() => "");
+  return frontmatterOptsIntoTypedSchema(extractFrontmatter(markdown));
+}
+
+function diagnosticHasOnlyMissingSourceRefs(diagnostic: WikiPageDiagnostic): boolean {
+  return diagnostic.errors.length > 0 && diagnostic.errors.every((error) => error.code === "missing_source_refs");
 }
 
 export async function lintPaperWiki(options: PaperWikiLintOptions): Promise<PaperWikiLintResult> {
@@ -335,6 +388,7 @@ export async function lintPaperWiki(options: PaperWikiLintOptions): Promise<Pape
     sectionTitles: string[];
     bodyWords: number;
   }> = [];
+  const typedCitedPagePaths = new Set<string>();
 
   for (const filePath of sourceFiles) {
     const markdown = await readFile(filePath, "utf8");
@@ -369,8 +423,14 @@ export async function lintPaperWiki(options: PaperWikiLintOptions): Promise<Pape
     const relatedPages = extractYamlStringValues(frontmatter, "related_pages");
     const title = extractMarkdownTitle(markdown, pageKey);
     const sectionTitles = extractSectionTitles(markdown);
-    const sourceCitationCount = extractSourceCitationPaths(frontmatter).length;
+    const typedSourceRefCount = frontmatterOptsIntoTypedSchema(frontmatter)
+      ? extractYamlStringValues(frontmatter, "source_refs").length
+      : 0;
+    const sourceCitationCount = extractSourceCitationPaths(frontmatter).length + typedSourceRefCount;
     const isAlias = isAliasFrontmatter(frontmatter);
+    if (typedSourceRefCount > 0) {
+      typedCitedPagePaths.add(relativePath);
+    }
     pageMetadata.push({
       pageKey,
       title,
@@ -548,8 +608,48 @@ export async function lintPaperWiki(options: PaperWikiLintOptions): Promise<Pape
   }
 
   if (options.includeQualityAudit) {
+    const typedPages = await listTypedWikiPages({
+      workspaceDir,
+      includeSources: false,
+      includePages: true
+    });
+    const weakEvidencePaths = new Set<string>();
+    for (const diagnostic of typedPages.diagnostics) {
+      if (
+        !(await diagnosticOptsIntoTypedSchema(diagnostic)) ||
+        !diagnosticHasOnlyMissingSourceRefs(diagnostic)
+      ) {
+        continue;
+      }
+      weakEvidencePaths.add(diagnostic.relativePath);
+      issues.push({
+        kind: "weak_evidence_contract",
+        severity: "medium",
+        path: diagnostic.relativePath,
+        reason: diagnosticReason(diagnostic)
+      });
+    }
+    for (const page of typedPages.pages) {
+      const relativePath = relativeToWorkspace(workspaceDir, page.path);
+      if (
+        page.metadata.evidence_contract === "paper-backed" &&
+        page.metadata.source_refs.length === 0 &&
+        !weakEvidencePaths.has(relativePath)
+      ) {
+        issues.push({
+          kind: "weak_evidence_contract",
+          severity: "medium",
+          path: relativePath,
+          reason: "Paper-backed wiki page has no source_refs."
+        });
+      }
+    }
+
     reports.pageQuality = await auditPageEvidenceContracts({ workspaceDir });
     for (const gap of reports.pageQuality.evidenceContractGaps) {
+      if (typedCitedPagePaths.has(gap.path)) {
+        continue;
+      }
       issues.push({
         kind: "evidence_contract_gap",
         severity: gap.inferredContract === "unverified" ? "medium" : "low",
@@ -592,9 +692,9 @@ export async function lintPaperWiki(options: PaperWikiLintOptions): Promise<Pape
     }
   }
 
-  const summary = Object.fromEntries(ISSUE_KINDS.map((kind) => [kind, 0])) as Record<PaperWikiLintIssueKind, number>;
+  const summary = Object.fromEntries(ISSUE_KINDS.map((kind) => [kind, 0])) as Record<string, number>;
   for (const issue of issues) {
-    summary[issue.kind] += 1;
+    summary[issue.kind] = (summary[issue.kind] ?? 0) + 1;
   }
   const sortedIssues = issues.sort((left, right) =>
     issueRank(left) - issueRank(right) ||

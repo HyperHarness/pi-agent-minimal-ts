@@ -24,6 +24,11 @@ async function writeMarkdown(filePath: string, content: string): Promise<void> {
   await writeFile(filePath, `${content.trim()}\n`, "utf8");
 }
 
+async function writeText(filePath: string, content: string): Promise<void> {
+  await mkdir(path.dirname(filePath), { recursive: true });
+  await writeFile(filePath, content, "utf8");
+}
+
 async function writeSource(workspaceDir: string, paperKey: string, content: string): Promise<void> {
   await writeMarkdown(path.join(workspaceDir, "knowledge-base", "sources", paperKey, "summary.md"), content);
 }
@@ -415,6 +420,123 @@ test("lintPaperWiki emits rich maintenance issues and optional reports", async (
     });
     assert.equal(defaultResult.summary.high_value_concept_gap, 0);
     assert.ok(!defaultResult.issues.some((issue) => issue.kind === "high_value_concept_gap"));
+  } finally {
+    await rm(workspace, { recursive: true, force: true });
+  }
+});
+
+test("lintPaperWiki reports pages with missing source refs for paper-backed contracts", async () => {
+  const workspace = await createWorkspace();
+  try {
+    await writeText(path.join(workspace, "knowledge-base", "pages", "weak.md"), [
+      "---",
+      "schema_version: 1",
+      'type: "synthesis"',
+      'key: "weak"',
+      'title: "Weak Evidence"',
+      "aliases: []",
+      "tags: []",
+      'evidence_contract: "paper-backed"',
+      "source_refs: []",
+      'created_at: "2026-05-10T00:00:00.000Z"',
+      'updated_at: "2026-05-10T00:00:00.000Z"',
+      "---",
+      "",
+      "# Weak Evidence"
+    ].join("\n"));
+
+    const result = await lintPaperWiki({ workspaceDir: workspace, includeQualityAudit: true });
+
+    assert.ok(result.issues.some((issue) =>
+      issue.kind === "weak_evidence_contract" &&
+      issue.path === "knowledge-base/pages/weak.md"
+    ));
+  } finally {
+    await rm(workspace, { recursive: true, force: true });
+  }
+});
+
+test("lintPaperWiki initializes weak evidence contract summary count", async () => {
+  const workspace = await createWorkspace();
+  try {
+    const result = await lintPaperWiki({ workspaceDir: workspace, includeQualityAudit: true });
+
+    assert.equal(result.summary.weak_evidence_contract, 0);
+  } finally {
+    await rm(workspace, { recursive: true, force: true });
+  }
+});
+
+test("lintPaperWiki treats typed source refs as paper-backed citations", async () => {
+  const workspace = await createWorkspace();
+  try {
+    await writeText(path.join(workspace, "knowledge-base", "pages", "typed-paper-backed.md"), [
+      "---",
+      "schema_version: 1",
+      'type: "synthesis"',
+      'key: "typed-paper-backed"',
+      'title: "Typed Paper Backed"',
+      "aliases: []",
+      "tags: []",
+      'evidence_contract: "paper-backed"',
+      "source_refs:",
+      '  - "paper-a"',
+      'created_at: "2026-05-10T00:00:00.000Z"',
+      'updated_at: "2026-05-10T00:00:00.000Z"',
+      "---",
+      "",
+      "# Typed Paper Backed",
+      "",
+      "This short typed page is grounded by source_refs."
+    ].join("\n"));
+
+    const result = await lintPaperWiki({
+      workspaceDir: workspace,
+      includeQualityAudit: true,
+      maxItems: 50
+    });
+
+    assert.ok(!result.issues.some((issue) =>
+      (issue.kind === "weak_evidence_contract" ||
+        issue.kind === "missing_source_citation" ||
+        issue.kind === "evidence_contract_gap") &&
+      issue.path === "knowledge-base/pages/typed-paper-backed.md"
+    ));
+  } finally {
+    await rm(workspace, { recursive: true, force: true });
+  }
+});
+
+test("lintPaperWiki does not classify mixed typed diagnostics as weak evidence", async () => {
+  const workspace = await createWorkspace();
+  try {
+    await writeText(path.join(workspace, "knowledge-base", "pages", "mixed.md"), [
+      "---",
+      "schema_version: 1",
+      'type: "synthesis"',
+      'key: ""',
+      'title: "Mixed"',
+      "aliases: []",
+      "tags: []",
+      'evidence_contract: "paper-backed"',
+      "source_refs: []",
+      'created_at: "2026-05-10T00:00:00.000Z"',
+      'updated_at: "2026-05-10T00:00:00.000Z"',
+      "---",
+      "",
+      "# Mixed"
+    ].join("\n"));
+
+    const result = await lintPaperWiki({
+      workspaceDir: workspace,
+      includeQualityAudit: true,
+      maxItems: 50
+    });
+
+    assert.ok(!result.issues.some((issue) =>
+      issue.kind === "weak_evidence_contract" &&
+      issue.path === "knowledge-base/pages/mixed.md"
+    ));
   } finally {
     await rm(workspace, { recursive: true, force: true });
   }

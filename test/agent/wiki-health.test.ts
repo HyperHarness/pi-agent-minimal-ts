@@ -215,6 +215,113 @@ test("checkWikiHealth reports legacy source metadata without citation status fie
   }
 });
 
+test("checkWikiHealth initializes typed wiki page summary counts", async () => {
+  const workspace = await createWorkspace();
+  try {
+    const result = await checkWikiHealth({ workspaceDir: workspace });
+
+    assert.equal(result.summary.wiki_page_malformed, 0);
+    assert.equal(result.summary.wiki_page_evidence_weak, 0);
+  } finally {
+    await rm(workspace, { recursive: true, force: true });
+  }
+});
+
+test("checkWikiHealth reports malformed typed wiki pages", async () => {
+  const workspace = await createWorkspace();
+  try {
+    await writeText(path.join(workspace, "knowledge-base", "pages", "broken.md"), [
+      "---",
+      "schema_version: 1",
+      'type: "synthesis"',
+      'key: ""',
+      'title: ""',
+      "aliases: []",
+      "tags: []",
+      'evidence_contract: "none"',
+      "source_refs: []",
+      'created_at: "not-a-date"',
+      'updated_at: "2026-05-10T00:00:00.000Z"',
+      "---",
+      "",
+      "# Broken page"
+    ].join("\n"));
+
+    const result = await checkWikiHealth({ workspaceDir: workspace });
+
+    assert.equal(result.summary.wiki_page_malformed, 1);
+    assert.ok(result.issues.some((issue) =>
+      issue.kind === "wiki_page_malformed" &&
+      issue.path === "knowledge-base/pages/broken.md"
+    ));
+  } finally {
+    await rm(workspace, { recursive: true, force: true });
+  }
+});
+
+test("checkWikiHealth ignores legacy wiki page metadata when checking typed pages", async () => {
+  const workspace = await createWorkspace();
+  try {
+    await writeText(path.join(workspace, "knowledge-base", "pages", "legacy.md"), [
+      "---",
+      'type: "wiki-synthesis-page"',
+      "page_key: legacy",
+      "sources:",
+      "  - paper_key: paper-a",
+      "    title: Legacy Evidence",
+      "    path: knowledge-base/sources/paper-a/summary.md",
+      "---",
+      "",
+      "# Legacy"
+    ].join("\n"));
+
+    const result = await checkWikiHealth({ workspaceDir: workspace });
+
+    assert.equal(result.summary.wiki_page_malformed, 0);
+    assert.ok(!result.issues.some((issue) =>
+      issue.kind === "wiki_page_malformed" &&
+      issue.path === "knowledge-base/pages/legacy.md"
+    ));
+  } finally {
+    await rm(workspace, { recursive: true, force: true });
+  }
+});
+
+test("checkWikiHealth reports mixed typed diagnostics as malformed", async () => {
+  const workspace = await createWorkspace();
+  try {
+    await writeText(path.join(workspace, "knowledge-base", "pages", "mixed.md"), [
+      "---",
+      "schema_version: 1",
+      'type: "synthesis"',
+      'key: ""',
+      'title: "Mixed"',
+      "aliases: []",
+      "tags: []",
+      'evidence_contract: "paper-backed"',
+      "source_refs: []",
+      'created_at: "2026-05-10T00:00:00.000Z"',
+      'updated_at: "2026-05-10T00:00:00.000Z"',
+      "---",
+      "",
+      "# Mixed"
+    ].join("\n"));
+
+    const result = await checkWikiHealth({ workspaceDir: workspace });
+
+    assert.ok(result.issues.some((issue) =>
+      issue.kind === "wiki_page_malformed" &&
+      issue.path === "knowledge-base/pages/mixed.md"
+    ));
+    assert.ok(!result.issues.some((issue) =>
+      issue.kind === "wiki_page_evidence_weak" &&
+      issue.path === "knowledge-base/pages/mixed.md"
+    ));
+  } finally {
+    await rm(workspace, { recursive: true, force: true });
+  }
+});
+
 test("checkWikiHealth reports source summaries without manifests", async () => {
   const workspace = await createWorkspace();
 

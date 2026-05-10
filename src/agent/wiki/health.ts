@@ -14,6 +14,7 @@ import {
   getPaperWikiSourceManifestPath,
   relativeToWorkspace
 } from "./store.js";
+import { listTypedWikiPages, type WikiPageDiagnostic } from "./typed-store.js";
 import {
   readPaperDownloadJobEvents,
   type PaperDownloadJobEvent
@@ -43,7 +44,9 @@ export type WikiHealthIssueKind =
   | "source_manifest_missing"
   | "missing_artifact"
   | "download_blocked"
-  | "citation_incomplete";
+  | "citation_incomplete"
+  | "wiki_page_malformed"
+  | "wiki_page_evidence_weak";
 
 export type WikiHealthSeverity = "high" | "medium" | "low";
 
@@ -56,6 +59,7 @@ export interface WikiHealthIssue {
   status?: string;
   articleUrl?: string;
   recordPath?: string;
+  path?: string;
   reason: string;
   paths?: string[];
   metadata?: {
@@ -80,7 +84,7 @@ export interface WikiHealthOptions {
 export interface WikiHealthResult {
   totalPapers: number;
   issueCount: number;
-  summary: Record<WikiHealthIssueKind, number>;
+  summary: Record<string, number>;
   issues: WikiHealthIssue[];
   actions: string[];
 }
@@ -172,7 +176,9 @@ const ISSUE_KINDS: WikiHealthIssueKind[] = [
   "source_manifest_missing",
   "missing_artifact",
   "download_blocked",
-  "citation_incomplete"
+  "citation_incomplete",
+  "wiki_page_malformed",
+  "wiki_page_evidence_weak"
 ];
 
 const DEFAULT_MAX_ITEMS = 20;
@@ -180,6 +186,17 @@ const DEFAULT_LOW_QUALITY_SCORE_THRESHOLD = 0.7;
 const DOWNLOAD_BLOCKABLE_ISSUE_KINDS = new Set<WikiHealthIssueKind>([
   "needs_download",
   "needs_authorization"
+]);
+const TYPED_WIKI_PAGE_TYPES = new Set([
+  "paper-source",
+  "synthesis",
+  "concept",
+  "method",
+  "finding",
+  "dataset",
+  "question",
+  "design-record",
+  "alias"
 ]);
 
 function toWorkspacePath(workspaceDir: string, filePath: string | undefined): string | undefined {
@@ -430,6 +447,73 @@ function downloadBlockedIssue(entry: LocalPaperEntry, blocked: PaperBlocklistEnt
   );
 }
 
+function diagnosticReason(diagnostic: WikiPageDiagnostic): string {
+  return diagnostic.errors.map((error) => error.message).join(" ");
+}
+
+function diagnosticPaths(workspaceDir: string, diagnostic: WikiPageDiagnostic): string[] {
+  const paths = new Set<string>([diagnostic.relativePath]);
+  for (const error of diagnostic.errors) {
+    if (!error.path) {
+      continue;
+    }
+    paths.add(path.isAbsolute(error.path) ? relativeToWorkspace(workspaceDir, error.path) : error.path);
+  }
+  return [...paths];
+}
+
+function extractFrontmatter(markdown: string): string {
+  return markdown.match(/^---\n([\s\S]*?)\n---(?:\n|$)/)?.[1] ?? "";
+}
+
+function parseFrontmatterScalar(frontmatter: string, key: string): string | undefined {
+  const rawValue = frontmatter
+    .split("\n")
+    .find((line) => line.startsWith(`${key}:`))
+    ?.slice(key.length + 1)
+    .trim();
+  if (!rawValue) {
+    return undefined;
+  }
+  try {
+    const parsed = JSON.parse(rawValue);
+    return typeof parsed === "string" ? parsed : String(parsed);
+  } catch {
+    return rawValue.replace(/^"|"$/g, "").trim();
+  }
+}
+
+function frontmatterOptsIntoTypedSchema(frontmatter: string): boolean {
+  if (/^schema_version:/m.test(frontmatter)) {
+    return true;
+  }
+  const type = parseFrontmatterScalar(frontmatter, "type");
+  return Boolean(type && TYPED_WIKI_PAGE_TYPES.has(type));
+}
+
+async function diagnosticOptsIntoTypedSchema(diagnostic: WikiPageDiagnostic): Promise<boolean> {
+  const markdown = await readFile(diagnostic.path, "utf8").catch(() => "");
+  return frontmatterOptsIntoTypedSchema(extractFrontmatter(markdown));
+}
+
+function diagnosticHasOnlyMissingSourceRefs(diagnostic: WikiPageDiagnostic): boolean {
+  return diagnostic.errors.length > 0 && diagnostic.errors.every((error) => error.code === "missing_source_refs");
+}
+
+function typedDiagnosticIssue(workspaceDir: string, diagnostic: WikiPageDiagnostic): WikiHealthIssue {
+  const kind: WikiHealthIssueKind = diagnosticHasOnlyMissingSourceRefs(diagnostic)
+    ? "wiki_page_evidence_weak"
+    : "wiki_page_malformed";
+  return {
+    kind,
+    severity: "medium",
+    paperKey: diagnostic.relativePath,
+    path: diagnostic.relativePath,
+    reason: diagnosticReason(diagnostic),
+    paths: diagnosticPaths(workspaceDir, diagnostic)
+  };
+}
+
 function entryHasOnlyWebpageReading(entry: LocalPaperEntry): boolean {
   return entry.hasParsedArtifacts && entry.parses.every((parse) => parse.engine === "webpage");
 }
@@ -482,7 +566,9 @@ function summarizeActions(issues: WikiHealthIssue[]): string[] {
     ["source_manifest_missing", "Backfill source manifests for existing wiki source summaries."],
     ["missing_artifact", "Repair or regenerate acquisition files that point at missing files."],
     ["download_blocked", "No repair needed for download-blocklisted papers unless the paper is removed from the local download blocklist."],
-    ["citation_incomplete", "Refresh source citation metadata through the paper-download-subagent metadata pass."]
+    ["citation_incomplete", "Refresh source citation metadata through the paper-download-subagent metadata pass."],
+    ["wiki_page_malformed", "Repair malformed typed wiki page frontmatter before relying on the page in retrieval or synthesis."],
+    ["wiki_page_evidence_weak", "Add source_refs to paper-backed typed wiki pages or weaken the evidence contract."]
   ].flatMap(([kind, text]) => {
     const count = counts.get(kind as WikiHealthIssueKind) ?? 0;
     return count > 0 ? [`${count}: ${text}`] : [];
@@ -614,9 +700,33 @@ export async function checkWikiHealth(options: WikiHealthOptions): Promise<WikiH
     }
   }
 
-  const summary = Object.fromEntries(ISSUE_KINDS.map((kind) => [kind, 0])) as Record<WikiHealthIssueKind, number>;
+  const typedPages = await listTypedWikiPages({
+    workspaceDir,
+    includeSources: false,
+    includePages: true
+  });
+  for (const diagnostic of typedPages.diagnostics) {
+    if (!(await diagnosticOptsIntoTypedSchema(diagnostic))) {
+      continue;
+    }
+    issues.push(typedDiagnosticIssue(workspaceDir, diagnostic));
+  }
+  for (const page of typedPages.pages) {
+    if (page.metadata.evidence_contract === "paper-backed" && page.metadata.source_refs.length === 0) {
+      const relativePath = relativeToWorkspace(workspaceDir, page.path);
+      issues.push({
+        kind: "wiki_page_evidence_weak",
+        severity: "medium",
+        paperKey: relativePath,
+        path: relativePath,
+        reason: "Paper-backed wiki page has no source_refs."
+      });
+    }
+  }
+
+  const summary = Object.fromEntries(ISSUE_KINDS.map((kind) => [kind, 0])) as Record<string, number>;
   for (const issue of issues) {
-    summary[issue.kind] += 1;
+    summary[issue.kind] = (summary[issue.kind] ?? 0) + 1;
   }
 
   const sortedIssues = issues.sort((left, right) => {
@@ -1297,6 +1407,10 @@ export async function fixWikiHealth(options: WikiHealthFixOptions): Promise<Wiki
     }
     if (issue.kind === "download_blocked") {
       results.push(skippedFix(issue, "Paper is on the local download blocklist; remove it from the blocklist before running automatic repair."));
+      continue;
+    }
+    if (issue.kind === "wiki_page_malformed" || issue.kind === "wiki_page_evidence_weak") {
+      results.push(skippedFix(issue, "Typed wiki page issues must be fixed by editing the page metadata."));
     }
   }
 
