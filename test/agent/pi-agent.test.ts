@@ -3,7 +3,7 @@ import assert from "node:assert/strict";
 import { mkdir, mkdtemp, rm, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import path from "node:path";
-import type { Api, AssistantMessage, Model, ToolResultMessage, UserMessage } from "@mariozechner/pi-ai";
+import type { Api, AssistantMessage, Context, Model, ToolResultMessage, UserMessage } from "@mariozechner/pi-ai";
 import {
   Type,
   fauxAssistantMessage,
@@ -245,6 +245,83 @@ test("runAgentTurn executes a tool call and appends the resulting messages", asy
         (message) => isAssistantMessage(message) && messageHasText(message, "Done using the tool.")
       )
     );
+  } finally {
+    registration.unregister();
+  }
+});
+
+test("runAgentTurn compacts oversized tool results only at the model boundary", async () => {
+  const registration = registerFauxProvider();
+  const prompt = "Use the large-result tool.";
+  const largeText = `prefix-${"x".repeat(30000)}-suffix`;
+  let modelBoundaryToolResultText = "";
+  registration.setResponses([
+    fauxAssistantMessage([fauxToolCall("large_result", {})], { stopReason: "toolUse" }),
+    (llmContext: Context) => {
+      const toolResult = llmContext.messages.find(
+        (message): message is ToolResultMessage =>
+          message.role === "toolResult" && message.toolName === "large_result"
+      );
+      assert.ok(toolResult);
+      modelBoundaryToolResultText = toolResult.content
+        .filter((content): content is Extract<ToolResultMessage["content"][number], { type: "text" }> =>
+          content.type === "text"
+        )
+        .map((content) => content.text)
+        .join("\n");
+      return fauxAssistantMessage([fauxText("Large result handled.")]);
+    }
+  ]);
+
+  const context: AgentContext = {
+    systemPrompt: "You are a helpful assistant. Use tools when they are useful.",
+    messages: [],
+    tools: [
+      {
+        name: "large_result",
+        label: "Large Result",
+        description: "Returns a large payload.",
+        parameters: Type.Object({}),
+        execute: async () => ({
+          content: [{ type: "text", text: largeText }],
+          details: { payload: largeText }
+        })
+      }
+    ]
+  };
+  const observedEvents: AgentEvent[] = [];
+
+  try {
+    const result = await runAgentTurn({
+      model: registration.getModel(),
+      workspaceDir: process.cwd(),
+      context,
+      prompt,
+      onEvent: (event) => {
+        observedEvents.push(event);
+      }
+    });
+
+    assert.ok(modelBoundaryToolResultText.length < largeText.length);
+    assert.match(modelBoundaryToolResultText, /truncated/i);
+    assert.equal(modelBoundaryToolResultText.includes("-suffix"), false);
+
+    const toolResult = result.newMessages.find(
+      (message): message is ToolResultMessage =>
+        isToolResultMessage(message) && message.toolName === "large_result"
+    );
+    assert.ok(toolResult);
+    assert.deepEqual(toolResult.content, [{ type: "text", text: largeText }]);
+    assert.deepEqual(toolResult.details, { payload: largeText });
+
+    const toolExecutionEnd = observedEvents.find(
+      (event): event is ToolExecutionEndEvent =>
+        event.type === "tool_execution_end" && event.toolName === "large_result"
+    );
+    assert.ok(toolExecutionEnd);
+    assert.deepEqual(toolExecutionEnd.result.content, [{ type: "text", text: largeText }]);
+    assert.deepEqual(toolExecutionEnd.result.details, { payload: largeText });
+    assert.deepEqual(context.messages, result.newMessages);
   } finally {
     registration.unregister();
   }

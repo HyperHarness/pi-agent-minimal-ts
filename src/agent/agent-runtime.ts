@@ -28,6 +28,8 @@ type AgentMessageEventHandler = (event: AgentEvent) => Promise<void> | void;
 const contextWorkspaceDirs = new WeakMap<AgentContext, string>();
 const TRANSIENT_MODEL_RETRY_ATTEMPTS = 5;
 const MAX_AGENT_TOOL_LOOPS_PER_TURN = 90;
+const MAX_LLM_TOOL_RESULT_TEXT_CHARS = 8000;
+const MAX_LLM_TOOL_RESULT_TOTAL_TEXT_CHARS = 48000;
 const TRANSIENT_MODEL_RETRY_PATTERNS = [
   /\boverloaded\b/i,
   /try again later/i,
@@ -71,6 +73,105 @@ function isLlmMessage(message: AgentMessage): message is LlmMessage {
 
 function convertAgentMessagesToLlm(messages: AgentMessage[]): Message[] {
   return messages.flatMap((message) => (isLlmMessage(message) ? [message] : []));
+}
+
+function toolResultTextLength(message: ToolResultMessage): number {
+  return message.content.reduce(
+    (total, item) => total + (item.type === "text" ? item.text.length : item.data.length),
+    0
+  );
+}
+
+function createToolResultContextNotice(message: ToolResultMessage, originalChars: number): string {
+  return [
+    "[tool result truncated for model context]",
+    `tool=${message.toolName}`,
+    `originalChars=${originalChars}`,
+    "Full result is preserved in tool events and session history."
+  ].join(" ");
+}
+
+function compactToolResultForLlmContext(
+  message: ToolResultMessage,
+  remainingTextBudget: number
+): { message: ToolResultMessage; usedTextBudget: number } {
+  const originalChars = toolResultTextLength(message);
+  const maxChars = Math.max(0, Math.min(MAX_LLM_TOOL_RESULT_TEXT_CHARS, remainingTextBudget));
+  const baseMessage = {
+    role: "toolResult" as const,
+    toolCallId: message.toolCallId,
+    toolName: message.toolName,
+    isError: message.isError,
+    timestamp: message.timestamp
+  };
+
+  if (originalChars <= maxChars) {
+    return {
+      message: {
+        ...baseMessage,
+        content: message.content
+      },
+      usedTextBudget: originalChars
+    };
+  }
+
+  const notice = createToolResultContextNotice(message, originalChars);
+  const contentBudget = Math.max(0, maxChars - notice.length - 2);
+  let remainingContentBudget = contentBudget;
+  const compactedContent: ToolResultMessage["content"] = [];
+
+  for (const item of message.content) {
+    if (remainingContentBudget <= 0) {
+      break;
+    }
+
+    if (item.type === "text") {
+      const text = item.text.slice(0, remainingContentBudget);
+      if (text.length > 0) {
+        compactedContent.push({ type: "text", text });
+        remainingContentBudget -= text.length;
+      }
+      continue;
+    }
+
+    const placeholder = `[image omitted from model context: mimeType=${item.mimeType} chars=${item.data.length}]`;
+    const text = placeholder.slice(0, remainingContentBudget);
+    if (text.length > 0) {
+      compactedContent.push({ type: "text", text });
+      remainingContentBudget -= text.length;
+    }
+  }
+
+  compactedContent.push({ type: "text", text: notice });
+  return {
+    message: {
+      ...baseMessage,
+      content: compactedContent
+    },
+    usedTextBudget: toolResultTextLength({
+      ...baseMessage,
+      content: compactedContent
+    })
+  };
+}
+
+function compactToolResultsForLlmContext(messages: AgentMessage[]): AgentMessage[] {
+  let remainingTextBudget = MAX_LLM_TOOL_RESULT_TOTAL_TEXT_CHARS;
+  const compacted = new Array<AgentMessage>(messages.length);
+
+  for (let index = messages.length - 1; index >= 0; index -= 1) {
+    const message = messages[index];
+    if (message?.role !== "toolResult") {
+      compacted[index] = message;
+      continue;
+    }
+
+    const result = compactToolResultForLlmContext(message, remainingTextBudget);
+    compacted[index] = result.message;
+    remainingTextBudget = Math.max(0, remainingTextBudget - result.usedTextBudget);
+  }
+
+  return compacted;
 }
 
 function getAssistantText(message: AssistantMessage): string {
@@ -248,6 +349,7 @@ async function runAgentLoopAttempt(options: {
     {
       model: options.model,
       convertToLlm: convertAgentMessagesToLlm,
+      transformContext: async (messages) => compactToolResultsForLlmContext(messages),
       getApiKey: (provider) => getEnvApiKey(provider),
       beforeToolCall: async ({ assistantMessage }) => {
         const reason = registerAssistantToolLoop(options.toolLoopLimiter, assistantMessage);
