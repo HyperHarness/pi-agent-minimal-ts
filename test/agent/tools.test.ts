@@ -4562,6 +4562,7 @@ Canonical content.
       duplicate_page_title: 0,
       near_duplicate_page: 0,
       duplicate_section: 0,
+      weak_evidence_contract: 0,
       weak_synthesis_page: 0,
       rendered_wiki_link: 0,
     });
