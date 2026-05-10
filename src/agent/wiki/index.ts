@@ -16,3 +16,4 @@ export * from "./summary.js";
 export * from "./relations.js";
 export * from "./health.js";
 export * from "./worker.js";
+export * from "./coordinator.js";
