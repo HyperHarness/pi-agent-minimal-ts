@@ -1,3 +1,5 @@
+import { validateWikiDomainBinding } from "./domain-bindings.js";
+
 export type WikiPageType =
   | "paper-source"
   | "synthesis"
@@ -28,6 +30,7 @@ export interface WikiPageMetadata {
   related_pages?: string[];
   related_papers?: string[];
   canonical_page?: string;
+  execution_binding?: string;
   created_at: string;
   updated_at: string;
 }
@@ -48,7 +51,8 @@ export interface WikiPageSchemaError {
     | "invalid_created_at"
     | "invalid_updated_at"
     | "missing_source_refs"
-    | "missing_canonical_page";
+    | "missing_canonical_page"
+    | "unknown_execution_binding";
   message: string;
   path?: string;
 }
@@ -254,6 +258,7 @@ export function validateWikiPageMetadata(
   const relatedPages = cleanOptionalStringArray(metadata.related_pages);
   const relatedPapers = cleanOptionalStringArray(metadata.related_papers);
   const canonicalPage = cleanString(metadata.canonical_page);
+  const executionBinding = cleanString(metadata.execution_binding);
 
   for (const field of ARRAY_METADATA_FIELDS) {
     if (hasOwnField(metadata, field) && !Array.isArray(metadata[field])) {
@@ -285,6 +290,17 @@ export function validateWikiPageMetadata(
     errors.push(schemaError("missing_canonical_page", "Alias wiki pages require canonical_page.", path));
   }
 
+  if (hasOwnField(metadata, "execution_binding")) {
+    const bindingValidation = validateWikiDomainBinding(executionBinding);
+    if (!bindingValidation.ok) {
+      errors.push(schemaError(
+        "unknown_execution_binding",
+        `Wiki page execution_binding is not registered: ${executionBinding}`,
+        path
+      ));
+    }
+  }
+
   if (errors.length > 0) {
     return { ok: false, errors };
   }
@@ -304,6 +320,7 @@ export function validateWikiPageMetadata(
       ...(relatedPages ? { related_pages: relatedPages } : {}),
       ...(relatedPapers ? { related_papers: relatedPapers } : {}),
       ...(canonicalPage ? { canonical_page: canonicalPage } : {}),
+      ...(executionBinding ? { execution_binding: executionBinding } : {}),
       created_at: metadata.created_at as string,
       updated_at: metadata.updated_at as string
     }
@@ -372,6 +389,7 @@ export function serializeWikiPageMarkdown(page: {
     ...(metadata.related_pages ? serializeStringArray("related_pages", metadata.related_pages) : []),
     ...(metadata.related_papers ? serializeStringArray("related_papers", metadata.related_papers) : []),
     ...(metadata.canonical_page ? [`canonical_page: ${quoteYamlString(metadata.canonical_page)}`] : []),
+    ...(metadata.execution_binding ? [`execution_binding: ${quoteYamlString(metadata.execution_binding)}`] : []),
     `created_at: ${quoteYamlString(metadata.created_at)}`,
     `updated_at: ${quoteYamlString(metadata.updated_at)}`,
     "---",

@@ -123,6 +123,61 @@ test("parseWikiPageMarkdown normalizes missing schema_version to 1", () => {
   assert.equal(parsed.page?.metadata.schema_version, 1);
 });
 
+test("parseWikiPageMarkdown accepts registered execution_binding metadata", () => {
+  const markdown = [
+    "---",
+    "schema_version: 1",
+    "type: concept",
+    "key: transmon-frequency",
+    "title: Transmon frequency",
+    "aliases: []",
+    'tags:',
+    '  - "superconducting-qubits"',
+    "evidence_contract: code-backed",
+    "source_refs:",
+    '  - "transmon-helper"',
+    'execution_binding: "transmon-frequency-estimate"',
+    "created_at: 2026-05-10T00:00:00.000Z",
+    "updated_at: 2026-05-10T00:00:00.000Z",
+    "---",
+    "",
+    "# Transmon frequency"
+  ].join("\n");
+
+  const parsed = parseWikiPageMarkdown(markdown, "knowledge-base/pages/transmon-frequency.md");
+
+  assert.equal(parsed.ok, true);
+  assert.equal(parsed.page?.metadata.execution_binding, "transmon-frequency-estimate");
+});
+
+test("parseWikiPageMarkdown rejects unknown execution_binding metadata without throwing", () => {
+  const markdown = [
+    "---",
+    "schema_version: 1",
+    "type: concept",
+    "key: unknown-helper-page",
+    "title: Unknown helper page",
+    "aliases: []",
+    "tags: []",
+    "evidence_contract: code-backed",
+    "source_refs:",
+    '  - "helper-source"',
+    'execution_binding: "unknown-helper"',
+    "created_at: 2026-05-10T00:00:00.000Z",
+    "updated_at: 2026-05-10T00:00:00.000Z",
+    "---",
+    "",
+    "# Unknown helper page"
+  ].join("\n");
+
+  assert.doesNotThrow(() => parseWikiPageMarkdown(markdown, "knowledge-base/pages/unknown-helper-page.md"));
+
+  const parsed = parseWikiPageMarkdown(markdown, "knowledge-base/pages/unknown-helper-page.md");
+
+  assert.equal(parsed.ok, false);
+  assert.deepEqual(parsed.errors.map((error) => error.code), ["unknown_execution_binding"]);
+});
+
 test("parseWikiPageMarkdown accepts unquoted scalars and empty array literals", () => {
   const markdown = [
     "---",
