@@ -15,6 +15,9 @@ export interface PaperWikiSourceResult {
   paperKey: string;
   title: string;
   sourcePath: string;
+  manifestPath: string;
+  operationId: string;
+  operationJournalPath: string;
   indexPath: string;
   logPath: string;
 }

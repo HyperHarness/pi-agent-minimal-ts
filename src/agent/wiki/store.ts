@@ -34,6 +34,14 @@ export function getPaperWikiStateDir(workspaceDir: string): string {
   return resolvePaperLibraryPaths(workspaceDir).stateRoot;
 }
 
+export function getPaperWikiSourceManifestPath(workspaceDir: string, paperKey: string): string {
+  return path.join(getPaperWikiManifestsDir(workspaceDir), `${sanitizeWikiFilename(paperKey)}.json`);
+}
+
+export function getPaperWikiOperationJournalPath(workspaceDir: string): string {
+  return path.join(getPaperWikiStateDir(workspaceDir), "wiki-operations.jsonl");
+}
+
 export function getPaperWikiIndexPath(workspaceDir: string): string {
   return resolvePaperLibraryPaths(workspaceDir).indexPath;
 }

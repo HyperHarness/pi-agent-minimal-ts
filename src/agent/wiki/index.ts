@@ -1,5 +1,7 @@
 export * from "./types.js";
 export * from "./store.js";
+export * from "./manifest-store.js";
+export * from "./journal.js";
 export * from "./content.js";
 export * from "./bootstrap.js";
 export * from "./lint.js";

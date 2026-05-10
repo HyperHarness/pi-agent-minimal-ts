@@ -215,6 +215,147 @@ test("checkWikiHealth reports legacy source metadata without citation status fie
   }
 });
 
+test("checkWikiHealth reports source summaries without manifests", async () => {
+  const workspace = await createWorkspace();
+
+  try {
+    const pdfPath = path.join(workspace, "knowledge-base", "raw", "pdfs", "arxiv-2401.00999.pdf");
+    await writeText(pdfPath, "%PDF-1.4\nexample\n%%EOF\n");
+    await writeJson(path.join(workspace, "knowledge-base", "sources", "arxiv-2401.00999", "acquisition.json"), {
+      source: "arxiv",
+      articleUrl: "https://arxiv.org/abs/2401.00999",
+      recordedAt: "2026-05-10T00:00:00.000Z",
+      handlingMethod: "direct_http",
+      status: "downloaded",
+      canonicalId: "2401.00999",
+      pdfUrl: "https://arxiv.org/pdf/2401.00999.pdf",
+      downloadPath: pdfPath
+    });
+    await writeJson(path.join(workspace, "knowledge-base", "sources", "arxiv-2401.00999", "source.json"), {
+      paperKey: "arxiv-2401.00999",
+      source: "arxiv",
+      canonicalId: "2401.00999",
+      articleUrl: "https://arxiv.org/abs/2401.00999",
+      pdfPath
+    });
+    const parsedDir = path.join(workspace, "knowledge-base", "sources", "arxiv-2401.00999", "parses", "plain-text-baseline");
+    await writeText(path.join(parsedDir, "document.md"), "A complete parse about wiki manifests.");
+    await writeJson(path.join(parsedDir, "parse.json"), { paperKey: "arxiv-2401.00999", engine: "plain-text-baseline" });
+    await writeJson(path.join(parsedDir, "quality.json"), {
+      status: "good",
+      score: 0.9,
+      pages: 1,
+      totalTextLength: 2000,
+      emptyPageCount: 0,
+      headingCount: 1,
+      tableCount: 0,
+      figureOrCaptionCount: 0,
+      warnings: []
+    });
+    await writeText(path.join(workspace, "knowledge-base", "sources", "arxiv-2401.00999", "summary.md"), [
+      "---",
+      "type: \"paper-source-summary\"",
+      "paper_key: \"arxiv-2401.00999\"",
+      "title: \"Manifest gap\"",
+      "---",
+      "",
+      "# Manifest gap",
+      ""
+    ].join("\n"));
+
+    const result = await checkWikiHealth({ workspaceDir: workspace });
+
+    assert.equal(result.summary.source_manifest_missing, 1);
+    assert.ok(result.issues.some((issue) =>
+      issue.kind === "source_manifest_missing" &&
+      issue.paperKey === "arxiv-2401.00999"
+    ));
+  } finally {
+    await rm(workspace, { recursive: true, force: true });
+  }
+});
+
+test("fixWikiHealth backfills source manifests from existing summaries", async () => {
+  const workspace = await createWorkspace();
+
+  try {
+    const pdfPath = path.join(workspace, "knowledge-base", "raw", "pdfs", "arxiv-2401.01000.pdf");
+    await writeText(pdfPath, "%PDF-1.4\nexample\n%%EOF\n");
+    await writeJson(path.join(workspace, "knowledge-base", "sources", "arxiv-2401.01000", "acquisition.json"), {
+      source: "arxiv",
+      articleUrl: "https://arxiv.org/abs/2401.01000",
+      recordedAt: "2026-05-10T00:00:00.000Z",
+      handlingMethod: "direct_http",
+      status: "downloaded",
+      canonicalId: "2401.01000",
+      pdfUrl: "https://arxiv.org/pdf/2401.01000.pdf",
+      downloadPath: pdfPath
+    });
+    await writeJson(path.join(workspace, "knowledge-base", "sources", "arxiv-2401.01000", "source.json"), {
+      paperKey: "arxiv-2401.01000",
+      source: "arxiv",
+      canonicalId: "2401.01000",
+      articleUrl: "https://arxiv.org/abs/2401.01000",
+      pdfPath
+    });
+    const parsedDir = path.join(workspace, "knowledge-base", "sources", "arxiv-2401.01000", "parses", "plain-text-baseline");
+    await writeText(path.join(parsedDir, "document.md"), "A complete parse about manifest backfill.");
+    await writeJson(path.join(parsedDir, "parse.json"), { paperKey: "arxiv-2401.01000", engine: "plain-text-baseline" });
+    await writeJson(path.join(parsedDir, "quality.json"), {
+      status: "good",
+      score: 0.9,
+      pages: 1,
+      totalTextLength: 2000,
+      emptyPageCount: 0,
+      headingCount: 1,
+      tableCount: 0,
+      figureOrCaptionCount: 0,
+      warnings: []
+    });
+    await writeText(path.join(workspace, "knowledge-base", "sources", "arxiv-2401.01000", "summary.md"), [
+      "---",
+      "type: \"paper-source-summary\"",
+      "paper_key: \"arxiv-2401.01000\"",
+      "title: \"Manifest backfill\"",
+      "created_at: \"2026-05-10T00:00:00.000Z\"",
+      "updated_at: \"2026-05-10T00:00:00.000Z\"",
+      "pdf_sha256: \"sha-backfill\"",
+      "raw_pdf: \"knowledge-base/raw/pdfs/arxiv-2401.01000.pdf\"",
+      "record: \"knowledge-base/sources/arxiv-2401.01000/acquisition.json\"",
+      "article_url: \"https://arxiv.org/abs/2401.01000\"",
+      "parse_engine: \"plain-text-baseline\"",
+      "parse_markdown: \"knowledge-base/sources/arxiv-2401.01000/parses/plain-text-baseline/document.md\"",
+      "parse_json: \"knowledge-base/sources/arxiv-2401.01000/parses/plain-text-baseline/parse.json\"",
+      "quality_json: \"knowledge-base/sources/arxiv-2401.01000/parses/plain-text-baseline/quality.json\"",
+      "tags:",
+      "  - \"manifest\"",
+      "related_papers: []",
+      "---",
+      "",
+      "# Manifest backfill",
+      ""
+    ].join("\n"));
+
+    const result = await fixWikiHealth({
+      workspaceDir: workspace,
+      issueKinds: ["source_manifest_missing"]
+    });
+
+    assert.equal(result.fixed, 1);
+    const manifest = JSON.parse(await readFile(
+      path.join(workspace, "knowledge-base", "manifests", "arxiv-2401.01000.json"),
+      "utf8"
+    ));
+    assert.equal(manifest.paperKey, "arxiv-2401.01000");
+    assert.equal(manifest.title, "Manifest backfill");
+    assert.equal(manifest.provenance.pdfSha256, "sha-backfill");
+    assert.equal(manifest.parse.engine, "plain-text-baseline");
+    assert.deepEqual(manifest.tags, ["manifest"]);
+  } finally {
+    await rm(workspace, { recursive: true, force: true });
+  }
+});
+
 test("checkWikiHealth accepts ready webpage reading when PDF parsing failed later", async () => {
   const workspace = await createWorkspace();
 

@@ -15,6 +15,7 @@ import {
   getPaperWikiLogPath,
   getPaperWikiPagePath,
   getPaperWikiPagesDir,
+  getPaperWikiSourceManifestPath,
   getPaperWikiSourcePath,
   listPaperWikiPageFiles,
   listPaperWikiSourceFiles,
@@ -22,6 +23,14 @@ import {
   relativeToWorkspace,
   sanitizeWikiFilename
 } from "./store.js";
+import {
+  writeWikiSourceManifest,
+  type WikiSourceManifest
+} from "./manifest-store.js";
+import {
+  beginWikiOperation,
+  completeWikiOperation
+} from "./journal.js";
 import type {
   PaperWikiPageInput,
   PaperWikiPageResult,
@@ -132,6 +141,10 @@ function yamlList(values: string[] | undefined): string {
     return "[]";
   }
   return `\n${cleaned.map((value) => `  - ${quoteYaml(value)}`).join("\n")}`;
+}
+
+function cleanStringValues(values: string[] | undefined): string[] {
+  return (values ?? []).map((value) => value.trim()).filter(Boolean);
 }
 
 function sectionList(title: string, values: string[] | undefined): string {
@@ -414,7 +427,27 @@ export async function writePaperWikiSource(input: PaperWikiSourceInput): Promise
     engine
   });
   const sourcePath = getPaperWikiSourcePath(input.workspaceDir, input.paperKey);
+  const manifestPath = getPaperWikiSourceManifestPath(input.workspaceDir, input.paperKey);
+  const indexPath = getPaperWikiIndexPath(input.workspaceDir);
   const now = new Date().toISOString();
+  const sourcePathRelative = relativeToWorkspace(input.workspaceDir, sourcePath);
+  const manifestPathRelative = relativeToWorkspace(input.workspaceDir, manifestPath);
+  const indexPathRelative = relativeToWorkspace(input.workspaceDir, indexPath);
+  const operation = await beginWikiOperation({
+    workspaceDir: input.workspaceDir,
+    intent: "write_source_summary",
+    owner: "wiki-agent",
+    plannedFiles: [
+      sourcePathRelative,
+      manifestPathRelative,
+      indexPathRelative
+    ],
+    inputs: {
+      paperKey: input.paperKey,
+      engine,
+      title
+    }
+  });
 
   const markdown = `---
 type: "paper-source-summary"
@@ -448,15 +481,57 @@ ${sectionList("Open Questions", input.openQuestions)}
 - Parsed markdown: \`${relativeToWorkspace(input.workspaceDir, artifacts.markdownPath)}\`
 `;
 
+  const manifest: WikiSourceManifest = {
+    schemaVersion: 1,
+    kind: "paper-source",
+    paperKey: input.paperKey,
+    title,
+    status: "ready",
+    createdAt: now,
+    updatedAt: now,
+    sourceSummaryPath: sourcePathRelative,
+    provenance: {
+      ...(source?.recordPath ? { recordPath: relativeToWorkspace(input.workspaceDir, source.recordPath) } : {}),
+      ...(source?.articleUrl ? { articleUrl: source.articleUrl } : {}),
+      ...(source?.pdfPath ? { rawPdfPath: relativeToWorkspace(input.workspaceDir, source.pdfPath) } : {}),
+      ...(document.pdfSha256 ? { pdfSha256: document.pdfSha256 } : {})
+    },
+    parse: {
+      engine,
+      markdownPath: relativeToWorkspace(input.workspaceDir, artifacts.markdownPath),
+      jsonPath: relativeToWorkspace(input.workspaceDir, artifacts.parsePath),
+      qualityPath: relativeToWorkspace(input.workspaceDir, artifacts.qualityPath)
+    },
+    tags: cleanStringValues(input.tags),
+    relatedPaperKeys: cleanStringValues(input.relatedPaperKeys),
+    synthesisPageKeys: []
+  };
+
   await mkdir(path.dirname(sourcePath), { recursive: true });
   await writeFile(sourcePath, markdown.trimEnd() + "\n", "utf8");
+  await writeWikiSourceManifest({
+    workspaceDir: input.workspaceDir,
+    manifest
+  });
   await rewriteWikiIndex(input.workspaceDir);
+  await completeWikiOperation({
+    workspaceDir: input.workspaceDir,
+    operationId: operation.operationId,
+    writtenFiles: [
+      sourcePathRelative,
+      manifestPathRelative,
+      indexPathRelative
+    ]
+  });
 
   return {
     paperKey: input.paperKey,
     title,
-    sourcePath: relativeToWorkspace(input.workspaceDir, sourcePath),
-    indexPath: relativeToWorkspace(input.workspaceDir, getPaperWikiIndexPath(input.workspaceDir)),
+    sourcePath: sourcePathRelative,
+    manifestPath: manifestPathRelative,
+    operationId: operation.operationId,
+    operationJournalPath: operation.journalPath,
+    indexPath: indexPathRelative,
     logPath: relativeToWorkspace(input.workspaceDir, getPaperWikiLogPath(input.workspaceDir))
   };
 }

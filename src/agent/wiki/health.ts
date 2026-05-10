@@ -9,6 +9,11 @@ import {
   type PaperSummaryProgress,
   type PaperSummaryWorker
 } from "./summary.js";
+import { backfillWikiSourceManifestFromSummary } from "./manifest-store.js";
+import {
+  getPaperWikiSourceManifestPath,
+  relativeToWorkspace
+} from "./store.js";
 import {
   readPaperDownloadJobEvents,
   type PaperDownloadJobEvent
@@ -35,6 +40,7 @@ export type WikiHealthIssueKind =
   | "parse_failed"
   | "low_quality"
   | "summary_missing"
+  | "source_manifest_missing"
   | "missing_artifact"
   | "download_blocked"
   | "citation_incomplete";
@@ -163,6 +169,7 @@ const ISSUE_KINDS: WikiHealthIssueKind[] = [
   "parse_failed",
   "low_quality",
   "summary_missing",
+  "source_manifest_missing",
   "missing_artifact",
   "download_blocked",
   "citation_incomplete"
@@ -472,6 +479,7 @@ function summarizeActions(issues: WikiHealthIssue[]): string[] {
     ["low_quality", "Inspect low-quality parses and prefer webpage/TeX/Docling alternatives where available."],
     ["parse_missing", "Parse downloaded papers that do not yet have reading artifacts."],
     ["summary_missing", "Write wiki source summaries for parsed papers without a summary page."],
+    ["source_manifest_missing", "Backfill source manifests for existing wiki source summaries."],
     ["missing_artifact", "Repair or regenerate acquisition files that point at missing files."],
     ["download_blocked", "No repair needed for download-blocklisted papers unless the paper is removed from the local download blocklist."],
     ["citation_incomplete", "Refresh source citation metadata through the paper-download-subagent metadata pass."]
@@ -574,6 +582,13 @@ export async function checkWikiHealth(options: WikiHealthOptions): Promise<WikiH
 
     if (!usesPreprintFallback && !isPublisherPending && hasUsableParsedReading && !entry.hasWikiSummary) {
       entryIssues.push(baseIssue(entry, "summary_missing", "low", "Parsed paper has no wiki source summary."));
+    }
+
+    if (entry.hasWikiSummary && !(await pathExists(getPaperWikiSourceManifestPath(workspaceDir, entry.paperKey)))) {
+      entryIssues.push({
+        ...baseIssue(entry, "source_manifest_missing", "low", "Wiki source summary has no durable source manifest."),
+        paths: [relativeToWorkspace(workspaceDir, getPaperWikiSourceManifestPath(workspaceDir, entry.paperKey))]
+      });
     }
 
     if (!usesPreprintFallback && !isPublisherPending && !needsAuthorization) {
@@ -1019,6 +1034,41 @@ function skippedFix(issue: WikiHealthIssue, message: string): WikiHealthFixItem 
   };
 }
 
+async function fixBySourceManifestBackfill(input: {
+  workspaceDir: string;
+  issue: WikiHealthIssue;
+  dryRun: boolean;
+}): Promise<WikiHealthFixItem> {
+  if (input.dryRun) {
+    return {
+      issue: input.issue,
+      status: "skipped",
+      action: "source_manifest_backfill",
+      message: `Dry run: would backfill source manifest for ${input.issue.paperKey}.`
+    };
+  }
+  try {
+    const manifestPath = await backfillWikiSourceManifestFromSummary({
+      workspaceDir: input.workspaceDir,
+      paperKey: input.issue.paperKey
+    });
+    return {
+      issue: input.issue,
+      status: "fixed",
+      action: "source_manifest_backfill",
+      message: `Backfilled source manifest for ${input.issue.paperKey}.`,
+      details: { manifestPath }
+    };
+  } catch (error) {
+    return {
+      issue: input.issue,
+      status: "failed",
+      action: "source_manifest_backfill",
+      message: error instanceof Error ? error.message : "Source manifest backfill failed."
+    };
+  }
+}
+
 async function readSourceMetadata(sourcePath: string): Promise<Partial<PaperSourceMetadata> | undefined> {
   try {
     return JSON.parse(await readFile(sourcePath, "utf8")) as Partial<PaperSourceMetadata>;
@@ -1230,6 +1280,14 @@ export async function fixWikiHealth(options: WikiHealthFixOptions): Promise<Wiki
         ...(options.paperSummaryWorker ? { paperSummaryWorker: options.paperSummaryWorker } : {}),
         dryRun: options.dryRun === true,
         ...(options.onProgress ? { onProgress: options.onProgress } : {})
+      }));
+      continue;
+    }
+    if (issue.kind === "source_manifest_missing") {
+      results.push(await fixBySourceManifestBackfill({
+        workspaceDir,
+        issue,
+        dryRun: options.dryRun === true
       }));
       continue;
     }
