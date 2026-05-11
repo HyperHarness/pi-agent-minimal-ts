@@ -14,7 +14,7 @@ agent runtime + worker router
         |
         +--> tool registry and boundary profiles
         |
-        +--> paper acquisition, parsing, local library, wiki, browser extension
+        +--> paper acquisition, parsing, local library, schema-first wiki, browser extension
         |
         +--> Feishu transport, memory, PDF delivery, managed repo commands
 ```
@@ -26,7 +26,7 @@ agent runtime + worker router
 - `src/agent/tools.ts` 是工具装配中心，按各领域工具 factory 的命名分组拼出默认/full 工具面；worker 可见工具面的白名单定义在 `src/agent/tool-types.ts`。
 - 论文能力分三层：检索/下载由 `paper-manager.ts` 和 `paper-download.ts` 承担，持久记录由 `paper-store.ts` 承担，解析和阅读由 `paper-reader/**` 承担。
 - 论文工具适配层位于 `src/agent/paper/tools.ts`，和 paper 领域服务放在同一目录树下。
-- Wiki 能力集中在 `src/agent/wiki/**`：store/content/bootstrap/lint/summary/relations/health 是领域服务，`wiki/tools.ts` 是 agent 工具适配层，`wiki/worker.ts` 承载 clean-context evidence worker。
+- Wiki 能力集中在 `src/agent/wiki/**`：`workspace-contract.ts`、`page-schema.ts`、`typed-store.ts`、`manifest-store.ts`、`retrieval-contract.ts`、`retrieval-search.ts`、`journal.ts`、`coordinator.ts` 是 schema-first 核心层；`content.ts`、`bootstrap.ts`、`lint.ts`、`summary.ts`、`relations.ts`、`health.ts` 是领域服务；`wiki/tools.ts` 是 agent 工具适配层；`wiki/worker.ts` 承载 clean-context evidence worker。
 - 浏览器扩展不是 agent runtime 的一部分。agent 通过 `paper-extension-bridge.ts` 写 job；native host `paper-extension-host.ts` 被浏览器调用，再把下载或网页快照登记回本地库。
 - Feishu bridge 在 `src/feishu-bridge/**`，它是传输、队列、记忆、PDF 回传和仓库命令边界，不应该承载科学推理逻辑。
 
@@ -71,7 +71,7 @@ agent runtime + worker router
 1. `search_papers` 工具进 `paper/tools.ts`，默认调用 `paper-manager.ts` 的 `searchPapers()`，组合 arXiv、APS、通用 web 检索。
 2. `download_paper` 调用 `paper-manager.ts` 的 `downloadPaper()`。它先查 blocklist 和本地记录，再按 source 选择 arXiv 直下、supported publisher、extension job 或 manual login。
 3. 低层 publisher 下载逻辑在 `paper-download.ts`；Science/Nature/APS 识别在 `publisher-adapters/**`。
-4. 下载结果由 `paper-store.ts` 写入 `knowledge-base/raw/papers`、`knowledge-base/raw/pdfs` 和 source metadata。
+4. 下载结果由 `paper-store.ts` 写入 `knowledge-base/raw/pdfs` 和 `knowledge-base/sources/<paper-key>/` 下的 acquisition/source metadata。
 5. 若需要浏览器扩展，`paper-extension-bridge.ts` 写 queue，`paper-extension-host.ts` 之后登记 PDF bytes、下载路径或网页快照。
 
 ### 论文解析
@@ -84,13 +84,17 @@ agent runtime + worker router
 
 ### Wiki 构建
 
-1. `search_paper_wiki`、`write_paper_wiki_source`、`build_wiki_page` 等工具在 `src/agent/wiki/tools.ts`。
-2. 持久写入和检索由 `wiki/content.ts` 与 `wiki/store.ts` 承担。
-3. `wiki/bootstrap.ts` 从已有 source summary 和 parsed fallback 组装页面证据。
-4. `wiki/summary.ts` 读取解析文本并调用 `wiki-evidence-worker` 生成 grounded source summary。
-5. `wiki/relations.ts` 维护 source summary 之间的相关论文关系。
-6. `wiki/health.ts` 扫描 wiki/source/parse/download 状态并按需触发修复。
-7. `wiki/worker.ts` 创建 clean-context summary/page worker，`agent-runtime.ts` 只负责注入它们。
+1. `search_paper_wiki`、`write_paper_wiki_source`、`build_wiki_page`、`answer_research_question` 等工具在 `src/agent/wiki/tools.ts`。
+2. `wiki/workspace-contract.ts` 给出 `knowledge-base/` 的 authoritative lifecycle roots；`wiki/store.ts` 保留兼容路径 helper，并逐步委托到 workspace contract。
+3. `wiki/page-schema.ts` 和 `wiki/typed-store.ts` 解析、验证、列出、写入 typed Markdown pages；坏 frontmatter 不会让整库读取失败，而是转成 diagnostics。
+4. `wiki/manifest-store.ts` 为 source summary 写入/回填 source manifest；`wiki/retrieval-contract.ts` 提供 read-only evidence API，把 source summaries、manifests 和 typed pages 统一成下游可消费的 evidence item。
+5. `wiki/retrieval-search.ts` 做结构化 evidence search，按 title/alias/tag/source_ref/body 打分并返回 match reasons；`content.ts` 的 `searchPaperWiki()` 优先使用它，再按需回退到旧正文搜索。
+6. `wiki/summary.ts` 读取解析文本并调用 `wiki-evidence-worker` 生成 grounded source summary；`content.ts` 写 source summary 时同步 manifest、index 和 operation journal。
+7. `wiki/bootstrap.ts` 从 retrieval contract、source summary 和 parsed fallback 组装页面证据。
+8. `wiki/coordinator.ts` 给 research answer、topic page build、maintenance session 生成 deterministic coordination plan，标出 `paper-download-subagent`、`wiki-evidence-worker`、逻辑 `wiki-synthesis-worker` 和 `wiki-agent` 的 owner 边界。
+9. `wiki/journal.ts` 为 source/page/alias/structure-plan 这类多文件写入记录 begin/complete 事件；`wiki/health.ts` 扫描下载、解析、summary、manifest、typed page 和 interrupted operation 状态并按需触发修复。
+10. `wiki/lint.ts`、`wiki/structure-plan.ts`、`wiki/structure-apply.ts` 组成 governance 层：先报告结构/证据问题，再生成可审阅计划，最后只执行低风险 deterministic 修复。
+11. `wiki/worker.ts` 创建 clean-context summary/page worker，`agent-runtime.ts` 只负责注入它们。
 
 ### Feishu 消息
 
@@ -208,14 +212,26 @@ agent runtime + worker router
 | --- | --- | --- | --- | --- |
 | `src/agent/wiki/index.ts` | wiki domain facade，统一导出 source/page/bootstrap/lint/summary/relations/health/worker API。 | `src/index.ts`、边界测试、外部复用者。 | `wiki/**` 子模块。 | 外部导入优先走这里或明确子域入口，避免重新形成散落路径。 |
 | `src/agent/wiki/types.ts` | wiki source/page/search/bootstrap/worker 类型。 | wiki tools、content、bootstrap、worker。 | 无。 | Worker JSON 输出契约在这里；字段变动要同步 prompt 和 parser。 |
-| `src/agent/wiki/store.ts` | wiki 目录、source/page/assets/manifests/state 路径和 scaffold。 | `content.ts`、`tools.ts`、`file-tools.ts` 的设计工件写入。 | `knowledge-base.ts`、Node fs/path。 | Wiki 路径 owner；共享文档要避免写死用户 home 路径。 |
-| `src/agent/wiki/content.ts` | 写 source summary、写 synthesis page、alias merge、wiki 搜索。 | `wiki/tools.ts`、`wiki/summary.ts`、tests。 | wiki store、types、paper reader store、Node fs。 | Source/page 文件格式 owner；搜索索引简单但被 answer/build flows 依赖。 |
-| `src/agent/wiki/bootstrap.ts` | 为新 wiki page 构建固定 evidence 包和 seed queries。 | `wiki/tools.ts`、tests。 | `local-paper-library.ts`、`wiki/content.ts`。 | 这是 no-page-yet bootstrap 入口；改 seed query 会改变页面覆盖范围。 |
-| `src/agent/wiki/lint.ts` | Wiki 结构和引用健康 lint。 | `wiki/tools.ts`、tests。 | wiki store、wiki types。 | lint severity 会影响 agent 修复建议；保持 issue kind 稳定。 |
+| `src/agent/wiki/workspace-contract.ts` | `knowledge-base/` lifecycle roots、index/log/journal 路径和相对路径 helper。 | `store.ts`、tests、外部 wiki 集成。 | `knowledge-base.ts`、Node path。 | 新路径类先加到 contract，再让旧 helper 委托；避免各模块重新拼目录。 |
+| `src/agent/wiki/page-schema.ts` | typed wiki page frontmatter 类型、解析、验证、序列化，含 `execution_binding` 校验。 | `typed-store.ts`、`health.ts`、`maintenance.ts`。 | `domain-bindings.ts`。 | schema 是持久 Markdown 契约；新增字段要保持旧页面宽松读取，并补 malformed diagnostics。 |
+| `src/agent/wiki/typed-store.ts` | 列出/读取/写入 typed wiki pages，保留 Markdown body，并把坏页面报告为 diagnostics。 | `retrieval-contract.ts`、`health.ts`、`lint.ts`、`maintenance.ts`。 | `page-schema.ts`、`store.ts`。 | 不负责下载或 LLM；写入时不能绕过 source/page 边界。 |
+| `src/agent/wiki/domain-bindings.ts` | validated executable helper binding 的 metadata registry。 | `page-schema.ts`、domain binding 测试。 | 无。 | 这里只描述 binding schema，不执行页面内容；返回值要深拷贝避免调用者修改 registry。 |
+| `src/agent/wiki/store.ts` | wiki 目录、source/page/assets/manifests/state 路径和 scaffold。 | `content.ts`、`tools.ts`、`file-tools.ts` 的设计工件写入。 | `knowledge-base.ts`、`workspace-contract.ts`、Node fs/path。 | 这是兼容路径 facade；新增路径应来自 workspace contract，共享文档要避免写死用户 home 路径。 |
+| `src/agent/wiki/manifest-store.ts` | source manifest 读写、从旧 `summary.md` 回填 manifest、manifest 状态类型。 | `content.ts`、`health.ts`、`retrieval-contract.ts`。 | `store.ts`、Node fs/path。 | manifest 是 wiki-facing provenance index，不替代 acquisition/parse record；字段缺失时优先降级诊断。 |
+| `src/agent/wiki/journal.ts` | 多文件 wiki 操作 WAL：begin/complete events、读取和未完成操作识别。 | `content.ts`、`structure-apply.ts`、`health.ts`。 | `store.ts`、Node fs/path。 | 写入前先 begin，全部完成后 complete；修复工具依赖 operation id 和 planned files。 |
+| `src/agent/wiki/retrieval-contract.ts` | read-only evidence contract：读/列 source evidence 和 typed page evidence，合并 manifest 与 diagnostics。 | `retrieval-search.ts`、`bootstrap.ts`、downstream workers。 | `manifest-store.ts`、`typed-store.ts`、`store.ts`。 | 下游 agent 应优先消费这里，不直接依赖物理目录；坏 key/坏 manifest 不应抛穿整个流程。 |
+| `src/agent/wiki/retrieval-search.ts` | 结构化 evidence search，返回 score、match reasons、warnings 和 insufficient evidence 状态。 | `content.ts`、tests。 | `retrieval-contract.ts`。 | 排序语义会影响 answer/build grounding；强 score 优先于 preferred kind。 |
+| `src/agent/wiki/content.ts` | 写 source summary、写 synthesis page、alias merge、wiki 搜索。 | `wiki/tools.ts`、`wiki/summary.ts`、tests。 | store、manifest-store、journal、typed-store、retrieval-search、paper reader store。 | Source/page 文件格式 owner；写 source/page/alias 时要保持 manifest、index、journal 和 typed metadata 一致。 |
+| `src/agent/wiki/bootstrap.ts` | 为新 wiki page 构建固定 evidence 包和 seed queries。 | `wiki/tools.ts`、tests。 | `retrieval-contract.ts`、`local-paper-library.ts`、`wiki/content.ts`。 | 这是 no-page-yet bootstrap 入口；优先读结构化 evidence，再回退到本地论文库。 |
+| `src/agent/wiki/lint.ts` | Wiki 结构、引用、typed evidence contract、coverage 和 governance lint。 | `wiki/tools.ts`、tests。 | wiki store、typed-store、maintenance helpers、wiki types。 | lint severity 会影响 agent 修复建议；保持 issue kind 稳定，低风险修复和 LLM 重写要分开。 |
+| `src/agent/wiki/maintenance.ts` | 读取 typed/legacy 页面和 source summaries，计算 coverage、concept gaps、semantic aliases、scope drift。 | `lint.ts`、`structure-plan.ts`、tests。 | `typed-store.ts`、`manifest-store.ts`、`store.ts`。 | legacy/typed 共存期要宽松读取；unsafe manifest-only source path 必须跳过。 |
+| `src/agent/wiki/structure-plan.ts` | 将 lint/governance issues 转成预算化、可审阅的维护 action。 | `wiki/tools.ts`、tests。 | `maintenance.ts`、lint 类型。 | 只规划，不写文件；action schema 是 `wiki_apply_structure_plan` 输入契约。 |
+| `src/agent/wiki/structure-apply.ts` | 应用批准的低风险 structure actions，支持 dry-run、preflight、journal 和验证。 | `wiki/tools.ts`、tests。 | `content.ts`、`journal.ts`、`lint.ts`、store。 | 只能做 deterministic 修复；别在这里引入 LLM 重写。 |
 | `src/agent/wiki/summary.ts` | 从 parsed paper 构建 summary evidence，调用 worker 生成/写入 source summary。 | `wiki/tools.ts`、`library-health-tools.ts`、`wiki/health.ts`。 | `paper-reader.ts`、`wiki/content.ts`、`local-paper-library.ts`。 | 证据截断和 worker confidence gating 是质量关键；不要让 worker 无证据扩写。 |
 | `src/agent/wiki/relations.ts` | 发现和更新 source summary 的 related paper keys。 | `wiki/tools.ts`、`wiki/summary.ts`。 | `local-paper-library.ts`、`wiki/store.ts`。 | 关系评分会影响知识图谱；写入模式 append/replace 要保留。 |
-| `src/agent/wiki/health.ts` | 检查/修复 wiki、parse、summary、download 状态。 | `library-health-tools.ts`、tests。 | `local-paper-library.ts`、`paper-manager.ts`、`paper-reader.ts`、`paper-blocklist.ts`、`wiki/lint.ts`。 | 大文件；download-blocked 降级、自动下载、自动总结都在这里，拆分时保持 issue kind/status 稳定。 |
-| `src/agent/wiki/tools.ts` | Wiki source/page/relations/health answer/research/bootstrap/build/alias 相关工具编排。 | `tools.ts`。 | `wiki/**` 领域服务、`local-paper-library.ts`、`paper/tools.ts`。 | 最大耦合文件；优先拆分为 source tools、page tools、research-answer flow、topic expansion，同时保留外部证据禁用开关。 |
+| `src/agent/wiki/health.ts` | 检查/修复 wiki、parse、summary、download、manifest、typed page、operation journal 状态。 | `library-health-tools.ts`、tests。 | `local-paper-library.ts`、`paper-manager.ts`、`paper-reader.ts`、`paper-blocklist.ts`、`manifest-store.ts`、`typed-store.ts`、`journal.ts`、`wiki/lint.ts`。 | 大文件；download-blocked 降级、manifest backfill、typed diagnostics、自动下载、自动总结都在这里，拆分时保持 issue kind/status 稳定。 |
+| `src/agent/wiki/coordinator.ts` | 根据 intent/evidence/blocker 生成 deterministic wiki coordination plan。 | `wiki/tools.ts`、tests。 | 无。 | owner 边界是审计契约；`wiki-synthesis-worker` 是逻辑 owner label，不是 router role。 |
+| `src/agent/wiki/tools.ts` | Wiki source/page/relations/health answer/research/bootstrap/build/alias 相关工具编排，并返回 evidenceStatus/coordination metadata。 | `tools.ts`。 | `wiki/**` 领域服务、`local-paper-library.ts`、`paper/tools.ts`。 | 最大耦合文件；优先拆分为 source tools、page tools、research-answer flow、topic expansion，同时保留外部证据禁用开关和 coordination details shape。 |
 | `src/agent/wiki/worker.ts` | 创建 clean-context `wiki-evidence-worker` summary/page 子任务，并解析 worker JSON 输出。 | `agent-runtime.ts`。 | `agent-prompts.ts`、`tools.ts` boundary、`agentLoop`。 | 递归工具过滤是关键，不能让 worker 直接调用 `generate_paper_wiki_summary` 或 `build_wiki_page` 形成自递归。 |
 
 ### Feishu bridge
@@ -256,7 +272,7 @@ agent runtime + worker router
 - 论文检索/下载/store/blocklist/jobs: `test/agent/arxiv.test.ts`、`test/agent/aps-search.test.ts`、`test/agent/paper-download.test.ts`、`test/agent/paper-manager.test.ts`、`test/agent/paper-manager-extension.test.ts`、`test/agent/paper-store.test.ts`、`test/agent/paper-download-jobs.test.ts`、`test/agent/publisher-adapters/index.test.ts`。
 - 浏览器和扩展: `test/agent/browser-session.test.ts`、`test/agent/browser-session-runtime.test.ts`、`test/agent/paper-browser-manager-client.test.ts`、`test/agent/paper-browser-manager-discovery.test.ts`、`test/agent/paper-browser-manager-server.test.ts`、`test/agent/paper-extension-host.test.ts`、`test/agent/paper-extension-host-registration.test.ts`、`test/agent/paper-extension-protocol.test.ts`、`test/browser-extension/paper-downloader.test.mjs`。
 - 论文解析/阅读/网页: `test/agent/paper-reader.test.ts`、`test/agent/paper-webpage-fetch.test.ts`、`test/agent/local-paper-library.test.ts`。
-- Wiki/source/relations/health: `test/agent/wiki-domain-boundary.test.ts`、`test/agent/paper-summary.test.ts`、`test/agent/paper-relations.test.ts`、`test/agent/wiki-health.test.ts`、`test/agent/local-paper-library.test.ts`、`test/agent/tools.test.ts`。
+- Wiki core/source/relations/health: `test/agent/wiki-domain-boundary.test.ts`、`test/agent/wiki-workspace-contract.test.ts`、`test/agent/wiki-page-schema.test.ts`、`test/agent/wiki-typed-store.test.ts`、`test/agent/wiki-retrieval-contract.test.ts`、`test/agent/wiki-coordinator.test.ts`、`test/agent/wiki-domain-bindings.test.ts`、`test/agent/paper-summary.test.ts`、`test/agent/paper-relations.test.ts`、`test/agent/wiki-health.test.ts`、`test/agent/wiki-maintenance.test.ts`、`test/agent/local-paper-library.test.ts`、`test/agent/tools.test.ts`。
 - Web 工具: `test/agent/web-fetch.test.ts`、`test/agent/web-search.test.ts`。
 - Feishu bridge: `test/feishu-bridge/*.test.ts`，按文件名基本一一对应 `src/feishu-bridge/**`；主流程相关优先看 `pi-client.test.ts`、`pi-session.test.ts`、`agent-tool-status.test.ts`、`mention-detection.test.ts`、`message-utils.test.ts`、`paper-git.test.ts`、`pdf-delivery.test.ts`、`config.test.ts`。
 
@@ -264,7 +280,9 @@ agent runtime + worker router
 
 - `src/agent/paper/acquisition/paper-manager.ts`: 先抽纯函数和策略对象，不先动持久 JSON 格式。建议切为 search aggregation、candidate ranking、download orchestration、publisher fallback、manual registration。
 - `src/agent/paper/storage/paper-store.ts`: 先补数据格式 fixture，再动路径和 record schema。任何字段改名都要支持旧记录读取。
-- `src/agent/wiki/tools.ts`: 先按工具族拆分 helper，保留 public tool names 和 details shape。`answer_research_question` 与 `build_wiki_page` 的外部证据开关是关键边界。
+- `src/agent/wiki/**` schema-first 核心层: 路径先走 `workspace-contract.ts`，页面字段先走 `page-schema.ts`，下游读取先走 `retrieval-contract.ts`。不要让新 workflow 重新直接扫描物理目录。
+- `src/agent/wiki/tools.ts`: 先按工具族拆分 helper，保留 public tool names、details shape、`evidenceStatus` 和 coordination metadata。`answer_research_question` 与 `build_wiki_page` 的外部证据开关是关键边界。
+- `src/agent/wiki/health.ts` 与 `src/agent/wiki/maintenance.ts`: 先按 issue kind/diagnostic source 拆纯函数，不先改 issue kind 名称。`source_manifest_*`、`wiki_page_*`、`wiki_operation_interrupted` 是当前治理层外部语义。
 - `src/agent/paper/extension/paper-extension-host.ts`: 先拆 native framing、protocol handling、PDF registration、webpage snapshot registration、manifest writer。每一步都要跑 extension host 和 browser-extension 测试。
 - `src/feishu-bridge/index.ts`: 先抽无状态 helper，不改变消息队列、memory、RPC client cache 的生命周期。桥接层不要吸收 agent/domain 逻辑。
 - `src/agent/agent-cli.ts`: 可拆 CLI args、RPC mode、REPL event formatting、session stats；改 `[tool:start]`/`[tool:end]` 文本前先看 `test/agent/pi-agent.test.ts`。

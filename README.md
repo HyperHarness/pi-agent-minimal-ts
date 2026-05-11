@@ -10,7 +10,9 @@ This repository is a practical agent harness for literature ingestion, local wik
 - runs the same agent as a JSONL RPC process for bridges
 - exposes a Feishu long-connection bridge with streaming replies and per-chat memory
 - searches, downloads, parses, summarizes, and indexes papers into a local knowledge base
-- builds durable wiki pages from fixed evidence rather than one-off answers
+- builds durable typed wiki pages from fixed evidence rather than one-off answers
+- maintains source manifests, operation journals, evidence contracts, and wiki governance diagnostics
+- plans wiki-agent work with deterministic owner boundaries for acquisition, evidence construction, page writing, and blocked cases
 - provides `design-projects/` as the recommended code workspace root for design subagent projects
 - manages paper/design/wiki Git repositories through a bridge-side repo manager
 - exposes isolated worker tool surfaces for wiki, evidence, download, design, and paper-writing workflows
@@ -80,7 +82,17 @@ Agents and workers should produce files. The repo manager decides when those fil
 
 ### Wiki Agent Boundary
 
-The wiki agent is the durable knowledge coordinator. It should decide what concepts need pages, inspect gaps, request evidence expansion, and maintain structure. In boundary mode it reads local wiki and local paper metadata, then writes synthesis pages through `build_wiki_page` and aliases through `merge_wiki_aliases`.
+The wiki agent is the durable knowledge coordinator. It decides what concepts need pages, inspects gaps, requests evidence expansion, and maintains structure. In boundary mode it reads local wiki and local paper metadata, then writes synthesis pages through `build_wiki_page` and aliases through `merge_wiki_aliases`.
+
+The current wiki core is schema-first:
+
+- `workspace-contract.ts` defines the authoritative `knowledge-base/` lifecycle roots for raw inputs, source records, parse artifacts, summaries, pages, manifests, assets, runtime state, index, and human log.
+- `page-schema.ts` and `typed-store.ts` parse, validate, list, and write human-editable Markdown pages with typed frontmatter. Supported page types include `paper-source`, `synthesis`, `concept`, `method`, `finding`, `dataset`, `question`, `design-record`, and `alias`.
+- `manifest-store.ts` and `retrieval-contract.ts` make source provenance and read-only downstream consumption explicit. Downstream agents can search/read wiki evidence without depending on the physical directory layout.
+- `retrieval-search.ts` returns structured evidence matches, match reasons, preferred evidence-kind ordering, and insufficient-evidence status.
+- `journal.ts` records multi-file wiki operations so interrupted writes can be reported by health checks.
+- `coordinator.ts` plans wiki-agent work with explicit owner assignments such as `paper-download-subagent`, `wiki-evidence-worker`, `wiki-synthesis-worker`, and `wiki-agent`.
+- `domain-bindings.ts` provides a metadata-only registry for validated executable helper bindings. Bindings are described in typed page metadata; arbitrary page content is not executed.
 
 The wiki agent should not directly download papers, run web search, or author raw source summaries in benchmark/boundary mode. Those are assigned to subagents/workers so page construction can be benchmarked under fixed evidence. Clean-context paper-summary and wiki-page-draft passes are treated as `wiki-evidence-worker` responsibilities, not separate durable worker roles.
 
@@ -283,27 +295,27 @@ Publisher and external URLs use the browser extension bridge by default when con
 ### Wiki And Research Tools
 
 - `answer_paper_wiki_question`: local-wiki-only Q&A over wiki source summaries and synthesis pages
-- `answer_research_question`: evidence-first research workflow; checks local wiki first, then acquires external evidence only when needed
-- `bootstrap_wiki_page_evidence`: prepares source evidence for a new topic page before a page exists
-- `build_wiki_page`: writes durable synthesis pages under `knowledge-base/pages/` from local source-summary evidence. It supports explicit evidence contracts, minimum source counts, required source keys, external-evidence blocking, and optional write-after lint verification.
+- `answer_research_question`: evidence-first research workflow; checks local wiki first, then acquires external evidence only when needed. Tool details include `evidenceStatus`, local/new evidence items, limitations, and a coordination plan explaining which worker owns each step.
+- `bootstrap_wiki_page_evidence`: prepares source evidence for a new topic page before a page exists, reports missing summaries, and returns coordination metadata for fixed-evidence page construction.
+- `build_wiki_page`: writes durable synthesis pages under `knowledge-base/pages/` from local source-summary evidence. It supports explicit evidence contracts, minimum source counts, required source keys, external-evidence blocking, optional write-after lint verification, page-worker draft generation, and coordination metadata.
 - `merge_wiki_aliases`: creates alias pages for acronyms, plurals, and duplicate concept names
 - `clarify_research_topic`: turns an ambiguous research request into concrete subtopics and evidence needs
 - `research_topic_bootstrap`: creates an initial evidence plan for a research topic
 - `expand_research_topic`: expands a topic through discovered gaps and related references
-- `search_paper_wiki`: full-mode direct retrieval over source summaries and synthesis pages
+- `search_paper_wiki`: full-mode direct retrieval over source summaries and synthesis pages. Search uses structured wiki evidence scoring before falling back to legacy body search for weak matches.
 - `write_paper_wiki_source`: full-mode source-summary writer
 - `generate_paper_wiki_summary`: full-mode clean-context source summary generation
 - `paper_wiki_relations`: full-mode relation discovery and `related_papers` maintenance
 
-The key distinction is that `sources/*/summary.md` are evidence summaries for individual papers, while `pages/*.md` are durable cross-paper concept pages.
+The key distinction is that `sources/*/summary.md` are evidence summaries for individual papers, while `pages/*.md` are durable typed cross-paper knowledge pages. Source manifests under `manifests/` tie wiki-facing summaries back to acquisition records, parser artifacts, quality reports, hashes, tags, and status.
 
 ### Wiki Maintenance Tools
 
-- `wiki_health`: reports acquisition state, downloads, authorization state, parse quality, incomplete `source.json` citation metadata, missing summaries, and missing artifacts
-- `wiki_health_fix`: orchestrates supported repairs. Download and citation-metadata repairs go through the paper-download-subagent boundary; citation refresh first reuses local parse artifacts, then uses arXiv/Crossref metadata when an identifier is available. Parsing stays in the ingestion path; missing summaries go through the `wiki-evidence-worker` summary pass.
-- `wiki_lint`: checks wiki structure, source-to-page coverage, repeated concept gaps, evidence-contract gaps, semantic alias candidates, scope drift, stale index entries, broken links, missing citations, orphan pages, duplicate titles, repeated sections, weak uncited pages, and rendered wiki-link failures. Goal/focus options can prioritize concept gaps for a current research direction.
+- `wiki_health`: reports acquisition state, downloads, authorization state, parse quality, incomplete `source.json` citation metadata, missing summaries, missing artifacts, missing source manifests, unsafe or missing manifest artifact paths, malformed typed wiki pages, weak evidence contracts, and interrupted wiki operations.
+- `wiki_health_fix`: orchestrates supported repairs. Download and citation-metadata repairs go through the paper-download-subagent boundary; citation refresh first reuses local parse artifacts, then uses arXiv/Crossref metadata when an identifier is available. Parsing stays in the ingestion path; missing summaries go through the `wiki-evidence-worker` summary pass; missing source manifests can be backfilled from existing source summaries.
+- `wiki_lint`: checks wiki structure, source-to-page coverage, repeated concept gaps, evidence-contract gaps, typed `source_refs`, semantic alias candidates, scope drift, stale index entries, broken links, missing citations, orphan pages, duplicate titles, repeated sections, weak uncited pages, rendered wiki-link failures, and ready source summaries not covered by synthesis pages. Goal/focus options can prioritize concept gaps for a current research direction.
 - `wiki_structure_plan`: turns `wiki_lint` findings into a reviewable, budgeted, goal-aware maintenance plan with owner, risk, recommended tool args, and verification actions. It suggests low-risk actions by default and does not rewrite wiki content.
-- `wiki_apply_structure_plan`: applies approved low-risk `wiki_structure_plan` actions with dry-run and verification safeguards. Supported writes are deterministic duplicate-section cleanup, safe alias creation, deterministic index rebuild, and constrained `## Scope Note` updates.
+- `wiki_apply_structure_plan`: applies approved low-risk `wiki_structure_plan` actions with dry-run, preflight, journal, and verification safeguards. Supported writes are deterministic duplicate-section cleanup, safe alias creation, deterministic index rebuild, and constrained `## Scope Note` updates.
 
 ### Wiki Evidence Tools
 
@@ -338,6 +350,8 @@ Design code should live under `design-projects/`, usually in a project-specific 
 
 Use the boundary APIs in benchmarks so each model is evaluated under the same tool surface.
 
+The main wiki/research tools also return compact coordination metadata. This is meant for agents and bridge logs: it records the detected intent, the decision path, ordered steps, worker owners, blocked/insufficient-evidence reasons, and the suggested next owner. `wiki-synthesis-worker` is a logical owner label for synthesis/page-writing steps, not a separate router prefix or durable runtime role. Coordination metadata is not a replacement for the worker boundary; it is an audit trail for why the boundary was chosen.
+
 ## Knowledge Base Layout
 
 By default the local knowledge base lives in `knowledge-base/`, which is gitignored. Set `PI_KNOWLEDGE_BASE_DIR=/absolute/path/to/knowledge-base` to move it into a private knowledge repository or large data volume.
@@ -359,10 +373,13 @@ knowledge-base/
     parses/                         # parsed markdown, JSON, and quality reports
     chunks/                         # searchable reading chunks
   pages/                            # durable cross-paper topic pages
-  manifests/
+  manifests/                        # wiki-facing source provenance manifests
   assets/
   state/
+    wiki-operations.jsonl           # operation journal for multi-file wiki writes
 ```
+
+Typed wiki pages remain normal Markdown files with frontmatter, so humans can edit them directly. The typed store validates the metadata and reports malformed or weak-evidence pages through `wiki_health` / `wiki_lint` instead of making every read fail.
 
 ## Design Project Layout
 
@@ -391,7 +408,7 @@ python -m pip install -e ".[dev]"
 Recommended paper-to-wiki path:
 
 ```text
-download_paper -> parse/read artifacts -> generate/write_paper_wiki_source -> build_wiki_page -> wiki_lint
+download_paper -> parse/read artifacts -> generate/write_paper_wiki_source -> source manifest -> build_wiki_page -> wiki_lint/wiki_health
 ```
 
 ## Paper Downloader Extension
