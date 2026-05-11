@@ -229,7 +229,7 @@ function extractSourceCitationKeys(frontmatter: string): string[] {
   for (const sourceRef of extractYamlStringValues(frontmatter, "source_refs")) {
     keys.add(sourceRef);
   }
-  for (const match of frontmatter.matchAll(/^\s+paper_key:\s+(.+)$/gm)) {
+  for (const match of frontmatter.matchAll(/^\s*(?:-\s+)?paper_key:\s+(.+)$/gm)) {
     const rawValue = match[1]?.trim();
     if (!rawValue) {
       continue;
@@ -299,6 +299,191 @@ function normalizeTitleForDuplicate(value: string): string {
     })
     .replace(/\s+/g, " ")
     .trim();
+}
+
+function singularizeDuplicateToken(token: string): string {
+  const stems: Record<string, string> = {
+    architectures: "architecture",
+    codes: "code",
+    collisions: "collision",
+    gates: "gate",
+    processors: "processor",
+    qubits: "qubit",
+    systems: "system"
+  };
+  if (stems[token]) {
+    return stems[token];
+  }
+  if (token.endsWith("ies") && token.length > 4) {
+    return `${token.slice(0, -3)}y`;
+  }
+  if (token.endsWith("s") && !token.endsWith("ss") && token.length > 3) {
+    return token.slice(0, -1);
+  }
+  return token;
+}
+
+function singularizedConceptKey(value: string): string {
+  return sanitizeWikiFilename(value.toLowerCase())
+    .split("-")
+    .map(singularizeDuplicateToken)
+    .join("-");
+}
+
+function hasSingularPluralConceptMatch(
+  left: { pageKey: string; normalizedTitle: string },
+  right: { pageKey: string; normalizedTitle: string }
+): boolean {
+  if (left.pageKey === right.pageKey) {
+    return false;
+  }
+  return left.normalizedTitle === right.normalizedTitle ||
+    singularizedConceptKey(left.pageKey) === singularizedConceptKey(right.pageKey);
+}
+
+const CONTAINED_CONCEPT_GENERIC_TOKENS = new Set([
+  "architecture",
+  "architectures",
+  "agent",
+  "agentic",
+  "agents",
+  "ai",
+  "assisted",
+  "autonomous",
+  "code",
+  "codes",
+  "computing",
+  "concept",
+  "design",
+  "fault",
+  "hardware",
+  "information",
+  "language",
+  "large",
+  "model",
+  "models",
+  "processor",
+  "processors",
+  "qubit",
+  "qubits",
+  "quantum",
+  "research",
+  "scientific",
+  "superconducting",
+  "system",
+  "systems",
+  "tolerant",
+  "workflow",
+  "workflows"
+]);
+
+function normalizeConceptSearchText(value: string): string {
+  return value
+    .toLowerCase()
+    .replace(/\[\[([^\]]+)\]\]/g, "$1")
+    .replace(/[^a-z0-9]+/g, " ")
+    .replace(/\s+/g, " ")
+    .trim();
+}
+
+function conceptTokens(value: string): Set<string> {
+  return new Set(normalizeConceptSearchText(value)
+    .split(/\s+/)
+    .map(singularizeDuplicateToken)
+    .filter((token) => token.length >= 3 && !CONTAINED_CONCEPT_GENERIC_TOKENS.has(token)));
+}
+
+function conceptSlugSet(values: string[]): Set<string> {
+  return new Set(values.map((value) => sanitizeWikiFilename(value.toLowerCase())));
+}
+
+function containedConceptScore(
+  container: {
+    pageKey: string;
+    title: string;
+    tags: string[];
+    relatedPages: string[];
+    bodyText: string;
+    bodyWords: number;
+    sourceCitationCount: number;
+    sourceCitationKeys: string[];
+  },
+  subject: {
+    pageKey: string;
+    title: string;
+    normalizedTitle: string;
+    tags: string[];
+    relatedPages: string[];
+    bodyWords: number;
+    sourceCitationCount: number;
+    sourceCitationKeys: string[];
+  }
+): number {
+  const sharedSources = sharedCitationKeyCount(container, subject);
+  if (sharedSources < 2) {
+    return 0;
+  }
+
+  const subjectTokens = conceptTokens(`${subject.title} ${subject.pageKey}`);
+  const containerTitleTokens = conceptTokens(`${container.title} ${container.pageKey}`);
+  const containerTokens = conceptTokens([
+    container.title,
+    container.pageKey,
+    ...container.tags,
+    ...container.relatedPages,
+    container.bodyText
+  ].join(" "));
+  if (subjectTokens.size < 2) {
+    return 0;
+  }
+  if (subjectTokens.size > 4 || containerTitleTokens.size > 4) {
+    return 0;
+  }
+  const titleOverlap = [...subjectTokens].filter((token) => containerTitleTokens.has(token));
+  const titleUnionSize = new Set([...subjectTokens, ...containerTitleTokens]).size || 1;
+  if (titleOverlap.length / titleUnionSize < 0.3) {
+    return 0;
+  }
+
+  const containerTags = conceptSlugSet(container.tags);
+  const subjectLinks = conceptSlugSet([...subject.tags, ...subject.relatedPages]);
+  const subjectTitleSlug = sanitizeWikiFilename(subject.normalizedTitle);
+  if (!containerTags.has(subject.pageKey) && !containerTags.has(subjectTitleSlug)) {
+    return 0;
+  }
+  if (!subjectLinks.has(container.pageKey) && !subjectLinks.has(sanitizeWikiFilename(container.title.toLowerCase()))) {
+    return 0;
+  }
+
+  const coveredTokens = [...subjectTokens].filter((token) => containerTokens.has(token));
+  if (coveredTokens.length / subjectTokens.size < 0.8) {
+    return 0;
+  }
+
+  const containerRelatedPages = conceptSlugSet(container.relatedPages);
+  const bodyText = normalizeConceptSearchText(container.bodyText);
+  const subjectKeyPhrase = subject.pageKey.replace(/-/g, " ");
+  const subjectTitlePhrase = normalizeConceptSearchText(subject.title);
+  let score = 0;
+  if (containerTags.has(subject.pageKey) || containerTags.has(sanitizeWikiFilename(subject.normalizedTitle ?? subject.title))) {
+    score += 4;
+  }
+  if (bodyText.includes(subjectKeyPhrase) || bodyText.includes(subjectTitlePhrase)) {
+    score += 3;
+  }
+  if (containerRelatedPages.has(subject.pageKey)) {
+    score += 1;
+  }
+  score += Math.min(3, sharedSources);
+  if (container.bodyWords >= subject.bodyWords) {
+    score += 1;
+  }
+  const containerUniqueSources = new Set(container.sourceCitationKeys).size;
+  const subjectUniqueSources = new Set(subject.sourceCitationKeys).size;
+  if (containerUniqueSources >= subjectUniqueSources) {
+    score += 1;
+  }
+  return score;
 }
 
 function sharedCitationKeyCount(
@@ -510,8 +695,11 @@ export async function lintPaperWiki(options: PaperWikiLintOptions): Promise<Pape
     isAlias: boolean;
     sourceCitationCount: number;
     sourceCitationKeys: string[];
+    tags: string[];
+    relatedPages: string[];
     sectionTitles: string[];
     bodyWords: number;
+    bodyText: string;
   }> = [];
   const typedCitedPagePaths = new Set<string>();
 
@@ -546,6 +734,7 @@ export async function lintPaperWiki(options: PaperWikiLintOptions): Promise<Pape
     const pageKey = path.basename(filePath, ".md");
     const frontmatter = extractFrontmatter(markdown);
     const relatedPages = extractYamlStringValues(frontmatter, "related_pages");
+    const tags = extractYamlStringValues(frontmatter, "tags").map((tag) => sanitizeWikiFilename(tag.toLowerCase()));
     const title = extractMarkdownTitle(markdown, pageKey);
     const sectionTitles = extractSectionTitles(markdown);
     const typedSourceRefCount = frontmatterOptsIntoTypedSchema(frontmatter)
@@ -565,8 +754,11 @@ export async function lintPaperWiki(options: PaperWikiLintOptions): Promise<Pape
       isAlias,
       sourceCitationCount,
       sourceCitationKeys,
+      tags,
+      relatedPages: relatedPages.map((relatedPage) => sanitizeWikiFilename(relatedPage.toLowerCase())),
       sectionTitles,
-      bodyWords: countBodyWords(markdown)
+      bodyWords: countBodyWords(markdown),
+      bodyText: markdown.replace(/^---\n[\s\S]*?\n---\n/, "")
     });
 
     if (!isAlias && isSourceDerivedWikiPageKey(pageKey)) {
@@ -686,21 +878,30 @@ export async function lintPaperWiki(options: PaperWikiLintOptions): Promise<Pape
     }
   }
 
+  const emittedNearDuplicatePairs = new Set<string>();
   for (const pages of normalizedTitles.values()) {
     const uniqueTitles = new Set(pages.map((page) => page.title.toLowerCase().trim()));
     if (pages.length > 1 && uniqueTitles.size > 1) {
       const canonical = [...pages].sort(compareDuplicateCanonicalCandidates)[0];
       const lowRiskPages = pages
         .filter((page) => page.pageKey !== canonical.pageKey)
-        .filter((page) => sharedCitationKeyCount(canonical, page) > 0);
+        .filter((page) =>
+          sharedCitationKeyCount(canonical, page) > 0 ||
+          hasSingularPluralConceptMatch(canonical, page)
+        );
       const lowRiskPageKeys = new Set(lowRiskPages.map((page) => page.pageKey));
       for (const page of lowRiskPages) {
+        const sharedSources = sharedCitationKeyCount(canonical, page);
+        const reason = sharedSources > 0
+          ? `Low-risk duplicate concept page: normalized title and shared source evidence match canonical page ${canonical.pageKey}.`
+          : `Low-risk duplicate concept page: singular/plural title match canonical page ${canonical.pageKey}.`;
+        emittedNearDuplicatePairs.add(`${page.pageKey}->${canonical.pageKey}`);
         issues.push({
           kind: "near_duplicate_page",
           severity: "low",
           path: page.path,
           target: canonical.pageKey,
-          reason: `Low-risk duplicate concept page: normalized title and shared source evidence match canonical page ${canonical.pageKey}.`
+          reason
         });
       }
       const mediumPages = lowRiskPages.length > 0
@@ -714,6 +915,46 @@ export async function lintPaperWiki(options: PaperWikiLintOptions): Promise<Pape
           reason: `Page title is near-duplicate with: ${pages.map((item) => item.pageKey).join(", ")}.`
         });
       }
+    }
+  }
+
+  const nonAliasPages = pageMetadata.filter((page) => !page.isAlias);
+  for (let leftIndex = 0; leftIndex < nonAliasPages.length; leftIndex += 1) {
+    for (let rightIndex = leftIndex + 1; rightIndex < nonAliasPages.length; rightIndex += 1) {
+      const left = nonAliasPages[leftIndex];
+      const right = nonAliasPages[rightIndex];
+      if (left.normalizedTitle === right.normalizedTitle) {
+        continue;
+      }
+      const leftContainsRight = containedConceptScore(left, right);
+      const rightContainsLeft = containedConceptScore(right, left);
+      const score = Math.max(leftContainsRight, rightContainsLeft);
+      if (score < 8) {
+        continue;
+      }
+      const canonical =
+        leftContainsRight > rightContainsLeft
+          ? left
+          : rightContainsLeft > leftContainsRight
+            ? right
+            : [...[left, right]].sort((first, second) =>
+              second.bodyWords - first.bodyWords ||
+              compareDuplicateCanonicalCandidates(first, second)
+            )[0];
+      const redundant = canonical.pageKey === left.pageKey ? right : left;
+      const pairKey = `${redundant.pageKey}->${canonical.pageKey}`;
+      if (emittedNearDuplicatePairs.has(pairKey)) {
+        continue;
+      }
+      emittedNearDuplicatePairs.add(pairKey);
+      issues.push({
+        kind: "near_duplicate_page",
+        severity: "medium",
+        path: redundant.path,
+        target: canonical.pageKey,
+        score,
+        reason: `Source-backed contained concept page: shared source evidence and page vocabulary match canonical page ${canonical.pageKey}.`
+      });
     }
   }
 

@@ -1440,6 +1440,176 @@ Plural duplicate.
   }
 });
 
+test("lintPaperWiki recognizes singular plural duplicates even when the redundant page has no citations", async () => {
+  const workspace = await createWorkspace();
+
+  try {
+    await writePage(
+      workspace,
+      "surface-code",
+      `
+---
+schema_version: 1
+type: "concept"
+key: "surface-code"
+title: "Surface Code"
+aliases: []
+tags:
+  - "surface-code"
+evidence_contract: "paper-backed"
+source_refs:
+  - "paper-surface"
+created_at: "2026-05-10T00:00:00.000Z"
+updated_at: "2026-05-10T00:00:00.000Z"
+---
+
+# Surface Code
+
+Surface code is the canonical synthesis page with maintained evidence and fault-tolerant context.
+`
+    );
+    await writePage(
+      workspace,
+      "surface-codes",
+      `
+---
+schema_version: 1
+type: "concept"
+key: "surface-codes"
+title: "Surface Codes"
+aliases: []
+tags:
+  - "surface-code"
+evidence_contract: "none"
+source_refs: []
+created_at: "2026-05-10T00:00:00.000Z"
+updated_at: "2026-05-10T00:00:00.000Z"
+---
+
+# Surface Codes
+
+Plural duplicate without direct source citations.
+`
+    );
+
+    const lint = await lintPaperWiki({ workspaceDir: workspace, maxItems: 20 });
+    const duplicate = lint.issues.find((issue) =>
+      issue.kind === "near_duplicate_page" &&
+      issue.path === "knowledge-base/pages/surface-codes.md"
+    );
+
+    assert.equal(duplicate?.severity, "low");
+    assert.equal(duplicate?.target, "surface-code");
+    assert.match(duplicate?.reason ?? "", /singular\/plural title match canonical page surface-code/);
+  } finally {
+    await rm(workspace, { recursive: true, force: true });
+  }
+});
+
+test("lintPaperWiki recognizes source-backed contained concept duplicates", async () => {
+  const workspace = await createWorkspace();
+
+  try {
+    await writeSource(workspace, "paper-allocation", "# Allocation Evidence\n");
+    await writeSource(workspace, "paper-collision", "# Collision Evidence\n");
+    await writeSource(workspace, "paper-fabrication", "# Fabrication Evidence\n");
+    await writePage(
+      workspace,
+      "frequency-allocation",
+      `
+---
+schema_version: 1
+type: "concept"
+key: "frequency-allocation"
+title: "Frequency Allocation in Superconducting Quantum Processors"
+aliases: []
+tags:
+  - "frequency-allocation"
+  - "frequency-collisions"
+  - "fixed-frequency-transmons"
+evidence_contract: "paper-backed"
+sources:
+  - paper_key: "paper-allocation"
+    title: "Allocation Evidence"
+    path: "knowledge-base/sources/paper-allocation/summary.md"
+  - paper_key: "paper-collision"
+    title: "Collision Evidence"
+    path: "knowledge-base/sources/paper-collision/summary.md"
+  - paper_key: "paper-fabrication"
+    title: "Fabrication Evidence"
+    path: "knowledge-base/sources/paper-fabrication/summary.md"
+created_at: "2026-05-10T00:00:00.000Z"
+updated_at: "2026-05-10T00:00:00.000Z"
+---
+
+# Frequency Allocation in Superconducting Quantum Processors
+
+Frequency allocation assigns target frequencies while avoiding frequency collisions in fixed-frequency
+transmon chips. This broader page covers collision mitigation, fabrication uncertainty, and processor yield.
+`
+    );
+    await writePage(
+      workspace,
+      "frequency-collisions",
+      `
+---
+schema_version: 1
+type: "concept"
+key: "frequency-collisions"
+title: "Frequency Collisions in Superconducting Quantum Processors"
+aliases: []
+tags:
+  - "frequency-allocation"
+  - "frequency-collisions"
+  - "fixed-frequency-transmons"
+evidence_contract: "paper-backed"
+sources:
+  - paper_key: "paper-collision"
+    title: "Collision Evidence"
+    path: "knowledge-base/sources/paper-collision/summary.md"
+  - paper_key: "paper-fabrication"
+    title: "Fabrication Evidence"
+    path: "knowledge-base/sources/paper-fabrication/summary.md"
+related_pages:
+  - "frequency-allocation"
+created_at: "2026-05-10T00:00:00.000Z"
+updated_at: "2026-05-10T00:00:00.000Z"
+---
+
+# Frequency Collisions in Superconducting Quantum Processors
+
+Frequency collisions are a subproblem of frequency allocation under fabrication uncertainty.
+`
+    );
+
+    const lint = await lintPaperWiki({ workspaceDir: workspace, maxItems: 20 });
+    const contained = lint.issues.find((issue) =>
+      issue.kind === "near_duplicate_page" &&
+      issue.path === "knowledge-base/pages/frequency-collisions.md"
+    );
+
+    assert.equal(contained?.severity, "medium");
+    assert.equal(contained?.target, "frequency-allocation");
+    assert.match(contained?.reason ?? "", /Source-backed contained concept page/);
+
+    const plan = await planWikiStructure({
+      workspaceDir: workspace,
+      includeMediumRisk: true,
+      maxItems: 10
+    });
+    const merge = plan.actions.find((action) =>
+      action.type === "merge_duplicate_pages" &&
+      action.path === "knowledge-base/pages/frequency-collisions.md"
+    );
+
+    assert.equal(merge?.risk, "medium");
+    assert.equal(merge?.target, "frequency-allocation");
+    assert.equal(merge?.recommendedTool, "wiki_apply_structure_plan");
+  } finally {
+    await rm(workspace, { recursive: true, force: true });
+  }
+});
+
 test("applyWikiStructurePlan merges duplicate pages, rewrites inbound links, and deletes the redundant page", async () => {
   const workspace = await createWorkspace();
 
