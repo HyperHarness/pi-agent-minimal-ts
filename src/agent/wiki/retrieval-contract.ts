@@ -6,7 +6,14 @@ import {
   relativeToWorkspace
 } from "./store.js";
 import { getWikiSourceManifestPath, type WikiSourceManifest, type WikiSourceManifestStatus } from "./manifest-store.js";
-import { type WikiEvidenceContract, type WikiTypedPage } from "./page-schema.js";
+import {
+  type WikiClaimProvenance,
+  type WikiEvidenceContract,
+  type WikiExperimentRef,
+  type WikiReviewerCritiqueItem,
+  type WikiTypedPage,
+  type WikiTypedRelation
+} from "./page-schema.js";
 import {
   listTypedWikiPages,
   readTypedWikiPage,
@@ -27,6 +34,10 @@ export interface WikiEvidenceItem {
   aliases: string[];
   evidenceContract: WikiEvidenceContract;
   sourceRefs: string[];
+  claims?: WikiClaimProvenance[];
+  typedRelations?: WikiTypedRelation[];
+  experimentRefs?: WikiExperimentRef[];
+  reviewerCritique?: WikiReviewerCritiqueItem[];
   manifest?: WikiSourceManifest;
   diagnostics: string[];
 }
@@ -256,6 +267,10 @@ function mapTypedPageToEvidenceItem(workspaceDir: string, page: WikiTypedPage): 
     aliases: page.metadata.aliases,
     evidenceContract: page.metadata.evidence_contract,
     sourceRefs: page.metadata.source_refs,
+    ...(page.metadata.claims ? { claims: page.metadata.claims } : {}),
+    ...(page.metadata.typed_relations ? { typedRelations: page.metadata.typed_relations } : {}),
+    ...(page.metadata.experiment_refs ? { experimentRefs: page.metadata.experiment_refs } : {}),
+    ...(page.metadata.reviewer_critique ? { reviewerCritique: page.metadata.reviewer_critique } : {}),
     diagnostics: []
   };
 }

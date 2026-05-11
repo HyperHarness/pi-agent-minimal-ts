@@ -294,6 +294,61 @@ test("retrieval contract lists typed pages by tag and evidence contract", async 
   });
 });
 
+test("retrieval contract exposes page evidence audit metadata", async () => {
+  await withWorkspace("wiki-retrieval-audit-fields-", async (workspaceDir) => {
+    await writeTypedWikiPage({
+      workspaceDir,
+      page: {
+        metadata: {
+          schema_version: 1,
+          type: "concept",
+          key: "logical-error-rate",
+          title: "Logical error rate",
+          aliases: [],
+          tags: ["surface-code"],
+          evidence_contract: "mixed",
+          source_refs: ["arxiv-2406.06015"],
+          claims: [{
+            claimId: "claim-1",
+            kind: "quantitative",
+            statement: "The fitted threshold is 0.016.",
+            sourceRefs: ["arxiv-2406.06015"],
+            evidence: [{ paperKey: "arxiv-2406.06015", page: 1, figure: "16" }],
+            confidence: "high"
+          }],
+          typed_relations: [{
+            type: "supports",
+            target: "surface-code",
+            targetKind: "page",
+            evidenceRefs: ["claim-1"],
+            status: "confirmed"
+          }],
+          experiment_refs: [{
+            experimentId: "exp-1",
+            title: "Scaling fit reproduction",
+            scriptPath: "experiments/scaling-fit/run.ts",
+            status: "planned"
+          }],
+          created_at: "2026-05-10T00:00:00.000Z",
+          updated_at: "2026-05-10T00:00:00.000Z"
+        },
+        body: "# Logical error rate"
+      }
+    });
+
+    const result = await readWikiEvidenceItem({
+      workspaceDir,
+      kind: "page",
+      key: "logical-error-rate"
+    });
+
+    assert.equal(result.status, "ready");
+    assert.equal(result.item?.claims?.[0].claimId, "claim-1");
+    assert.equal(result.item?.typedRelations?.[0].type, "supports");
+    assert.equal(result.item?.experimentRefs?.[0].experimentId, "exp-1");
+  });
+});
+
 test("retrieval contract returns diagnostics for source summaries missing manifests", async () => {
   await withWorkspace("wiki-retrieval-missing-manifest-", async (workspaceDir) => {
     const paperKey = "arxiv-2601.00004";
