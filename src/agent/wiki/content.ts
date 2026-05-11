@@ -23,6 +23,7 @@ import {
   listPaperWikiSourceFiles,
   paperKeyFromPaperWikiSourcePath,
   relativeToWorkspace,
+  resolveWikiPageKey,
   sanitizeWikiFilename
 } from "./store.js";
 import {
@@ -593,7 +594,12 @@ export async function writePaperWikiPage(input: PaperWikiPageInput): Promise<Pap
     throw new Error("sourceCitations must include at least one source summary.");
   }
 
-  const pageKey = sanitizeWikiFilename(input.pageKey ?? input.topic);
+  const pageKey = resolveWikiPageKey({
+    topic: input.topic,
+    ...(input.pageKey ? { pageKey: input.pageKey } : {}),
+    ...(input.title ? { title: input.title } : {}),
+    ...(input.allowSourceDerivedPageKey ? { allowSourceDerivedPageKey: true } : {})
+  });
   const pagePath = getPaperWikiPagePath(input.workspaceDir, pageKey);
   const indexPath = getPaperWikiIndexPath(input.workspaceDir);
   const logPath = getPaperWikiLogPath(input.workspaceDir);

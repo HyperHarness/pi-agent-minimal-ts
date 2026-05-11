@@ -15,6 +15,7 @@ import {
 import {
   getPaperWikiIndexPath,
   getPaperWikiPagesDir,
+  isSourceDerivedWikiPageKey,
   listPaperWikiPageFiles,
   listPaperWikiSourceFiles,
   relativeToWorkspace,
@@ -27,6 +28,7 @@ export type PaperWikiLintIssueKind =
   | "broken_wiki_link"
   | "missing_source_citation"
   | "source_without_synthesis_coverage"
+  | "source_derived_page_key"
   | "orphan_page"
   | "concept_gap"
   | "high_value_concept_gap"
@@ -92,6 +94,7 @@ const ISSUE_KINDS: PaperWikiLintIssueKind[] = [
   "broken_wiki_link",
   "missing_source_citation",
   "source_without_synthesis_coverage",
+  "source_derived_page_key",
   "orphan_page",
   "concept_gap",
   "high_value_concept_gap",
@@ -314,6 +317,7 @@ function summarizeActions(issues: PaperWikiLintIssue[]): string[] {
     ["broken_wiki_link", "Fix or regenerate markdown links that point to missing wiki files."],
     ["missing_source_citation", "Repair synthesis page source citations or regenerate the page from source summaries."],
     ["source_without_synthesis_coverage", "Promote or cite ready sources that are not referenced by any synthesis page."],
+    ["source_derived_page_key", "Rename source-derived page files to semantic concept keys, or convert one-paper notes back into source summaries."],
     ["orphan_page", "Add related_pages or links from another page so synthesis pages form a navigable graph."],
     ["concept_gap", "Promote repeated source tags into durable topic pages with build_wiki_page."],
     ["high_value_concept_gap", "Build high-priority concept pages identified by maintenance triage."],
@@ -490,6 +494,15 @@ export async function lintPaperWiki(options: PaperWikiLintOptions): Promise<Pape
       sectionTitles,
       bodyWords: countBodyWords(markdown)
     });
+
+    if (!isAlias && isSourceDerivedWikiPageKey(pageKey)) {
+      issues.push({
+        kind: "source_derived_page_key",
+        severity: "medium",
+        path: relativePath,
+        reason: "Synthesis page key is derived from a paper/source identifier instead of a durable concept name."
+      });
+    }
 
     if (!isAlias) {
       const sectionCounts = new Map<string, number>();

@@ -612,6 +612,45 @@ test("writePaperWikiPage saves a synthesis page and updates the wiki index", asy
   }
 });
 
+test("writePaperWikiPage derives semantic page keys instead of source coverage keys", async () => {
+  const workspace = await createWorkspace();
+  try {
+    const page = await writePaperWikiPage({
+      workspaceDir: workspace,
+      topic: "arxiv-2407.02467 source coverage synthesis",
+      title: "Noise Stabilization for Error Mitigation in Superconducting Quantum Processors",
+      pageMarkdown: "## Overview\n\nStabilized noise can support mitigation [arxiv-2407.02467].",
+      tags: ["noise-stabilization", "superconducting-qubits"],
+      sourceCitations: [
+        {
+          paperKey: "arxiv-2407.02467",
+          title: "Error mitigation with stabilized noise in superconducting quantum processors",
+          path: "knowledge-base/sources/arxiv-2407.02467/summary.md"
+        }
+      ]
+    });
+
+    assert.equal(
+      page.pageKey,
+      "noise-stabilization-for-error-mitigation-in-superconducting-quantum-processors"
+    );
+    assert.equal(
+      page.pagePath,
+      "knowledge-base/pages/noise-stabilization-for-error-mitigation-in-superconducting-quantum-processors.md"
+    );
+    await assert.rejects(
+      readFile(path.join(workspace, "knowledge-base/pages/arxiv-2407-02467-source-coverage-synthesis.md"), "utf8"),
+      /ENOENT/
+    );
+
+    const markdown = await readFile(path.join(workspace, page.pagePath), "utf8");
+    assert.match(markdown, /page_key: "noise-stabilization-for-error-mitigation-in-superconducting-quantum-processors"/);
+    assert.match(markdown, /topic: "arxiv-2407\.02467 source coverage synthesis"/);
+  } finally {
+    await rm(workspace, { recursive: true, force: true });
+  }
+});
+
 test("writePaperWikiPage does not duplicate an existing open questions section", async () => {
   const workspace = await createWorkspace();
   try {
@@ -767,6 +806,55 @@ More evidence about qLDPC.
     assert.ok(lint.issues.some((issue) => issue.kind === "missing_source_citation"));
     assert.ok(lint.issues.some((issue) => issue.kind === "broken_wiki_link"));
     assert.ok(lint.issues.some((issue) => issue.kind === "concept_gap" && issue.concept === "qldpc"));
+  } finally {
+    await rm(workspace, { recursive: true, force: true });
+  }
+});
+
+test("lintPaperWiki reports source-derived page keys", async () => {
+  const workspace = await createWorkspace();
+  try {
+    await writeSourceSummary(
+      workspace,
+      "arxiv-2407.02467",
+      [
+        "---",
+        "paper_key: arxiv-2407.02467",
+        "title: Stabilized Noise",
+        "tags:",
+        "  - noise-stabilization",
+        "---",
+        "",
+        "Source evidence."
+      ].join("\n")
+    );
+    await mkdir(path.join(workspace, "knowledge-base/pages"), { recursive: true });
+    await writeFile(
+      path.join(workspace, "knowledge-base/pages/arxiv-2407-02467-source-coverage.md"),
+      [
+        "---",
+        "type: \"wiki-synthesis-page\"",
+        "page_key: \"arxiv-2407-02467-source-coverage\"",
+        "title: \"Noise Stabilization\"",
+        "sources:",
+        "  - paper_key: \"arxiv-2407.02467\"",
+        "    path: \"knowledge-base/sources/arxiv-2407.02467/summary.md\"",
+        "---",
+        "",
+        "# Noise Stabilization",
+        "",
+        "Evidence summary."
+      ].join("\n"),
+      "utf8"
+    );
+
+    const lint = await lintPaperWiki({ workspaceDir: workspace, maxItems: 20 });
+
+    assert.ok(lint.issues.some((issue) =>
+      issue.kind === "source_derived_page_key" &&
+      issue.path === "knowledge-base/pages/arxiv-2407-02467-source-coverage.md"
+    ));
+    assert.match(lint.actions.join("\n"), /Rename source-derived page files/);
   } finally {
     await rm(workspace, { recursive: true, force: true });
   }

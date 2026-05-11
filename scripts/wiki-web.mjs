@@ -414,13 +414,13 @@ async function drawGraph() {
     return group;
   });
 
-  function tick() {
+  function tick(alpha) {
     for (let i = 0; i < nodes.length; i++) {
       for (let j = i + 1; j < nodes.length; j++) {
         const a = nodes[i], b = nodes[j];
         let dx = b.x - a.x, dy = b.y - a.y;
         const distance2 = Math.max(80, dx * dx + dy * dy);
-        const force = 850 / distance2;
+        const force = 950 * alpha / distance2;
         dx = dx || 0.01;
         dy = dy || 0.01;
         a.vx -= dx * force; a.vy -= dy * force;
@@ -432,20 +432,23 @@ async function drawGraph() {
       const dy = link.target.y - link.source.y;
       const distance = Math.sqrt(dx * dx + dy * dy) || 1;
       const desired = 95 - Math.min(35, link.weight * 5);
-      const force = (distance - desired) * 0.012;
+      const force = (distance - desired) * 0.014 * alpha;
       const fx = dx / distance * force;
       const fy = dy / distance * force;
       link.source.vx += fx; link.source.vy += fy;
       link.target.vx -= fx; link.target.vy -= fy;
     }
     for (const node of nodes) {
-      node.vx += (width / 2 - node.x) * 0.002;
-      node.vy += (height / 2 - node.y) * 0.002;
-      node.vx *= 0.83;
-      node.vy *= 0.83;
+      node.vx += (width / 2 - node.x) * 0.0025 * alpha;
+      node.vy += (height / 2 - node.y) * 0.0025 * alpha;
+      node.vx *= 0.78;
+      node.vy *= 0.78;
       node.x = Math.max(18, Math.min(width - 18, node.x + node.vx));
       node.y = Math.max(18, Math.min(height - 18, node.y + node.vy));
     }
+  }
+
+  function renderGraphFrame() {
     for (let i = 0; i < links.length; i++) {
       const link = links[i], line = linkEls[i];
       line.setAttribute("x1", link.source.x);
@@ -457,9 +460,21 @@ async function drawGraph() {
       nodeEls[i].setAttribute("transform", "translate(" + nodes[i].x + "," + nodes[i].y + ")");
     }
   }
-  for (let i = 0; i < 320; i++) tick();
-  function animate() { tick(); requestAnimationFrame(animate); }
-  animate();
+
+  function settleLayout() {
+    const iterations = Math.min(760, Math.max(360, Math.round(260 + nodes.length * 3 + links.length * 0.35)));
+    let alpha = 1;
+    for (let i = 0; i < iterations; i++) {
+      tick(alpha);
+      alpha *= 0.985;
+    }
+    for (const node of nodes) {
+      node.vx = 0;
+      node.vy = 0;
+    }
+    renderGraphFrame();
+  }
+  settleLayout();
 
   search.addEventListener("input", () => {
     const query = search.value.toLowerCase();

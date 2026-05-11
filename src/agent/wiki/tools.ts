@@ -8,7 +8,7 @@ import {
   writePaperWikiPage,
   writePaperWikiSource
 } from "./content.js";
-import { sanitizeWikiFilename } from "./store.js";
+import { resolveWikiPageKey, sanitizeWikiFilename } from "./store.js";
 import {
   bootstrapPaperWikiPageEvidence,
   type BootstrapPaperWikiPageEvidenceDependencies
@@ -241,6 +241,12 @@ const buildWikiPageParameters = Type.Object({
   ),
   pageKey: Type.Optional(
     Type.String({ description: "Optional filename-safe wiki page key. Defaults to a sanitized topic." })
+  ),
+  allowSourceDerivedPageKey: Type.Optional(
+    Type.Boolean({
+      description:
+        "Allow page keys derived from individual paper/source identifiers, such as arxiv-2407-02467-source-coverage. Defaults to false so durable pages use semantic concept keys."
+    })
   ),
   mode: Type.Optional(
     Type.Union([
@@ -2117,10 +2123,17 @@ export function createWikiTools(input: {
         query,
         message: "Writing wiki synthesis page."
       });
+      const pageKey = resolveWikiPageKey({
+        topic: args.topic,
+        ...(args.pageKey ? { pageKey: args.pageKey } : {}),
+        title: draft.title,
+        ...(args.allowSourceDerivedPageKey ? { allowSourceDerivedPageKey: true } : {})
+      });
       const page = await writePaperWikiPageImpl({
         workspaceDir: resolvedWorkspaceDir,
         topic: args.topic,
-        ...(args.pageKey ? { pageKey: args.pageKey } : {}),
+        pageKey,
+        ...(args.allowSourceDerivedPageKey ? { allowSourceDerivedPageKey: true } : {}),
         title: draft.title,
         pageMarkdown: draft.pageMarkdown,
         ...(draft.tags ? { tags: draft.tags } : {}),

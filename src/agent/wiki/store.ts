@@ -68,6 +68,53 @@ export function sanitizeWikiFilename(value: string): string {
   return sanitized;
 }
 
+function slugifyWikiPageKey(value: string): string | undefined {
+  const sanitized = value
+    .trim()
+    .toLowerCase()
+    .replace(/\.[Mm][Dd]$/, "")
+    .replace(/[\u2010-\u2015]/g, "-")
+    .replace(/[^\p{L}\p{N}\u4e00-\u9fff]+/gu, "-")
+    .replace(/-+/g, "-")
+    .replace(/^-+|-+$/g, "");
+  return sanitized || undefined;
+}
+
+export function isSourceDerivedWikiPageKey(value: string): boolean {
+  const normalized = value
+    .trim()
+    .toLowerCase()
+    .replace(/\./g, "-")
+    .replace(/-+/g, "-")
+    .replace(/^-+|-+$/g, "");
+  const startsWithPaperSourceKey =
+    /^arxiv-\d{4}-\d{4,5}(?:v\d+)?(?:-|$)/.test(normalized) ||
+    /^(?:science|nature|aps)-[a-z0-9]+(?:-[a-z0-9]+)+(?:-|$)/.test(normalized);
+  return startsWithPaperSourceKey &&
+    /(?:^|-)(?:paper|record|source|summary|coverage|synthesis)(?:-|$)/.test(normalized);
+}
+
+export function resolveWikiPageKey(input: {
+  topic: string;
+  pageKey?: string;
+  title?: string;
+  allowSourceDerivedPageKey?: boolean;
+}): string {
+  const requested = sanitizeWikiFilename(input.pageKey ?? input.topic);
+  if (input.allowSourceDerivedPageKey || !isSourceDerivedWikiPageKey(requested)) {
+    return requested;
+  }
+
+  const semanticPageKey = slugifyWikiPageKey(input.title ?? "");
+  if (semanticPageKey && !isSourceDerivedWikiPageKey(semanticPageKey)) {
+    return semanticPageKey;
+  }
+
+  throw new Error(
+    `Refusing source-derived wiki page key "${requested}". Provide a semantic pageKey or title for the durable page.`
+  );
+}
+
 export function getPaperWikiSourcePath(workspaceDir: string, paperKey: string): string {
   return path.join(getPaperWikiSourcesDir(workspaceDir), sanitizeWikiFilename(paperKey), "summary.md");
 }

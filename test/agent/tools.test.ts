@@ -3432,6 +3432,7 @@ test("wiki_lint delegates to the injected wiki lint dependency and returns detai
             broken_wiki_link: 0,
             missing_source_citation: 0,
             source_without_synthesis_coverage: 0,
+            source_derived_page_key: 0,
             orphan_page: 0,
             concept_gap: 1,
             high_value_concept_gap: 0,
@@ -3524,6 +3525,7 @@ test("wiki_structure_plan delegates to the injected planner and returns details"
             broken_wiki_link: 0,
             missing_source_citation: 0,
             source_without_synthesis_coverage: 0,
+            source_derived_page_key: 0,
             orphan_page: 0,
             concept_gap: 0,
             high_value_concept_gap: 0,
@@ -3630,6 +3632,7 @@ test("wiki_structure_plan passes goal, focus, growth, and budget options", async
             broken_wiki_link: 0,
             missing_source_citation: 0,
             source_without_synthesis_coverage: 0,
+            source_derived_page_key: 0,
             orphan_page: 0,
             concept_gap: 0,
             high_value_concept_gap: 0,
@@ -4529,6 +4532,57 @@ test("build_wiki_page writes a synthesis page from local wiki evidence", async (
   }
 });
 
+test("build_wiki_page avoids source-derived page keys", async () => {
+  const workspace = await mkdtemp(path.join(tmpdir(), "pi-agent-tools-"));
+
+  try {
+    const tool = getBuildWikiPageTool(workspace, {
+      searchPaperWiki: async (options) => ({
+        query: options.query,
+        results: [
+          {
+            paperKey: "arxiv-2407.02467",
+            title: "Error mitigation with stabilized noise in superconducting quantum processors",
+            path: "knowledge-base/sources/arxiv-2407.02467/summary.md",
+            snippet: "Stabilized noise evidence",
+          },
+        ],
+      }),
+      paperWikiPageWorker: async () => ({
+        title: "Noise Stabilization for Error Mitigation in Superconducting Quantum Processors",
+        pageMarkdown: "## Overview\n\nStabilized noise can support mitigation [arxiv-2407.02467].",
+        tags: ["noise-stabilization", "superconducting-qubits"],
+        confidence: "high",
+      }),
+    });
+
+    const result = await tool.execute("build-source-coverage-page", {
+      topic: "arxiv-2407.02467 source coverage synthesis",
+      pageKey: "arxiv-2407-02467-source-coverage",
+    }, undefined);
+    const details = result.details as {
+      status?: string;
+      page?: { pageKey?: string; pagePath?: string };
+    };
+
+    assert.equal(details.status, "written");
+    assert.equal(
+      details.page?.pageKey,
+      "noise-stabilization-for-error-mitigation-in-superconducting-quantum-processors"
+    );
+    assert.equal(
+      details.page?.pagePath,
+      "knowledge-base/pages/noise-stabilization-for-error-mitigation-in-superconducting-quantum-processors.md"
+    );
+    await assert.rejects(
+      readFile(path.join(workspace, "knowledge-base/pages/arxiv-2407-02467-source-coverage.md"), "utf8"),
+      /ENOENT/
+    );
+  } finally {
+    await rm(workspace, { recursive: true, force: true });
+  }
+});
+
 test("build_wiki_page refuses write mode when minSources is not met", async () => {
   const workspace = await mkdtemp(path.join(tmpdir(), "pi-agent-tools-"));
 
@@ -4817,6 +4871,7 @@ Canonical content.
       broken_wiki_link: 0,
       missing_source_citation: 0,
       source_without_synthesis_coverage: 0,
+      source_derived_page_key: 0,
       orphan_page: 0,
       concept_gap: 0,
       high_value_concept_gap: 0,

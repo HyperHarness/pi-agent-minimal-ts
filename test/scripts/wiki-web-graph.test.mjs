@@ -1,7 +1,7 @@
 import test from "node:test";
 import assert from "node:assert/strict";
 import path from "node:path";
-import { mkdir, mkdtemp, rm, writeFile } from "node:fs/promises";
+import { mkdir, mkdtemp, readFile, rm, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { buildGraphData } from "../../scripts/wiki-web.mjs";
 
@@ -35,4 +35,12 @@ test("wiki web graph uses typed relation edge types", async () => {
   } finally {
     await rm(wikiRoot, { recursive: true, force: true });
   }
+});
+
+test("wiki web graph client settles instead of animating forever", async () => {
+  const source = await readFile(new URL("../../scripts/wiki-web.mjs", import.meta.url), "utf8");
+
+  assert.match(source, /function settleLayout\(\)/);
+  assert.match(source, /function renderGraphFrame\(\)/);
+  assert.doesNotMatch(source, /requestAnimationFrame\(animate\)/);
 });

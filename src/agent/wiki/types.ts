@@ -111,6 +111,7 @@ export interface PaperWikiPageInput {
   topic: string;
   pageMarkdown: string;
   pageKey?: string;
+  allowSourceDerivedPageKey?: boolean;
   title?: string;
   tags?: string[];
   sourceCitations: PaperWikiPageSourceCitation[];
