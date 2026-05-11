@@ -17,7 +17,7 @@
   ],
   "scripts": {
     "build": "tsc -p tsconfig.json",
-    "test": "npm run build && node --test --experimental-test-isolation=none dist/test/**/*.test.js",
+    "test": "npm run build && node --test --experimental-test-isolation=none dist/test/**/*.test.js test/scripts/**/*.test.mjs",
     "agent": "npm run build && node dist/src/pi-agent.js",
     "agent:rpc": "npm run build && node dist/src/pi-agent.js --mode rpc",
     "feishu-bridge": "npm run build && node dist/src/feishu-bridge/index.js",

@@ -184,16 +184,16 @@ function renderMarkdown(markdown, relativePath) {
   return out.join("\n");
 }
 
-async function listMarkdownFiles(dir = wikiRoot) {
+async function listMarkdownFiles(dir = wikiRoot, root = wikiRoot) {
   const entries = await readdir(dir, { withFileTypes: true });
   const files = [];
   for (const entry of entries) {
     if (entry.name.startsWith(".")) continue;
     const absolute = path.join(dir, entry.name);
     if (entry.isDirectory()) {
-      files.push(...await listMarkdownFiles(absolute));
+      files.push(...await listMarkdownFiles(absolute, root));
     } else if (entry.isFile() && entry.name.endsWith(".md")) {
-      files.push(path.relative(wikiRoot, absolute).replaceAll("\\", "/"));
+      files.push(path.relative(root, absolute).replaceAll("\\", "/"));
     }
   }
   return files.sort((a, b) => a.localeCompare(b));
@@ -215,31 +215,65 @@ function extractYamlList(markdown, key) {
   return values;
 }
 
-async function buildGraphData() {
-  const pageFiles = await listMarkdownFiles(path.join(wikiRoot, "pages")).catch(() => []);
+function extractJsonArray(markdown, key) {
+  const raw = frontMatter(markdown)
+    .split("\n")
+    .find((line) => line.startsWith(`${key}:`))
+    ?.slice(key.length + 1)
+    .trim();
+  if (!raw) return [];
+  try {
+    const parsed = JSON.parse(raw);
+    return Array.isArray(parsed) ? parsed : [];
+  } catch {
+    return [];
+  }
+}
+
+export async function buildGraphData(root = wikiRoot) {
+  const pageFiles = await listMarkdownFiles(path.join(root, "pages"), root).catch(() => []);
   const pageBySlug = new Map(pageFiles.map((file) => [path.basename(file, ".md"), file]));
   const nodes = [];
   const edges = new Map();
 
-  const addEdge = (from, to, type) => {
+  const addEdge = (from, to, type, weight = type === "related" ? 2 : 1, status) => {
     if (!from || !to || from === to || !pageBySlug.has(to)) return;
     const key = [from, to].sort().join("::");
     const existing = edges.get(key);
     if (existing) {
-      existing.weight += type === "related" ? 2 : 1;
+      existing.weight += weight;
       existing.types.add(type);
+      if (status) existing.statuses.add(status);
     } else {
-      edges.set(key, { source: from, target: to, weight: type === "related" ? 2 : 1, types: new Set([type]) });
+      edges.set(key, {
+        source: from,
+        target: to,
+        weight,
+        types: new Set([type]),
+        statuses: new Set(status ? [status] : [])
+      });
     }
   };
 
   for (const file of pageFiles) {
     const slug = path.basename(file, ".md");
-    const markdown = await readFile(path.join(wikiRoot, file), "utf8");
+    const markdown = await readFile(path.join(root, file), "utf8");
     const title = markdown.match(/^title:\s+"([^"]+)"/m)?.[1] || titleFromPath(file);
     const tags = extractYamlList(markdown, "tags");
     const related = extractYamlList(markdown, "related_pages");
+    const typedRelations = extractJsonArray(markdown, "typed_relations");
     nodes.push({ id: slug, title, path: file, tags, href: hrefFor(file) });
+    for (const relation of typedRelations) {
+      if (
+        relation &&
+        typeof relation === "object" &&
+        relation.targetKind === "page" &&
+        typeof relation.target === "string" &&
+        typeof relation.type === "string"
+      ) {
+        addEdge(slug, relation.target, relation.type, relation.status === "confirmed" ? 3 : 1, relation.status);
+      }
+    }
     for (const target of related) addEdge(slug, target, "related");
 
     for (const match of markdown.matchAll(/\]\((pages\/[^)#]+\.md|\.\/[^)#]+\.md|\.\.\/pages\/[^)#]+\.md)\)/g)) {
@@ -263,8 +297,10 @@ async function buildGraphData() {
     links: [...edges.values()].map((edge) => ({
       source: edge.source,
       target: edge.target,
+      type: [...edge.types][0],
       weight: edge.weight,
       types: [...edge.types],
+      statuses: [...edge.statuses],
     })),
   };
 }
@@ -565,7 +601,9 @@ const server = createServer(async (request, response) => {
   }
 });
 
-server.listen(port, host, () => {
-  console.log(`Wiki web viewer: http://${host}:${port}`);
-  console.log(`Serving: ${wikiRoot}`);
-});
+if (process.argv[1] && path.resolve(process.argv[1]) === fileURLToPath(import.meta.url)) {
+  server.listen(port, host, () => {
+    console.log(`Wiki web viewer: http://${host}:${port}`);
+    console.log(`Serving: ${wikiRoot}`);
+  });
+}
