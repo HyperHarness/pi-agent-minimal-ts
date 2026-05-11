@@ -130,7 +130,11 @@ const wikiLintParameters = Type.Object({
 });
 
 const wikiStructurePlanParameters = Type.Object({
-  maxItems: Type.Optional(Type.Integer({ description: "Maximum planned structure actions to return.", minimum: 1 })),
+  maxItems: Type.Optional(Type.Integer({
+    description:
+      "Maximum primary maintenance actions to return. Verification actions may be appended beyond this cap.",
+    minimum: 1
+  })),
   includeMediumRisk: Type.Optional(Type.Boolean({
     description:
       "Include medium-risk actions such as page merges, page promotion drafts, and rebuild recommendations. Defaults to false."

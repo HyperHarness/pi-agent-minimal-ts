@@ -425,7 +425,7 @@ function nextActionId(actions: WikiStructurePlanAction[]): string {
 export async function planWikiStructure(options: WikiStructurePlanOptions): Promise<WikiStructurePlanResult> {
   const maxItems = Math.max(1, Math.trunc(options.maxItems ?? 50));
   const includeGrowthActions = options.includeGrowthActions ?? false;
-  const lintMaxItems = includeGrowthActions ? Math.max(200, maxItems * 5) : maxItems;
+  const lintMaxItems = Math.max(200, maxItems * 5);
   const lint = await lintPaperWiki({
     workspaceDir: options.workspaceDir,
     maxItems: lintMaxItems,
@@ -443,11 +443,7 @@ export async function planWikiStructure(options: WikiStructurePlanOptions): Prom
     .map((issue, index) => actionForIssue(issue, index, options))
     .filter((action): action is WikiStructurePlanAction => Boolean(action))
     .filter((action) => includeMediumRisk || action.risk === "low"), budget);
-  const hasWriteCapableAction = plannedActions.some((action) =>
-    action.recommendedTool && action.recommendedTool !== "wiki_lint" && action.recommendedTool !== "wiki_health"
-  );
-  const primaryLimit = hasWriteCapableAction ? Math.max(0, maxItems - 1) : maxItems;
-  const actions = appendVerificationAction(plannedActions.slice(0, primaryLimit), options);
+  const actions = appendVerificationAction(plannedActions.slice(0, maxItems), options);
 
   return {
     status: "planned",

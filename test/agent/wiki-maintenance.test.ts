@@ -1266,7 +1266,7 @@ test("planWikiStructure maps and budgets semantic alias and scope drift growth a
       budget: { maxPagesToBuild: 0, maxAliasesToCreate: 1, maxScopeNotes: 0 }
     });
     assert.ok(capped.actions.some((action) => action.type === "create_alias"));
-    assert.ok(capped.actions.length <= 6);
+    assert.ok(capped.actions.filter((action) => action.type !== "verify").length <= 6);
     assert.ok(capped.actions.some((action) => action.type === "verify"));
 
     const tinyCap = await planWikiStructure({
@@ -1277,8 +1277,9 @@ test("planWikiStructure maps and budgets semantic alias and scope drift growth a
       goal: "agentic chip design",
       budget: { maxPagesToBuild: 0, maxAliasesToCreate: 1, maxScopeNotes: 0 }
     });
-    assert.ok(tinyCap.actions.length <= 1);
-    assert.ok(!tinyCap.actions.some((action) => action.recommendedTool && action.recommendedTool !== "wiki_lint" && action.recommendedTool !== "wiki_health"));
+    assert.ok(tinyCap.actions.filter((action) => action.type !== "verify").length <= 1);
+    assert.ok(tinyCap.actions.some((action) => action.recommendedTool && action.recommendedTool !== "wiki_lint" && action.recommendedTool !== "wiki_health"));
+    assert.ok(tinyCap.actions.some((action) => action.type === "verify"));
   } finally {
     await rm(workspace, { recursive: true, force: true });
   }
@@ -1726,6 +1727,47 @@ Gap evidence B.
     );
     await writePage(
       workspace,
+      "cross-resonance-gate",
+      `
+---
+schema_version: 1
+type: "concept"
+key: "cross-resonance-gate"
+title: "Cross-Resonance Gate"
+aliases: []
+tags:
+  - "cross-resonance-gate"
+evidence_contract: "none"
+source_refs: []
+created_at: "2026-05-10T00:00:00.000Z"
+updated_at: "2026-05-10T00:00:00.000Z"
+---
+
+# Cross-Resonance Gate
+
+Canonical cross-resonance gate page.
+`
+    );
+    await writePage(
+      workspace,
+      "cross-resonance-gates",
+      `
+---
+type: "wiki-alias-page"
+page_key: "cross-resonance-gates"
+title: "Cross-Resonance Gates"
+canonical_page: "cross-resonance-gate"
+related_pages:
+  - "cross-resonance-gate"
+---
+
+# Cross-Resonance Gates
+
+Plural alias page.
+`
+    );
+    await writePage(
+      workspace,
       "surface-code",
       `
 ---
@@ -1821,7 +1863,12 @@ Compact alias page.
       issue.target === "su-2"
     ));
 
-    const plan = await planWikiStructure({ workspaceDir: workspace });
+    const plan = await planWikiStructure({ workspaceDir: workspace, maxItems: 3 });
+    assert.ok(plan.actions.some((action) =>
+      action.type === "merge_duplicate_pages" &&
+      action.path === "knowledge-base/pages/cross-resonance-gates.md" &&
+      action.target === "cross-resonance-gate"
+    ));
     assert.ok(plan.actions.some((action) =>
       action.type === "merge_duplicate_pages" &&
       action.path === "knowledge-base/pages/surface-codes.md" &&
