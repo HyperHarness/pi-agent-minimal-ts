@@ -248,6 +248,66 @@ test("validateWikiPageMetadata allows none evidence contract without source_refs
   assert.deepEqual(result.metadata?.source_refs, []);
 });
 
+test("parseWikiPageMarkdown accepts evidence audit metadata", () => {
+  const markdown = [
+    "---",
+    "schema_version: 1",
+    'type: "concept"',
+    'key: "logical-error-rate"',
+    'title: "Logical error rate"',
+    "aliases: []",
+    "tags: []",
+    'evidence_contract: "mixed"',
+    "source_refs:",
+    '  - "arxiv-2406.06015"',
+    'claims: [{"claimId":"claim-1","kind":"quantitative","statement":"The fitted threshold is 0.016.","sourceRefs":["arxiv-2406.06015"],"evidence":[{"paperKey":"arxiv-2406.06015","page":1,"figure":"16","elementId":"el-00555","quote":"fit parameters"}],"confidence":"high"}]',
+    'typed_relations: [{"type":"supports","target":"surface-code","targetKind":"page","evidenceRefs":["claim-1"],"status":"confirmed","note":"Uses surface-code scaling."}]',
+    'experiment_refs: [{"experimentId":"exp-1","title":"Scaling fit reproduction","scriptPath":"experiments/scaling-fit/run.ts","resultPath":"experiments/scaling-fit/result.json","status":"planned"}]',
+    'reviewer_critique: [{"id":"critique-1","severity":"medium","target":"claim-1","reason":"Fit assumptions need checking.","suggestedFix":"Link the simulation configuration."}]',
+    'created_at: "2026-05-10T00:00:00.000Z"',
+    'updated_at: "2026-05-10T00:00:00.000Z"',
+    "---",
+    "",
+    "# Logical error rate"
+  ].join("\n");
+
+  const parsed = parseWikiPageMarkdown(markdown, "knowledge-base/pages/logical-error-rate.md");
+
+  assert.equal(parsed.ok, true);
+  assert.equal(parsed.page?.metadata.claims?.[0].claimId, "claim-1");
+  assert.equal(parsed.page?.metadata.typed_relations?.[0].type, "supports");
+  assert.equal(parsed.page?.metadata.experiment_refs?.[0].scriptPath, "experiments/scaling-fit/run.ts");
+  assert.equal(parsed.page?.metadata.reviewer_critique?.[0].severity, "medium");
+
+  const serialized = serializeWikiPageMarkdown({
+    metadata: { ...parsed.page!.metadata },
+    body: parsed.page!.body
+  });
+  assert.match(serialized, /claims: \[/);
+  assert.match(serialized, /typed_relations: \[/);
+  assert.match(serialized, /experiment_refs: \[/);
+  assert.match(serialized, /reviewer_critique: \[/);
+});
+
+test("validateWikiPageMetadata rejects quantitative claims without concrete provenance", () => {
+  const result = validateWikiPageMetadata(validMetadata({
+    claims: [{
+      claimId: "claim-1",
+      kind: "quantitative",
+      statement: "The threshold is 0.016.",
+      sourceRefs: ["arxiv-2406.06015"],
+      evidence: [{
+        paperKey: "arxiv-2406.06015",
+        quote: "fit parameters"
+      }],
+      confidence: "high"
+    }]
+  }));
+
+  assert.equal(result.ok, false);
+  assert.deepEqual(result.errors.map((error) => error.code), ["invalid_claim_provenance"]);
+});
+
 test("validateWikiPageMetadata requires canonical_page for alias pages", () => {
   const missingCanonicalPage = validateWikiPageMetadata(validMetadata({
     type: "alias",

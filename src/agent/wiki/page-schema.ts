@@ -18,6 +18,76 @@ export type WikiEvidenceContract =
   | "mixed"
   | "none";
 
+export type WikiClaimKind = "quantitative" | "qualitative" | "assumption" | "limitation";
+export type WikiClaimConfidence = "high" | "medium" | "low";
+export type WikiRelationType =
+  | "supports"
+  | "contradicts"
+  | "extends"
+  | "uses"
+  | "baseline_of"
+  | "open_problem_for"
+  | "implementation_of";
+export type WikiRelationTargetKind = "page" | "source" | "experiment" | "code";
+export type WikiRelationStatus = "confirmed" | "candidate" | "rejected";
+export type WikiExperimentStatus = "planned" | "ran" | "failed" | "blocked";
+export type WikiReviewerCritiqueSeverity = "high" | "medium" | "low";
+
+export interface WikiClaimEvidence {
+  paperKey?: string;
+  sourcePath?: string;
+  parsePath?: string;
+  chunkId?: string;
+  elementId?: string;
+  sectionId?: string;
+  page?: number;
+  figure?: string;
+  table?: string;
+  codeOutputPath?: string;
+  quote?: string;
+  note?: string;
+}
+
+export interface WikiClaimProvenance {
+  claimId: string;
+  kind: WikiClaimKind;
+  statement: string;
+  sourceRefs: string[];
+  evidence: WikiClaimEvidence[];
+  confidence: WikiClaimConfidence;
+}
+
+export interface WikiTypedRelation {
+  type: WikiRelationType;
+  target: string;
+  targetKind: WikiRelationTargetKind;
+  evidenceRefs: string[];
+  status: WikiRelationStatus;
+  note?: string;
+}
+
+export interface WikiExperimentRef {
+  experimentId: string;
+  title: string;
+  scriptPath?: string;
+  command?: string;
+  resultPath?: string;
+  logPath?: string;
+  artifactPaths?: string[];
+  status: WikiExperimentStatus;
+  createdAt?: string;
+  updatedAt?: string;
+  note?: string;
+}
+
+export interface WikiReviewerCritiqueItem {
+  id: string;
+  severity: WikiReviewerCritiqueSeverity;
+  target?: string;
+  reason: string;
+  suggestedFix: string;
+}
+
 export interface WikiPageMetadata {
   schema_version: 1;
   type: WikiPageType;
@@ -29,6 +99,10 @@ export interface WikiPageMetadata {
   source_refs: string[];
   related_pages?: string[];
   related_papers?: string[];
+  claims?: WikiClaimProvenance[];
+  typed_relations?: WikiTypedRelation[];
+  experiment_refs?: WikiExperimentRef[];
+  reviewer_critique?: WikiReviewerCritiqueItem[];
   canonical_page?: string;
   execution_binding?: string;
   created_at: string;
@@ -52,7 +126,11 @@ export interface WikiPageSchemaError {
     | "invalid_updated_at"
     | "missing_source_refs"
     | "missing_canonical_page"
-    | "unknown_execution_binding";
+    | "unknown_execution_binding"
+    | "invalid_claim_provenance"
+    | "invalid_typed_relation"
+    | "invalid_experiment_ref"
+    | "invalid_reviewer_critique";
   message: string;
   path?: string;
 }
@@ -89,6 +167,55 @@ const WIKI_EVIDENCE_CONTRACTS: readonly WikiEvidenceContract[] = [
   "none"
 ];
 
+const WIKI_CLAIM_KINDS: readonly WikiClaimKind[] = [
+  "quantitative",
+  "qualitative",
+  "assumption",
+  "limitation"
+];
+
+const WIKI_CLAIM_CONFIDENCES: readonly WikiClaimConfidence[] = [
+  "high",
+  "medium",
+  "low"
+];
+
+const WIKI_RELATION_TYPES: readonly WikiRelationType[] = [
+  "supports",
+  "contradicts",
+  "extends",
+  "uses",
+  "baseline_of",
+  "open_problem_for",
+  "implementation_of"
+];
+
+const WIKI_RELATION_TARGET_KINDS: readonly WikiRelationTargetKind[] = [
+  "page",
+  "source",
+  "experiment",
+  "code"
+];
+
+const WIKI_RELATION_STATUSES: readonly WikiRelationStatus[] = [
+  "confirmed",
+  "candidate",
+  "rejected"
+];
+
+const WIKI_EXPERIMENT_STATUSES: readonly WikiExperimentStatus[] = [
+  "planned",
+  "ran",
+  "failed",
+  "blocked"
+];
+
+const WIKI_REVIEWER_CRITIQUE_SEVERITIES: readonly WikiReviewerCritiqueSeverity[] = [
+  "high",
+  "medium",
+  "low"
+];
+
 const SOURCE_REQUIRED_CONTRACTS = new Set<WikiEvidenceContract>([
   "paper-backed",
   "design-backed",
@@ -114,6 +241,14 @@ function isWikiEvidenceContract(value: unknown): value is WikiEvidenceContract {
   return typeof value === "string" && WIKI_EVIDENCE_CONTRACTS.includes(value as WikiEvidenceContract);
 }
 
+function isRecord(value: unknown): value is Record<string, unknown> {
+  return typeof value === "object" && value !== null && !Array.isArray(value);
+}
+
+function isStringArray(value: unknown): value is string[] {
+  return Array.isArray(value) && value.every((item) => typeof item === "string");
+}
+
 function schemaError(code: WikiPageSchemaError["code"], message: string, path?: string): WikiPageSchemaError {
   return path ? { code, message, path } : { code, message };
 }
@@ -126,6 +261,13 @@ function parseScalarValue(rawValue: string): unknown {
   const trimmed = rawValue.trim();
   if (trimmed === "1") {
     return 1;
+  }
+  if (trimmed.startsWith("[") || trimmed.startsWith("{")) {
+    try {
+      return JSON.parse(trimmed);
+    } catch {
+      return trimmed;
+    }
   }
   if (trimmed.startsWith("\"")) {
     try {
@@ -213,6 +355,223 @@ function isValidIsoDate(value: unknown): value is string {
   return typeof value === "string" && value.trim() !== "" && !Number.isNaN(Date.parse(value));
 }
 
+function isWorkspaceRelativePath(value: string): boolean {
+  if (!value.trim() || value.startsWith("/") || /^[A-Za-z]:[\\/]/.test(value)) {
+    return false;
+  }
+  return !value.split(/[\\/]+/).includes("..");
+}
+
+function cleanOptionalString(value: unknown): string | undefined {
+  const cleaned = cleanString(value);
+  return cleaned || undefined;
+}
+
+function cleanClaimEvidence(value: unknown): WikiClaimEvidence | undefined {
+  if (!isRecord(value)) {
+    return undefined;
+  }
+  const page = typeof value.page === "number" && Number.isFinite(value.page) ? value.page : undefined;
+  return {
+    ...(cleanOptionalString(value.paperKey) ? { paperKey: cleanOptionalString(value.paperKey) } : {}),
+    ...(cleanOptionalString(value.sourcePath) ? { sourcePath: cleanOptionalString(value.sourcePath) } : {}),
+    ...(cleanOptionalString(value.parsePath) ? { parsePath: cleanOptionalString(value.parsePath) } : {}),
+    ...(cleanOptionalString(value.chunkId) ? { chunkId: cleanOptionalString(value.chunkId) } : {}),
+    ...(cleanOptionalString(value.elementId) ? { elementId: cleanOptionalString(value.elementId) } : {}),
+    ...(cleanOptionalString(value.sectionId) ? { sectionId: cleanOptionalString(value.sectionId) } : {}),
+    ...(page !== undefined ? { page } : {}),
+    ...(cleanOptionalString(value.figure) ? { figure: cleanOptionalString(value.figure) } : {}),
+    ...(cleanOptionalString(value.table) ? { table: cleanOptionalString(value.table) } : {}),
+    ...(cleanOptionalString(value.codeOutputPath) ? { codeOutputPath: cleanOptionalString(value.codeOutputPath) } : {}),
+    ...(cleanOptionalString(value.quote) ? { quote: cleanOptionalString(value.quote) } : {}),
+    ...(cleanOptionalString(value.note) ? { note: cleanOptionalString(value.note) } : {})
+  };
+}
+
+function hasConcreteClaimEvidence(evidence: WikiClaimEvidence): boolean {
+  return evidence.page !== undefined ||
+    Boolean(evidence.figure) ||
+    Boolean(evidence.table) ||
+    Boolean(evidence.elementId) ||
+    Boolean(evidence.chunkId) ||
+    Boolean(evidence.codeOutputPath);
+}
+
+function cleanClaims(value: unknown): {
+  values?: WikiClaimProvenance[];
+  invalid: boolean;
+} {
+  if (value === undefined) {
+    return { invalid: false };
+  }
+  if (!Array.isArray(value)) {
+    return { invalid: true };
+  }
+  const values: WikiClaimProvenance[] = [];
+  for (const item of value) {
+    if (!isRecord(item)) {
+      return { invalid: true };
+    }
+    const claimId = cleanString(item.claimId);
+    const kind = cleanString(item.kind) as WikiClaimKind;
+    const statement = cleanString(item.statement);
+    const sourceRefs = cleanStringArray(item.sourceRefs);
+    const evidence = Array.isArray(item.evidence)
+      ? item.evidence.map((entry) => cleanClaimEvidence(entry))
+      : [];
+    const confidence = cleanString(item.confidence) as WikiClaimConfidence;
+    if (
+      !claimId ||
+      !WIKI_CLAIM_KINDS.includes(kind) ||
+      !statement ||
+      sourceRefs.length === 0 ||
+      evidence.some((entry) => !entry) ||
+      evidence.length === 0 ||
+      !WIKI_CLAIM_CONFIDENCES.includes(confidence)
+    ) {
+      return { invalid: true };
+    }
+    const cleanedEvidence = evidence.filter((entry): entry is WikiClaimEvidence => Boolean(entry));
+    if (kind === "quantitative" && !cleanedEvidence.some((entry) => hasConcreteClaimEvidence(entry))) {
+      return { invalid: true };
+    }
+    values.push({
+      claimId,
+      kind,
+      statement,
+      sourceRefs,
+      evidence: cleanedEvidence,
+      confidence
+    });
+  }
+  return values.length > 0 ? { values, invalid: false } : { invalid: false };
+}
+
+function cleanTypedRelations(value: unknown): {
+  values?: WikiTypedRelation[];
+  invalid: boolean;
+} {
+  if (value === undefined) {
+    return { invalid: false };
+  }
+  if (!Array.isArray(value)) {
+    return { invalid: true };
+  }
+  const values: WikiTypedRelation[] = [];
+  for (const item of value) {
+    if (!isRecord(item)) {
+      return { invalid: true };
+    }
+    const type = cleanString(item.type) as WikiRelationType;
+    const target = cleanString(item.target);
+    const targetKind = cleanString(item.targetKind) as WikiRelationTargetKind;
+    const evidenceRefs = cleanStringArray(item.evidenceRefs);
+    const status = cleanString(item.status) as WikiRelationStatus;
+    if (
+      !WIKI_RELATION_TYPES.includes(type) ||
+      !target ||
+      !WIKI_RELATION_TARGET_KINDS.includes(targetKind) ||
+      !isStringArray(item.evidenceRefs) ||
+      !WIKI_RELATION_STATUSES.includes(status)
+    ) {
+      return { invalid: true };
+    }
+    values.push({
+      type,
+      target,
+      targetKind,
+      evidenceRefs,
+      status,
+      ...(cleanOptionalString(item.note) ? { note: cleanOptionalString(item.note) } : {})
+    });
+  }
+  return values.length > 0 ? { values, invalid: false } : { invalid: false };
+}
+
+function cleanExperimentRefs(value: unknown): {
+  values?: WikiExperimentRef[];
+  invalid: boolean;
+} {
+  if (value === undefined) {
+    return { invalid: false };
+  }
+  if (!Array.isArray(value)) {
+    return { invalid: true };
+  }
+  const values: WikiExperimentRef[] = [];
+  for (const item of value) {
+    if (!isRecord(item)) {
+      return { invalid: true };
+    }
+    const experimentId = cleanString(item.experimentId);
+    const title = cleanString(item.title);
+    const status = cleanString(item.status) as WikiExperimentStatus;
+    const artifactPaths = cleanStringArray(item.artifactPaths);
+    const paths = [
+      cleanOptionalString(item.scriptPath),
+      cleanOptionalString(item.resultPath),
+      cleanOptionalString(item.logPath),
+      ...artifactPaths
+    ].filter((candidate): candidate is string => Boolean(candidate));
+    if (
+      !experimentId ||
+      !title ||
+      !WIKI_EXPERIMENT_STATUSES.includes(status) ||
+      (item.artifactPaths !== undefined && !isStringArray(item.artifactPaths)) ||
+      paths.some((candidate) => !isWorkspaceRelativePath(candidate))
+    ) {
+      return { invalid: true };
+    }
+    values.push({
+      experimentId,
+      title,
+      ...(cleanOptionalString(item.scriptPath) ? { scriptPath: cleanOptionalString(item.scriptPath) } : {}),
+      ...(cleanOptionalString(item.command) ? { command: cleanOptionalString(item.command) } : {}),
+      ...(cleanOptionalString(item.resultPath) ? { resultPath: cleanOptionalString(item.resultPath) } : {}),
+      ...(cleanOptionalString(item.logPath) ? { logPath: cleanOptionalString(item.logPath) } : {}),
+      ...(artifactPaths.length > 0 ? { artifactPaths } : {}),
+      status,
+      ...(cleanOptionalString(item.createdAt) ? { createdAt: cleanOptionalString(item.createdAt) } : {}),
+      ...(cleanOptionalString(item.updatedAt) ? { updatedAt: cleanOptionalString(item.updatedAt) } : {}),
+      ...(cleanOptionalString(item.note) ? { note: cleanOptionalString(item.note) } : {})
+    });
+  }
+  return values.length > 0 ? { values, invalid: false } : { invalid: false };
+}
+
+function cleanReviewerCritique(value: unknown): {
+  values?: WikiReviewerCritiqueItem[];
+  invalid: boolean;
+} {
+  if (value === undefined) {
+    return { invalid: false };
+  }
+  if (!Array.isArray(value)) {
+    return { invalid: true };
+  }
+  const values: WikiReviewerCritiqueItem[] = [];
+  for (const item of value) {
+    if (!isRecord(item)) {
+      return { invalid: true };
+    }
+    const id = cleanString(item.id);
+    const severity = cleanString(item.severity) as WikiReviewerCritiqueSeverity;
+    const reason = cleanString(item.reason);
+    const suggestedFix = cleanString(item.suggestedFix);
+    if (!id || !WIKI_REVIEWER_CRITIQUE_SEVERITIES.includes(severity) || !reason || !suggestedFix) {
+      return { invalid: true };
+    }
+    values.push({
+      id,
+      severity,
+      ...(cleanOptionalString(item.target) ? { target: cleanOptionalString(item.target) } : {}),
+      reason,
+      suggestedFix
+    });
+  }
+  return values.length > 0 ? { values, invalid: false } : { invalid: false };
+}
+
 function quoteYamlString(value: string): string {
   return JSON.stringify(value);
 }
@@ -257,6 +616,10 @@ export function validateWikiPageMetadata(
   const sourceRefs = cleanStringArray(metadata.source_refs);
   const relatedPages = cleanOptionalStringArray(metadata.related_pages);
   const relatedPapers = cleanOptionalStringArray(metadata.related_papers);
+  const claims = cleanClaims(metadata.claims);
+  const typedRelations = cleanTypedRelations(metadata.typed_relations);
+  const experimentRefs = cleanExperimentRefs(metadata.experiment_refs);
+  const reviewerCritique = cleanReviewerCritique(metadata.reviewer_critique);
   const canonicalPage = cleanString(metadata.canonical_page);
   const executionBinding = cleanString(metadata.execution_binding);
 
@@ -268,6 +631,22 @@ export function validateWikiPageMetadata(
 
   if (!isWikiEvidenceContract(metadata.evidence_contract)) {
     errors.push(schemaError("invalid_frontmatter", "Wiki evidence contract is missing or invalid.", path));
+  }
+
+  if (claims.invalid) {
+    errors.push(schemaError("invalid_claim_provenance", "Wiki claims must include valid provenance; quantitative claims require concrete page, figure, table, element, chunk, or code-output evidence.", path));
+  }
+
+  if (typedRelations.invalid) {
+    errors.push(schemaError("invalid_typed_relation", "Wiki typed_relations must be valid relation records.", path));
+  }
+
+  if (experimentRefs.invalid) {
+    errors.push(schemaError("invalid_experiment_ref", "Wiki experiment_refs must be valid records with workspace-relative paths.", path));
+  }
+
+  if (reviewerCritique.invalid) {
+    errors.push(schemaError("invalid_reviewer_critique", "Wiki reviewer_critique must be valid critique records.", path));
   }
 
   if (!isValidIsoDate(metadata.created_at)) {
@@ -319,6 +698,10 @@ export function validateWikiPageMetadata(
       source_refs: sourceRefs,
       ...(relatedPages ? { related_pages: relatedPages } : {}),
       ...(relatedPapers ? { related_papers: relatedPapers } : {}),
+      ...(claims.values ? { claims: claims.values } : {}),
+      ...(typedRelations.values ? { typed_relations: typedRelations.values } : {}),
+      ...(experimentRefs.values ? { experiment_refs: experimentRefs.values } : {}),
+      ...(reviewerCritique.values ? { reviewer_critique: reviewerCritique.values } : {}),
       ...(canonicalPage ? { canonical_page: canonicalPage } : {}),
       ...(executionBinding ? { execution_binding: executionBinding } : {}),
       created_at: metadata.created_at as string,
@@ -388,6 +771,10 @@ export function serializeWikiPageMarkdown(page: {
     ...serializeStringArray("source_refs", metadata.source_refs),
     ...(metadata.related_pages ? serializeStringArray("related_pages", metadata.related_pages) : []),
     ...(metadata.related_papers ? serializeStringArray("related_papers", metadata.related_papers) : []),
+    ...(metadata.claims ? [`claims: ${JSON.stringify(metadata.claims)}`] : []),
+    ...(metadata.typed_relations ? [`typed_relations: ${JSON.stringify(metadata.typed_relations)}`] : []),
+    ...(metadata.experiment_refs ? [`experiment_refs: ${JSON.stringify(metadata.experiment_refs)}`] : []),
+    ...(metadata.reviewer_critique ? [`reviewer_critique: ${JSON.stringify(metadata.reviewer_critique)}`] : []),
     ...(metadata.canonical_page ? [`canonical_page: ${quoteYamlString(metadata.canonical_page)}`] : []),
     ...(metadata.execution_binding ? [`execution_binding: ${quoteYamlString(metadata.execution_binding)}`] : []),
     `created_at: ${quoteYamlString(metadata.created_at)}`,
