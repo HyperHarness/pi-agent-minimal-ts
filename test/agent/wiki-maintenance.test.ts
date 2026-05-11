@@ -1610,6 +1610,167 @@ Frequency collisions are a subproblem of frequency allocation under fabrication 
   }
 });
 
+test("lintPaperWiki recognizes compact spelling duplicates as deleteable page duplicates", async () => {
+  const workspace = await createWorkspace();
+
+  try {
+    await writePage(
+      workspace,
+      "su-2",
+      `
+---
+schema_version: 1
+type: "concept"
+key: "su-2"
+title: "SU(2)"
+aliases: []
+tags:
+  - "su-2"
+evidence_contract: "none"
+source_refs: []
+created_at: "2026-05-10T00:00:00.000Z"
+updated_at: "2026-05-10T00:00:00.000Z"
+---
+
+# SU(2)
+
+Canonical compact group notation page.
+`
+    );
+    await writePage(
+      workspace,
+      "su2",
+      `
+---
+schema_version: 1
+type: "concept"
+key: "su2"
+title: "SU2"
+aliases: []
+tags:
+  - "su-2"
+evidence_contract: "none"
+source_refs: []
+created_at: "2026-05-10T00:00:00.000Z"
+updated_at: "2026-05-10T00:00:00.000Z"
+---
+
+# SU2
+
+Redundant compact spelling page.
+`
+    );
+
+    const lint = await lintPaperWiki({ workspaceDir: workspace, maxItems: 20 });
+    const duplicate = lint.issues.find((issue) =>
+      issue.kind === "near_duplicate_page" &&
+      issue.path === "knowledge-base/pages/su2.md"
+    );
+
+    assert.equal(duplicate?.severity, "low");
+    assert.equal(duplicate?.target, "su-2");
+    assert.match(duplicate?.reason ?? "", /simple alias key match canonical page su-2/);
+
+    const plan = await planWikiStructure({
+      workspaceDir: workspace,
+      maxItems: 10
+    });
+    const merge = plan.actions.find((action) =>
+      action.type === "merge_duplicate_pages" &&
+      action.path === "knowledge-base/pages/su2.md"
+    );
+
+    assert.equal(merge?.risk, "low");
+    assert.equal(merge?.recommendedTool, "wiki_apply_structure_plan");
+    assert.deepEqual(merge?.recommendedArgs, {
+      canonical: "su-2",
+      redundant: "su2",
+      alias: "su2",
+      note: "Low-risk duplicate concept page: simple alias key match canonical page su-2."
+    });
+  } finally {
+    await rm(workspace, { recursive: true, force: true });
+  }
+});
+
+test("wiki structure repair deletes existing simple alias pages instead of keeping alias stubs", async () => {
+  const workspace = await createWorkspace();
+
+  try {
+    await writePage(
+      workspace,
+      "surface-code",
+      `
+---
+schema_version: 1
+type: "concept"
+key: "surface-code"
+title: "Surface Code"
+aliases: []
+tags:
+  - "surface-code"
+evidence_contract: "none"
+source_refs: []
+created_at: "2026-05-10T00:00:00.000Z"
+updated_at: "2026-05-10T00:00:00.000Z"
+---
+
+# Surface Code
+
+Canonical page.
+`
+    );
+    await writePage(
+      workspace,
+      "surface-codes",
+      `
+---
+schema_version: 1
+type: "wiki-alias-page"
+key: "surface-codes"
+title: "Surface Codes"
+canonical_page: "surface-code"
+aliases: []
+created_at: "2026-05-10T00:00:00.000Z"
+updated_at: "2026-05-10T00:00:00.000Z"
+---
+
+# Surface Codes
+
+Alias of [Surface Code](knowledge-base/pages/surface-code.md).
+`
+    );
+
+    const plan = await planWikiStructure({
+      workspaceDir: workspace,
+      maxItems: 10
+    });
+    const merge = plan.actions.find((action) =>
+      action.type === "merge_duplicate_pages" &&
+      action.path === "knowledge-base/pages/surface-codes.md"
+    );
+
+    assert.equal(merge?.risk, "low");
+    assert.equal(merge?.target, "surface-code");
+    assert.equal(merge?.recommendedTool, "wiki_apply_structure_plan");
+
+    const { applyWikiStructurePlan } = await import("../../src/agent/wiki/structure-apply.js");
+    const result = await applyWikiStructurePlan({
+      workspaceDir: workspace,
+      dryRun: false,
+      runVerification: false,
+      actions: merge ? [merge] : []
+    });
+
+    assert.equal(result.status, "applied");
+    await assert.rejects(readFile(path.join(workspace, "knowledge-base/pages/surface-codes.md"), "utf8"));
+    const canonical = await readFile(path.join(workspace, "knowledge-base/pages/surface-code.md"), "utf8");
+    assert.match(canonical, /aliases:\n\s+- "surface-codes"/);
+  } finally {
+    await rm(workspace, { recursive: true, force: true });
+  }
+});
+
 test("applyWikiStructurePlan merges duplicate pages, rewrites inbound links, and deletes the redundant page", async () => {
   const workspace = await createWorkspace();
 

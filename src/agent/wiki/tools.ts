@@ -2177,7 +2177,7 @@ export function createWikiTools(input: {
     name: "merge_wiki_aliases",
     label: "Merge Wiki Aliases",
     description:
-      "Creates or updates lightweight alias pages under knowledge-base/pages/ that point duplicate names, acronyms, plural forms, or synonyms to an existing canonical synthesis page. Use this instead of write_file when the user asks to handle wiki synonyms or duplicate concepts. It refuses to overwrite existing non-alias synthesis pages unless replaceExisting=true.",
+      "Creates or updates lightweight alias pages under knowledge-base/pages/ that point deliberate acronyms or synonyms to an existing canonical synthesis page. For existing duplicate pages, including simple plurals or compact spellings such as surface-codes/surface-code or su2/su-2, use wiki_lint, wiki_structure_plan, and wiki_apply_structure_plan so the redundant page is merged and deleted instead of kept as an alias page. It refuses to overwrite existing non-alias synthesis pages unless replaceExisting=true.",
     parameters: mergeWikiAliasesParameters,
     executionMode: "sequential",
     execute: async (_toolCallId: string, args: MergeWikiAliasesParameters) => {

@@ -75,6 +75,51 @@ const DEFAULT_BUDGET: Required<WikiStructurePlanBudget> = {
   maxScopeNotes: 3
 };
 
+function singularizeSimpleAliasToken(token: string): string {
+  const stems: Record<string, string> = {
+    architectures: "architecture",
+    codes: "code",
+    collisions: "collision",
+    gates: "gate",
+    processors: "processor",
+    qubits: "qubit",
+    systems: "system"
+  };
+  if (stems[token]) {
+    return stems[token];
+  }
+  if (token.endsWith("ies") && token.length > 4) {
+    return `${token.slice(0, -3)}y`;
+  }
+  if (token.endsWith("s") && !token.endsWith("ss") && token.length > 3) {
+    return token.slice(0, -1);
+  }
+  return token;
+}
+
+function compactSimpleAliasKey(value: string, singularize: boolean): string {
+  return value
+    .toLowerCase()
+    .replace(/[^a-z0-9]+/g, "-")
+    .replace(/^-+|-+$/g, "")
+    .split(/-+/)
+    .filter(Boolean)
+    .map((token) => singularize ? singularizeSimpleAliasToken(token) : token)
+    .join("");
+}
+
+function isSimpleWikiAliasDuplicate(left: string, right: string): boolean {
+  if (!left.trim() || !right.trim()) {
+    return false;
+  }
+  const leftRaw = compactSimpleAliasKey(left, false);
+  const rightRaw = compactSimpleAliasKey(right, false);
+  if (!leftRaw || !rightRaw || (leftRaw === rightRaw && left.trim().toLowerCase() === right.trim().toLowerCase())) {
+    return false;
+  }
+  return leftRaw === rightRaw || compactSimpleAliasKey(left, true) === compactSimpleAliasKey(right, true);
+}
+
 function priorityForIssue(issue: PaperWikiLintIssue): WikiStructurePriority {
   if (issue.severity === "high") {
     return "high";
@@ -183,6 +228,26 @@ function actionForIssue(
     const aliasPageKey = pathBasenameWithoutMarkdownExtension(issue.path);
     if (!aliasPageKey) {
       return undefined;
+    }
+    if (isSimpleWikiAliasDuplicate(aliasPageKey, issue.target)) {
+      return {
+        id,
+        type: "merge_duplicate_pages",
+        priority: priorityForIssue(issue),
+        risk: "low",
+        issueKind: issue.kind,
+        owner: "wiki-agent",
+        path: issue.path,
+        target: issue.target,
+        reason: issue.reason,
+        recommendedTool: "wiki_apply_structure_plan",
+        recommendedArgs: {
+          canonical: issue.target,
+          redundant: aliasPageKey,
+          alias: aliasPageKey,
+          note: issue.reason
+        }
+      };
     }
     return {
       id,

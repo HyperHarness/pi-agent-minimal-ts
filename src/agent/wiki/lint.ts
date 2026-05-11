@@ -246,6 +246,22 @@ function extractSourceCitationKeys(frontmatter: string): string[] {
   return [...keys].filter(Boolean);
 }
 
+function extractFrontmatterScalar(frontmatter: string, key: string): string | undefined {
+  const line = frontmatter
+    .split("\n")
+    .find((candidate) => candidate.startsWith(`${key}:`));
+  const raw = line?.slice(key.length + 1).trim();
+  if (!raw) {
+    return undefined;
+  }
+  try {
+    const parsed = JSON.parse(raw);
+    return typeof parsed === "string" ? parsed.trim() : undefined;
+  } catch {
+    return raw.replace(/^"|"$/g, "").trim();
+  }
+}
+
 function isAliasFrontmatter(frontmatter: string): boolean {
   return frontmatter.includes('type: "wiki-alias-page"') ||
     frontmatter.includes("type: wiki-alias-page") ||
@@ -328,6 +344,29 @@ function singularizedConceptKey(value: string): string {
     .split("-")
     .map(singularizeDuplicateToken)
     .join("-");
+}
+
+function compactSimpleAliasKey(value: string, singularize: boolean): string {
+  return value
+    .toLowerCase()
+    .replace(/[^a-z0-9]+/g, "-")
+    .replace(/^-+|-+$/g, "")
+    .split(/-+/)
+    .filter(Boolean)
+    .map((token) => singularize ? singularizeDuplicateToken(token) : token)
+    .join("");
+}
+
+function isSimpleWikiAliasDuplicate(left: string, right: string): boolean {
+  if (!left.trim() || !right.trim()) {
+    return false;
+  }
+  const leftRaw = compactSimpleAliasKey(left, false);
+  const rightRaw = compactSimpleAliasKey(right, false);
+  if (!leftRaw || !rightRaw || (leftRaw === rightRaw && left.trim().toLowerCase() === right.trim().toLowerCase())) {
+    return false;
+  }
+  return leftRaw === rightRaw || compactSimpleAliasKey(left, true) === compactSimpleAliasKey(right, true);
 }
 
 function hasSingularPluralConceptMatch(
@@ -693,6 +732,7 @@ export async function lintPaperWiki(options: PaperWikiLintOptions): Promise<Pape
     normalizedTitle: string;
     path: string;
     isAlias: boolean;
+    canonicalPageKey?: string;
     sourceCitationCount: number;
     sourceCitationKeys: string[];
     tags: string[];
@@ -743,6 +783,8 @@ export async function lintPaperWiki(options: PaperWikiLintOptions): Promise<Pape
     const sourceCitationKeys = extractSourceCitationKeys(frontmatter);
     const sourceCitationCount = extractSourceCitationPaths(frontmatter).length + typedSourceRefCount;
     const isAlias = isAliasFrontmatter(frontmatter);
+    const canonicalPageKey = extractFrontmatterScalar(frontmatter, "canonical_page") ??
+      extractFrontmatterScalar(frontmatter, "alias_of");
     if (typedSourceRefCount > 0) {
       typedCitedPagePaths.add(relativePath);
     }
@@ -752,6 +794,7 @@ export async function lintPaperWiki(options: PaperWikiLintOptions): Promise<Pape
       normalizedTitle: normalizeTitleForDuplicate(title),
       path: relativePath,
       isAlias,
+      ...(canonicalPageKey ? { canonicalPageKey: sanitizeWikiFilename(canonicalPageKey.toLowerCase()) } : {}),
       sourceCitationCount,
       sourceCitationKeys,
       tags,
@@ -879,6 +922,29 @@ export async function lintPaperWiki(options: PaperWikiLintOptions): Promise<Pape
   }
 
   const emittedNearDuplicatePairs = new Set<string>();
+  const pagesByKey = new Map(pageMetadata.map((page) => [page.pageKey, page]));
+  for (const page of pageMetadata) {
+    if (!page.isAlias || !page.canonicalPageKey || !isSimpleWikiAliasDuplicate(page.pageKey, page.canonicalPageKey)) {
+      continue;
+    }
+    const canonical = pagesByKey.get(page.canonicalPageKey);
+    if (!canonical || canonical.isAlias) {
+      continue;
+    }
+    const pairKey = `${page.pageKey}->${canonical.pageKey}`;
+    if (emittedNearDuplicatePairs.has(pairKey)) {
+      continue;
+    }
+    emittedNearDuplicatePairs.add(pairKey);
+    issues.push({
+      kind: "near_duplicate_page",
+      severity: "low",
+      path: page.path,
+      target: canonical.pageKey,
+      reason: `Low-risk duplicate alias page: simple alias key match canonical page ${canonical.pageKey}.`
+    });
+  }
+
   for (const pages of normalizedTitles.values()) {
     const uniqueTitles = new Set(pages.map((page) => page.title.toLowerCase().trim()));
     if (pages.length > 1 && uniqueTitles.size > 1) {
@@ -919,6 +985,30 @@ export async function lintPaperWiki(options: PaperWikiLintOptions): Promise<Pape
   }
 
   const nonAliasPages = pageMetadata.filter((page) => !page.isAlias);
+  for (let leftIndex = 0; leftIndex < nonAliasPages.length; leftIndex += 1) {
+    for (let rightIndex = leftIndex + 1; rightIndex < nonAliasPages.length; rightIndex += 1) {
+      const left = nonAliasPages[leftIndex];
+      const right = nonAliasPages[rightIndex];
+      if (left.normalizedTitle === right.normalizedTitle || !isSimpleWikiAliasDuplicate(left.pageKey, right.pageKey)) {
+        continue;
+      }
+      const canonical = [...[left, right]].sort(compareDuplicateCanonicalCandidates)[0];
+      const redundant = canonical.pageKey === left.pageKey ? right : left;
+      const pairKey = `${redundant.pageKey}->${canonical.pageKey}`;
+      if (emittedNearDuplicatePairs.has(pairKey)) {
+        continue;
+      }
+      emittedNearDuplicatePairs.add(pairKey);
+      issues.push({
+        kind: "near_duplicate_page",
+        severity: "low",
+        path: redundant.path,
+        target: canonical.pageKey,
+        reason: `Low-risk duplicate concept page: simple alias key match canonical page ${canonical.pageKey}.`
+      });
+    }
+  }
+
   for (let leftIndex = 0; leftIndex < nonAliasPages.length; leftIndex += 1) {
     for (let rightIndex = leftIndex + 1; rightIndex < nonAliasPages.length; rightIndex += 1) {
       const left = nonAliasPages[leftIndex];
