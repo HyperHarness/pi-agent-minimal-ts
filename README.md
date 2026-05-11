@@ -11,6 +11,7 @@ This repository is a practical agent harness for literature ingestion, local wik
 - exposes a Feishu long-connection bridge with streaming replies and per-chat memory
 - searches, downloads, parses, summarizes, and indexes papers into a local knowledge base
 - builds durable typed wiki pages from fixed evidence rather than one-off answers
+- records claim-level provenance, typed page/source/experiment relations, experiment references, and reviewer-risk critique metadata on wiki pages
 - maintains source manifests, operation journals, evidence contracts, and wiki governance diagnostics
 - plans wiki-agent work with deterministic owner boundaries for acquisition, evidence construction, page writing, and blocked cases
 - provides `design-projects/` as the recommended code workspace root for design subagent projects
@@ -88,6 +89,7 @@ The current wiki core is schema-first:
 
 - `workspace-contract.ts` defines the authoritative `knowledge-base/` lifecycle roots for raw inputs, source records, parse artifacts, summaries, pages, manifests, assets, runtime state, index, and human log.
 - `page-schema.ts` and `typed-store.ts` parse, validate, list, and write human-editable Markdown pages with typed frontmatter. Supported page types include `paper-source`, `synthesis`, `concept`, `method`, `finding`, `dataset`, `question`, `design-record`, and `alias`.
+- `page-schema.ts` also owns the wiki evidence-audit contract. Pages can carry `claims`, `typed_relations`, `experiment_refs`, and `reviewer_critique` metadata. Quantitative claims must point at concrete provenance such as a page, figure, table, parser element, chunk, or code-output path.
 - `manifest-store.ts` and `retrieval-contract.ts` make source provenance and read-only downstream consumption explicit. Downstream agents can search/read wiki evidence without depending on the physical directory layout.
 - `retrieval-search.ts` returns structured evidence matches, match reasons, preferred evidence-kind ordering, and insufficient-evidence status.
 - `journal.ts` records multi-file wiki operations so interrupted writes can be reported by health checks.
@@ -244,6 +246,8 @@ http://localhost:4177/graph
 
 The viewer reads `knowledge-base` by default. Set `PI_WIKI_DIR` or `WIKI_PORT` to change the wiki directory or port. Operational details are in [docs/wiki-web-graph.md](docs/wiki-web-graph.md).
 
+The graph endpoint prefers typed page metadata from `typed_relations` when present. Edge types include `supports`, `contradicts`, `extends`, `uses`, `baseline_of`, `open_problem_for`, and `implementation_of`; legacy `related_pages` remains readable as a fallback.
+
 ## Built-In Tools
 
 The default chat agent exposes a compact tool profile. Development and benchmarks can use `createTools(workspaceDir, { toolProfile: "full" })` for the full profile, or `createToolsForBoundary(workspaceDir, role)` for role-isolated worker surfaces.
@@ -309,11 +313,20 @@ Publisher and external URLs use the browser extension bridge by default when con
 
 The key distinction is that `sources/*/summary.md` are evidence summaries for individual papers, while `pages/*.md` are durable typed cross-paper knowledge pages. Source manifests under `manifests/` tie wiki-facing summaries back to acquisition records, parser artifacts, quality reports, hashes, tags, and status.
 
+Wiki pages may also include evidence-audit metadata:
+
+- `claims`: per-claim provenance records. Quantitative claims require concrete original-location or code-output evidence.
+- `typed_relations`: typed graph edges to pages, sources, experiments, or code, with candidate/confirmed/rejected status.
+- `experiment_refs`: workspace-relative local scripts, commands, logs, result files, and artifacts that support or test a page.
+- `reviewer_critique`: structured critique items for likely reviewer objections and the suggested fix.
+
+This v0 is deterministic schema and lint support. It does not run background freshness checks, poll arXiv/publishers/GitHub on a schedule, or execute third-party paper repositories automatically.
+
 ### Wiki Maintenance Tools
 
 - `wiki_health`: reports acquisition state, downloads, authorization state, parse quality, incomplete `source.json` citation metadata, missing summaries, missing artifacts, missing source manifests, unsafe or missing manifest artifact paths, malformed typed wiki pages, weak evidence contracts, and interrupted wiki operations.
 - `wiki_health_fix`: orchestrates supported repairs. Download and citation-metadata repairs go through the paper-download-subagent boundary; citation refresh first reuses local parse artifacts, then uses arXiv/Crossref metadata when an identifier is available. Parsing stays in the ingestion path; missing summaries go through the `wiki-evidence-worker` summary pass; missing source manifests can be backfilled from existing source summaries.
-- `wiki_lint`: checks wiki structure, source-to-page coverage, repeated concept gaps, evidence-contract gaps, typed `source_refs`, semantic alias candidates, scope drift, stale index entries, broken links, missing citations, orphan pages, duplicate titles, repeated sections, weak uncited pages, rendered wiki-link failures, and ready source summaries not covered by synthesis pages. Goal/focus options can prioritize concept gaps for a current research direction.
+- `wiki_lint`: checks wiki structure, source-to-page coverage, repeated concept gaps, evidence-contract gaps, typed `source_refs`, semantic alias candidates, scope drift, stale index entries, broken links, missing citations, orphan pages, duplicate titles, repeated sections, weak uncited pages, rendered wiki-link failures, ready source summaries not covered by synthesis pages, missing quantitative claim provenance, unresolved contradiction candidates, legacy `related_pages` without typed relations, broken experiment references, and code-backed pages without experiment refs. Goal/focus options can prioritize concept gaps for a current research direction.
 - `wiki_structure_plan`: turns `wiki_lint` findings into a reviewable, budgeted, goal-aware maintenance plan with owner, risk, recommended tool args, and verification actions. It suggests low-risk actions by default and does not rewrite wiki content.
 - `wiki_apply_structure_plan`: applies approved low-risk `wiki_structure_plan` actions with dry-run, preflight, journal, and verification safeguards. Supported writes are deterministic duplicate-section cleanup, safe alias creation, deterministic index rebuild, and constrained `## Scope Note` updates.
 
@@ -380,6 +393,8 @@ knowledge-base/
 ```
 
 Typed wiki pages remain normal Markdown files with frontmatter, so humans can edit them directly. The typed store validates the metadata and reports malformed or weak-evidence pages through `wiki_health` / `wiki_lint` instead of making every read fail.
+
+Evidence-audit metadata is stored in the same page frontmatter. Use workspace-relative paths in `experiment_refs`; absolute paths and `..` escapes are rejected by the schema validator. Use `typed_relations` for graph semantics and keep `related_pages` only as legacy compatibility.
 
 ## Design Project Layout
 
@@ -508,7 +523,7 @@ If you run `npm install --ignore-scripts`, build/test still work, but browser to
 ## Scripts
 
 - `npm run build`: compile TypeScript to `dist/`
-- `npm test`: run the automated test suite
+- `npm test`: run the automated test suite, including compiled TypeScript tests and script-level `.mjs` tests
 - `npm run agent`: build and start the terminal chat / REPL agent
 - `npm run agent:rpc`: build and start the JSONL RPC agent
 - `npm run feishu-bridge`: build and start the Feishu bridge
