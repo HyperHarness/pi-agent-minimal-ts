@@ -353,11 +353,14 @@ function suggestSemanticAliasesFromDocuments(
     for (let rightIndex = leftIndex + 1; rightIndex < pages.length; rightIndex += 1) {
       const left = pages[leftIndex];
       const right = pages[rightIndex];
-      const leftTokens = tokenize(`${left.title} ${left.pageKey}`);
-      const rightTokens = tokenize(`${right.title} ${right.pageKey}`);
+      const leftTokens = tokenizeForSemanticAlias(`${left.title} ${left.pageKey}`);
+      const rightTokens = tokenizeForSemanticAlias(`${right.title} ${right.pageKey}`);
       const tokenOverlap = [...leftTokens].filter((token) => rightTokens.has(token)).sort();
       const sharedPaperKeys = sharedCitationKeys(left, right);
       if (sharedPaperKeys.length === 0) {
+        continue;
+      }
+      if (!isPlausibleSemanticAlias({ left, right, leftTokens, rightTokens, tokenOverlap })) {
         continue;
       }
       const unionSize = new Set([...leftTokens, ...rightTokens]).size || 1;
@@ -380,6 +383,78 @@ function suggestSemanticAliasesFromDocuments(
   }
 
   return suggestions.sort((left, right) => right.score - left.score || left.canonicalPageKey.localeCompare(right.canonicalPageKey));
+}
+
+const SEMANTIC_ALIAS_GENERIC_TOKENS = new Set([
+  "architecture",
+  "automated",
+  "automation",
+  "computing",
+  "design",
+  "fault",
+  "hardware",
+  "high",
+  "level",
+  "llm4eda",
+  "processor",
+  "quantum",
+  "research",
+  "roadmap",
+  "superconducting",
+  "synthesis",
+  "system",
+  "tolerant"
+]);
+
+function stemSemanticAliasToken(token: string): string {
+  const stems: Record<string, string> = {
+    architectures: "architecture",
+    codes: "code",
+    gates: "gate",
+    processors: "processor",
+    systems: "system"
+  };
+  return stems[token] ?? token;
+}
+
+function tokenizeForSemanticAlias(value: string): Set<string> {
+  return new Set([...tokenize(value)]
+    .map(stemSemanticAliasToken)
+    .filter((token) => !SEMANTIC_ALIAS_GENERIC_TOKENS.has(token)));
+}
+
+function hasVersionedSpecificationMarker(page: WikiMaintenancePageDocument): boolean {
+  const text = `${page.title} ${page.pageKey}`.toLowerCase();
+  return /\bv?\d+(?:[-.]\d+)+\b/.test(text) ||
+    /(?:^|[-\s])(spec|specification|version|revision|draft)(?:$|[-\s])/.test(text);
+}
+
+function isPlausibleSemanticAlias(input: {
+  left: WikiMaintenancePageDocument;
+  right: WikiMaintenancePageDocument;
+  leftTokens: Set<string>;
+  rightTokens: Set<string>;
+  tokenOverlap: string[];
+}): boolean {
+  if (input.tokenOverlap.length < 2) {
+    return false;
+  }
+
+  const smallerTokenCount = Math.min(input.leftTokens.size, input.rightTokens.size);
+  const largerTokenCount = Math.max(input.leftTokens.size, input.rightTokens.size);
+  if (smallerTokenCount === 0 || largerTokenCount === 0) {
+    return false;
+  }
+
+  const smallerCoverage = input.tokenOverlap.length / smallerTokenCount;
+  const largerCoverage = input.tokenOverlap.length / largerTokenCount;
+  if (smallerCoverage < 0.75) {
+    return false;
+  }
+
+  return largerCoverage >= 0.75 ||
+    hasVersionedSpecificationMarker(input.left) ||
+    hasVersionedSpecificationMarker(input.right);
 }
 
 function auditScopeDriftFromDocuments(

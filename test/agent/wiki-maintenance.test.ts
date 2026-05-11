@@ -444,6 +444,136 @@ test("suggestSemanticAliases reports strong near duplicates with shared source e
   }
 });
 
+test("suggestSemanticAliases ignores related pages that only share broad domain vocabulary", async () => {
+  const workspace = await createWorkspace();
+
+  try {
+    for (const page of [
+      {
+        key: "decoding",
+        title: "Decoding in Fault-Tolerant Quantum Computing",
+        refs: ["paper-ftqc-a", "paper-ftqc-b", "paper-ftqc-c"]
+      },
+      {
+        key: "logical-gates",
+        title: "Logical Gates in Fault-Tolerant Quantum Computing",
+        refs: ["paper-ftqc-a", "paper-ftqc-b", "paper-ftqc-c"]
+      },
+      {
+        key: "frequency-allocation",
+        title: "Frequency Allocation in Superconducting Quantum Processors",
+        refs: ["paper-frequency-a", "paper-frequency-b"]
+      },
+      {
+        key: "frequency-collisions",
+        title: "Frequency Collisions in Superconducting Quantum Processors",
+        refs: ["paper-frequency-a", "paper-frequency-b"]
+      },
+      {
+        key: "high-level-synthesis",
+        title: "High-Level Synthesis in LLM4EDA and Automated Chip Design",
+        refs: ["paper-eda-a", "paper-eda-b"]
+      },
+      {
+        key: "verilog",
+        title: "Verilog in LLM4EDA, Hardware Design Automation, and High-Level Synthesis",
+        refs: ["paper-eda-a", "paper-eda-b"]
+      }
+    ]) {
+      await writePage(
+        workspace,
+        page.key,
+        `
+---
+schema_version: 1
+type: "concept"
+key: "${page.key}"
+title: "${page.title}"
+aliases: []
+tags: []
+evidence_contract: "paper-backed"
+source_refs:
+${page.refs.map((ref) => `  - "${ref}"`).join("\n")}
+created_at: "2026-05-10T00:00:00.000Z"
+updated_at: "2026-05-10T00:00:00.000Z"
+---
+
+# ${page.title}
+
+Shared source evidence in the same broad topic area.
+`
+      );
+    }
+
+    const result = await suggestSemanticAliases({ workspaceDir: workspace });
+
+    assert.deepEqual(result.suggestions, []);
+  } finally {
+    await rm(workspace, { recursive: true, force: true });
+  }
+});
+
+test("suggestSemanticAliases keeps versioned specification aliases when the canonical page is otherwise narrower", async () => {
+  const workspace = await createWorkspace();
+
+  try {
+    await writePage(
+      workspace,
+      "minimal-superconducting-qldpc-chip",
+      `
+---
+schema_version: 1
+type: "concept"
+key: "minimal-superconducting-qldpc-chip"
+title: "Minimal Superconducting qLDPC Chip Design"
+aliases: []
+tags: []
+evidence_contract: "paper-backed"
+source_refs:
+  - "paper-qldpc-a"
+  - "paper-qldpc-b"
+  - "paper-qldpc-c"
+created_at: "2026-05-10T00:00:00.000Z"
+updated_at: "2026-05-10T00:00:00.000Z"
+---
+
+# Minimal Superconducting qLDPC Chip Design
+`
+    );
+    await writePage(
+      workspace,
+      "minimal-superconducting-qldpc-chip-v0-1-spec",
+      `
+---
+schema_version: 1
+type: "concept"
+key: "minimal-superconducting-qldpc-chip-v0-1-spec"
+title: "Minimal Superconducting qLDPC Flip-Chip Processor v0.1 Specification"
+aliases: []
+tags: []
+evidence_contract: "paper-backed"
+source_refs:
+  - "paper-qldpc-a"
+  - "paper-qldpc-b"
+  - "paper-qldpc-c"
+created_at: "2026-05-10T00:00:00.000Z"
+updated_at: "2026-05-10T00:00:00.000Z"
+---
+
+# Minimal Superconducting qLDPC Flip-Chip Processor v0.1 Specification
+`
+    );
+
+    const result = await suggestSemanticAliases({ workspaceDir: workspace });
+
+    assert.equal(result.suggestions.length, 1);
+    assert.equal(result.suggestions[0]?.canonicalPageKey, "minimal-superconducting-qldpc-chip");
+    assert.equal(result.suggestions[0]?.aliasPageKey, "minimal-superconducting-qldpc-chip-v0-1-spec");
+  } finally {
+    await rm(workspace, { recursive: true, force: true });
+  }
+});
+
 test("auditScopeDrift reports stale central framing only in scoped page regions", async () => {
   const workspace = await createMaintenanceFixture();
 
@@ -1113,7 +1243,7 @@ test("planWikiStructure maps and budgets semantic alias and scope drift growth a
       aliases: [{
         alias: "autonomous-agentic-quantum-eda",
         canonical: "agentic-autonomous-quantum-eda",
-        note: "shared sources: paper-d; overlapping tokens: agentic, autonomous, design, eda, quantum, superconducting"
+        note: "shared sources: paper-d; overlapping tokens: agentic, autonomous, eda"
       }]
     });
 
