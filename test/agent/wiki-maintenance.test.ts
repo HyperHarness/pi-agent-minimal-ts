@@ -707,6 +707,116 @@ test("lintPaperWiki initializes weak evidence contract summary count", async () 
   }
 });
 
+test("lintPaperWiki reports evidence audit gaps for typed pages", async () => {
+  const workspace = await createWorkspace();
+  try {
+    await writePage(workspace, "invalid-claim-page", `
+---
+schema_version: 1
+type: concept
+key: invalid-claim-page
+title: Invalid Claim Page
+aliases: []
+tags: []
+evidence_contract: mixed
+source_refs:
+  - "arxiv-2406.06015"
+claims: [{"claimId":"claim-1","kind":"quantitative","statement":"The threshold is 0.016.","sourceRefs":["arxiv-2406.06015"],"evidence":[{"paperKey":"arxiv-2406.06015","quote":"fit"}],"confidence":"high"}]
+created_at: 2026-05-10T00:00:00.000Z
+updated_at: 2026-05-10T00:00:00.000Z
+---
+
+# Invalid Claim Page
+`);
+    await writePage(workspace, "typed-relation-gap", `
+---
+schema_version: 1
+type: concept
+key: typed-relation-gap
+title: Typed Relation Gap
+aliases: []
+tags: []
+evidence_contract: paper-backed
+source_refs:
+  - "arxiv-2406.06015"
+related_pages:
+  - "surface-code"
+created_at: 2026-05-10T00:00:00.000Z
+updated_at: 2026-05-10T00:00:00.000Z
+---
+
+# Typed Relation Gap
+`);
+    await writePage(workspace, "contradiction-and-experiment-gap", `
+---
+schema_version: 1
+type: concept
+key: contradiction-and-experiment-gap
+title: Contradiction And Experiment Gap
+aliases: []
+tags: []
+evidence_contract: mixed
+source_refs:
+  - "arxiv-2406.06015"
+claims: [{"claimId":"claim-2","kind":"quantitative","statement":"The threshold is 0.016.","sourceRefs":["arxiv-2406.06015"],"evidence":[{"paperKey":"arxiv-2406.06015","page":1}],"confidence":"high"}]
+typed_relations: [{"type":"contradicts","target":"other-paper","targetKind":"source","evidenceRefs":["claim-2"],"status":"candidate"}]
+experiment_refs: [{"experimentId":"exp-1","title":"Missing log","logPath":"experiments/missing.log","status":"ran"}]
+created_at: 2026-05-10T00:00:00.000Z
+updated_at: 2026-05-10T00:00:00.000Z
+---
+
+# Contradiction And Experiment Gap
+`);
+
+    const result = await lintPaperWiki({
+      workspaceDir: workspace,
+      includeQualityAudit: true,
+      maxItems: 40
+    });
+
+    const kinds = result.issues.map((issue) => issue.kind);
+    assert.ok(kinds.includes("missing_claim_provenance"));
+    assert.ok(kinds.includes("unresolved_contradiction"));
+    assert.ok(kinds.includes("missing_typed_relation"));
+    assert.ok(kinds.includes("missing_experiment_ref"));
+  } finally {
+    await rm(workspace, { recursive: true, force: true });
+  }
+});
+
+test("lintPaperWiki reports code-backed pages without experiment refs", async () => {
+  const workspace = await createWorkspace();
+  try {
+    await writePage(workspace, "code-backed-page", `
+---
+schema_version: 1
+type: concept
+key: code-backed-page
+title: Code Backed Page
+aliases: []
+tags: []
+evidence_contract: code-backed
+source_refs:
+  - "local-helper"
+created_at: 2026-05-10T00:00:00.000Z
+updated_at: 2026-05-10T00:00:00.000Z
+---
+
+# Code Backed Page
+`);
+
+    const result = await lintPaperWiki({
+      workspaceDir: workspace,
+      includeQualityAudit: true,
+      maxItems: 20
+    });
+
+    assert.ok(result.issues.some((issue) => issue.kind === "code_backed_without_experiment"));
+  } finally {
+    await rm(workspace, { recursive: true, force: true });
+  }
+});
+
 test("lintPaperWiki treats typed source refs as paper-backed citations", async () => {
   const workspace = await createWorkspace();
   try {

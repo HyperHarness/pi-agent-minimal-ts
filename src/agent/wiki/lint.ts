@@ -38,7 +38,12 @@ export type PaperWikiLintIssueKind =
   | "duplicate_section"
   | "weak_synthesis_page"
   | "rendered_wiki_link"
-  | "weak_evidence_contract";
+  | "weak_evidence_contract"
+  | "missing_claim_provenance"
+  | "unresolved_contradiction"
+  | "missing_typed_relation"
+  | "missing_experiment_ref"
+  | "code_backed_without_experiment";
 
 export type PaperWikiLintSeverity = "high" | "medium" | "low";
 
@@ -98,7 +103,12 @@ const ISSUE_KINDS: PaperWikiLintIssueKind[] = [
   "duplicate_section",
   "weak_synthesis_page",
   "rendered_wiki_link",
-  "weak_evidence_contract"
+  "weak_evidence_contract",
+  "missing_claim_provenance",
+  "unresolved_contradiction",
+  "missing_typed_relation",
+  "missing_experiment_ref",
+  "code_backed_without_experiment"
 ];
 const DEFAULT_MAX_ITEMS = 30;
 const TYPED_WIKI_PAGE_TYPES = new Set([
@@ -315,7 +325,12 @@ function summarizeActions(issues: PaperWikiLintIssue[]): string[] {
     ["duplicate_section", "Normalize synthesis pages so each section title appears once."],
     ["weak_synthesis_page", "Convert short uncited pages into aliases or rebuild them with source-backed evidence."],
     ["rendered_wiki_link", "Fix double-bracket wiki links that render to missing local pages."],
-    ["weak_evidence_contract", "Add source_refs to paper-backed typed wiki pages or weaken the evidence contract."]
+    ["weak_evidence_contract", "Add source_refs to paper-backed typed wiki pages or weaken the evidence contract."],
+    ["missing_claim_provenance", "Add concrete page, figure, table, element, chunk, or code-output provenance to quantitative claims."],
+    ["unresolved_contradiction", "Review contradiction candidates and mark them confirmed or rejected."],
+    ["missing_typed_relation", "Replace legacy related_pages with typed_relations."],
+    ["missing_experiment_ref", "Fix experiment_refs paths or update the experiment status."],
+    ["code_backed_without_experiment", "Attach local experiment_refs to code-backed or mixed pages when claims depend on code."]
   ]);
   const counts = new Map<PaperWikiLintIssueKind, number>();
   for (const issue of issues) {
@@ -353,6 +368,30 @@ async function diagnosticOptsIntoTypedSchema(diagnostic: WikiPageDiagnostic): Pr
 
 function diagnosticHasOnlyMissingSourceRefs(diagnostic: WikiPageDiagnostic): boolean {
   return diagnostic.errors.length > 0 && diagnostic.errors.every((error) => error.code === "missing_source_refs");
+}
+
+function diagnosticHasClaimProvenanceError(diagnostic: WikiPageDiagnostic): boolean {
+  return diagnostic.errors.some((error) => error.code === "invalid_claim_provenance");
+}
+
+function claimHasConcreteEvidence(claim: {
+  evidence: Array<{
+    page?: number;
+    figure?: string;
+    table?: string;
+    elementId?: string;
+    chunkId?: string;
+    codeOutputPath?: string;
+  }>;
+}): boolean {
+  return claim.evidence.some((item) =>
+    item.page !== undefined ||
+    Boolean(item.figure) ||
+    Boolean(item.table) ||
+    Boolean(item.elementId) ||
+    Boolean(item.chunkId) ||
+    Boolean(item.codeOutputPath)
+  );
 }
 
 function hasConceptGapIssue(issues: PaperWikiLintIssue[], concept: string): boolean {
@@ -651,6 +690,14 @@ export async function lintPaperWiki(options: PaperWikiLintOptions): Promise<Pape
     });
     const weakEvidencePaths = new Set<string>();
     for (const diagnostic of typedPages.diagnostics) {
+      if (diagnosticHasClaimProvenanceError(diagnostic)) {
+        issues.push({
+          kind: "missing_claim_provenance",
+          severity: "high",
+          path: diagnostic.relativePath,
+          reason: diagnosticReason(diagnostic)
+        });
+      }
       if (
         !(await diagnosticOptsIntoTypedSchema(diagnostic)) ||
         !diagnosticHasOnlyMissingSourceRefs(diagnostic)
@@ -667,6 +714,66 @@ export async function lintPaperWiki(options: PaperWikiLintOptions): Promise<Pape
     }
     for (const page of typedPages.pages) {
       const relativePath = relativeToWorkspace(workspaceDir, page.path);
+      for (const claim of page.metadata.claims ?? []) {
+        if (claim.kind === "quantitative" && !claimHasConcreteEvidence(claim)) {
+          issues.push({
+            kind: "missing_claim_provenance",
+            severity: "high",
+            path: relativePath,
+            target: claim.claimId,
+            reason: "Quantitative claim lacks concrete paper location or code output provenance."
+          });
+        }
+      }
+      if ((page.metadata.related_pages?.length ?? 0) > 0 && (page.metadata.typed_relations?.length ?? 0) === 0) {
+        issues.push({
+          kind: "missing_typed_relation",
+          severity: "medium",
+          path: relativePath,
+          reason: "Page still uses related_pages without typed_relations."
+        });
+      }
+      for (const relation of page.metadata.typed_relations ?? []) {
+        if (relation.type === "contradicts" && relation.status === "candidate") {
+          issues.push({
+            kind: "unresolved_contradiction",
+            severity: "medium",
+            path: relativePath,
+            target: relation.target,
+            reason: "Contradiction relation is still a candidate and needs review."
+          });
+        }
+      }
+      for (const experiment of page.metadata.experiment_refs ?? []) {
+        const experimentPaths = [
+          experiment.scriptPath,
+          experiment.resultPath,
+          experiment.logPath,
+          ...(experiment.artifactPaths ?? [])
+        ].filter((candidate): candidate is string => Boolean(candidate));
+        for (const experimentPath of experimentPaths) {
+          if (!(await pathExists(path.resolve(workspaceDir, experimentPath)))) {
+            issues.push({
+              kind: "missing_experiment_ref",
+              severity: experiment.status === "planned" ? "low" : "medium",
+              path: relativePath,
+              target: experimentPath,
+              reason: "Experiment reference points to a missing workspace-relative path."
+            });
+          }
+        }
+      }
+      if (
+        (page.metadata.evidence_contract === "code-backed" || page.metadata.evidence_contract === "mixed") &&
+        (page.metadata.experiment_refs?.length ?? 0) === 0
+      ) {
+        issues.push({
+          kind: "code_backed_without_experiment",
+          severity: "medium",
+          path: relativePath,
+          reason: "Code-backed or mixed page has no experiment_refs."
+        });
+      }
       if (
         page.metadata.evidence_contract === "paper-backed" &&
         page.metadata.source_refs.length === 0 &&
