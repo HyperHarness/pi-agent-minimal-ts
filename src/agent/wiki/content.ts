@@ -158,6 +158,19 @@ function sectionList(title: string, values: string[] | undefined): string {
   return `\n## ${title}\n\n${cleaned.map((value) => `- ${value}`).join("\n")}\n`;
 }
 
+function normalizeMarkdownSectionTitle(value: string): string {
+  return value
+    .toLowerCase()
+    .replace(/\s+/g, " ")
+    .trim();
+}
+
+function hasMarkdownSection(markdown: string, title: string): boolean {
+  const expected = normalizeMarkdownSectionTitle(title);
+  return [...markdown.matchAll(/^##\s+(.+)$/gm)]
+    .some((match) => normalizeMarkdownSectionTitle(match[1] ?? "") === expected);
+}
+
 function yamlSourceCitations(values: PaperWikiPageSourceCitation[]): string {
   const cleaned = values.filter((value) => value.paperKey.trim() && value.path.trim());
   if (cleaned.length === 0) {
@@ -628,6 +641,9 @@ export async function writePaperWikiPage(input: PaperWikiPageInput): Promise<Pap
     }
   });
   await ensurePaperWikiScaffold(input.workspaceDir);
+  const openQuestionsSection = hasMarkdownSection(pageMarkdown, "Open Questions")
+    ? ""
+    : sectionList("Open Questions", input.openQuestions);
   const markdown = `---
 type: "wiki-synthesis-page"
 page_key: ${quoteYaml(pageKey)}
@@ -644,7 +660,7 @@ related_pages: ${yamlList(input.relatedPageKeys)}
 # ${title}
 
 ${pageMarkdown}
-${sectionList("Open Questions", input.openQuestions)}
+${openQuestionsSection}
 ## Sources
 
 ${input.sourceCitations.map((source) =>

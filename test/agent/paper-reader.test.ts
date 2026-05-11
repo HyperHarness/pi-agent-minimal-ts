@@ -612,6 +612,42 @@ test("writePaperWikiPage saves a synthesis page and updates the wiki index", asy
   }
 });
 
+test("writePaperWikiPage does not duplicate an existing open questions section", async () => {
+  const workspace = await createWorkspace();
+  try {
+    const page = await writePaperWikiPage({
+      workspaceDir: workspace,
+      topic: "relativistic quantum computation",
+      pageKey: "relativistic-quantum-computation",
+      title: "Relativistic Quantum Computation",
+      pageMarkdown: [
+        "## Overview",
+        "",
+        "Relativistic motion can be treated as a computational resource [aps-relativistic].",
+        "",
+        "## Open Questions",
+        "",
+        "- Can the relativistic-motion architecture be implemented experimentally [aps-relativistic]?"
+      ].join("\n"),
+      openQuestions: [
+        "What fault-tolerance strategy is compatible with relativistic-motion-based computation?"
+      ],
+      sourceCitations: [
+        {
+          paperKey: "aps-relativistic",
+          title: "Universal Quantum Computer from Relativistic Motion",
+          path: "knowledge-base/sources/aps-relativistic/summary.md"
+        }
+      ]
+    });
+
+    const markdown = await readFile(path.join(workspace, page.pagePath), "utf8");
+    assert.equal([...markdown.matchAll(/^## Open Questions$/gm)].length, 1);
+  } finally {
+    await rm(workspace, { recursive: true, force: true });
+  }
+});
+
 test("writePaperWikiPage refuses symlinked targets before journaling", async () => {
   const workspace = await createWorkspace();
   const outside = await mkdtemp(path.join(os.tmpdir(), "pi-paper-reader-outside-"));
