@@ -1402,7 +1402,7 @@ export function createWikiTools(input: {
     name: "wiki_apply_structure_plan",
     label: "Apply Wiki Structure Plan",
     description:
-      "Applies approved wiki_structure_plan actions with dry-run and low-risk safeguards. The first implementation only performs deterministic duplicate-section cleanup and skips unsupported or risky actions.",
+      "Applies approved wiki_structure_plan actions with dry-run and low-risk safeguards, including deterministic duplicate-section cleanup, safe duplicate-page merges, alias creation, index rebuilds, and constrained scope-note updates.",
     parameters: wikiApplyStructurePlanParameters,
     execute: async (_toolCallId: string, args: WikiApplyStructurePlanParameters) => {
       const result = await applyWikiStructurePlanImpl({

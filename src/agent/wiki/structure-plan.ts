@@ -105,6 +105,27 @@ function actionForIssue(
     };
   }
   if (issue.kind === "near_duplicate_page") {
+    const aliasPageKey = issue.path ? pathBasenameWithoutMarkdownExtension(issue.path) : undefined;
+    if (issue.target && aliasPageKey) {
+      return {
+        id,
+        type: "merge_duplicate_pages",
+        priority: priorityForIssue(issue),
+        risk: issue.severity === "low" ? "low" : "medium",
+        issueKind: issue.kind,
+        owner: "wiki-agent",
+        path: issue.path,
+        target: issue.target,
+        reason: issue.reason,
+        recommendedTool: "wiki_apply_structure_plan",
+        recommendedArgs: {
+          canonical: issue.target,
+          redundant: aliasPageKey,
+          alias: aliasPageKey,
+          note: issue.reason
+        }
+      };
+    }
     return {
       id,
       type: "create_alias",

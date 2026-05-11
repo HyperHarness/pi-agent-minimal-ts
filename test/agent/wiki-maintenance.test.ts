@@ -1354,6 +1354,209 @@ Shared source evidence.
   }
 });
 
+test("planWikiStructure plans low-risk duplicate page merges for singular plural concept pages", async () => {
+  const workspace = await createWorkspace();
+
+  try {
+    await writeReadySourceManifest(workspace, "paper-surface", ["surface-code"]);
+    await writePage(
+      workspace,
+      "surface-code",
+      `
+---
+schema_version: 1
+type: "concept"
+key: "surface-code"
+title: "Surface Code"
+aliases: []
+tags:
+  - "surface-code"
+evidence_contract: "paper-backed"
+source_refs:
+  - "paper-surface"
+created_at: "2026-05-10T00:00:00.000Z"
+updated_at: "2026-05-10T00:00:00.000Z"
+---
+
+# Surface Code
+
+Surface code is the canonical synthesis page with maintained evidence, decoding context,
+layout constraints, and fault-tolerant quantum computing notes.
+`
+    );
+    await writePage(
+      workspace,
+      "surface-codes",
+      `
+---
+schema_version: 1
+type: "concept"
+key: "surface-codes"
+title: "Surface Codes"
+aliases: []
+tags:
+  - "surface-code"
+evidence_contract: "paper-backed"
+source_refs:
+  - "paper-surface"
+created_at: "2026-05-10T00:00:00.000Z"
+updated_at: "2026-05-10T00:00:00.000Z"
+---
+
+# Surface Codes
+
+Plural duplicate.
+`
+    );
+
+    const lint = await lintPaperWiki({
+      workspaceDir: workspace,
+      maxItems: 20
+    });
+    const lintMergeCandidate = lint.issues.find((issue) =>
+      issue.kind === "near_duplicate_page" &&
+      issue.path === "knowledge-base/pages/surface-codes.md"
+    );
+    assert.equal(lintMergeCandidate?.severity, "low");
+    assert.equal(lintMergeCandidate?.target, "surface-code");
+    assert.match(lintMergeCandidate?.reason ?? "", /shared source evidence match canonical page surface-code/);
+
+    const result = await planWikiStructure({
+      workspaceDir: workspace,
+      maxItems: 10
+    });
+
+    const merge = result.actions.find((action) => action.type === "merge_duplicate_pages");
+    assert.equal(merge?.risk, "low");
+    assert.equal(merge?.recommendedTool, "wiki_apply_structure_plan");
+    assert.deepEqual(merge?.recommendedArgs, {
+      canonical: "surface-code",
+      redundant: "surface-codes",
+      alias: "surface-codes",
+      note: "Low-risk duplicate concept page: normalized title and shared source evidence match canonical page surface-code."
+    });
+  } finally {
+    await rm(workspace, { recursive: true, force: true });
+  }
+});
+
+test("applyWikiStructurePlan merges duplicate pages, rewrites inbound links, and deletes the redundant page", async () => {
+  const workspace = await createWorkspace();
+
+  try {
+    await writePage(
+      workspace,
+      "surface-code",
+      `
+---
+schema_version: 1
+type: "concept"
+key: "surface-code"
+title: "Surface Code"
+aliases: []
+tags:
+  - "surface-code"
+created_at: "2026-05-10T00:00:00.000Z"
+updated_at: "2026-05-10T00:00:00.000Z"
+---
+
+# Surface Code
+
+Canonical content.
+`
+    );
+    await writePage(
+      workspace,
+      "surface-codes",
+      `
+---
+schema_version: 1
+type: "concept"
+key: "surface-codes"
+title: "Surface Codes"
+aliases: []
+tags:
+  - "surface-code"
+created_at: "2026-05-10T00:00:00.000Z"
+updated_at: "2026-05-10T00:00:00.000Z"
+---
+
+# Surface Codes
+
+Redundant plural content.
+`
+    );
+    await writePage(
+      workspace,
+      "fault-tolerance",
+      `
+---
+title: "Fault Tolerance"
+aliases: []
+---
+
+# Fault Tolerance
+
+See [Surface Codes](knowledge-base/pages/surface-codes.md) for the code family.
+`
+    );
+
+    const action = {
+      id: "wiki-structure-001",
+      type: "merge_duplicate_pages" as const,
+      priority: "medium" as const,
+      risk: "low" as const,
+      issueKind: "near_duplicate_page" as const,
+      owner: "wiki-agent" as const,
+      path: "knowledge-base/pages/surface-codes.md",
+      target: "surface-code",
+      reason: "Plural duplicate.",
+      recommendedTool: "wiki_apply_structure_plan" as const,
+      recommendedArgs: {
+        canonical: "surface-code",
+        redundant: "surface-codes",
+        alias: "surface-codes",
+        note: "Plural duplicate."
+      }
+    };
+    const { applyWikiStructurePlan } = await import("../../src/agent/wiki/structure-apply.js");
+
+    const dryRun = await applyWikiStructurePlan({
+      workspaceDir: workspace,
+      dryRun: true,
+      runVerification: false,
+      actions: [action]
+    });
+    assert.equal(dryRun.status, "dry_run");
+    assert.deepEqual(dryRun.changedFiles, []);
+    assert.ok(dryRun.applied[0]?.changedFiles.includes("knowledge-base/pages/surface-code.md"));
+    assert.ok(dryRun.applied[0]?.changedFiles.includes("knowledge-base/pages/surface-codes.md"));
+    assert.ok(dryRun.applied[0]?.changedFiles.includes("knowledge-base/pages/fault-tolerance.md"));
+
+    const applied = await applyWikiStructurePlan({
+      workspaceDir: workspace,
+      dryRun: false,
+      runVerification: false,
+      actions: [action]
+    });
+
+    assert.equal(applied.status, "applied");
+    assert.ok(applied.changedFiles.includes("knowledge-base/pages/surface-code.md"));
+    assert.ok(applied.changedFiles.includes("knowledge-base/pages/surface-codes.md"));
+    assert.ok(applied.changedFiles.includes("knowledge-base/pages/fault-tolerance.md"));
+    await assert.rejects(readFile(path.join(workspace, "knowledge-base/pages/surface-codes.md"), "utf8"));
+    const canonical = await readFile(path.join(workspace, "knowledge-base/pages/surface-code.md"), "utf8");
+    assert.match(canonical, /aliases:\n\s+- "surface-codes"/);
+    const inbound = await readFile(path.join(workspace, "knowledge-base/pages/fault-tolerance.md"), "utf8");
+    assert.match(inbound, /knowledge-base\/pages\/surface-code\.md/);
+    assert.doesNotMatch(inbound, /knowledge-base\/pages\/surface-codes\.md/);
+    const log = await readFile(path.join(workspace, "knowledge-base/log.md"), "utf8");
+    assert.match(log, /merged duplicate pages/);
+  } finally {
+    await rm(workspace, { recursive: true, force: true });
+  }
+});
+
 test("applyWikiStructurePlan dry-runs safe alias and scope note actions", async () => {
   const workspace = await createWorkspace();
 

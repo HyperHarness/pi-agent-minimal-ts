@@ -224,6 +224,28 @@ function extractSourceCitationPaths(frontmatter: string): string[] {
     });
 }
 
+function extractSourceCitationKeys(frontmatter: string): string[] {
+  const keys = new Set<string>();
+  for (const sourceRef of extractYamlStringValues(frontmatter, "source_refs")) {
+    keys.add(sourceRef);
+  }
+  for (const match of frontmatter.matchAll(/^\s+paper_key:\s+(.+)$/gm)) {
+    const rawValue = match[1]?.trim();
+    if (!rawValue) {
+      continue;
+    }
+    try {
+      const parsed = JSON.parse(rawValue);
+      if (typeof parsed === "string" && parsed.trim()) {
+        keys.add(parsed.trim());
+      }
+    } catch {
+      keys.add(rawValue.replace(/^"|"$/g, "").trim());
+    }
+  }
+  return [...keys].filter(Boolean);
+}
+
 function isAliasFrontmatter(frontmatter: string): boolean {
   return frontmatter.includes('type: "wiki-alias-page"') ||
     frontmatter.includes("type: wiki-alias-page") ||
@@ -277,6 +299,55 @@ function normalizeTitleForDuplicate(value: string): string {
     })
     .replace(/\s+/g, " ")
     .trim();
+}
+
+function sharedCitationKeyCount(
+  left: { sourceCitationKeys: string[] },
+  right: { sourceCitationKeys: string[] }
+): number {
+  const rightKeys = new Set(right.sourceCitationKeys);
+  return left.sourceCitationKeys.filter((key) => rightKeys.has(key)).length;
+}
+
+function duplicateCanonicalSortKey(page: {
+  pageKey: string;
+  sourceCitationCount: number;
+  bodyWords: number;
+}): [number, number, number, string] {
+  const pluralPenalty = /\b[a-z]+s\b/.test(page.pageKey.replace(/-/g, " ")) ? 1 : 0;
+  return [
+    -page.sourceCitationCount,
+    -page.bodyWords,
+    pluralPenalty,
+    page.pageKey
+  ];
+}
+
+function compareDuplicateCanonicalCandidates(
+  left: {
+    pageKey: string;
+    sourceCitationCount: number;
+    bodyWords: number;
+  },
+  right: {
+    pageKey: string;
+    sourceCitationCount: number;
+    bodyWords: number;
+  }
+): number {
+  const leftKey = duplicateCanonicalSortKey(left);
+  const rightKey = duplicateCanonicalSortKey(right);
+  for (let index = 0; index < leftKey.length; index += 1) {
+    const leftValue = leftKey[index];
+    const rightValue = rightKey[index];
+    if (typeof leftValue === "number" && typeof rightValue === "number" && leftValue !== rightValue) {
+      return leftValue - rightValue;
+    }
+    if (typeof leftValue === "string" && typeof rightValue === "string" && leftValue !== rightValue) {
+      return leftValue.localeCompare(rightValue);
+    }
+  }
+  return 0;
 }
 
 function extractSectionTitles(markdown: string): string[] {
@@ -438,6 +509,7 @@ export async function lintPaperWiki(options: PaperWikiLintOptions): Promise<Pape
     path: string;
     isAlias: boolean;
     sourceCitationCount: number;
+    sourceCitationKeys: string[];
     sectionTitles: string[];
     bodyWords: number;
   }> = [];
@@ -479,6 +551,7 @@ export async function lintPaperWiki(options: PaperWikiLintOptions): Promise<Pape
     const typedSourceRefCount = frontmatterOptsIntoTypedSchema(frontmatter)
       ? extractYamlStringValues(frontmatter, "source_refs").length
       : 0;
+    const sourceCitationKeys = extractSourceCitationKeys(frontmatter);
     const sourceCitationCount = extractSourceCitationPaths(frontmatter).length + typedSourceRefCount;
     const isAlias = isAliasFrontmatter(frontmatter);
     if (typedSourceRefCount > 0) {
@@ -491,6 +564,7 @@ export async function lintPaperWiki(options: PaperWikiLintOptions): Promise<Pape
       path: relativePath,
       isAlias,
       sourceCitationCount,
+      sourceCitationKeys,
       sectionTitles,
       bodyWords: countBodyWords(markdown)
     });
@@ -615,7 +689,24 @@ export async function lintPaperWiki(options: PaperWikiLintOptions): Promise<Pape
   for (const pages of normalizedTitles.values()) {
     const uniqueTitles = new Set(pages.map((page) => page.title.toLowerCase().trim()));
     if (pages.length > 1 && uniqueTitles.size > 1) {
-      for (const page of pages) {
+      const canonical = [...pages].sort(compareDuplicateCanonicalCandidates)[0];
+      const lowRiskPages = pages
+        .filter((page) => page.pageKey !== canonical.pageKey)
+        .filter((page) => sharedCitationKeyCount(canonical, page) > 0);
+      const lowRiskPageKeys = new Set(lowRiskPages.map((page) => page.pageKey));
+      for (const page of lowRiskPages) {
+        issues.push({
+          kind: "near_duplicate_page",
+          severity: "low",
+          path: page.path,
+          target: canonical.pageKey,
+          reason: `Low-risk duplicate concept page: normalized title and shared source evidence match canonical page ${canonical.pageKey}.`
+        });
+      }
+      const mediumPages = lowRiskPages.length > 0
+        ? pages.filter((candidate) => candidate.pageKey !== canonical.pageKey && !lowRiskPageKeys.has(candidate.pageKey))
+        : pages;
+      for (const page of mediumPages) {
         issues.push({
           kind: "near_duplicate_page",
           severity: "medium",
