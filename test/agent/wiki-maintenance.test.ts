@@ -1693,6 +1693,150 @@ Redundant compact spelling page.
   }
 });
 
+test("wiki lint default display quotas keep duplicate pages visible amid many concept gaps", async () => {
+  const workspace = await createWorkspace();
+
+  try {
+    const manyGapTags = Array.from({ length: 35 }, (_, index) => `gap-topic-${String(index + 1).padStart(2, "0")}`);
+    await writeSource(
+      workspace,
+      "gap-source-a",
+      `---
+paper_key: gap-source-a
+title: Gap Source A
+tags:
+${manyGapTags.map((tag) => `  - ${tag}`).join("\n")}
+---
+
+Gap evidence A.
+`
+    );
+    await writeSource(
+      workspace,
+      "gap-source-b",
+      `---
+paper_key: gap-source-b
+title: Gap Source B
+tags:
+${manyGapTags.map((tag) => `  - ${tag}`).join("\n")}
+---
+
+Gap evidence B.
+`
+    );
+    await writePage(
+      workspace,
+      "surface-code",
+      `
+---
+schema_version: 1
+type: "concept"
+key: "surface-code"
+title: "Surface Code"
+aliases: []
+tags:
+  - "surface-code"
+evidence_contract: "none"
+source_refs: []
+created_at: "2026-05-10T00:00:00.000Z"
+updated_at: "2026-05-10T00:00:00.000Z"
+---
+
+# Surface Code
+
+Canonical surface code page.
+`
+    );
+    await writePage(
+      workspace,
+      "surface-codes",
+      `
+---
+type: "wiki-alias-page"
+page_key: "surface-codes"
+title: "Surface Codes"
+canonical_page: "surface-code"
+related_pages:
+  - "surface-code"
+---
+
+# Surface Codes
+
+Plural alias page.
+`
+    );
+    await writePage(
+      workspace,
+      "su-2",
+      `
+---
+schema_version: 1
+type: "concept"
+key: "su-2"
+title: "SU(2)"
+aliases: []
+tags:
+  - "su-2"
+evidence_contract: "none"
+source_refs: []
+created_at: "2026-05-10T00:00:00.000Z"
+updated_at: "2026-05-10T00:00:00.000Z"
+---
+
+# SU(2)
+
+Canonical compact group notation page.
+`
+    );
+    await writePage(
+      workspace,
+      "su2",
+      `
+---
+type: "wiki-alias-page"
+page_key: "su2"
+title: "SU2"
+canonical_page: "su-2"
+related_pages:
+  - "su-2"
+---
+
+# SU2
+
+Compact alias page.
+`
+    );
+
+    const lint = await lintPaperWiki({ workspaceDir: workspace });
+
+    assert.equal(lint.summary.concept_gap, 35);
+    assert.ok(lint.issues.some((issue) =>
+      issue.kind === "near_duplicate_page" &&
+      issue.path === "knowledge-base/pages/surface-codes.md" &&
+      issue.target === "surface-code"
+    ));
+    assert.ok(lint.issues.some((issue) =>
+      issue.kind === "near_duplicate_page" &&
+      issue.path === "knowledge-base/pages/su2.md" &&
+      issue.target === "su-2"
+    ));
+
+    const plan = await planWikiStructure({ workspaceDir: workspace });
+    assert.ok(plan.actions.some((action) =>
+      action.type === "merge_duplicate_pages" &&
+      action.path === "knowledge-base/pages/surface-codes.md" &&
+      action.target === "surface-code"
+    ));
+    assert.ok(plan.actions.some((action) =>
+      action.type === "merge_duplicate_pages" &&
+      action.path === "knowledge-base/pages/su2.md" &&
+      action.target === "su-2"
+    ));
+  } finally {
+    await rm(workspace, { recursive: true, force: true });
+  }
+});
+
 test("wiki structure repair deletes existing simple alias pages instead of keeping alias stubs", async () => {
   const workspace = await createWorkspace();
 

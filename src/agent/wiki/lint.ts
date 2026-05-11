@@ -114,6 +114,19 @@ const ISSUE_KINDS: PaperWikiLintIssueKind[] = [
   "code_backed_without_experiment"
 ];
 const DEFAULT_MAX_ITEMS = 30;
+const DEFAULT_ISSUE_KIND_DISPLAY_LIMIT = 8;
+const ISSUE_KIND_DISPLAY_LIMITS: Partial<Record<PaperWikiLintIssueKind, number>> = {
+  broken_wiki_link: 12,
+  stale_index: 12,
+  missing_source_citation: 12,
+  source_without_synthesis_coverage: 8,
+  concept_gap: 8,
+  high_value_concept_gap: 8,
+  semantic_alias_candidate: 8,
+  near_duplicate_page: 8,
+  duplicate_section: 8,
+  weak_synthesis_page: 8
+};
 const TYPED_WIKI_PAGE_TYPES = new Set([
   "paper-source",
   "synthesis",
@@ -654,6 +667,27 @@ function summarizeActions(issues: PaperWikiLintIssue[]): string[] {
 function issueRank(issue: PaperWikiLintIssue): number {
   const rank: Record<PaperWikiLintSeverity, number> = { high: 0, medium: 1, low: 2 };
   return rank[issue.severity];
+}
+
+function issueKindDisplayLimit(kind: PaperWikiLintIssueKind, maxItems: number): number {
+  return Math.max(1, Math.min(maxItems, ISSUE_KIND_DISPLAY_LIMITS[kind] ?? DEFAULT_ISSUE_KIND_DISPLAY_LIMIT));
+}
+
+function selectIssuesForDisplay(issues: PaperWikiLintIssue[], maxItems: number): PaperWikiLintIssue[] {
+  const selected: PaperWikiLintIssue[] = [];
+  const selectedByKind = new Map<PaperWikiLintIssueKind, number>();
+  for (const issue of issues) {
+    if (selected.length >= maxItems) {
+      break;
+    }
+    const used = selectedByKind.get(issue.kind) ?? 0;
+    if (used >= issueKindDisplayLimit(issue.kind, maxItems)) {
+      continue;
+    }
+    selected.push(issue);
+    selectedByKind.set(issue.kind, used + 1);
+  }
+  return selected;
 }
 
 function diagnosticReason(diagnostic: WikiPageDiagnostic): string {
@@ -1285,7 +1319,7 @@ export async function lintPaperWiki(options: PaperWikiLintOptions): Promise<Pape
     sourceCount: sourceFiles.length,
     issueCount: issues.length,
     summary,
-    issues: sortedIssues.slice(0, maxItems),
+    issues: selectIssuesForDisplay(sortedIssues, maxItems),
     actions: summarizeActions(sortedIssues)
   };
   if (Object.keys(reports).length > 0) {

@@ -117,7 +117,11 @@ const searchPaperWikiParameters = Type.Object({
 });
 
 const wikiLintParameters = Type.Object({
-  maxItems: Type.Optional(Type.Integer({ description: "Maximum wiki structure issues to return.", minimum: 1 })),
+  maxItems: Type.Optional(Type.Integer({
+    description:
+      "Maximum wiki structure issues to return after per-issue-kind display caps are applied. Defaults to 30.",
+    minimum: 1
+  })),
   goal: Type.Optional(Type.String({ description: "Current wiki optimization goal used to rank concept gaps." })),
   focus: Type.Optional(Type.Array(Type.String({ description: "Focus terms used to rank high-value concept gaps." }))),
   includeCoverage: Type.Optional(Type.Boolean({ description: "Include source/page coverage diagnostics in reports." })),
