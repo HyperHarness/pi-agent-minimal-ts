@@ -50,6 +50,10 @@ type ToolName =
   | "load_paper_writing_skill"
   | "merge_wiki_aliases"
   | "open_paper_page_for_login"
+  | "paper_orchestra_check_draft"
+  | "paper_orchestra_prepare_workspace"
+  | "paper_orchestra_score_delta"
+  | "paper_orchestra_snapshot_provenance"
   | "paper_wiki_relations"
   | "parse_paper"
   | "read_file"
@@ -132,6 +136,10 @@ export const TOOL_BOUNDARY_NAMES: Record<ToolBoundaryRole, readonly ToolName[]> 
     "read_file",
     "write_file",
     "replace_file_text",
+    "paper_orchestra_prepare_workspace",
+    "paper_orchestra_check_draft",
+    "paper_orchestra_score_delta",
+    "paper_orchestra_snapshot_provenance",
     "compile_latex",
     "answer_paper_wiki_question",
     "search_paper_wiki",

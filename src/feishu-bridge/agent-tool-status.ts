@@ -33,6 +33,10 @@ const WIKI_TOOL_LABELS: Record<string, string> = {
   search_local_papers: '检索本地论文',
   write_design_artifact: '写入设计记录',
   load_paper_writing_skill: '加载论文写作技能',
+  paper_orchestra_prepare_workspace: '准备论文写作工作区',
+  paper_orchestra_check_draft: '检查论文草稿',
+  paper_orchestra_score_delta: '评估修订分数',
+  paper_orchestra_snapshot_provenance: '记录论文 provenance',
   wiki_health: '检查 wiki 健康状态',
   wiki_health_fix: '修复 wiki 健康问题',
 };
@@ -68,7 +72,7 @@ function summarizeArgs(args: unknown): string {
     return '';
   }
 
-  const fields = ['path', 'texPath', 'query', 'topic', 'question', 'paperKey']
+  const fields = ['path', 'workspacePath', 'texPath', 'query', 'topic', 'question', 'paperKey']
     .map((key) => getStringField(args, key))
     .filter((value): value is string => Boolean(value));
 

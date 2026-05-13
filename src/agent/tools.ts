@@ -4,6 +4,7 @@ import { createFileTools } from "./file-tools.js";
 import { createLibraryHealthTools } from "./library-health-tools.js";
 import { createPaperTools } from "./paper/tools.js";
 import { createWebTools } from "./web-tools.js";
+import { createWritingTools } from "./writing/tools.js";
 import { createWikiTools } from "./wiki/tools.js";
 import {
   getToolBoundaryToolNames as getToolBoundaryToolNamesFromBoundaryModule,
@@ -54,6 +55,9 @@ export function createTools(workspaceDir: string, dependencies: ToolDependencies
     workspaceDir: resolvedWorkspaceDir,
     dependencies
   });
+  const writingTools = createWritingTools({
+    workspaceDir: resolvedWorkspaceDir
+  });
 
   const tools = [
     ...fileTools.defaultTools,
@@ -71,6 +75,7 @@ export function createTools(workspaceDir: string, dependencies: ToolDependencies
     tools.push(
       ...wikiTools.fullTools,
       ...fileTools.artifactFullTools,
+      ...writingTools.fullTools,
       ...fileTools.tailFullTools,
       ...libraryHealthTools.fullTools,
       ...webTools.fullTools,

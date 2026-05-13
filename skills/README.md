@@ -9,6 +9,6 @@ skills/<worker-role>/<skill-name>/prompt.md
 skills/<worker-role>/<skill-name>/ATTRIBUTION.md
 ```
 
-The current runtime exposes `load_paper_writing_skill` to the `paper-writing-worker` boundary. It loads modules from `skills/paper-writing-worker/<skill-name>/prompt.md`, defaulting to `sciwrite`.
+The current runtime exposes `load_paper_writing_skill` to the `paper-writing-worker` boundary. It loads modules from `skills/paper-writing-worker/<skill-name>/prompt.md`, defaulting to `sciwrite`. PaperOrchestra-style workflow modules live in the same namespace, including `paper-orchestra`, `po-outline`, `po-literature-review`, `po-plotting`, `po-section-writing`, and `po-content-refinement`.
 
 Keep skills here when they describe worker behavior. Keep manuscript drafts, figures, claims, and paper-specific notes under `paper-projects/`.

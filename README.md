@@ -17,6 +17,7 @@ This repository is a practical agent harness for literature ingestion, local wik
 - provides `design-projects/` as the recommended code workspace root for design subagent projects
 - manages paper/design/wiki Git repositories through a bridge-side repo manager
 - exposes isolated worker tool surfaces for wiki, evidence, download, design, and paper-writing workflows
+- supports a PaperOrchestra-inspired controlled manuscript workflow for writing workspace setup, draft gates, refinement decisions, and provenance snapshots
 
 ## Architecture
 
@@ -55,6 +56,7 @@ The bridge should not contain domain reasoning. It should route messages, collec
 The local chat/RPC runtime has a lightweight router layer before the default main-agent turn. It detects high-confidence worker intents and runs the requested turn in a clean worker context with the corresponding boundary tools:
 
 - manuscript editing, writing-quality review, or LaTeX requests -> `paper-writing-worker`
+- PaperOrchestra-style full manuscript generation, outline, draft refinement, or submission-package requests -> `paper-writing-worker`
 - paper search, paper download, acquisition fallback, and citation-metadata repair requests -> `paper-download-subagent`
 - evidence construction, paper summarization, and source-summary relation requests -> `wiki-evidence-worker`
 - chip-design records, verification records, or design-failure cases -> `design-subagent`
@@ -189,6 +191,8 @@ The router automatically sends high-confidence worker requests to the matching i
 ```
 
 The paper-writing worker receives only the `paper-writing-worker` boundary tools: project-local writing skills, manuscript file edits, LaTeX compilation, local wiki retrieval, and wiki linting. It cannot download papers, run web search, build wiki pages, or create raw source summaries.
+
+For PaperOrchestra-style workflows, keep the writing workspace under a private paper project, for example `paper-projects/current/paper-orchestra/`. The worker can prepare and validate the controlled layout, run draft gates, apply refinement accept/revert decisions, and write a provenance snapshot, while upstream paper acquisition and wiki evidence construction remain owned by the download and evidence workers.
 
 Other explicit worker routes:
 
@@ -342,7 +346,11 @@ This v0 is deterministic schema and lint support. It does not run background fre
 
 - `write_design_artifact`: full-mode / design-subagent tool that writes structured design records, verification reports, failure records, and benchmark cases under `knowledge-base/design-records/`
 - `load_paper_writing_skill`: full-mode / paper-writing-worker tool that loads worker-scoped writing prompt modules such as `skills/paper-writing-worker/sciwrite/prompt.md`
-- paper-writing-worker tools: project-local writing skill loading, manuscript file reading/writing, LaTeX compilation, local wiki retrieval, and wiki-grounded Q&A
+- `paper_orchestra_prepare_workspace`: full-mode / paper-writing-worker tool that creates and validates the controlled PaperOrchestra writing workspace layout
+- `paper_orchestra_check_draft`: full-mode / paper-writing-worker tool that runs orphan-citation, LaTeX sanity, and anonymous anti-leakage draft gates
+- `paper_orchestra_score_delta`: full-mode / paper-writing-worker tool that applies PaperOrchestra refinement accept/revert/plateau halt rules to score JSON files
+- `paper_orchestra_snapshot_provenance`: full-mode / paper-writing-worker tool that writes input/final artifact hashes to `provenance.json`
+- paper-writing-worker tools: project-local writing skill loading, manuscript file reading/writing, PaperOrchestra writing gates, LaTeX compilation, local wiki retrieval, and wiki-grounded Q&A
 - `get_time`: full-mode diagnostic tool for checking the current local time
 
 The design subagent records design reasoning and verification artifacts. The wiki agent later curates stable lessons from those artifacts into durable wiki pages.
@@ -359,7 +367,7 @@ Design code should live under `design-projects/`, usually in a project-specific 
 | `paper-download-subagent` | literature acquisition | search/download, browser/manual fallback, webpage capture, local-parse/arXiv/Crossref citation metadata refresh, parsing, health repair | wiki page writes, source-summary authoring |
 | `wiki-evidence-worker` | evidence construction | source summaries, relation maintenance, fixed-evidence page draft output | paper download, external search, autonomous acquisition |
 | `design-subagent` | minimal chip-design reasoning | local wiki/paper retrieval, `write_design_artifact` | web search, paper download, wiki page writes, arbitrary file writes |
-| `paper-writing-worker` | manuscript writing | project-local writing skills, manuscript read/write, LaTeX compile, wiki retrieval/Q&A | paper download, source-summary generation, wiki page construction, web search |
+| `paper-writing-worker` | manuscript writing | project-local writing skills, manuscript read/write, PaperOrchestra workspace/gate/provenance tools, LaTeX compile, wiki retrieval/Q&A | paper download, source-summary generation, wiki page construction, web search |
 
 Use the boundary APIs in benchmarks so each model is evaluated under the same tool surface.
 

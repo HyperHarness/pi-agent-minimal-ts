@@ -97,8 +97,9 @@ export function routeChatPromptToWorker(text: string): RoutedWorkerPrompt | null
   }
 
   const paperWritingIntent =
-    /(论文|manuscript|main\.tex|latex|paper-projects)/i.test(trimmed) &&
-    /(修改|润色|改写|重写|编辑|修订|编译|评审|审稿|问题点|问题|polish|revise|rewrite|edit|compile|review|critique|evaluate|issues|problems)/i.test(trimmed);
+    (/(论文|manuscript|main\.tex|latex|paper-projects|paper[-\s]?orchestra|完整论文|conference submission)/i.test(trimmed) &&
+      /(修改|润色|改写|重写|编辑|修订|编译|评审|审稿|问题点|问题|polish|revise|rewrite|edit|compile|review|critique|evaluate|issues|problems|写|生成|撰写|投稿|run|generate|draft|outline|refine)/i.test(trimmed)) ||
+    /paper[-\s]?orchestra/i.test(trimmed);
   if (paperWritingIntent) {
     return { role: "paper-writing-worker", instruction: trimmed, reason: "intent" };
   }
