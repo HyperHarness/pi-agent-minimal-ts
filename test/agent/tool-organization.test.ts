@@ -48,7 +48,7 @@ test("tool adapters avoid obsolete top-level compatibility files", () => {
   assert.equal(existsSync(legacyPaperToolsPath), false);
   assert.equal(existsSync(legacyDesignToolsPath), false);
   assert.equal(existsSync(legacyToolBoundariesPath), false);
-  assert.ok(sourceFiles.length <= 106, `expected at most 106 src files, found ${sourceFiles.length}`);
+  assert.ok(sourceFiles.length <= 107, `expected at most 107 src files, found ${sourceFiles.length}`);
 });
 
 test("wiki and library health tool factories expose named default groups for registry assembly", async () => {

@@ -4962,6 +4962,11 @@ Canonical content.
       missing_typed_relation: 0,
       missing_experiment_ref: 0,
       code_backed_without_experiment: 0,
+      material_parameter_missing_unit: 0,
+      material_parameter_missing_condition: 0,
+      missing_template_section: 0,
+      design_record_without_uses_relation: 0,
+      software_doc_version_missing: 0,
       rendered_wiki_link: 0,
     });
   } finally {
