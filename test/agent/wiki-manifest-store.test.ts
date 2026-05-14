@@ -64,9 +64,10 @@ test("writeWikiSourceManifestV2 writes a generalized software-doc manifest", asy
     const relativePath = await writeWikiSourceManifestV2({ workspaceDir, manifest });
 
     assert.equal(relativePath, "knowledge-base/manifests/software-doc-hfss-eigenmode.json");
-    const persisted = JSON.parse(
-      await readFile(path.join(workspaceDir, relativePath), "utf8")
-    ) as WikiSourceManifestV2;
+    const rawText = await readFile(path.join(workspaceDir, relativePath), "utf8");
+    assert.ok(rawText.includes('\n  "schemaVersion": 2,\n'));
+    assert.ok(rawText.endsWith("\n"));
+    const persisted = JSON.parse(rawText) as WikiSourceManifestV2;
     assert.equal(persisted.schemaVersion, 2);
     assert.equal(persisted.sourceKind, "software-doc");
     assert.equal(persisted.sourceKey, "software-doc-hfss-eigenmode");
@@ -149,5 +150,69 @@ test("readNormalizedWikiSourceManifest reads V2 manifests by source key", async 
     assert.equal(manifest?.sourceKind, "material-database");
     assert.equal(manifest?.sourceKey, "material-sapphire-permittivity");
     assert.equal(manifest?.status, "needs_review");
+  });
+});
+
+test("readNormalizedWikiSourceManifest rejects malformed V2 manifests", async () => {
+  await withWorkspace("wiki-manifest-v2-malformed-", async (workspaceDir) => {
+    const timestamp = "2026-05-14T00:00:00.000Z";
+    const validManifest = {
+      schemaVersion: 2,
+      sourceKind: "material-database",
+      sourceKey: "malformed-v2",
+      title: "Malformed V2",
+      status: "needs_review",
+      createdAt: timestamp,
+      updatedAt: timestamp,
+      summaryPath: "knowledge-base/sources/malformed-v2/summary.md",
+      provenance: {
+        url: "https://example.invalid/malformed",
+        retrievedAt: timestamp
+      },
+      artifacts: [
+        {
+          kind: "table",
+          path: "knowledge-base/sources/malformed-v2/tables/parameters.json"
+        }
+      ],
+      tags: ["materials"],
+      relatedSourceKeys: [],
+      synthesisPageKeys: []
+    };
+    const cases: Array<{
+      name: string;
+      manifest: Record<string, unknown>;
+    }> = [
+      {
+        name: "invalid source kind",
+        manifest: { ...validManifest, sourceKind: "spreadsheet" }
+      },
+      {
+        name: "invalid status",
+        manifest: { ...validManifest, status: "pending" }
+      },
+      {
+        name: "artifact missing path",
+        manifest: {
+          ...validManifest,
+          artifacts: [{ kind: "table" }]
+        }
+      }
+    ];
+
+    for (const item of cases) {
+      await writeWorkspaceFile(
+        workspaceDir,
+        "knowledge-base/manifests/malformed-v2.json",
+        `${JSON.stringify(item.manifest, null, 2)}\n`
+      );
+
+      const manifest = await readNormalizedWikiSourceManifest({
+        workspaceDir,
+        sourceKey: "malformed-v2"
+      });
+
+      assert.equal(manifest, undefined, item.name);
+    }
   });
 });

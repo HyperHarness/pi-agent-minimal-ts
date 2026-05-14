@@ -49,6 +49,7 @@ export interface WikiSourceArtifact {
   jsonPath?: string;
   qualityPath?: string;
   sha256?: string;
+  note?: string;
 }
 
 export interface WikiSourceManifestV2 {
@@ -79,6 +80,65 @@ export interface WikiSourceManifestV2 {
   relatedSourceKeys: string[];
   synthesisPageKeys: string[];
 }
+
+const WIKI_SOURCE_KINDS = new Set<string>([
+  "paper",
+  "material-database",
+  "software-doc",
+  "vendor-note",
+  "standard",
+  "lab-note",
+  "code-output",
+  "design-artifact",
+  "webpage",
+  "manual"
+]);
+
+const WIKI_SOURCE_MANIFEST_V2_STATUSES = new Set<string>([
+  "ready",
+  "stale",
+  "blocked",
+  "low_quality",
+  "citation_incomplete",
+  "missing_artifact",
+  "version_unknown",
+  "needs_review"
+]);
+
+const WIKI_SOURCE_ARTIFACT_KINDS = new Set<string>([
+  "raw",
+  "parse",
+  "table",
+  "figure",
+  "script",
+  "result",
+  "log",
+  "snapshot"
+]);
+
+const WIKI_SOURCE_ARTIFACT_OPTIONAL_STRING_FIELDS = [
+  "engine",
+  "markdownPath",
+  "jsonPath",
+  "qualityPath",
+  "sha256",
+  "note"
+] as const;
+
+const WIKI_SOURCE_PROVENANCE_OPTIONAL_STRING_FIELDS = [
+  "url",
+  "doi",
+  "arxivId",
+  "recordPath",
+  "rawPath",
+  "rawSha256",
+  "retrievedAt",
+  "version",
+  "softwareName",
+  "softwareVersion",
+  "vendor",
+  "license"
+] as const;
 
 export interface WikiSourceManifest {
   schemaVersion: 1;
@@ -219,19 +279,46 @@ function isStringArray(value: unknown): value is string[] {
   return Array.isArray(value) && value.every((item) => typeof item === "string");
 }
 
+function hasOptionalStringFields<T extends readonly string[]>(
+  value: Record<string, unknown>,
+  fields: T
+): boolean {
+  return fields.every((field) => value[field] === undefined || typeof value[field] === "string");
+}
+
+function isWikiSourceArtifact(value: unknown): value is WikiSourceArtifact {
+  return (
+    isRecord(value) &&
+    typeof value.kind === "string" &&
+    WIKI_SOURCE_ARTIFACT_KINDS.has(value.kind) &&
+    typeof value.path === "string" &&
+    hasOptionalStringFields(value, WIKI_SOURCE_ARTIFACT_OPTIONAL_STRING_FIELDS)
+  );
+}
+
+function isWikiSourceProvenance(value: unknown): value is WikiSourceManifestV2["provenance"] {
+  return (
+    isRecord(value) &&
+    hasOptionalStringFields(value, WIKI_SOURCE_PROVENANCE_OPTIONAL_STRING_FIELDS)
+  );
+}
+
 function isWikiSourceManifestV2(value: unknown): value is WikiSourceManifestV2 {
   return (
     isRecord(value) &&
     value.schemaVersion === 2 &&
     typeof value.sourceKind === "string" &&
+    WIKI_SOURCE_KINDS.has(value.sourceKind) &&
     typeof value.sourceKey === "string" &&
     typeof value.title === "string" &&
     typeof value.status === "string" &&
+    WIKI_SOURCE_MANIFEST_V2_STATUSES.has(value.status) &&
     typeof value.createdAt === "string" &&
     typeof value.updatedAt === "string" &&
     typeof value.summaryPath === "string" &&
-    isRecord(value.provenance) &&
+    isWikiSourceProvenance(value.provenance) &&
     Array.isArray(value.artifacts) &&
+    value.artifacts.every(isWikiSourceArtifact) &&
     isStringArray(value.tags) &&
     isStringArray(value.relatedSourceKeys) &&
     isStringArray(value.synthesisPageKeys)
