@@ -94,13 +94,17 @@ const WIKI_SOURCE_KINDS = new Set<string>([
   "manual"
 ]);
 
-const WIKI_SOURCE_MANIFEST_V2_STATUSES = new Set<string>([
+const WIKI_SOURCE_MANIFEST_STATUSES = new Set<string>([
   "ready",
   "stale",
   "blocked",
   "low_quality",
   "citation_incomplete",
-  "missing_artifact",
+  "missing_artifact"
+]);
+
+const WIKI_SOURCE_MANIFEST_V2_STATUSES = new Set<string>([
+  ...WIKI_SOURCE_MANIFEST_STATUSES,
   "version_unknown",
   "needs_review"
 ]);
@@ -138,6 +142,20 @@ const WIKI_SOURCE_PROVENANCE_OPTIONAL_STRING_FIELDS = [
   "softwareVersion",
   "vendor",
   "license"
+] as const;
+
+const WIKI_SOURCE_MANIFEST_V1_PROVENANCE_OPTIONAL_STRING_FIELDS = [
+  "recordPath",
+  "articleUrl",
+  "rawPdfPath",
+  "pdfSha256"
+] as const;
+
+const WIKI_SOURCE_MANIFEST_V1_PARSE_STRING_FIELDS = [
+  "engine",
+  "markdownPath",
+  "jsonPath",
+  "qualityPath"
 ] as const;
 
 export interface WikiSourceManifest {
@@ -263,7 +281,8 @@ export async function readNormalizedWikiSourceManifest(input: {
       return manifest;
     }
     if (isWikiSourceManifestV1(manifest)) {
-      return normalizeWikiSourceManifest(manifest);
+      const normalized = normalizeWikiSourceManifest(manifest);
+      return isWikiSourceManifestV2(normalized) ? normalized : undefined;
     }
     return undefined;
   } catch {
@@ -286,6 +305,13 @@ function hasOptionalStringFields<T extends readonly string[]>(
   return fields.every((field) => value[field] === undefined || typeof value[field] === "string");
 }
 
+function hasStringFields<T extends readonly string[]>(
+  value: Record<string, unknown>,
+  fields: T
+): boolean {
+  return fields.every((field) => typeof value[field] === "string");
+}
+
 function isWikiSourceArtifact(value: unknown): value is WikiSourceArtifact {
   return (
     isRecord(value) &&
@@ -300,6 +326,20 @@ function isWikiSourceProvenance(value: unknown): value is WikiSourceManifestV2["
   return (
     isRecord(value) &&
     hasOptionalStringFields(value, WIKI_SOURCE_PROVENANCE_OPTIONAL_STRING_FIELDS)
+  );
+}
+
+function isWikiSourceManifestV1Provenance(value: unknown): value is WikiSourceManifest["provenance"] {
+  return (
+    isRecord(value) &&
+    hasOptionalStringFields(value, WIKI_SOURCE_MANIFEST_V1_PROVENANCE_OPTIONAL_STRING_FIELDS)
+  );
+}
+
+function isWikiSourceManifestV1Parse(value: unknown): value is WikiSourceManifest["parse"] {
+  return (
+    isRecord(value) &&
+    hasStringFields(value, WIKI_SOURCE_MANIFEST_V1_PARSE_STRING_FIELDS)
   );
 }
 
@@ -333,11 +373,12 @@ function isWikiSourceManifestV1(value: unknown): value is WikiSourceManifest {
     typeof value.paperKey === "string" &&
     typeof value.title === "string" &&
     typeof value.status === "string" &&
+    WIKI_SOURCE_MANIFEST_STATUSES.has(value.status) &&
     typeof value.createdAt === "string" &&
     typeof value.updatedAt === "string" &&
     typeof value.sourceSummaryPath === "string" &&
-    isRecord(value.provenance) &&
-    isRecord(value.parse) &&
+    isWikiSourceManifestV1Provenance(value.provenance) &&
+    isWikiSourceManifestV1Parse(value.parse) &&
     isStringArray(value.tags) &&
     isStringArray(value.relatedPaperKeys) &&
     isStringArray(value.synthesisPageKeys)

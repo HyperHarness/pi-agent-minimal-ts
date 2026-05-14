@@ -197,6 +197,29 @@ test("readNormalizedWikiSourceManifest rejects malformed V2 manifests", async ()
           ...validManifest,
           artifacts: [{ kind: "table" }]
         }
+      },
+      {
+        name: "invalid optional artifact field type",
+        manifest: {
+          ...validManifest,
+          artifacts: [
+            {
+              kind: "table",
+              path: "knowledge-base/sources/malformed-v2/tables/parameters.json",
+              qualityPath: 42
+            }
+          ]
+        }
+      },
+      {
+        name: "invalid optional provenance field type",
+        manifest: {
+          ...validManifest,
+          provenance: {
+            url: 42,
+            retrievedAt: timestamp
+          }
+        }
       }
     ];
 
@@ -214,5 +237,46 @@ test("readNormalizedWikiSourceManifest rejects malformed V2 manifests", async ()
 
       assert.equal(manifest, undefined, item.name);
     }
+  });
+});
+
+test("readNormalizedWikiSourceManifest rejects malformed legacy V1 manifests", async () => {
+  await withWorkspace("wiki-manifest-v1-malformed-", async (workspaceDir) => {
+    const timestamp = "2026-05-14T00:00:00.000Z";
+    const legacyManifest = {
+      schemaVersion: 1,
+      kind: "paper-source",
+      paperKey: "arxiv-malformed-v1",
+      title: "Malformed legacy manifest",
+      status: "pending",
+      createdAt: timestamp,
+      updatedAt: timestamp,
+      sourceSummaryPath: "knowledge-base/sources/arxiv-malformed-v1/summary.md",
+      provenance: {
+        articleUrl: "https://arxiv.org/abs/2601.00003",
+        rawPdfPath: "knowledge-base/raw/pdfs/arxiv-malformed-v1.pdf"
+      },
+      parse: {
+        engine: "fixture",
+        markdownPath: 42,
+        jsonPath: "knowledge-base/sources/arxiv-malformed-v1/parses/fixture/parse.json",
+        qualityPath: "knowledge-base/sources/arxiv-malformed-v1/parses/fixture/quality.json"
+      },
+      tags: ["frequency-allocation"],
+      relatedPaperKeys: [],
+      synthesisPageKeys: []
+    };
+    await writeWorkspaceFile(
+      workspaceDir,
+      "knowledge-base/manifests/arxiv-malformed-v1.json",
+      `${JSON.stringify(legacyManifest, null, 2)}\n`
+    );
+
+    const manifest = await readNormalizedWikiSourceManifest({
+      workspaceDir,
+      sourceKey: "arxiv-malformed-v1"
+    });
+
+    assert.equal(manifest, undefined);
   });
 });
