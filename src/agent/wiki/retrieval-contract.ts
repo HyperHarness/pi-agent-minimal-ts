@@ -8,6 +8,7 @@ import {
 import {
   getWikiSourceManifestPath,
   normalizeUnknownWikiSourceManifest,
+  validateWikiSourceManifestIdentity,
   type WikiSourceKind,
   type WikiSourceManifestV2
 } from "./manifest-store.js";
@@ -99,6 +100,8 @@ function diagnosticForKey(kind: WikiEvidenceKind, key: string, error: unknown): 
 async function readSourceManifestForEvidence(input: {
   workspaceDir: string;
   manifestPath: string;
+  expectedSourceKey: string;
+  expectedSummaryPath: string;
 }): Promise<{
   manifest?: WikiSourceManifestV2;
   missing: boolean;
@@ -127,6 +130,19 @@ async function readSourceManifestForEvidence(input: {
         missing: false,
         malformed: true,
         diagnostics: [`${relativeManifestPath}: malformed manifest shape.`]
+      };
+    }
+
+    const identityDiagnostics = validateWikiSourceManifestIdentity({
+      manifest,
+      sourceKey: input.expectedSourceKey,
+      summaryPath: input.expectedSummaryPath
+    });
+    if (identityDiagnostics.length > 0) {
+      return {
+        missing: false,
+        malformed: true,
+        diagnostics: identityDiagnostics.map((diagnostic) => `${relativeManifestPath}: malformed manifest identity: ${diagnostic}`)
       };
     }
 
@@ -189,7 +205,9 @@ async function readSourceEvidenceItem(options: ReadWikiEvidenceItemOptions): Pro
 
   const manifestResult = await readSourceManifestForEvidence({
     workspaceDir: options.workspaceDir,
-    manifestPath
+    manifestPath,
+    expectedSourceKey: options.key,
+    expectedSummaryPath: relativeToWorkspace(options.workspaceDir, sourcePath)
   });
   const diagnostics = manifestResult.diagnostics;
   const manifest = manifestResult.manifest;

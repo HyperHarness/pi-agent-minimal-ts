@@ -283,10 +283,45 @@ export async function readNormalizedWikiSourceManifest(input: {
     const manifest = JSON.parse(
       await readFile(getWikiSourceManifestPath(input.workspaceDir, input.sourceKey), "utf8")
     ) as unknown;
-    return normalizeUnknownWikiSourceManifest(manifest);
+    const normalized = normalizeUnknownWikiSourceManifest(manifest);
+    if (!normalized) {
+      return undefined;
+    }
+    return validateWikiSourceManifestIdentity({
+      manifest: normalized,
+      sourceKey: input.sourceKey
+    }).length === 0
+      ? normalized
+      : undefined;
   } catch {
     return undefined;
   }
+}
+
+export function validateWikiSourceManifestIdentity(input: {
+  manifest: WikiSourceManifestV2;
+  sourceKey: string;
+  summaryPath?: string;
+}): string[] {
+  const diagnostics: string[] = [];
+  if (input.manifest.sourceKey !== input.sourceKey) {
+    diagnostics.push(
+      `manifest sourceKey "${input.manifest.sourceKey}" does not match requested source key "${input.sourceKey}".`
+    );
+  }
+  if (
+    input.summaryPath !== undefined &&
+    normalizeManifestRelativePath(input.manifest.summaryPath) !== normalizeManifestRelativePath(input.summaryPath)
+  ) {
+    diagnostics.push(
+      `manifest summaryPath "${input.manifest.summaryPath}" does not match source summary path "${input.summaryPath}".`
+    );
+  }
+  return diagnostics;
+}
+
+function normalizeManifestRelativePath(value: string): string {
+  return value.replace(/\\/g, "/").replace(/^\.\//, "");
 }
 
 export function normalizeUnknownWikiSourceManifest(manifest: unknown): WikiSourceManifestV2 | undefined {

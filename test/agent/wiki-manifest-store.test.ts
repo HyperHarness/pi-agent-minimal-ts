@@ -153,6 +153,41 @@ test("readNormalizedWikiSourceManifest reads V2 manifests by source key", async 
   });
 });
 
+test("readNormalizedWikiSourceManifest rejects manifest sourceKey mismatches", async () => {
+  await withWorkspace("wiki-manifest-v2-identity-", async (workspaceDir) => {
+    const timestamp = "2026-05-14T00:00:00.000Z";
+    await writeWorkspaceFile(
+      workspaceDir,
+      "knowledge-base/manifests/material-sapphire-permittivity.json",
+      `${JSON.stringify({
+        schemaVersion: 2,
+        sourceKind: "material-database",
+        sourceKey: "material-silicon-permittivity",
+        title: "Mismatched material manifest",
+        status: "ready",
+        createdAt: timestamp,
+        updatedAt: timestamp,
+        summaryPath: "knowledge-base/sources/material-sapphire-permittivity/summary.md",
+        provenance: {
+          url: "https://example.invalid/materials/sapphire",
+          retrievedAt: timestamp
+        },
+        artifacts: [],
+        tags: ["materials"],
+        relatedSourceKeys: [],
+        synthesisPageKeys: []
+      }, null, 2)}\n`
+    );
+
+    const manifest = await readNormalizedWikiSourceManifest({
+      workspaceDir,
+      sourceKey: "material-sapphire-permittivity"
+    });
+
+    assert.equal(manifest, undefined);
+  });
+});
+
 test("readNormalizedWikiSourceManifest rejects malformed V2 manifests", async () => {
   await withWorkspace("wiki-manifest-v2-malformed-", async (workspaceDir) => {
     const timestamp = "2026-05-14T00:00:00.000Z";

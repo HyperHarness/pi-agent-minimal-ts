@@ -491,6 +491,56 @@ test("checkWikiHealth reports source_manifest_artifact_missing for manifest path
   }
 });
 
+test("checkWikiHealth reports source_manifest_artifact_missing for V2 manifest paths", async () => {
+  const workspace = await createWorkspace();
+
+  try {
+    const sourceKey = "material-sapphire-permittivity";
+    await writeText(
+      path.join(workspace, "knowledge-base", "sources", sourceKey, "summary.md"),
+      "# Sapphire permittivity\n\nMaterial parameter evidence."
+    );
+    await writeJson(path.join(workspace, "knowledge-base", "manifests", `${sourceKey}.json`), {
+      schemaVersion: 2,
+      sourceKind: "material-database",
+      sourceKey,
+      title: "Sapphire permittivity values",
+      status: "ready",
+      createdAt: "2026-05-14T00:00:00.000Z",
+      updatedAt: "2026-05-14T00:00:00.000Z",
+      summaryPath: `knowledge-base/sources/${sourceKey}/summary.md`,
+      provenance: {
+        recordPath: `knowledge-base/records/${sourceKey}.json`,
+        rawPath: `knowledge-base/sources/${sourceKey}/raw/snapshot.html`
+      },
+      artifacts: [
+        {
+          kind: "table",
+          path: `knowledge-base/sources/${sourceKey}/tables/parameters.json`,
+          qualityPath: `knowledge-base/sources/${sourceKey}/tables/quality.json`
+        }
+      ],
+      tags: ["materials", "sapphire"],
+      relatedSourceKeys: [],
+      synthesisPageKeys: []
+    });
+
+    const result = await checkWikiHealth({ workspaceDir: workspace });
+
+    assert.equal(result.summary.source_manifest_artifact_missing, 1);
+    const issue = result.issues.find((candidate) =>
+      candidate.kind === "source_manifest_artifact_missing" &&
+      candidate.paperKey === sourceKey
+    );
+    assert.ok(issue);
+    assert.match(issue.reason, /knowledge-base\/records/);
+    assert.match(issue.reason, /parameters\.json/);
+    assert.match(issue.reason, /quality\.json/);
+  } finally {
+    await rm(workspace, { recursive: true, force: true });
+  }
+});
+
 test("checkWikiHealth reports source_manifest_artifact_missing for unsafe manifest paths", async () => {
   const workspace = await createWorkspace();
   const outside = await createWorkspace();

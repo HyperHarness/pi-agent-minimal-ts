@@ -630,15 +630,26 @@ async function sourceManifestArtifactIssues(workspaceDir: string): Promise<WikiH
     } catch {
       continue;
     }
-    const paperKey = readNestedString(manifest, ["paperKey"]) ?? entry.name.replace(/\.json$/i, "");
+    const paperKey =
+      readNestedString(manifest, ["sourceKey"]) ??
+      readNestedString(manifest, ["paperKey"]) ??
+      entry.name.replace(/\.json$/i, "");
     const title = readNestedString(manifest, ["title"]);
-    const candidatePaths = [
-      { name: "sourceSummaryPath", value: readNestedValue(manifest, ["sourceSummaryPath"]) },
-      { name: "parse.markdownPath", value: readNestedValue(manifest, ["parse", "markdownPath"]) },
-      { name: "parse.jsonPath", value: readNestedValue(manifest, ["parse", "jsonPath"]) },
-      { name: "parse.qualityPath", value: readNestedValue(manifest, ["parse", "qualityPath"]) },
-      { name: "provenance.rawPdfPath", value: readNestedValue(manifest, ["provenance", "rawPdfPath"]), optional: true }
-    ].filter((candidate) => !candidate.optional || candidate.value !== undefined);
+    const schemaVersion = readNestedValue(manifest, ["schemaVersion"]);
+    const candidatePaths = schemaVersion === 2
+      ? [
+          { name: "summaryPath", value: readNestedValue(manifest, ["summaryPath"]) },
+          { name: "provenance.recordPath", value: readNestedValue(manifest, ["provenance", "recordPath"]), optional: true },
+          { name: "provenance.rawPath", value: readNestedValue(manifest, ["provenance", "rawPath"]), optional: true },
+          ...manifestArtifactPathCandidates(manifest)
+        ].filter((candidate) => !candidate.optional || candidate.value !== undefined)
+      : [
+          { name: "sourceSummaryPath", value: readNestedValue(manifest, ["sourceSummaryPath"]) },
+          { name: "parse.markdownPath", value: readNestedValue(manifest, ["parse", "markdownPath"]) },
+          { name: "parse.jsonPath", value: readNestedValue(manifest, ["parse", "jsonPath"]) },
+          { name: "parse.qualityPath", value: readNestedValue(manifest, ["parse", "qualityPath"]) },
+          { name: "provenance.rawPdfPath", value: readNestedValue(manifest, ["provenance", "rawPdfPath"]), optional: true }
+        ].filter((candidate) => !candidate.optional || candidate.value !== undefined);
     const invalidPaths: string[] = [];
     const missingPaths: string[] = [];
     for (const candidatePath of candidatePaths) {
@@ -673,6 +684,23 @@ async function sourceManifestArtifactIssues(workspaceDir: string): Promise<WikiH
     });
   }
   return issues;
+}
+
+function manifestArtifactPathCandidates(manifest: unknown): Array<{
+  name: string;
+  value: unknown;
+  optional?: boolean;
+}> {
+  const artifacts = readNestedValue(manifest, ["artifacts"]);
+  if (!Array.isArray(artifacts)) {
+    return [];
+  }
+  return artifacts.flatMap((artifact, index) => [
+    { name: `artifacts[${index}].path`, value: readNestedValue(artifact, ["path"]) },
+    { name: `artifacts[${index}].markdownPath`, value: readNestedValue(artifact, ["markdownPath"]), optional: true },
+    { name: `artifacts[${index}].jsonPath`, value: readNestedValue(artifact, ["jsonPath"]), optional: true },
+    { name: `artifacts[${index}].qualityPath`, value: readNestedValue(artifact, ["qualityPath"]), optional: true }
+  ]);
 }
 
 function summarizeActions(issues: WikiHealthIssue[]): string[] {

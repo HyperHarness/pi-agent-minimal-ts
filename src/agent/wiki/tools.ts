@@ -33,7 +33,8 @@ import {
 } from "./coordinator.js";
 import {
   getWikiPageTemplate,
-  inferWikiPageTypeForEvidence
+  inferWikiPageTypeForEvidence,
+  validateRequiredTemplateSections
 } from "./page-templates.js";
 import { isWikiSourceKind, type WikiSourceKind } from "./manifest-store.js";
 import type { PaperSearchResult, PaperSearchSource } from "../paper/types.js";
@@ -2164,6 +2165,40 @@ export function createWikiTools(input: {
           ...(research ? { research } : {}),
           status: "drafted",
           message: "Built a wiki page draft without writing it.",
+          draft,
+          evidence
+        };
+        return {
+          content: [{ type: "text", text: JSON.stringify(compactBuildWikiPageResult(result)) }],
+          details: result
+        };
+      }
+
+      const missingTemplateSections = validateRequiredTemplateSections({
+        pageType: template.pageType,
+        markdown: draft.pageMarkdown
+      }).missingSections;
+      if (missingTemplateSections.length > 0) {
+        const coordination = await buildCoordination({
+          selectedEvidenceCount: evidence.length,
+          hasBlockedAcquisition: (research?.blocked.length ?? bootstrap.blocked.length) > 0,
+          insufficientReason: `Wiki page draft is missing required ${template.pageType} section${
+            missingTemplateSections.length === 1 ? "" : "s"
+          }: ${missingTemplateSections.join(", ")}.`,
+          handoff: {
+            pageType: template.pageType,
+            missingTemplateSections
+          }
+        });
+        const result: BuildWikiPageDetails = {
+          topic: args.topic,
+          ...(args.question ? { question: args.question } : {}),
+          mode,
+          coordination,
+          bootstrap,
+          ...(research ? { research } : {}),
+          status: "needs_worker",
+          message: `Cannot write a wiki page because the draft is missing required ${template.pageType} sections: ${missingTemplateSections.join(", ")}.`,
           draft,
           evidence
         };

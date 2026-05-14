@@ -4477,7 +4477,27 @@ test("build_wiki_page writes a synthesis page from local wiki evidence", async (
       }),
       paperWikiPageWorker: async (input) => ({
         title: "qLDPC on Superconducting Chips",
-        pageMarkdown: `## Overview\n\n${input.topic} depends on long-range couplers [arxiv-2507.09690].`,
+        pageMarkdown: [
+          "## Overview",
+          "",
+          `${input.topic} depends on long-range couplers [arxiv-2507.09690].`,
+          "",
+          "## Key Concepts",
+          "",
+          "Connectivity, crosstalk, and routing constraints shape implementation.",
+          "",
+          "## Evidence",
+          "",
+          "The source evidence describes LDPC implementation constraints.",
+          "",
+          "## Open Questions",
+          "",
+          "How much crosstalk is tolerable?",
+          "",
+          "## Related Pages",
+          "",
+          "No related pages yet."
+        ].join("\n"),
         tags: ["qldpc", "superconducting-qubits"],
         openQuestions: ["How much crosstalk is tolerable?"],
         confidence: "high",
@@ -4554,7 +4574,27 @@ test("build_wiki_page avoids source-derived page keys", async () => {
       }),
       paperWikiPageWorker: async () => ({
         title: "Noise Stabilization for Error Mitigation in Superconducting Quantum Processors",
-        pageMarkdown: "## Overview\n\nStabilized noise can support mitigation [arxiv-2407.02467].",
+        pageMarkdown: [
+          "## Overview",
+          "",
+          "Stabilized noise can support mitigation [arxiv-2407.02467].",
+          "",
+          "## Key Concepts",
+          "",
+          "The page tracks stability assumptions for processor noise.",
+          "",
+          "## Evidence",
+          "",
+          "The cited source is the local evidence anchor.",
+          "",
+          "## Open Questions",
+          "",
+          "What calibration cadence is required?",
+          "",
+          "## Related Pages",
+          "",
+          "No related pages yet."
+        ].join("\n"),
         tags: ["noise-stabilization", "superconducting-qubits"],
         confidence: "high",
       }),
@@ -4634,7 +4674,27 @@ Permittivity and loss tangent parameters for sapphire substrates used in superco
         capturedInput = input;
         return {
           title: "Sapphire Substrate Parameters",
-          pageMarkdown: "## Parameter Table\n\nSapphire parameters [material-sapphire-permittivity].",
+          pageMarkdown: [
+            "## Parameter Table",
+            "",
+            "Sapphire parameters [material-sapphire-permittivity].",
+            "",
+            "## Applicability",
+            "",
+            "Use for superconducting microwave substrate estimates.",
+            "",
+            "## Design Implications",
+            "",
+            "Permittivity and loss tangent change resonator geometry and Q estimates.",
+            "",
+            "## Known Uncertainty",
+            "",
+            "Cryogenic condition coverage must be reviewed before signoff.",
+            "",
+            "## Related Pages",
+            "",
+            "No related pages yet."
+          ].join("\n"),
           confidence: "high",
         };
       },
@@ -4652,6 +4712,71 @@ Permittivity and loss tangent parameters for sapphire substrates used in superco
     assert.match(capturedInput?.templateGuidance ?? "", /Required sections/);
     assert.match(capturedInput?.templateGuidance ?? "", /Parameter Table/);
     assert.ok(capturedInput?.evidence?.some((item) => item.sourceKind === "material-database"));
+  } finally {
+    await rm(workspace, { recursive: true, force: true });
+  }
+});
+
+test("build_wiki_page refuses to write incomplete material template drafts", async () => {
+  const workspace = await mkdtemp(path.join(tmpdir(), "pi-agent-tools-"));
+
+  try {
+    const sourceKey = "material-sapphire-permittivity";
+    const sourceDir = path.join(workspace, "knowledge-base/sources", sourceKey);
+    await mkdir(sourceDir, { recursive: true });
+    await mkdir(path.join(workspace, "knowledge-base/manifests"), { recursive: true });
+    await writeFile(path.join(sourceDir, "summary.md"), "# Sapphire Permittivity Dataset\n\nMaterial parameter evidence.", "utf8");
+    await writeFile(path.join(workspace, "knowledge-base/manifests", `${sourceKey}.json`), `${JSON.stringify({
+      schemaVersion: 2,
+      sourceKind: "material-database",
+      sourceKey,
+      title: "Sapphire Permittivity Dataset",
+      status: "ready",
+      createdAt: "2026-05-14T00:00:00.000Z",
+      updatedAt: "2026-05-14T00:00:00.000Z",
+      summaryPath: `knowledge-base/sources/${sourceKey}/summary.md`,
+      provenance: {
+        url: "https://example.test/materials/sapphire"
+      },
+      artifacts: [],
+      tags: ["sapphire", "permittivity"],
+      relatedSourceKeys: [],
+      synthesisPageKeys: []
+    }, null, 2)}\n`, "utf8");
+
+    const tool = getBuildWikiPageTool(workspace, {
+      paperWikiPageWorker: async () => ({
+        title: "Sapphire Substrate Parameters",
+        pageMarkdown: "## Parameter Table\n\nSapphire parameters [material-sapphire-permittivity].",
+        confidence: "high",
+      }),
+    });
+
+    const result = await tool.execute("build-incomplete-material-page", {
+      topic: "sapphire substrate material parameters",
+      question: "请整理蓝宝石衬底的介电常数和损耗角正切参数",
+      pageKey: "sapphire-substrate-material-parameters",
+    }, undefined);
+    const details = result.details as {
+      status?: string;
+      message?: string;
+      draft?: { title?: string };
+      coordination?: { handoff?: { missingTemplateSections?: string[] } };
+    };
+
+    assert.equal(details.status, "needs_worker");
+    assert.match(details.message ?? "", /missing required dataset sections/i);
+    assert.equal(details.draft?.title, "Sapphire Substrate Parameters");
+    assert.deepEqual(details.coordination?.handoff?.missingTemplateSections, [
+      "Applicability",
+      "Design Implications",
+      "Known Uncertainty",
+      "Related Pages"
+    ]);
+    await assert.rejects(
+      readFile(path.join(workspace, "knowledge-base/pages/sapphire-substrate-material-parameters.md"), "utf8"),
+      /ENOENT/
+    );
   } finally {
     await rm(workspace, { recursive: true, force: true });
   }
@@ -4849,7 +4974,27 @@ test("build_wiki_page writes evidence contract and verifies after write", async 
       }),
       paperWikiPageWorker: async () => ({
         title: "Tunable Coupler",
-        pageMarkdown: "## Overview\n\nTwo-source synthesis.",
+        pageMarkdown: [
+          "## Overview",
+          "",
+          "Two-source synthesis.",
+          "",
+          "## Key Concepts",
+          "",
+          "The coupler page records reusable chip-design concepts.",
+          "",
+          "## Evidence",
+          "",
+          "Evidence A and Evidence B support the synthesis.",
+          "",
+          "## Open Questions",
+          "",
+          "No open questions recorded.",
+          "",
+          "## Related Pages",
+          "",
+          "No related pages yet."
+        ].join("\n"),
         confidence: "high",
       }),
     });

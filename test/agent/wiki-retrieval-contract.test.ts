@@ -378,6 +378,55 @@ test("retrieval contract rejects malformed generalized source manifests", async 
   }
 });
 
+test("retrieval contract rejects generalized source manifest identity mismatches", async () => {
+  const cases: Array<{ name: string; manifest: Record<string, unknown>; expectedDiagnostic: RegExp }> = [
+    {
+      name: "source-key-mismatch",
+      manifest: generalizedSourceManifest({
+        sourceKey: "material-silicon-permittivity"
+      }),
+      expectedDiagnostic: /sourceKey .* does not match requested source key/i
+    },
+    {
+      name: "summary-path-mismatch",
+      manifest: generalizedSourceManifest({
+        summaryPath: "knowledge-base/sources/material-silicon-permittivity/summary.md"
+      }),
+      expectedDiagnostic: /summaryPath .* does not match source summary path/i
+    }
+  ];
+
+  for (const item of cases) {
+    await withWorkspace(`wiki-retrieval-v2-identity-${item.name}-`, async (workspaceDir) => {
+      await writeWorkspaceFile(
+        workspaceDir,
+        "knowledge-base/sources/material-sapphire-permittivity/summary.md",
+        "# Sapphire permittivity\n\nIdentity mismatches must not provide manifest metadata."
+      );
+      await writeWorkspaceFile(
+        workspaceDir,
+        "knowledge-base/manifests/material-sapphire-permittivity.json",
+        `${JSON.stringify(item.manifest, null, 2)}\n`
+      );
+
+      const result = await readWikiEvidenceItem({
+        workspaceDir,
+        kind: "source",
+        key: "material-sapphire-permittivity"
+      });
+
+      assert.equal(result.status, "malformed", item.name);
+      assert.equal(result.item?.key, "material-sapphire-permittivity", item.name);
+      assert.equal(result.item?.manifest, undefined, item.name);
+      assert.deepEqual(result.item?.sourceRefs, [], item.name);
+      assert.ok(
+        result.diagnostics.some((diagnostic) => item.expectedDiagnostic.test(diagnostic)),
+        `${item.name}: expected identity diagnostic, got ${JSON.stringify(result.diagnostics)}`
+      );
+    });
+  }
+});
+
 test("retrieval contract lists typed pages by tag and evidence contract", async () => {
   await withWorkspace("wiki-retrieval-pages-", async (workspaceDir) => {
     await writeTypedWikiPage({
