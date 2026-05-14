@@ -1344,7 +1344,7 @@ export async function lintPaperWiki(options: PaperWikiLintOptions): Promise<Pape
             path: relativePath,
             target: finding.target,
             reason: finding.kind === "material_parameter_missing_unit"
-              ? "Material parameter row has a value but no unit."
+              ? "Material parameter row has a quantitative value but no unit."
               : "Material parameter row has a value but no conditions."
           });
         }
