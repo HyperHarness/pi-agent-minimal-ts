@@ -35,7 +35,7 @@ import {
   getWikiPageTemplate,
   inferWikiPageTypeForEvidence
 } from "./page-templates.js";
-import type { WikiSourceKind } from "./manifest-store.js";
+import { isWikiSourceKind, type WikiSourceKind } from "./manifest-store.js";
 import type { PaperSearchResult, PaperSearchSource } from "../paper/types.js";
 import { searchLocalPapers } from "../paper/storage/local-paper-library.js";
 import {
@@ -798,19 +798,6 @@ function uniqueSourceEvidenceByPaperKey<T extends { paperKey: string }>(items: T
   return unique;
 }
 
-const KNOWN_WIKI_SOURCE_KINDS = new Set<string>([
-  "paper",
-  "material-database",
-  "software-doc",
-  "vendor-note",
-  "standard",
-  "lab-note",
-  "code-output",
-  "design-artifact",
-  "webpage",
-  "manual"
-]);
-
 function inferWikiSourceKindsForTemplate(evidence: BuildWikiPageDetails["evidence"]): WikiSourceKind[] {
   const sourceKinds: WikiSourceKind[] = [];
   for (const item of evidence) {
@@ -819,8 +806,8 @@ function inferWikiSourceKindsForTemplate(evidence: BuildWikiPageDetails["evidenc
     }
 
     const sourceKind = (item as { sourceKind?: unknown }).sourceKind;
-    if (typeof sourceKind === "string" && KNOWN_WIKI_SOURCE_KINDS.has(sourceKind)) {
-      sourceKinds.push(sourceKind as WikiSourceKind);
+    if (isWikiSourceKind(sourceKind)) {
+      sourceKinds.push(sourceKind);
       continue;
     }
 
@@ -836,19 +823,16 @@ function inferWikiSourceKindsForTemplate(evidence: BuildWikiPageDetails["evidenc
   return [...new Set(sourceKinds)];
 }
 
-function appendWikiPageTemplateGuidance(
-  question: string | undefined,
+function formatWikiPageTemplateGuidance(
   template: ReturnType<typeof getWikiPageTemplate>
 ): string {
-  const guidance = [
+  return [
     "Wiki page template guidance:",
     `Page type: ${template.pageType}`,
     "Required sections:",
     ...template.requiredSections.map((section) => `- ${section}`),
     template.guidance
   ].join("\n");
-
-  return question ? `${question}\n\n${guidance}` : guidance;
 }
 
 function markCoordinationInsufficient(
@@ -2157,7 +2141,8 @@ export function createWikiTools(input: {
       }));
       const draft = await dependencies.paperWikiPageWorker({
         topic: args.topic,
-        question: appendWikiPageTemplateGuidance(args.question, template),
+        ...(args.question ? { question: args.question } : {}),
+        templateGuidance: formatWikiPageTemplateGuidance(template),
         evidence
       });
       emitToolProgress(onUpdate, {

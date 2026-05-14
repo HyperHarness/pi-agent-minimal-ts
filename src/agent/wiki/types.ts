@@ -1,3 +1,5 @@
+import type { WikiSourceKind } from "./manifest-store.js";
+
 export interface PaperWikiSourceInput {
   workspaceDir: string;
   paperKey: string;
@@ -37,6 +39,7 @@ export interface PaperWikiSearchResult {
     key?: string;
     paperKey?: string;
     pageKey?: string;
+    sourceKind?: WikiSourceKind;
     title: string;
     path: string;
     snippet: string;
@@ -53,6 +56,7 @@ export interface PaperWikiPageBootstrapEvidence {
   origin: "seed_search" | "related_expansion" | "local_fallback";
   paperKey?: string;
   pageKey?: string;
+  sourceKind?: WikiSourceKind;
   tags?: string[];
   relatedPaperKeys?: string[];
 }
@@ -165,11 +169,13 @@ export interface PaperWikiAliasMergeResult {
 export interface PaperWikiPageWorkerInput {
   topic: string;
   question?: string;
+  templateGuidance?: string;
   evidence: Array<{
     kind?: "source" | "page";
     key?: string;
     paperKey?: string;
     pageKey?: string;
+    sourceKind?: WikiSourceKind;
     title: string;
     path: string;
     snippet: string;

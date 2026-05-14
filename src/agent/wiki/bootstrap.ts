@@ -2,6 +2,11 @@ import { readFile } from "node:fs/promises";
 import path from "node:path";
 import { searchLocalPapers, type SearchLocalPapersResult } from "../paper/storage/local-paper-library.js";
 import { searchPaperWiki } from "./content.js";
+import { readNormalizedWikiSourceManifest, type WikiSourceKind } from "./manifest-store.js";
+import {
+  searchWikiEvidence,
+  type WikiEvidenceSearchResult
+} from "./retrieval-search.js";
 import {
   listPaperWikiSourceFiles,
   paperKeyFromPaperWikiSourcePath,
@@ -28,10 +33,12 @@ interface SourceSummaryDocument {
   body: string;
   tags: string[];
   relatedPaperKeys: string[];
+  sourceKind?: WikiSourceKind;
 }
 
 export interface BootstrapPaperWikiPageEvidenceDependencies {
   searchPaperWikiImpl?: typeof searchPaperWiki;
+  searchWikiEvidenceImpl?: typeof searchWikiEvidence;
   searchLocalPapersImpl?: typeof searchLocalPapers;
 }
 
@@ -171,14 +178,19 @@ async function readSourceSummaryDocuments(workspaceDir: string): Promise<Map<str
       continue;
     }
     const paperKey = paperKeyFromPaperWikiSourcePath(filePath);
+    const manifest = await readNormalizedWikiSourceManifest({
+      workspaceDir,
+      sourceKey: paperKey
+    });
     const frontmatter = extractFrontmatter(markdown);
     documents.set(paperKey, {
       paperKey,
-      title: extractTitle(markdown, paperKey),
+      title: manifest?.title ?? extractTitle(markdown, paperKey),
       path: relativeToWorkspace(workspaceDir, filePath),
       body: bodyWithoutFrontmatter(markdown),
-      tags: extractYamlStringValues(frontmatter, "tags"),
-      relatedPaperKeys: extractYamlStringValues(frontmatter, "related_papers")
+      tags: manifest?.tags ?? extractYamlStringValues(frontmatter, "tags"),
+      relatedPaperKeys: manifest?.relatedSourceKeys ?? extractYamlStringValues(frontmatter, "related_papers"),
+      ...(manifest?.sourceKind ? { sourceKind: manifest.sourceKind } : {})
     });
   }
   return documents;
@@ -199,8 +211,33 @@ function toSourceEvidence(
     snippet: snippet ?? document.body.replace(/\s+/g, " ").trim().slice(0, 320),
     ...(query ? { query } : {}),
     origin,
+    ...(document.sourceKind ? { sourceKind: document.sourceKind } : {}),
     tags: document.tags,
     relatedPaperKeys: document.relatedPaperKeys
+  };
+}
+
+function toGeneralizedSourceEvidence(
+  result: WikiEvidenceSearchResult,
+  query: string
+): PaperWikiPageBootstrapEvidence | undefined {
+  if (result.item.kind !== "source") {
+    return undefined;
+  }
+
+  const sourceKey = result.item.sourceKey ?? result.item.key;
+  return {
+    kind: "source",
+    key: sourceKey,
+    paperKey: sourceKey,
+    title: result.item.title,
+    path: result.item.relativePath,
+    snippet: createSnippet(result.item.body),
+    query,
+    origin: "seed_search",
+    ...(result.item.sourceKind ? { sourceKind: result.item.sourceKind } : {}),
+    tags: result.item.tags,
+    relatedPaperKeys: result.item.manifest?.relatedSourceKeys ?? []
   };
 }
 
@@ -220,6 +257,7 @@ function addEvidence(
 
 function collectSearchEvidence(input: {
   wikiResults: PaperWikiSearchResult[];
+  generalizedResults: Array<{ query: string; results: WikiEvidenceSearchResult[] }>;
   sourceDocuments: Map<string, SourceSummaryDocument>;
   maxSources: number;
 }): {
@@ -264,8 +302,19 @@ function collectSearchEvidence(input: {
             path: result.path,
             snippet: result.snippet,
             query: resultSet.query,
-            origin: "seed_search" as const
+            origin: "seed_search" as const,
+            ...(result.sourceKind ? { sourceKind: result.sourceKind } : {})
           };
+      addEvidence(sourceEvidence, seenSources, evidence, input.maxSources);
+    }
+  }
+
+  for (const resultSet of input.generalizedResults) {
+    for (const result of resultSet.results) {
+      const evidence = toGeneralizedSourceEvidence(result, resultSet.query);
+      if (!evidence) {
+        continue;
+      }
       addEvidence(sourceEvidence, seenSources, evidence, input.maxSources);
     }
   }
@@ -377,10 +426,12 @@ export async function bootstrapPaperWikiPageEvidence(
     ...(options.maxSeedQueries !== undefined ? { maxSeedQueries: options.maxSeedQueries } : {})
   });
   const searchPaperWikiImpl = dependencies.searchPaperWikiImpl ?? searchPaperWiki;
+  const searchWikiEvidenceImpl = dependencies.searchWikiEvidenceImpl ?? searchWikiEvidence;
   const searchLocalPapersImpl = dependencies.searchLocalPapersImpl ?? searchLocalPapers;
   const blocked: PaperWikiPageBootstrapResult["blocked"] = [];
   const sourceDocuments = await readSourceSummaryDocuments(workspaceDir);
   const wikiResults: PaperWikiSearchResult[] = [];
+  const generalizedResults: Array<{ query: string; results: WikiEvidenceSearchResult[] }> = [];
 
   for (const query of seedQueries) {
     try {
@@ -395,10 +446,31 @@ export async function bootstrapPaperWikiPageEvidence(
         reason: error instanceof Error ? error.message : `Wiki seed search failed for ${query}.`
       });
     }
+    try {
+      const result = await searchWikiEvidenceImpl({
+        workspaceDir,
+        query,
+        preferredKinds: ["source"],
+        maxResults: maxSources,
+        itemFilter: (item) => item.kind === "source" && item.sourceKind !== undefined && item.sourceKind !== "paper"
+      });
+      if (result.status === "ready") {
+        generalizedResults.push({
+          query: result.query,
+          results: result.results
+        });
+      }
+    } catch (error) {
+      blocked.push({
+        stage: "seed_search",
+        reason: error instanceof Error ? error.message : `Generalized wiki evidence search failed for ${query}.`
+      });
+    }
   }
 
   const { sourceEvidence, pageContext } = collectSearchEvidence({
     wikiResults,
+    generalizedResults,
     sourceDocuments,
     maxSources
   });

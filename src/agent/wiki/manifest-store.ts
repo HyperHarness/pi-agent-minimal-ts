@@ -81,7 +81,7 @@ export interface WikiSourceManifestV2 {
   synthesisPageKeys: string[];
 }
 
-const WIKI_SOURCE_KINDS = new Set<string>([
+export const WIKI_SOURCE_KINDS: readonly WikiSourceKind[] = [
   "paper",
   "material-database",
   "software-doc",
@@ -92,7 +92,13 @@ const WIKI_SOURCE_KINDS = new Set<string>([
   "design-artifact",
   "webpage",
   "manual"
-]);
+];
+
+const WIKI_SOURCE_KIND_SET = new Set<string>(WIKI_SOURCE_KINDS);
+
+export function isWikiSourceKind(value: unknown): value is WikiSourceKind {
+  return typeof value === "string" && WIKI_SOURCE_KIND_SET.has(value);
+}
 
 const WIKI_SOURCE_MANIFEST_STATUSES = new Set<string>([
   "ready",
@@ -351,8 +357,7 @@ function isWikiSourceManifestV2(value: unknown): value is WikiSourceManifestV2 {
   return (
     isRecord(value) &&
     value.schemaVersion === 2 &&
-    typeof value.sourceKind === "string" &&
-    WIKI_SOURCE_KINDS.has(value.sourceKind) &&
+    isWikiSourceKind(value.sourceKind) &&
     typeof value.sourceKey === "string" &&
     typeof value.title === "string" &&
     typeof value.status === "string" &&

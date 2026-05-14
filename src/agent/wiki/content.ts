@@ -1039,6 +1039,7 @@ export async function searchPaperWiki(options: PaperWikiSearchOptions): Promise<
         kind: result.item.kind,
         key: result.item.key,
         ...(result.item.kind === "source" ? { paperKey: result.item.key } : { pageKey: result.item.key }),
+        ...(result.item.sourceKind ? { sourceKind: result.item.sourceKind } : {}),
         title: result.item.title,
         path: result.item.relativePath,
         snippet: createBestSnippet(result.item.body, query, buildWikiSearchTerms(query))

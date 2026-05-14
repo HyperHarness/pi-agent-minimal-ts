@@ -4587,26 +4587,51 @@ test("build_wiki_page avoids source-derived page keys", async () => {
   }
 });
 
-test("build_wiki_page guides material evidence pages with required template sections", async () => {
+test("build_wiki_page guides material evidence pages from default retrieval with required template sections", async () => {
   const workspace = await mkdtemp(path.join(tmpdir(), "pi-agent-tools-"));
-  let capturedQuestion: string | undefined;
+  let capturedInput: {
+    question?: string;
+    templateGuidance?: string;
+    evidence?: Array<{ sourceKind?: string }>;
+  } | undefined;
 
   try {
+    const sourceKey = "material-sapphire-permittivity";
+    const sourceDir = path.join(workspace, "knowledge-base/sources", sourceKey);
+    await mkdir(sourceDir, { recursive: true });
+    await mkdir(path.join(workspace, "knowledge-base/manifests"), { recursive: true });
+    await writeFile(path.join(sourceDir, "summary.md"), `---
+title: "Sapphire Permittivity Dataset"
+tags:
+  - "sapphire"
+  - "permittivity"
+---
+
+# Sapphire Permittivity Dataset
+
+Permittivity and loss tangent parameters for sapphire substrates used in superconducting microwave design.
+`, "utf8");
+    await writeFile(path.join(workspace, "knowledge-base/manifests", `${sourceKey}.json`), `${JSON.stringify({
+      schemaVersion: 2,
+      sourceKind: "material-database",
+      sourceKey,
+      title: "Sapphire Permittivity Dataset",
+      status: "ready",
+      createdAt: "2026-05-14T00:00:00.000Z",
+      updatedAt: "2026-05-14T00:00:00.000Z",
+      summaryPath: `knowledge-base/sources/${sourceKey}/summary.md`,
+      provenance: {
+        url: "https://example.test/materials/sapphire"
+      },
+      artifacts: [],
+      tags: ["sapphire", "permittivity"],
+      relatedSourceKeys: [],
+      synthesisPageKeys: []
+    }, null, 2)}\n`, "utf8");
+
     const tool = getBuildWikiPageTool(workspace, {
-      searchPaperWiki: async (options) => ({
-        query: options.query,
-        results: [
-          {
-            key: "material-sapphire-permittivity",
-            paperKey: "material-sapphire-permittivity",
-            title: "Sapphire Permittivity Dataset",
-            path: "knowledge-base/sources/material-sapphire-permittivity/summary.md",
-            snippet: "Permittivity and loss tangent parameters for sapphire substrates.",
-          },
-        ],
-      }),
       paperWikiPageWorker: async (input) => {
-        capturedQuestion = input.question;
+        capturedInput = input;
         return {
           title: "Sapphire Substrate Parameters",
           pageMarkdown: "## Parameter Table\n\nSapphire parameters [material-sapphire-permittivity].",
@@ -4623,8 +4648,10 @@ test("build_wiki_page guides material evidence pages with required template sect
     const details = result.details as { status?: string };
 
     assert.equal(details.status, "written");
-    assert.match(capturedQuestion ?? "", /Required sections/);
-    assert.match(capturedQuestion ?? "", /Parameter Table/);
+    assert.equal(capturedInput?.question, "请整理蓝宝石衬底的介电常数和损耗角正切参数");
+    assert.match(capturedInput?.templateGuidance ?? "", /Required sections/);
+    assert.match(capturedInput?.templateGuidance ?? "", /Parameter Table/);
+    assert.ok(capturedInput?.evidence?.some((item) => item.sourceKind === "material-database"));
   } finally {
     await rm(workspace, { recursive: true, force: true });
   }
