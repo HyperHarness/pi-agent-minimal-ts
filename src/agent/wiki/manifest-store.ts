@@ -14,6 +14,72 @@ export type WikiSourceManifestStatus =
   | "citation_incomplete"
   | "missing_artifact";
 
+export type WikiSourceKind =
+  | "paper"
+  | "material-database"
+  | "software-doc"
+  | "vendor-note"
+  | "standard"
+  | "lab-note"
+  | "code-output"
+  | "design-artifact"
+  | "webpage"
+  | "manual";
+
+export type WikiSourceManifestV2Status =
+  | WikiSourceManifestStatus
+  | "version_unknown"
+  | "needs_review";
+
+export type WikiSourceArtifactKind =
+  | "raw"
+  | "parse"
+  | "table"
+  | "figure"
+  | "script"
+  | "result"
+  | "log"
+  | "snapshot";
+
+export interface WikiSourceArtifact {
+  kind: WikiSourceArtifactKind;
+  path: string;
+  engine?: string;
+  markdownPath?: string;
+  jsonPath?: string;
+  qualityPath?: string;
+  sha256?: string;
+}
+
+export interface WikiSourceManifestV2 {
+  schemaVersion: 2;
+  sourceKind: WikiSourceKind;
+  sourceKey: string;
+  title: string;
+  status: WikiSourceManifestV2Status;
+  createdAt: string;
+  updatedAt: string;
+  summaryPath: string;
+  provenance: {
+    url?: string;
+    doi?: string;
+    arxivId?: string;
+    recordPath?: string;
+    rawPath?: string;
+    rawSha256?: string;
+    retrievedAt?: string;
+    version?: string;
+    softwareName?: string;
+    softwareVersion?: string;
+    vendor?: string;
+    license?: string;
+  };
+  artifacts: WikiSourceArtifact[];
+  tags: string[];
+  relatedSourceKeys: string[];
+  synthesisPageKeys: string[];
+}
+
 export interface WikiSourceManifest {
   schemaVersion: 1;
   kind: "paper-source";
@@ -44,6 +110,54 @@ export function getWikiSourceManifestPath(workspaceDir: string, paperKey: string
   return getPaperWikiSourceManifestPath(workspaceDir, paperKey);
 }
 
+export function normalizeWikiSourceManifest(
+  manifest: WikiSourceManifest | WikiSourceManifestV2
+): WikiSourceManifestV2 {
+  if (manifest.schemaVersion === 2) {
+    return manifest;
+  }
+
+  const artifacts: WikiSourceArtifact[] = [];
+  if (manifest.provenance.rawPdfPath) {
+    artifacts.push({
+      kind: "raw",
+      path: manifest.provenance.rawPdfPath,
+      ...(manifest.provenance.pdfSha256 ? { sha256: manifest.provenance.pdfSha256 } : {})
+    });
+  }
+  if (manifest.parse.markdownPath || manifest.parse.jsonPath || manifest.parse.qualityPath) {
+    artifacts.push({
+      kind: "parse",
+      path: manifest.parse.markdownPath || manifest.parse.jsonPath || manifest.parse.qualityPath,
+      engine: manifest.parse.engine,
+      ...(manifest.parse.markdownPath ? { markdownPath: manifest.parse.markdownPath } : {}),
+      ...(manifest.parse.jsonPath ? { jsonPath: manifest.parse.jsonPath } : {}),
+      ...(manifest.parse.qualityPath ? { qualityPath: manifest.parse.qualityPath } : {})
+    });
+  }
+
+  return {
+    schemaVersion: 2,
+    sourceKind: "paper",
+    sourceKey: manifest.paperKey,
+    title: manifest.title,
+    status: manifest.status,
+    createdAt: manifest.createdAt,
+    updatedAt: manifest.updatedAt,
+    summaryPath: manifest.sourceSummaryPath,
+    provenance: {
+      ...(manifest.provenance.articleUrl ? { url: manifest.provenance.articleUrl } : {}),
+      ...(manifest.provenance.recordPath ? { recordPath: manifest.provenance.recordPath } : {}),
+      ...(manifest.provenance.rawPdfPath ? { rawPath: manifest.provenance.rawPdfPath } : {}),
+      ...(manifest.provenance.pdfSha256 ? { rawSha256: manifest.provenance.pdfSha256 } : {})
+    },
+    artifacts,
+    tags: manifest.tags,
+    relatedSourceKeys: manifest.relatedPaperKeys,
+    synthesisPageKeys: manifest.synthesisPageKeys
+  };
+}
+
 export async function writeWikiSourceManifest(input: {
   workspaceDir: string;
   manifest: WikiSourceManifest;
@@ -65,6 +179,82 @@ export async function readWikiSourceManifest(input: {
   } catch {
     return undefined;
   }
+}
+
+export async function writeWikiSourceManifestV2(input: {
+  workspaceDir: string;
+  manifest: WikiSourceManifestV2;
+}): Promise<string> {
+  const manifestPath = getWikiSourceManifestPath(input.workspaceDir, input.manifest.sourceKey);
+  await mkdir(path.dirname(manifestPath), { recursive: true });
+  await writeFile(manifestPath, `${JSON.stringify(input.manifest, null, 2)}\n`, "utf8");
+  return relativeToWorkspace(input.workspaceDir, manifestPath);
+}
+
+export async function readNormalizedWikiSourceManifest(input: {
+  workspaceDir: string;
+  sourceKey: string;
+}): Promise<WikiSourceManifestV2 | undefined> {
+  try {
+    const manifest = JSON.parse(
+      await readFile(getWikiSourceManifestPath(input.workspaceDir, input.sourceKey), "utf8")
+    ) as unknown;
+    if (isWikiSourceManifestV2(manifest)) {
+      return manifest;
+    }
+    if (isWikiSourceManifestV1(manifest)) {
+      return normalizeWikiSourceManifest(manifest);
+    }
+    return undefined;
+  } catch {
+    return undefined;
+  }
+}
+
+function isRecord(value: unknown): value is Record<string, unknown> {
+  return typeof value === "object" && value !== null && !Array.isArray(value);
+}
+
+function isStringArray(value: unknown): value is string[] {
+  return Array.isArray(value) && value.every((item) => typeof item === "string");
+}
+
+function isWikiSourceManifestV2(value: unknown): value is WikiSourceManifestV2 {
+  return (
+    isRecord(value) &&
+    value.schemaVersion === 2 &&
+    typeof value.sourceKind === "string" &&
+    typeof value.sourceKey === "string" &&
+    typeof value.title === "string" &&
+    typeof value.status === "string" &&
+    typeof value.createdAt === "string" &&
+    typeof value.updatedAt === "string" &&
+    typeof value.summaryPath === "string" &&
+    isRecord(value.provenance) &&
+    Array.isArray(value.artifacts) &&
+    isStringArray(value.tags) &&
+    isStringArray(value.relatedSourceKeys) &&
+    isStringArray(value.synthesisPageKeys)
+  );
+}
+
+function isWikiSourceManifestV1(value: unknown): value is WikiSourceManifest {
+  return (
+    isRecord(value) &&
+    value.schemaVersion === 1 &&
+    value.kind === "paper-source" &&
+    typeof value.paperKey === "string" &&
+    typeof value.title === "string" &&
+    typeof value.status === "string" &&
+    typeof value.createdAt === "string" &&
+    typeof value.updatedAt === "string" &&
+    typeof value.sourceSummaryPath === "string" &&
+    isRecord(value.provenance) &&
+    isRecord(value.parse) &&
+    isStringArray(value.tags) &&
+    isStringArray(value.relatedPaperKeys) &&
+    isStringArray(value.synthesisPageKeys)
+  );
 }
 
 function extractFrontmatter(markdown: string): string {
