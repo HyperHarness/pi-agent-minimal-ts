@@ -2,6 +2,7 @@ export * from "./types.js";
 export * from "./workspace-contract.js";
 export * from "./domain-bindings.js";
 export * from "./page-schema.js";
+export * from "./page-templates.js";
 export * from "./typed-store.js";
 export * from "./retrieval-contract.js";
 export * from "./retrieval-search.js";
