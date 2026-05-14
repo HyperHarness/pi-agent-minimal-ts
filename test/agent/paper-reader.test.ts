@@ -607,6 +607,71 @@ test("searchPaperWiki does not expose generalized non-paper sources as paper res
   }
 });
 
+test("searchPaperWiki fills maxResults after filtering higher-ranked non-paper sources", async () => {
+  const workspace = await createWorkspace();
+  try {
+    for (const sourceKey of ["material-sapphire-permittivity", "material-sapphire-loss-tangent"]) {
+      await writeSourceSummary(
+        workspace,
+        sourceKey,
+        "# Sapphire permittivity exact match\n\nSapphire permittivity exact match appears in material data."
+      );
+      await writeJson(
+        path.join(workspace, "knowledge-base", "manifests", `${sourceKey}.json`),
+        {
+          schemaVersion: 2,
+          sourceKind: "material-database",
+          sourceKey,
+          title: "Sapphire permittivity exact match",
+          status: "needs_review",
+          createdAt: "2026-05-14T00:00:00.000Z",
+          updatedAt: "2026-05-14T00:00:00.000Z",
+          summaryPath: `knowledge-base/sources/${sourceKey}/summary.md`,
+          provenance: {
+            url: "https://example.invalid/materials/sapphire",
+            retrievedAt: "2026-05-14T00:00:00.000Z"
+          },
+          artifacts: [{
+            kind: "table",
+            path: `knowledge-base/sources/${sourceKey}/tables/parameters.json`
+          }],
+          tags: ["sapphire", "permittivity"],
+          relatedSourceKeys: [],
+          synthesisPageKeys: []
+        }
+      );
+    }
+    await writeSourceSummary(
+      workspace,
+      "arxiv-sapphire-permittivity-paper",
+      "# Sapphire permittivity exact match\n\nPaper evidence discusses sapphire permittivity exact match."
+    );
+    await writeSourceSummary(
+      workspace,
+      "arxiv-sapphire-loss-paper",
+      "# Sapphire substrate loss\n\nSecondary paper evidence discusses sapphire permittivity."
+    );
+    await writeSourceSummary(
+      workspace,
+      "arxiv-sapphire-review-paper",
+      "# Sapphire materials review\n\nReview paper evidence discusses sapphire permittivity."
+    );
+
+    const search = await searchPaperWiki({
+      workspaceDir: workspace,
+      query: "sapphire permittivity exact match",
+      maxResults: 3
+    });
+
+    assert.deepEqual(
+      search.results.map((result) => result.paperKey),
+      ["arxiv-sapphire-permittivity-paper", "arxiv-sapphire-loss-paper", "arxiv-sapphire-review-paper"]
+    );
+  } finally {
+    await rm(workspace, { recursive: true, force: true });
+  }
+});
+
 test("writePaperWikiPage saves a synthesis page and updates the wiki index", async () => {
   const workspace = await createWorkspace();
   try {

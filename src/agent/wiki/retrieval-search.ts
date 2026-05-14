@@ -26,6 +26,7 @@ export interface SearchWikiEvidenceOptions {
   query: string;
   preferredKinds?: WikiEvidenceKind[];
   maxResults?: number;
+  itemFilter?: (item: WikiEvidenceItem) => boolean;
 }
 
 const DEFAULT_MAX_RESULTS = 8;
@@ -174,6 +175,7 @@ export async function searchWikiEvidence(options: SearchWikiEvidenceOptions): Pr
   });
 
   const results = items
+    .filter((item) => options.itemFilter?.(item) ?? true)
     .map((item) => scoreItem(item, needles))
     .filter((result) => result.score > 0)
     .sort((left, right) => {

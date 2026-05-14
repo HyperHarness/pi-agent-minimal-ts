@@ -1008,10 +1008,6 @@ function isMeaningfulStructuredSearchResult(result: WikiEvidenceSearchResult): b
   return result.score >= 2;
 }
 
-function isPaperOrPageStructuredSearchResult(result: WikiEvidenceSearchResult): boolean {
-  return result.item.kind === "page" || result.item.sourceKind === "paper" || result.item.sourceKind === undefined;
-}
-
 export async function searchPaperWiki(options: PaperWikiSearchOptions): Promise<PaperWikiSearchResult> {
   const query = options.query.trim();
   if (!query) {
@@ -1024,13 +1020,12 @@ export async function searchPaperWiki(options: PaperWikiSearchOptions): Promise<
     workspaceDir: options.workspaceDir,
     query,
     preferredKinds: ["source", "page"],
-    maxResults
+    maxResults,
+    itemFilter: (item) => item.kind === "page" || item.sourceKind === "paper" || item.sourceKind === undefined
   });
 
   if (structured.status === "ready" && structured.results.some(isMeaningfulStructuredSearchResult)) {
-    const meaningfulResults = structured.results
-      .filter(isMeaningfulStructuredSearchResult)
-      .filter(isPaperOrPageStructuredSearchResult);
+    const meaningfulResults = structured.results.filter(isMeaningfulStructuredSearchResult);
     if (meaningfulResults.length === 0) {
       return searchPaperWikiWithLegacyScoring({
         workspaceDir: options.workspaceDir,
