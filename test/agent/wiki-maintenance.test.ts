@@ -1079,6 +1079,122 @@ Temperature and frequency dependence still need source-level checks.
   }
 });
 
+test("lintPaperWiki accepts singular material parameter condition header", async () => {
+  const workspace = await createWorkspace();
+  try {
+    await writePage(workspace, "substrate-material-conditions", `
+---
+schema_version: 1
+type: dataset
+key: substrate-material-conditions
+title: Substrate Material Conditions
+aliases: []
+tags: []
+evidence_contract: mixed
+source_refs:
+  - "material-sapphire-permittivity"
+created_at: 2026-05-10T00:00:00.000Z
+updated_at: 2026-05-10T00:00:00.000Z
+---
+
+# Substrate Material Conditions
+
+## Parameter Table
+
+| Parameter | Value | Unit | Condition | Source |
+| --- | --- | --- | --- | --- |
+| Sapphire relative permittivity | 9.4 | dimensionless | 10 GHz, cryogenic | material-sapphire-permittivity |
+
+## Applicability
+
+Applies to substrate-level superconducting chip simulations.
+
+## Design Implications
+
+Use this value to seed electromagnetic design sweeps.
+
+## Known Uncertainty
+
+Temperature and frequency dependence still need source-level checks.
+
+## Related Pages
+
+- [[hfss-eigenmode-simulation]]
+`);
+
+    const result = await lintPaperWiki({
+      workspaceDir: workspace,
+      includeQualityAudit: true,
+      maxItems: 50
+    });
+
+    assert.ok(!result.issues.some((issue) =>
+      issue.kind === "material_parameter_missing_condition" &&
+      issue.target === "Sapphire relative permittivity"
+    ));
+  } finally {
+    await rm(workspace, { recursive: true, force: true });
+  }
+});
+
+test("lintPaperWiki does not require units for nonnumeric material parameter values", async () => {
+  const workspace = await createWorkspace();
+  try {
+    await writePage(workspace, "substrate-material-qualitative-values", `
+---
+schema_version: 1
+type: dataset
+key: substrate-material-qualitative-values
+title: Substrate Material Qualitative Values
+aliases: []
+tags: []
+evidence_contract: mixed
+source_refs:
+  - "material-sapphire-permittivity"
+created_at: 2026-05-10T00:00:00.000Z
+updated_at: 2026-05-10T00:00:00.000Z
+---
+
+# Substrate Material Qualitative Values
+
+## Parameter Table
+
+| Parameter | Value | Unit | Conditions | Source |
+| --- | --- | --- | --- | --- |
+| Process readiness | TBD |  | pending supplier data | material-sapphire-permittivity |
+
+## Applicability
+
+Applies to substrate-level superconducting chip simulations.
+
+## Design Implications
+
+Use this value to track incomplete material records.
+
+## Known Uncertainty
+
+The quantitative value has not been selected.
+
+## Related Pages
+
+- [[hfss-eigenmode-simulation]]
+`);
+
+    const result = await lintPaperWiki({
+      workspaceDir: workspace,
+      includeQualityAudit: true,
+      maxItems: 50
+    });
+
+    assert.ok(!result.issues.some((issue) =>
+      issue.kind === "material_parameter_missing_unit" &&
+      issue.target === "Process readiness"
+    ));
+  } finally {
+    await rm(workspace, { recursive: true, force: true });
+  }
+});
+
 test("lintPaperWiki reports method pages missing required template sections", async () => {
   const workspace = await createWorkspace();
   try {

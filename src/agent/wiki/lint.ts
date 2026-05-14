@@ -806,6 +806,24 @@ function extractMarkdownTableRows(markdown: string, heading: string): Array<Reco
   return rows;
 }
 
+function markdownTableCell(row: Record<string, string>, columns: string[]): string {
+  for (const column of columns) {
+    const value = row[column]?.trim();
+    if (value) {
+      return value;
+    }
+  }
+  return "";
+}
+
+function isQuantitativeParameterValue(value: string): boolean {
+  const normalized = value.trim().toLowerCase();
+  if (!normalized || /^(?:tbd|n\/a|na|none|unknown|pending)$/i.test(normalized)) {
+    return false;
+  }
+  return /\d/.test(normalized);
+}
+
 function materialParameterRowIssues(markdown: string): Array<{
   kind: "material_parameter_missing_unit" | "material_parameter_missing_condition";
   target: string;
@@ -815,15 +833,15 @@ function materialParameterRowIssues(markdown: string): Array<{
     target: string;
   }> = [];
   for (const row of extractMarkdownTableRows(markdown, "Parameter Table")) {
-    const parameter = row.parameter?.trim() ?? "";
-    const value = row.value?.trim() ?? "";
+    const parameter = markdownTableCell(row, ["parameter"]);
+    const value = markdownTableCell(row, ["value"]);
     if (!parameter || !value) {
       continue;
     }
-    if (!(row.unit?.trim())) {
+    if (isQuantitativeParameterValue(value) && !markdownTableCell(row, ["unit"])) {
       findings.push({ kind: "material_parameter_missing_unit", target: parameter });
     }
-    if (!(row.conditions?.trim())) {
+    if (!markdownTableCell(row, ["conditions", "condition"])) {
       findings.push({ kind: "material_parameter_missing_condition", target: parameter });
     }
   }
