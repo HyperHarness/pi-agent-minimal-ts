@@ -20,6 +20,13 @@ test("inferWikiPageTypeForEvidence maps software documentation to method pages",
   }), "method");
 });
 
+test("inferWikiPageTypeForEvidence maps generic software queries to method pages", () => {
+  assert.equal(inferWikiPageTypeForEvidence({
+    query: "software documentation",
+    sourceKinds: []
+  }), "method");
+});
+
 test("getWikiPageTemplate returns concrete required sections", () => {
   const template = getWikiPageTemplate("design-record");
   assert.equal(template.pageType, "design-record");

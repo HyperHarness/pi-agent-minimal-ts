@@ -73,7 +73,7 @@ export function inferWikiPageTypeForEvidence(input: InferWikiPageTypeInput): Tem
 
   if (
     sourceKinds.has("software-doc") ||
-    containsAny(query, ["workflow", "procedure", "simulation", "hfss", "qiskit metal", "pyepr", "scqubits", "manual"])
+    containsAny(query, ["workflow", "software", "procedure", "simulation", "hfss", "qiskit metal", "pyepr", "scqubits", "manual"])
   ) {
     return "method";
   }
