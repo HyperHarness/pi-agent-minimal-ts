@@ -22,6 +22,7 @@ import {
   sanitizeWikiFilename
 } from "./store.js";
 import { listTypedWikiPages, type WikiPageDiagnostic } from "./typed-store.js";
+import { validateRequiredTemplateSections } from "./page-templates.js";
 
 export type PaperWikiLintIssueKind =
   | "stale_index"
@@ -45,7 +46,12 @@ export type PaperWikiLintIssueKind =
   | "unresolved_contradiction"
   | "missing_typed_relation"
   | "missing_experiment_ref"
-  | "code_backed_without_experiment";
+  | "code_backed_without_experiment"
+  | "material_parameter_missing_unit"
+  | "material_parameter_missing_condition"
+  | "missing_template_section"
+  | "design_record_without_uses_relation"
+  | "software_doc_version_missing";
 
 export type PaperWikiLintSeverity = "high" | "medium" | "low";
 
@@ -111,7 +117,12 @@ const ISSUE_KINDS: PaperWikiLintIssueKind[] = [
   "unresolved_contradiction",
   "missing_typed_relation",
   "missing_experiment_ref",
-  "code_backed_without_experiment"
+  "code_backed_without_experiment",
+  "material_parameter_missing_unit",
+  "material_parameter_missing_condition",
+  "missing_template_section",
+  "design_record_without_uses_relation",
+  "software_doc_version_missing"
 ];
 const DEFAULT_MAX_ITEMS = 30;
 const DEFAULT_ISSUE_KIND_DISPLAY_LIMIT = 8;
@@ -642,7 +653,12 @@ function summarizeActions(issues: PaperWikiLintIssue[]): string[] {
     ["unresolved_contradiction", "Review contradiction candidates and mark them confirmed or rejected."],
     ["missing_typed_relation", "Replace legacy related_pages with typed_relations."],
     ["missing_experiment_ref", "Fix experiment_refs paths or update the experiment status."],
-    ["code_backed_without_experiment", "Attach local experiment_refs to code-backed or mixed pages when claims depend on code."]
+    ["code_backed_without_experiment", "Attach local experiment_refs to code-backed or mixed pages when claims depend on code."],
+    ["material_parameter_missing_unit", "Add units to dataset parameter rows that contain quantitative values."],
+    ["material_parameter_missing_condition", "Add measurement or simulation conditions to dataset parameter rows."],
+    ["missing_template_section", "Add required template sections to typed evidence-backed pages."],
+    ["design_record_without_uses_relation", "Connect design records to the evidence or method pages they use with typed_relations."],
+    ["software_doc_version_missing", "Record software version or release information on software-backed method pages."]
   ]);
   const counts = new Map<PaperWikiLintIssueKind, number>();
   for (const issue of issues) {
@@ -725,6 +741,105 @@ function claimHasConcreteEvidence(claim: {
     Boolean(item.chunkId) ||
     Boolean(item.codeOutputPath)
   );
+}
+
+function escapeRegExp(value: string): string {
+  return value.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
+}
+
+function normalizeMarkdownTableColumn(value: string): string {
+  return value
+    .trim()
+    .toLowerCase()
+    .replace(/<br\s*\/?>/g, " ")
+    .replace(/[^a-z0-9]+/g, "_")
+    .replace(/^_+|_+$/g, "");
+}
+
+function splitMarkdownTableRow(line: string): string[] {
+  const trimmed = line.trim();
+  const withoutEdges = trimmed.replace(/^\|/, "").replace(/\|$/, "");
+  return withoutEdges.split("|").map((cell) => cell.trim());
+}
+
+function isMarkdownTableSeparator(line: string): boolean {
+  return /^\s*\|?\s*:?-{3,}:?\s*(?:\|\s*:?-{3,}:?\s*)+\|?\s*$/.test(line);
+}
+
+function extractMarkdownTableRows(markdown: string, heading: string): Array<Record<string, string>> {
+  const normalized = markdown.replace(/\r\n/g, "\n");
+  const headingPattern = new RegExp(`^##\\s+${escapeRegExp(heading)}\\s*#*\\s*$`, "m");
+  const headingMatch = headingPattern.exec(normalized);
+  if (!headingMatch) {
+    return [];
+  }
+
+  const sectionStart = (headingMatch.index ?? 0) + headingMatch[0].length;
+  const sectionRest = normalized.slice(sectionStart);
+  const nextHeadingMatch = /^##\s+.+$/m.exec(sectionRest);
+  const section = nextHeadingMatch ? sectionRest.slice(0, nextHeadingMatch.index) : sectionRest;
+  const lines = section.split("\n").map((line) => line.trim()).filter(Boolean);
+  const headerIndex = lines.findIndex((line, index) =>
+    line.includes("|") &&
+    index + 1 < lines.length &&
+    isMarkdownTableSeparator(lines[index + 1] ?? "")
+  );
+  if (headerIndex < 0) {
+    return [];
+  }
+
+  const columns = splitMarkdownTableRow(lines[headerIndex] ?? "").map(normalizeMarkdownTableColumn);
+  const rows: Array<Record<string, string>> = [];
+  for (const line of lines.slice(headerIndex + 2)) {
+    if (!line.includes("|") || isMarkdownTableSeparator(line)) {
+      break;
+    }
+    const cells = splitMarkdownTableRow(line);
+    const row: Record<string, string> = {};
+    columns.forEach((column, index) => {
+      if (column) {
+        row[column] = cells[index]?.trim() ?? "";
+      }
+    });
+    rows.push(row);
+  }
+  return rows;
+}
+
+function materialParameterRowIssues(markdown: string): Array<{
+  kind: "material_parameter_missing_unit" | "material_parameter_missing_condition";
+  target: string;
+}> {
+  const findings: Array<{
+    kind: "material_parameter_missing_unit" | "material_parameter_missing_condition";
+    target: string;
+  }> = [];
+  for (const row of extractMarkdownTableRows(markdown, "Parameter Table")) {
+    const parameter = row.parameter?.trim() ?? "";
+    const value = row.value?.trim() ?? "";
+    if (!parameter || !value) {
+      continue;
+    }
+    if (!(row.unit?.trim())) {
+      findings.push({ kind: "material_parameter_missing_unit", target: parameter });
+    }
+    if (!(row.conditions?.trim())) {
+      findings.push({ kind: "material_parameter_missing_condition", target: parameter });
+    }
+  }
+  return findings;
+}
+
+function isSoftwareDocMethodPage(sourceRefs: string[], body: string, frontmatter: string): boolean {
+  return sourceRefs.some((sourceRef) => /^software-doc(?:-|$)/i.test(sourceRef)) ||
+    /\bsoftware\s+doc(?:umentation)?\b/i.test(`${frontmatter}\n${body}`);
+}
+
+function hasSoftwareVersionSignal(values: string[]): boolean {
+  const combined = values.join("\n");
+  return /\b(?:version|release)\s*[:#-]?\s*(?:v?\d|20\d{2}[-\s]*r\d)\b/i.test(combined) ||
+    /\bv?\d+\.\d+(?:\.\d+)?\b/i.test(combined) ||
+    /\b20\d{2}[-\s]*r\d\b/i.test(combined);
 }
 
 function hasConceptGapIssue(issues: PaperWikiLintIssue[], concept: string): boolean {
@@ -1183,6 +1298,64 @@ export async function lintPaperWiki(options: PaperWikiLintOptions): Promise<Pape
     }
     for (const page of typedPages.pages) {
       const relativePath = relativeToWorkspace(workspaceDir, page.path);
+      if (
+        page.metadata.type === "dataset" ||
+        page.metadata.type === "method" ||
+        page.metadata.type === "finding" ||
+        page.metadata.type === "design-record"
+      ) {
+        const templateAudit = validateRequiredTemplateSections({
+          pageType: page.metadata.type,
+          markdown: page.body
+        });
+        for (const section of templateAudit.missingSections) {
+          issues.push({
+            kind: "missing_template_section",
+            severity: page.metadata.type === "design-record" ? "medium" : "low",
+            path: relativePath,
+            target: section,
+            reason: `Typed ${page.metadata.type} page is missing required "${section}" section.`
+          });
+        }
+      }
+      if (page.metadata.type === "dataset") {
+        for (const finding of materialParameterRowIssues(page.body)) {
+          issues.push({
+            kind: finding.kind,
+            severity: "medium",
+            path: relativePath,
+            target: finding.target,
+            reason: finding.kind === "material_parameter_missing_unit"
+              ? "Material parameter row has a value but no unit."
+              : "Material parameter row has a value but no conditions."
+          });
+        }
+      }
+      if (
+        page.metadata.type === "design-record" &&
+        !(page.metadata.typed_relations ?? []).some((relation) => relation.type === "uses")
+      ) {
+        issues.push({
+          kind: "design_record_without_uses_relation",
+          severity: "medium",
+          path: relativePath,
+          reason: "Design record has no typed_relations entry with type uses."
+        });
+      }
+      if (page.metadata.type === "method") {
+        const frontmatter = extractFrontmatter(await readFile(page.path, "utf8").catch(() => ""));
+        if (
+          isSoftwareDocMethodPage(page.metadata.source_refs, page.body, frontmatter) &&
+          !hasSoftwareVersionSignal([frontmatter, page.body, ...page.metadata.source_refs])
+        ) {
+          issues.push({
+            kind: "software_doc_version_missing",
+            severity: "low",
+            path: relativePath,
+            reason: "Software documentation method page has no obvious version or release signal."
+          });
+        }
+      }
       for (const claim of page.metadata.claims ?? []) {
         if (claim.kind === "quantitative" && !claimHasConcreteEvidence(claim)) {
           issues.push({

@@ -1022,6 +1022,166 @@ test("lintPaperWiki does not classify mixed typed diagnostics as weak evidence",
   }
 });
 
+test("lintPaperWiki reports material dataset rows without units or conditions", async () => {
+  const workspace = await createWorkspace();
+  try {
+    await writePage(workspace, "substrate-material-parameters", `
+---
+schema_version: 1
+type: dataset
+key: substrate-material-parameters
+title: Substrate Material Parameters
+aliases: []
+tags: []
+evidence_contract: mixed
+source_refs:
+  - "material-sapphire-permittivity"
+created_at: 2026-05-10T00:00:00.000Z
+updated_at: 2026-05-10T00:00:00.000Z
+---
+
+# Substrate Material Parameters
+
+## Parameter Table
+
+| Parameter | Value | Unit | Conditions | Source |
+| --- | --- | --- | --- | --- |
+| Sapphire relative permittivity | 9.4 |  |  | material-sapphire-permittivity |
+
+## Applicability
+
+Applies to substrate-level superconducting chip simulations.
+
+## Design Implications
+
+Use this value to seed electromagnetic design sweeps.
+
+## Known Uncertainty
+
+Temperature and frequency dependence still need source-level checks.
+
+## Related Pages
+
+- [[hfss-eigenmode-simulation]]
+`);
+
+    const result = await lintPaperWiki({
+      workspaceDir: workspace,
+      includeQualityAudit: true,
+      maxItems: 50
+    });
+
+    const kinds = result.issues.map((issue) => issue.kind);
+    assert.ok(kinds.includes("material_parameter_missing_unit"));
+    assert.ok(kinds.includes("material_parameter_missing_condition"));
+  } finally {
+    await rm(workspace, { recursive: true, force: true });
+  }
+});
+
+test("lintPaperWiki reports method pages missing required template sections", async () => {
+  const workspace = await createWorkspace();
+  try {
+    await writePage(workspace, "hfss-eigenmode-simulation", `
+---
+schema_version: 1
+type: method
+key: hfss-eigenmode-simulation
+title: HFSS Eigenmode Simulation
+aliases: []
+tags: []
+evidence_contract: mixed
+source_refs:
+  - "software-doc-hfss"
+created_at: 2026-05-10T00:00:00.000Z
+updated_at: 2026-05-10T00:00:00.000Z
+---
+
+# HFSS Eigenmode Simulation
+
+## Goal
+
+Estimate resonant frequencies for a candidate chip layout.
+
+## Procedure
+
+Create the model, assign boundaries, mesh, and solve.
+`);
+
+    const result = await lintPaperWiki({
+      workspaceDir: workspace,
+      includeQualityAudit: true,
+      maxItems: 50
+    });
+
+    const missingTargets = result.issues
+      .filter((issue) => issue.kind === "missing_template_section")
+      .map((issue) => issue.target);
+    assert.ok(missingTargets.includes("Inputs"));
+    assert.ok(missingTargets.includes("Outputs"));
+  } finally {
+    await rm(workspace, { recursive: true, force: true });
+  }
+});
+
+test("lintPaperWiki reports design records without uses relations", async () => {
+  const workspace = await createWorkspace();
+  try {
+    await writePage(workspace, "sapphire-substrate-selection", `
+---
+schema_version: 1
+type: design-record
+key: sapphire-substrate-selection
+title: Sapphire Substrate Selection
+aliases: []
+tags: []
+evidence_contract: mixed
+source_refs:
+  - "material-sapphire-permittivity"
+typed_relations: []
+created_at: 2026-05-10T00:00:00.000Z
+updated_at: 2026-05-10T00:00:00.000Z
+---
+
+# Sapphire Substrate Selection
+
+## Decision
+
+Use sapphire as the baseline substrate for this design pass.
+
+## Context
+
+Substrate dielectric properties constrain resonator and qubit geometry.
+
+## Evidence Used
+
+The material parameter page records the permittivity source.
+
+## Alternatives Considered
+
+Silicon remains an alternative pending loss analysis.
+
+## Verification Plan
+
+Run an eigenmode sweep against the material dataset.
+
+## Status
+
+Candidate decision.
+`);
+
+    const result = await lintPaperWiki({
+      workspaceDir: workspace,
+      includeQualityAudit: true,
+      maxItems: 50
+    });
+
+    assert.ok(result.issues.some((issue) => issue.kind === "design_record_without_uses_relation"));
+  } finally {
+    await rm(workspace, { recursive: true, force: true });
+  }
+});
+
 test("planWikiStructure emits budgeted tool-call-shaped growth and verification actions", async () => {
   const workspace = await createWorkspace();
 
