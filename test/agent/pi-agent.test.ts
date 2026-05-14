@@ -1,6 +1,6 @@
 import test from "node:test";
 import assert from "node:assert/strict";
-import { mkdir, mkdtemp, rm, writeFile } from "node:fs/promises";
+import { mkdir, mkdtemp, readFile, rm, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import path from "node:path";
 import type { Api, AssistantMessage, Context, Model, ToolResultMessage, UserMessage } from "@mariozechner/pi-ai";
@@ -1004,6 +1004,79 @@ test("runSessionPrompt routes paper write commands to the paper-writing worker b
     assert.equal(handoff.finalResponse, "Paper-writing worker finished.");
     assert.equal(handoff.nextSuggestedOwner, "wiki-agent");
     assert.deepEqual(context.messages, result.newMessages);
+  } finally {
+    registration.unregister();
+    await rm(workspace, { recursive: true, force: true });
+  }
+});
+
+test("runSessionPrompt paper download worker queues browser extension jobs", async () => {
+  const runSessionPrompt = (
+    piAgent as {
+      runSessionPrompt?: (options: {
+        model: Model<Api>;
+        workspaceDir: string;
+        context: AgentContext;
+        prompt: string;
+        onEvent?: (event: AgentEvent) => void;
+      }) => Promise<{ action: "stop" | "continue"; newMessages: AgentMessage[] }>;
+    }
+  ).runSessionPrompt;
+  assert.equal(typeof runSessionPrompt, "function");
+
+  const registration = registerFauxProvider();
+  const workspace = await mkdtemp(path.join(tmpdir(), "pi-agent-paper-download-worker-"));
+  const articleUrl = "https://example.com/research/paper";
+  registration.setResponses([
+    fauxAssistantMessage([fauxToolCall("download_paper", { url: articleUrl })], {
+      stopReason: "toolUse"
+    }),
+    fauxAssistantMessage([fauxText("Queued by paper-download-subagent.")])
+  ]);
+
+  const context: AgentContext = {
+    systemPrompt: "You are a helpful assistant. Use tools when they are useful.",
+    messages: [],
+    tools: []
+  };
+  const observedEvents: AgentEvent[] = [];
+
+  try {
+    const result = await runSessionPrompt!({
+      model: registration.getModel(),
+      workspaceDir: workspace,
+      context,
+      prompt: `paper download ${articleUrl}`,
+      onEvent: (event) => {
+        observedEvents.push(event);
+      }
+    });
+
+    assert.equal(result.action, "continue");
+    const toolExecutionEnd = observedEvents.find(
+      (event): event is ToolExecutionEndEvent =>
+        event.type === "tool_execution_end" &&
+        event.toolName === "download_paper" &&
+        !event.isError
+    );
+    assert.ok(toolExecutionEnd);
+    const details = toolExecutionEnd.result.details as { status?: string; jobId?: string; articleUrl?: string };
+    assert.equal(details.status, "extension_job_queued");
+    assert.equal(details.articleUrl, articleUrl);
+    assert.equal(typeof details.jobId, "string");
+
+    const jobsPath = path.join(workspace, ".browser-profile", "paper-download-jobs.jsonl");
+    const rawJobs = await readFile(jobsPath, "utf8");
+    assert.match(rawJobs, /"status":"queued"/);
+    assert.match(rawJobs, /"source":"external"/);
+    assert.match(rawJobs, new RegExp(articleUrl.replace(/[.*+?^${}()|[\]\\]/g, "\\$&")));
+
+    const handoff = parseWorkerHandoff(result.newMessages[1] as AssistantMessage) as {
+      role?: string;
+      toolsUsed?: string[];
+    };
+    assert.equal(handoff.role, "paper-download-subagent");
+    assert.deepEqual(handoff.toolsUsed, ["download_paper"]);
   } finally {
     registration.unregister();
     await rm(workspace, { recursive: true, force: true });

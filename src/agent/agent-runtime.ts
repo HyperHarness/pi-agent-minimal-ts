@@ -388,7 +388,9 @@ async function runRoutedWorkerPrompt(options: {
   instruction: string;
   onEvent?: AgentMessageEventHandler;
 }): Promise<{ messages: AgentMessage[]; handoff: WorkerHandoff }> {
-  const workerTools = createToolsForBoundary(options.workspaceDir, options.role);
+  const workerTools = createToolsForBoundary(options.workspaceDir, options.role, {
+    extensionBridge: createQueuedPaperExtensionBridge({ workspaceDir: options.workspaceDir })
+  });
   const workerContext: AgentContext = {
     systemPrompt: systemPromptForWorker(options.role),
     messages: [],
