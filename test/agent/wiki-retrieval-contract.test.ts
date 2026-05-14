@@ -57,6 +57,31 @@ function sourceManifest(paperKey: string): Record<string, unknown> {
   };
 }
 
+function generalizedSourceManifest(overrides: Record<string, unknown> = {}): Record<string, unknown> {
+  return {
+    schemaVersion: 2,
+    sourceKind: "material-database",
+    sourceKey: "material-sapphire-permittivity",
+    title: "Sapphire permittivity values",
+    status: "needs_review",
+    createdAt: "2026-05-14T00:00:00.000Z",
+    updatedAt: "2026-05-14T00:00:00.000Z",
+    summaryPath: "knowledge-base/sources/material-sapphire-permittivity/summary.md",
+    provenance: {
+      url: "https://example.invalid/materials/sapphire",
+      retrievedAt: "2026-05-14T00:00:00.000Z"
+    },
+    artifacts: [{
+      kind: "table",
+      path: "knowledge-base/sources/material-sapphire-permittivity/tables/parameters.json"
+    }],
+    tags: ["materials", "sapphire"],
+    relatedSourceKeys: [],
+    synthesisPageKeys: ["substrate-and-film-material-parameters"],
+    ...overrides
+  };
+}
+
 async function writeLegacySourceWithManifest(input: {
   workspace: string;
   paperKey: string;
@@ -254,6 +279,10 @@ test("retrieval contract reads source evidence by key from legacy summary and ma
     assert.equal(result.item?.kind, "source");
     assert.equal(result.item?.key, paperKey);
     assert.equal(result.item?.manifest?.status, "ready");
+    assert.equal(result.item?.sourceKind, "paper");
+    assert.equal(result.item?.sourceKey, paperKey);
+    assert.deepEqual(result.item?.sourceRefs, [paperKey]);
+    assert.equal(result.item?.evidenceContract, "mixed");
     assert.match(result.item?.body ?? "", /durable evidence text/);
     assert.equal(result.item?.relativePath, `knowledge-base/sources/${paperKey}/summary.md`);
   });
@@ -269,27 +298,7 @@ test("retrieval contract returns generalized non-paper source evidence", async (
     await writeWorkspaceFile(
       workspaceDir,
       "knowledge-base/manifests/material-sapphire-permittivity.json",
-      `${JSON.stringify({
-        schemaVersion: 2,
-        sourceKind: "material-database",
-        sourceKey: "material-sapphire-permittivity",
-        title: "Sapphire permittivity values",
-        status: "needs_review",
-        createdAt: "2026-05-14T00:00:00.000Z",
-        updatedAt: "2026-05-14T00:00:00.000Z",
-        summaryPath: "knowledge-base/sources/material-sapphire-permittivity/summary.md",
-        provenance: {
-          url: "https://example.invalid/materials/sapphire",
-          retrievedAt: "2026-05-14T00:00:00.000Z"
-        },
-        artifacts: [{
-          kind: "table",
-          path: "knowledge-base/sources/material-sapphire-permittivity/tables/parameters.json"
-        }],
-        tags: ["materials", "sapphire"],
-        relatedSourceKeys: [],
-        synthesisPageKeys: ["substrate-and-film-material-parameters"]
-      }, null, 2)}\n`
+      `${JSON.stringify(generalizedSourceManifest(), null, 2)}\n`
     );
 
     const result = await readWikiEvidenceItem({
@@ -306,6 +315,67 @@ test("retrieval contract returns generalized non-paper source evidence", async (
     assert.deepEqual(result.item?.sourceRefs, ["material-sapphire-permittivity"]);
     assert.equal(result.item?.manifest?.schemaVersion, 2);
   });
+});
+
+test("retrieval contract rejects malformed generalized source manifests", async () => {
+  const cases: Array<{ name: string; manifest: Record<string, unknown> }> = [
+    {
+      name: "invalid-artifact-kind",
+      manifest: generalizedSourceManifest({
+        artifacts: [{
+          kind: "spreadsheet",
+          path: "knowledge-base/sources/material-sapphire-permittivity/tables/parameters.json"
+        }]
+      })
+    },
+    {
+      name: "invalid-artifact-optional-field",
+      manifest: generalizedSourceManifest({
+        artifacts: [{
+          kind: "table",
+          path: "knowledge-base/sources/material-sapphire-permittivity/tables/parameters.json",
+          qualityPath: 42
+        }]
+      })
+    },
+    {
+      name: "invalid-provenance-optional-field",
+      manifest: generalizedSourceManifest({
+        provenance: {
+          url: 42,
+          retrievedAt: "2026-05-14T00:00:00.000Z"
+        }
+      })
+    }
+  ];
+
+  for (const item of cases) {
+    await withWorkspace(`wiki-retrieval-v2-${item.name}-`, async (workspaceDir) => {
+      await writeWorkspaceFile(
+        workspaceDir,
+        "knowledge-base/sources/material-sapphire-permittivity/summary.md",
+        "# Sapphire permittivity\n\nMalformed manifest must not provide metadata."
+      );
+      await writeWorkspaceFile(
+        workspaceDir,
+        "knowledge-base/manifests/material-sapphire-permittivity.json",
+        `${JSON.stringify(item.manifest, null, 2)}\n`
+      );
+
+      const result = await readWikiEvidenceItem({
+        workspaceDir,
+        kind: "source",
+        key: "material-sapphire-permittivity"
+      });
+
+      assert.equal(result.status, "malformed", item.name);
+      assert.equal(result.item?.manifest, undefined, item.name);
+      assert.ok(
+        result.diagnostics.some((diagnostic) => diagnostic.toLowerCase().includes("malformed manifest")),
+        `${item.name}: expected malformed manifest diagnostic, got ${JSON.stringify(result.diagnostics)}`
+      );
+    });
+  }
 });
 
 test("retrieval contract lists typed pages by tag and evidence contract", async () => {

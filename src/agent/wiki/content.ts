@@ -27,6 +27,7 @@ import {
   sanitizeWikiFilename
 } from "./store.js";
 import {
+  readNormalizedWikiSourceManifest,
   writeWikiSourceManifest,
   type WikiSourceManifest
 } from "./manifest-store.js";
@@ -903,6 +904,32 @@ ${note ? `- Note: ${note}\n` : ""}`;
   };
 }
 
+async function isNonPaperSourceSummary(input: {
+  workspaceDir: string;
+  sourceKey: string;
+}): Promise<boolean> {
+  try {
+    const rawManifest = JSON.parse(
+      await readFile(getPaperWikiSourceManifestPath(input.workspaceDir, input.sourceKey), "utf8")
+    ) as { schemaVersion?: unknown; sourceKind?: unknown };
+    if (
+      rawManifest.schemaVersion === 2 &&
+      typeof rawManifest.sourceKind === "string" &&
+      rawManifest.sourceKind !== "paper"
+    ) {
+      return true;
+    }
+  } catch {
+    // Legacy source summaries can predate manifests; keep them searchable as paper evidence.
+  }
+
+  const manifest = await readNormalizedWikiSourceManifest({
+    workspaceDir: input.workspaceDir,
+    sourceKey: input.sourceKey
+  });
+  return manifest?.sourceKind !== undefined && manifest.sourceKind !== "paper";
+}
+
 async function searchPaperWikiWithLegacyScoring(options: PaperWikiSearchOptions): Promise<PaperWikiSearchResult> {
   const query = options.query.trim();
   if (!query) {
@@ -928,6 +955,9 @@ async function searchPaperWikiWithLegacyScoring(options: PaperWikiSearchOptions)
   for (const filePath of sourceFiles) {
     const markdown = await readFile(filePath, "utf8");
     const paperKey = paperKeyFromPaperWikiSourcePath(filePath);
+    if (await isNonPaperSourceSummary({ workspaceDir: options.workspaceDir, sourceKey: paperKey })) {
+      continue;
+    }
     const title = extractTitle(markdown, paperKey);
     const score = scoreWikiDocument(markdown, title, paperKey, query, searchTerms);
     if (score <= 0) {
@@ -978,6 +1008,10 @@ function isMeaningfulStructuredSearchResult(result: WikiEvidenceSearchResult): b
   return result.score >= 2;
 }
 
+function isPaperOrPageStructuredSearchResult(result: WikiEvidenceSearchResult): boolean {
+  return result.item.kind === "page" || result.item.sourceKind === "paper" || result.item.sourceKind === undefined;
+}
+
 export async function searchPaperWiki(options: PaperWikiSearchOptions): Promise<PaperWikiSearchResult> {
   const query = options.query.trim();
   if (!query) {
@@ -994,7 +1028,16 @@ export async function searchPaperWiki(options: PaperWikiSearchOptions): Promise<
   });
 
   if (structured.status === "ready" && structured.results.some(isMeaningfulStructuredSearchResult)) {
-    const meaningfulResults = structured.results.filter(isMeaningfulStructuredSearchResult);
+    const meaningfulResults = structured.results
+      .filter(isMeaningfulStructuredSearchResult)
+      .filter(isPaperOrPageStructuredSearchResult);
+    if (meaningfulResults.length === 0) {
+      return searchPaperWikiWithLegacyScoring({
+        workspaceDir: options.workspaceDir,
+        query,
+        maxResults
+      });
+    }
     return {
       query,
       results: meaningfulResults.map((result) => ({

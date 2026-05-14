@@ -277,17 +277,21 @@ export async function readNormalizedWikiSourceManifest(input: {
     const manifest = JSON.parse(
       await readFile(getWikiSourceManifestPath(input.workspaceDir, input.sourceKey), "utf8")
     ) as unknown;
-    if (isWikiSourceManifestV2(manifest)) {
-      return manifest;
-    }
-    if (isWikiSourceManifestV1(manifest)) {
-      const normalized = normalizeWikiSourceManifest(manifest);
-      return isWikiSourceManifestV2(normalized) ? normalized : undefined;
-    }
-    return undefined;
+    return normalizeUnknownWikiSourceManifest(manifest);
   } catch {
     return undefined;
   }
+}
+
+export function normalizeUnknownWikiSourceManifest(manifest: unknown): WikiSourceManifestV2 | undefined {
+  if (isWikiSourceManifestV2(manifest)) {
+    return manifest;
+  }
+  if (isWikiSourceManifestV1(manifest)) {
+    const normalized = normalizeWikiSourceManifest(manifest);
+    return isWikiSourceManifestV2(normalized) ? normalized : undefined;
+  }
+  return undefined;
 }
 
 function isRecord(value: unknown): value is Record<string, unknown> {

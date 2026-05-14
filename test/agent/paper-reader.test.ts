@@ -559,6 +559,54 @@ leakage, and measurement overhead.
   }
 });
 
+test("searchPaperWiki does not expose generalized non-paper sources as paper results", async () => {
+  const workspace = await createWorkspace();
+  try {
+    await writeSourceSummary(
+      workspace,
+      "material-sapphire-permittivity",
+      "# Sapphire permittivity values\n\nSapphire permittivity requires cryogenic-condition review."
+    );
+    await writeJson(
+      path.join(workspace, "knowledge-base", "manifests", "material-sapphire-permittivity.json"),
+      {
+        schemaVersion: 2,
+        sourceKind: "material-database",
+        sourceKey: "material-sapphire-permittivity",
+        title: "Sapphire permittivity values",
+        status: "needs_review",
+        createdAt: "2026-05-14T00:00:00.000Z",
+        updatedAt: "2026-05-14T00:00:00.000Z",
+        summaryPath: "knowledge-base/sources/material-sapphire-permittivity/summary.md",
+        provenance: {
+          url: "https://example.invalid/materials/sapphire",
+          retrievedAt: "2026-05-14T00:00:00.000Z"
+        },
+        artifacts: [{
+          kind: "table",
+          path: "knowledge-base/sources/material-sapphire-permittivity/tables/parameters.json"
+        }],
+        tags: ["materials", "sapphire"],
+        relatedSourceKeys: [],
+        synthesisPageKeys: []
+      }
+    );
+
+    const search = await searchPaperWiki({
+      workspaceDir: workspace,
+      query: "sapphire permittivity",
+      maxResults: 3
+    });
+
+    assert.equal(
+      search.results.some((result) => result.paperKey === "material-sapphire-permittivity"),
+      false
+    );
+  } finally {
+    await rm(workspace, { recursive: true, force: true });
+  }
+});
+
 test("writePaperWikiPage saves a synthesis page and updates the wiki index", async () => {
   const workspace = await createWorkspace();
   try {
