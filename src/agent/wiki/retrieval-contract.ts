@@ -5,7 +5,14 @@ import {
   paperKeyFromPaperWikiSourcePath,
   relativeToWorkspace
 } from "./store.js";
-import { getWikiSourceManifestPath, type WikiSourceManifest, type WikiSourceManifestStatus } from "./manifest-store.js";
+import {
+  getWikiSourceManifestPath,
+  normalizeWikiSourceManifest,
+  type WikiSourceKind,
+  type WikiSourceManifest,
+  type WikiSourceManifestStatus,
+  type WikiSourceManifestV2
+} from "./manifest-store.js";
 import {
   type WikiClaimProvenance,
   type WikiEvidenceContract,
@@ -34,11 +41,13 @@ export interface WikiEvidenceItem {
   aliases: string[];
   evidenceContract: WikiEvidenceContract;
   sourceRefs: string[];
+  sourceKind?: WikiSourceKind;
+  sourceKey?: string;
   claims?: WikiClaimProvenance[];
   typedRelations?: WikiTypedRelation[];
   experimentRefs?: WikiExperimentRef[];
   reviewerCritique?: WikiReviewerCritiqueItem[];
-  manifest?: WikiSourceManifest;
+  manifest?: WikiSourceManifestV2;
   diagnostics: string[];
 }
 
@@ -77,6 +86,25 @@ const WIKI_SOURCE_MANIFEST_STATUSES = new Set<WikiSourceManifestStatus>([
   "missing_artifact"
 ]);
 
+const WIKI_SOURCE_MANIFEST_V2_STATUSES = new Set<string>([
+  ...WIKI_SOURCE_MANIFEST_STATUSES,
+  "version_unknown",
+  "needs_review"
+]);
+
+const WIKI_SOURCE_KINDS = new Set<WikiSourceKind>([
+  "paper",
+  "material-database",
+  "software-doc",
+  "vendor-note",
+  "standard",
+  "lab-note",
+  "code-output",
+  "design-artifact",
+  "webpage",
+  "manual"
+]);
+
 function stripLeadingFrontmatter(markdown: string): string {
   return markdown.replace(/\r\n/g, "\n").replace(/^---\n[\s\S]*?\n---(?:\n|$)/, "");
 }
@@ -110,11 +138,17 @@ function hasOnlyOptionalStringFields(value: Record<string, unknown>, fields: str
   return fields.every((field) => value[field] === undefined || typeof value[field] === "string");
 }
 
-function validateSourceManifest(value: unknown): value is WikiSourceManifest {
-  if (!isObject(value)) {
-    return false;
-  }
+function hasRequiredStringFields(value: Record<string, unknown>, fields: string[]): boolean {
+  return fields.every((field) => typeof value[field] === "string");
+}
+
+function validateSourceArtifact(value: unknown): boolean {
+  return isObject(value) && typeof value.kind === "string" && typeof value.path === "string";
+}
+
+function validateSourceManifestV1(value: unknown): value is WikiSourceManifest {
   return (
+    isObject(value) &&
     value.schemaVersion === 1 &&
     value.kind === "paper-source" &&
     typeof value.paperKey === "string" &&
@@ -137,11 +171,35 @@ function validateSourceManifest(value: unknown): value is WikiSourceManifest {
   );
 }
 
+function validateSourceManifestV2(value: unknown): value is WikiSourceManifestV2 {
+  return (
+    isObject(value) &&
+    value.schemaVersion === 2 &&
+    typeof value.sourceKind === "string" &&
+    WIKI_SOURCE_KINDS.has(value.sourceKind as WikiSourceKind) &&
+    hasRequiredStringFields(value, ["sourceKey", "title", "status", "createdAt", "updatedAt", "summaryPath"]) &&
+    WIKI_SOURCE_MANIFEST_V2_STATUSES.has(value.status as string) &&
+    isObject(value.provenance) &&
+    Array.isArray(value.artifacts) &&
+    value.artifacts.every(validateSourceArtifact) &&
+    isStringArray(value.tags) &&
+    isStringArray(value.relatedSourceKeys) &&
+    isStringArray(value.synthesisPageKeys)
+  );
+}
+
+function validateSourceManifest(value: unknown): value is WikiSourceManifest | WikiSourceManifestV2 {
+  if (!isObject(value)) {
+    return false;
+  }
+  return validateSourceManifestV1(value) || validateSourceManifestV2(value);
+}
+
 async function readSourceManifestForEvidence(input: {
   workspaceDir: string;
   manifestPath: string;
 }): Promise<{
-  manifest?: WikiSourceManifest;
+  manifest?: WikiSourceManifest | WikiSourceManifestV2;
   missing: boolean;
   malformed: boolean;
   diagnostics: string[];
@@ -232,20 +290,26 @@ async function readSourceEvidenceItem(options: ReadWikiEvidenceItemOptions): Pro
     manifestPath
   });
   const diagnostics = manifestResult.diagnostics;
-  const manifest = manifestResult.manifest;
+  const manifest = manifestResult.manifest ? normalizeWikiSourceManifest(manifestResult.manifest) : undefined;
 
-  const sourceRefs = manifest?.paperKey ? [manifest.paperKey] : [];
+  const sourceRefs = manifest ? [manifest.sourceKey] : [];
   const item: WikiEvidenceItem = {
     kind: "source",
-    key: manifest?.paperKey ?? options.key,
+    key: manifest?.sourceKey ?? options.key,
     title: manifest?.title ?? options.key,
-    body: stripLeadingFrontmatter(markdown),
+    body: stripLeadingFrontmatter(markdown).trim(),
     relativePath: relativeToWorkspace(options.workspaceDir, sourcePath),
     tags: manifest?.tags ?? [],
     aliases: [],
-    evidenceContract: "paper-backed",
+    evidenceContract: manifest ? "mixed" : "none",
     sourceRefs,
-    ...(manifest ? { manifest } : {}),
+    ...(manifest
+      ? {
+          sourceKind: manifest.sourceKind,
+          sourceKey: manifest.sourceKey,
+          manifest
+        }
+      : {}),
     diagnostics
   };
 

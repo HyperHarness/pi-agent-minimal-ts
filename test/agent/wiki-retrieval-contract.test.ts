@@ -259,6 +259,55 @@ test("retrieval contract reads source evidence by key from legacy summary and ma
   });
 });
 
+test("retrieval contract returns generalized non-paper source evidence", async () => {
+  await withWorkspace("wiki-retrieval-non-paper-source-", async (workspaceDir) => {
+    await writeWorkspaceFile(
+      workspaceDir,
+      "knowledge-base/sources/material-sapphire-permittivity/summary.md",
+      "# Sapphire permittivity\n\nRelative permittivity values require cryogenic-condition review."
+    );
+    await writeWorkspaceFile(
+      workspaceDir,
+      "knowledge-base/manifests/material-sapphire-permittivity.json",
+      `${JSON.stringify({
+        schemaVersion: 2,
+        sourceKind: "material-database",
+        sourceKey: "material-sapphire-permittivity",
+        title: "Sapphire permittivity values",
+        status: "needs_review",
+        createdAt: "2026-05-14T00:00:00.000Z",
+        updatedAt: "2026-05-14T00:00:00.000Z",
+        summaryPath: "knowledge-base/sources/material-sapphire-permittivity/summary.md",
+        provenance: {
+          url: "https://example.invalid/materials/sapphire",
+          retrievedAt: "2026-05-14T00:00:00.000Z"
+        },
+        artifacts: [{
+          kind: "table",
+          path: "knowledge-base/sources/material-sapphire-permittivity/tables/parameters.json"
+        }],
+        tags: ["materials", "sapphire"],
+        relatedSourceKeys: [],
+        synthesisPageKeys: ["substrate-and-film-material-parameters"]
+      }, null, 2)}\n`
+    );
+
+    const result = await readWikiEvidenceItem({
+      workspaceDir,
+      kind: "source",
+      key: "material-sapphire-permittivity"
+    });
+
+    assert.equal(result.status, "ready");
+    assert.equal(result.item?.key, "material-sapphire-permittivity");
+    assert.equal(result.item?.sourceKind, "material-database");
+    assert.equal(result.item?.sourceKey, "material-sapphire-permittivity");
+    assert.equal(result.item?.evidenceContract, "mixed");
+    assert.deepEqual(result.item?.sourceRefs, ["material-sapphire-permittivity"]);
+    assert.equal(result.item?.manifest?.schemaVersion, 2);
+  });
+});
+
 test("retrieval contract lists typed pages by tag and evidence contract", async () => {
   await withWorkspace("wiki-retrieval-pages-", async (workspaceDir) => {
     await writeTypedWikiPage({
