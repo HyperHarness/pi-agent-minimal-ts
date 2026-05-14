@@ -4587,6 +4587,49 @@ test("build_wiki_page avoids source-derived page keys", async () => {
   }
 });
 
+test("build_wiki_page guides material evidence pages with required template sections", async () => {
+  const workspace = await mkdtemp(path.join(tmpdir(), "pi-agent-tools-"));
+  let capturedQuestion: string | undefined;
+
+  try {
+    const tool = getBuildWikiPageTool(workspace, {
+      searchPaperWiki: async (options) => ({
+        query: options.query,
+        results: [
+          {
+            key: "material-sapphire-permittivity",
+            paperKey: "material-sapphire-permittivity",
+            title: "Sapphire Permittivity Dataset",
+            path: "knowledge-base/sources/material-sapphire-permittivity/summary.md",
+            snippet: "Permittivity and loss tangent parameters for sapphire substrates.",
+          },
+        ],
+      }),
+      paperWikiPageWorker: async (input) => {
+        capturedQuestion = input.question;
+        return {
+          title: "Sapphire Substrate Parameters",
+          pageMarkdown: "## Parameter Table\n\nSapphire parameters [material-sapphire-permittivity].",
+          confidence: "high",
+        };
+      },
+    });
+
+    const result = await tool.execute("build-material-page", {
+      topic: "sapphire substrate material parameters",
+      question: "请整理蓝宝石衬底的介电常数和损耗角正切参数",
+      pageKey: "sapphire-substrate-material-parameters",
+    }, undefined);
+    const details = result.details as { status?: string };
+
+    assert.equal(details.status, "written");
+    assert.match(capturedQuestion ?? "", /Required sections/);
+    assert.match(capturedQuestion ?? "", /Parameter Table/);
+  } finally {
+    await rm(workspace, { recursive: true, force: true });
+  }
+});
+
 test("build_wiki_page refuses write mode when minSources is not met", async () => {
   const workspace = await mkdtemp(path.join(tmpdir(), "pi-agent-tools-"));
 
