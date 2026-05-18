@@ -1033,6 +1033,7 @@ export async function searchPaperWiki(options: PaperWikiSearchOptions): Promise<
     ...(options.knowledgeStates ? { knowledgeStates: options.knowledgeStates as WikiKnowledgeState[] } : {}),
     ...(options.evidenceContracts ? { evidenceContracts: options.evidenceContracts as WikiEvidenceContract[] } : {}),
     ...(options.maxEvidenceAgeDays !== undefined ? { maxEvidenceAgeDays: options.maxEvidenceAgeDays } : {}),
+    ...(options.now ? { now: options.now } : {}),
     ...(options.sourceKinds
       ? {}
       : { itemFilter: (item) => item.kind === "page" || item.sourceKind === "paper" || item.sourceKind === undefined })

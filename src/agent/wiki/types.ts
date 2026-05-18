@@ -34,6 +34,7 @@ export interface PaperWikiSearchOptions {
   knowledgeStates?: string[];
   evidenceContracts?: string[];
   maxEvidenceAgeDays?: number;
+  now?: Date;
 }
 
 export type PaperWikiSearchResultKind = "source" | "page";

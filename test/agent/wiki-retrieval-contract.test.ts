@@ -8,6 +8,7 @@ import {
   readWikiEvidenceItem
 } from "../../src/agent/wiki/retrieval-contract.js";
 import { searchWikiEvidence } from "../../src/agent/wiki/retrieval-search.js";
+import { searchPaperWiki } from "../../src/agent/wiki/content.js";
 import { writeTypedWikiPage } from "../../src/agent/wiki/typed-store.js";
 
 async function withWorkspace(
@@ -743,6 +744,42 @@ test("searchWikiEvidence emits stale and unknown freshness warnings", async () =
     const warningsByKey = new Map(result.results.map((item) => [item.item.key, item.warnings]));
     assert.ok(warningsByKey.get("fixed-frequency-transmon-crowding")?.includes("stale_evidence"));
     assert.ok(warningsByKey.get("unknown-review-page")?.includes("unknown_freshness"));
+  });
+});
+
+test("searchPaperWiki preserves structured freshness warnings with caller clock", async () => {
+  await withWorkspace("wiki-public-search-freshness-", async (workspaceDir) => {
+    await writeTypedWikiPage({
+      workspaceDir,
+      page: {
+        metadata: {
+          schema_version: 1,
+          type: "concept",
+          key: "frequency-collision-public-warning",
+          title: "Frequency collision public warning",
+          aliases: [],
+          tags: ["superconducting-qubits"],
+          evidence_contract: "paper-backed",
+          source_refs: ["arxiv-2601.00003"],
+          knowledge_state: "established",
+          last_reviewed_at: "2026-01-01T00:00:00.000Z",
+          created_at: "2026-01-01T00:00:00.000Z",
+          updated_at: "2026-01-01T00:00:00.000Z"
+        },
+        body: "# Frequency collision public warning\n\nFrequency collision risk."
+      }
+    });
+
+    const result = await searchPaperWiki({
+      workspaceDir,
+      query: "frequency collision public warning",
+      maxResults: 5,
+      maxEvidenceAgeDays: 30,
+      now: new Date("2026-05-18T00:00:00.000Z")
+    });
+
+    assert.equal(result.results[0].pageKey, "frequency-collision-public-warning");
+    assert.ok(result.results[0].warnings?.includes("stale_evidence"));
   });
 });
 
