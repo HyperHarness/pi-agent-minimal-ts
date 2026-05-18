@@ -815,6 +815,48 @@ test("searchPaperWiki honors structured filters without legacy fallback", async 
   });
 });
 
+test("searchPaperWiki treats now without freshness threshold as inert", async () => {
+  await withWorkspace("wiki-public-search-now-inert-", async (workspaceDir) => {
+    await writeLegacySourceWithManifest({
+      workspace: workspaceDir,
+      paperKey: "aaa-common-words",
+      title: "Unrelated Common Words",
+      summaryMarkdown: [
+        "# Unrelated Common Words",
+        "",
+        "What are the ordinary words in this unrelated note."
+      ].join("\n"),
+      tags: []
+    });
+    await writeLegacySourceWithManifest({
+      workspace: workspaceDir,
+      paperKey: "source-b",
+      title: "qLDPC Hardware Constraints",
+      summaryMarkdown: [
+        "# qLDPC Hardware Constraints",
+        "",
+        "This source discusses non-local connectivity, long-range couplers, crosstalk, leakage, and measurement overhead."
+      ].join("\n"),
+      tags: ["qldpc"]
+    });
+
+    const withoutNow = await searchPaperWiki({
+      workspaceDir,
+      query: "what are the implementation barriers",
+      maxResults: 1
+    });
+    const withNow = await searchPaperWiki({
+      workspaceDir,
+      query: "what are the implementation barriers",
+      maxResults: 1,
+      now: new Date("2026-05-18T00:00:00.000Z")
+    });
+
+    assert.deepEqual(withNow.results, withoutNow.results);
+    assert.equal(withNow.results[0]?.paperKey, "source-b");
+  });
+});
+
 test("searchWikiEvidence preserves diagnostic warnings", async () => {
   await withWorkspace("wiki-search-diagnostic-warnings-", async (workspaceDir) => {
     await writeWorkspaceFile(

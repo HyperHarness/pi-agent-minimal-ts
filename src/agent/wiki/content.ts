@@ -1015,8 +1015,7 @@ function hasStructuredSearchConstraints(options: PaperWikiSearchOptions): boolea
     options.claimKinds?.length ||
     options.knowledgeStates?.length ||
     options.evidenceContracts?.length ||
-    options.maxEvidenceAgeDays !== undefined ||
-    options.now
+    options.maxEvidenceAgeDays !== undefined
   );
 }
 
