@@ -18,6 +18,12 @@ export type WikiEvidenceContract =
   | "mixed"
   | "none";
 
+export type WikiKnowledgeState =
+  | "established"
+  | "promising_unverified"
+  | "speculative"
+  | "disputed";
+
 export type WikiClaimKind = "quantitative" | "qualitative" | "assumption" | "limitation";
 export type WikiClaimConfidence = "high" | "medium" | "low";
 export type WikiRelationType =
@@ -99,6 +105,8 @@ export interface WikiPageMetadata {
   source_refs: string[];
   related_pages?: string[];
   related_papers?: string[];
+  knowledge_state?: WikiKnowledgeState;
+  last_reviewed_at?: string;
   claims?: WikiClaimProvenance[];
   typed_relations?: WikiTypedRelation[];
   experiment_refs?: WikiExperimentRef[];
@@ -126,6 +134,8 @@ export interface WikiPageSchemaError {
     | "invalid_updated_at"
     | "missing_source_refs"
     | "missing_canonical_page"
+    | "invalid_knowledge_state"
+    | "invalid_last_reviewed_at"
     | "unknown_execution_binding"
     | "invalid_claim_provenance"
     | "invalid_typed_relation"
@@ -165,6 +175,13 @@ const WIKI_EVIDENCE_CONTRACTS: readonly WikiEvidenceContract[] = [
   "code-backed",
   "mixed",
   "none"
+];
+
+const WIKI_KNOWLEDGE_STATES: readonly WikiKnowledgeState[] = [
+  "established",
+  "promising_unverified",
+  "speculative",
+  "disputed"
 ];
 
 const WIKI_CLAIM_KINDS: readonly WikiClaimKind[] = [
@@ -239,6 +256,10 @@ function isWikiPageType(value: unknown): value is WikiPageType {
 
 function isWikiEvidenceContract(value: unknown): value is WikiEvidenceContract {
   return typeof value === "string" && WIKI_EVIDENCE_CONTRACTS.includes(value as WikiEvidenceContract);
+}
+
+function isWikiKnowledgeState(value: unknown): value is WikiKnowledgeState {
+  return typeof value === "string" && WIKI_KNOWLEDGE_STATES.includes(value as WikiKnowledgeState);
 }
 
 function isRecord(value: unknown): value is Record<string, unknown> {
@@ -616,6 +637,8 @@ export function validateWikiPageMetadata(
   const sourceRefs = cleanStringArray(metadata.source_refs);
   const relatedPages = cleanOptionalStringArray(metadata.related_pages);
   const relatedPapers = cleanOptionalStringArray(metadata.related_papers);
+  const knowledgeState = cleanOptionalString(metadata.knowledge_state);
+  const lastReviewedAt = cleanOptionalString(metadata.last_reviewed_at);
   const claims = cleanClaims(metadata.claims);
   const typedRelations = cleanTypedRelations(metadata.typed_relations);
   const experimentRefs = cleanExperimentRefs(metadata.experiment_refs);
@@ -631,6 +654,14 @@ export function validateWikiPageMetadata(
 
   if (!isWikiEvidenceContract(metadata.evidence_contract)) {
     errors.push(schemaError("invalid_frontmatter", "Wiki evidence contract is missing or invalid.", path));
+  }
+
+  if (hasOwnField(metadata, "knowledge_state") && !isWikiKnowledgeState(knowledgeState)) {
+    errors.push(schemaError("invalid_knowledge_state", "Wiki knowledge_state is invalid.", path));
+  }
+
+  if (hasOwnField(metadata, "last_reviewed_at") && !isValidIsoDate(lastReviewedAt)) {
+    errors.push(schemaError("invalid_last_reviewed_at", "Wiki last_reviewed_at must be a valid date string.", path));
   }
 
   if (claims.invalid) {
@@ -698,6 +729,8 @@ export function validateWikiPageMetadata(
       source_refs: sourceRefs,
       ...(relatedPages ? { related_pages: relatedPages } : {}),
       ...(relatedPapers ? { related_papers: relatedPapers } : {}),
+      ...(isWikiKnowledgeState(knowledgeState) ? { knowledge_state: knowledgeState } : {}),
+      ...(lastReviewedAt ? { last_reviewed_at: lastReviewedAt } : {}),
       ...(claims.values ? { claims: claims.values } : {}),
       ...(typedRelations.values ? { typed_relations: typedRelations.values } : {}),
       ...(experimentRefs.values ? { experiment_refs: experimentRefs.values } : {}),
@@ -745,12 +778,12 @@ export function parseWikiPageMarkdown(markdown: string, path: string): WikiPageP
 }
 
 export function serializeWikiPageMarkdown(page: {
-  metadata: Partial<WikiPageMetadata> & RawWikiPageMetadata;
+  metadata: WikiPageMetadata | (Partial<WikiPageMetadata> & RawWikiPageMetadata);
   body: string;
 }): string {
   const metadataInput: Partial<WikiPageMetadata> & RawWikiPageMetadata = {
-    ...page.metadata,
-    ...(hasOwnField(page.metadata, "schema_version") ? {} : { schema_version: 1 as const })
+    ...page.metadata as Partial<WikiPageMetadata> & RawWikiPageMetadata,
+    ...(hasOwnField(page.metadata as RawWikiPageMetadata, "schema_version") ? {} : { schema_version: 1 as const })
   };
   const validation = validateWikiPageMetadata(metadataInput);
   if (!validation.metadata) {
@@ -775,6 +808,8 @@ export function serializeWikiPageMarkdown(page: {
     ...(metadata.typed_relations ? [`typed_relations: ${JSON.stringify(metadata.typed_relations)}`] : []),
     ...(metadata.experiment_refs ? [`experiment_refs: ${JSON.stringify(metadata.experiment_refs)}`] : []),
     ...(metadata.reviewer_critique ? [`reviewer_critique: ${JSON.stringify(metadata.reviewer_critique)}`] : []),
+    ...(metadata.knowledge_state ? [`knowledge_state: ${quoteYamlString(metadata.knowledge_state)}`] : []),
+    ...(metadata.last_reviewed_at ? [`last_reviewed_at: ${quoteYamlString(metadata.last_reviewed_at)}`] : []),
     ...(metadata.canonical_page ? [`canonical_page: ${quoteYamlString(metadata.canonical_page)}`] : []),
     ...(metadata.execution_binding ? [`execution_binding: ${quoteYamlString(metadata.execution_binding)}`] : []),
     `created_at: ${quoteYamlString(metadata.created_at)}`,

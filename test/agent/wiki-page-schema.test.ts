@@ -431,3 +431,53 @@ test("serializeWikiPageMarkdown rejects explicit unsupported schema_version", ()
     /invalid_frontmatter/
   );
 });
+
+test("parseWikiPageMarkdown accepts knowledge state and last reviewed metadata", () => {
+  const markdown = [
+    "---",
+    "schema_version: 1",
+    "type: concept",
+    "key: qldpc-connectivity",
+    "title: qLDPC connectivity",
+    "aliases: []",
+    'tags:',
+    '  - "qldpc"',
+    "evidence_contract: paper-backed",
+    "source_refs:",
+    '  - "arxiv-2601.00003"',
+    "knowledge_state: promising_unverified",
+    "last_reviewed_at: 2026-05-01T00:00:00.000Z",
+    "created_at: 2026-05-10T00:00:00.000Z",
+    "updated_at: 2026-05-10T00:00:00.000Z",
+    "---",
+    "",
+    "# qLDPC connectivity"
+  ].join("\n");
+
+  const parsed = parseWikiPageMarkdown(markdown, "knowledge-base/pages/qldpc-connectivity.md");
+
+  assert.equal(parsed.ok, true);
+  assert.equal(parsed.page?.metadata.knowledge_state, "promising_unverified");
+  assert.equal(parsed.page?.metadata.last_reviewed_at, "2026-05-01T00:00:00.000Z");
+
+  const serialized = serializeWikiPageMarkdown({
+    metadata: parsed.page!.metadata,
+    body: parsed.page!.body
+  });
+
+  assert.match(serialized, /knowledge_state: "promising_unverified"/);
+  assert.match(serialized, /last_reviewed_at: "2026-05-01T00:00:00.000Z"/);
+});
+
+test("validateWikiPageMetadata rejects invalid knowledge state and last reviewed date", () => {
+  const result = validateWikiPageMetadata(validMetadata({
+    knowledge_state: "settled",
+    last_reviewed_at: "not-a-date"
+  }));
+
+  assert.equal(result.ok, false);
+  assert.deepEqual(result.errors.map((error) => error.code), [
+    "invalid_knowledge_state",
+    "invalid_last_reviewed_at"
+  ]);
+});
