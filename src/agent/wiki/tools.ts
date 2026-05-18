@@ -38,6 +38,12 @@ import {
   validateRequiredTemplateSections
 } from "./page-templates.js";
 import { isWikiSourceKind, type WikiSourceKind } from "./manifest-store.js";
+import type {
+  WikiClaimKind,
+  WikiEvidenceContract,
+  WikiKnowledgeState,
+  WikiPageType
+} from "./page-schema.js";
 import type { PaperSearchResult, PaperSearchSource } from "../paper/types.js";
 import { searchLocalPapers } from "../paper/storage/local-paper-library.js";
 import {
@@ -118,9 +124,72 @@ const paperWikiRelationsParameters = Type.Object({
   )
 });
 
+const wikiSourceKindParameter = Type.Union([
+  Type.Literal("paper"),
+  Type.Literal("material-database"),
+  Type.Literal("software-doc"),
+  Type.Literal("vendor-note"),
+  Type.Literal("standard"),
+  Type.Literal("lab-note"),
+  Type.Literal("code-output"),
+  Type.Literal("design-artifact"),
+  Type.Literal("webpage"),
+  Type.Literal("manual")
+], { description: "Wiki source manifest kind to include." });
+
+const wikiPageTypeParameter = Type.Union([
+  Type.Literal("paper-source"),
+  Type.Literal("synthesis"),
+  Type.Literal("concept"),
+  Type.Literal("method"),
+  Type.Literal("finding"),
+  Type.Literal("dataset"),
+  Type.Literal("question"),
+  Type.Literal("design-record"),
+  Type.Literal("alias")
+], { description: "Typed wiki page type to include." });
+
+const wikiClaimKindParameter = Type.Union([
+  Type.Literal("quantitative"),
+  Type.Literal("qualitative"),
+  Type.Literal("assumption"),
+  Type.Literal("limitation")
+], { description: "Claim provenance kind to include." });
+
+const wikiKnowledgeStateParameter = Type.Union([
+  Type.Literal("established"),
+  Type.Literal("promising_unverified"),
+  Type.Literal("speculative"),
+  Type.Literal("disputed")
+], { description: "Knowledge state to include." });
+
+const wikiEvidenceContractParameter = Type.Union([
+  Type.Literal("paper-backed"),
+  Type.Literal("design-backed"),
+  Type.Literal("code-backed"),
+  Type.Literal("mixed"),
+  Type.Literal("none")
+], { description: "Evidence contract to include." });
+
 const searchPaperWikiParameters = Type.Object({
   query: Type.String({ description: "Text query to search inside LLM-authored paper source summaries and synthesis pages." }),
   maxResults: Type.Optional(Type.Integer({ description: "Maximum matching wiki items to return.", minimum: 1 })),
+  sourceKinds: Type.Optional(Type.Array(wikiSourceKindParameter, {
+    description:
+      "Limit matches to source manifest kinds such as paper, code-output, software-doc, or material-database."
+  })),
+  pageTypes: Type.Optional(Type.Array(wikiPageTypeParameter, {
+    description: "Limit page matches to typed wiki page types such as finding, method, dataset, or design-record."
+  })),
+  claimKinds: Type.Optional(Type.Array(wikiClaimKindParameter, {
+    description: "Limit typed page matches to pages with at least one claim of these kinds."
+  })),
+  knowledgeStates: Type.Optional(Type.Array(wikiKnowledgeStateParameter, {
+    description: "Limit typed page matches by knowledge state, such as established, speculative, or disputed."
+  })),
+  evidenceContracts: Type.Optional(Type.Array(wikiEvidenceContractParameter, {
+    description: "Limit typed page matches by evidence contract, such as paper-backed, code-backed, or mixed."
+  })),
   maxEvidenceAgeDays: Type.Optional(Type.Integer({
     description: "Warn when wiki evidence was last reviewed or updated older than this many days.",
     minimum: 1
@@ -1438,6 +1507,11 @@ export function createWikiTools(input: {
         workspaceDir: resolvedWorkspaceDir,
         query: args.query,
         ...(args.maxResults !== undefined ? { maxResults: args.maxResults } : {}),
+        ...(args.sourceKinds?.length ? { sourceKinds: args.sourceKinds as WikiSourceKind[] } : {}),
+        ...(args.pageTypes?.length ? { pageTypes: args.pageTypes as WikiPageType[] } : {}),
+        ...(args.claimKinds?.length ? { claimKinds: args.claimKinds as WikiClaimKind[] } : {}),
+        ...(args.knowledgeStates?.length ? { knowledgeStates: args.knowledgeStates as WikiKnowledgeState[] } : {}),
+        ...(args.evidenceContracts?.length ? { evidenceContracts: args.evidenceContracts as WikiEvidenceContract[] } : {}),
         ...(args.maxEvidenceAgeDays !== undefined ? { maxEvidenceAgeDays: args.maxEvidenceAgeDays } : {})
       });
 

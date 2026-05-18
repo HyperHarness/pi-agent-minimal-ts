@@ -269,7 +269,16 @@ type PaperWikiRelationsTool = {
 type SearchPaperWikiTool = {
   execute: (
     toolCallId: string,
-    args: { query: string; maxResults?: number; maxEvidenceAgeDays?: number },
+    args: {
+      query: string;
+      maxResults?: number;
+      sourceKinds?: string[];
+      pageTypes?: string[];
+      claimKinds?: string[];
+      knowledgeStates?: string[];
+      evidenceContracts?: string[];
+      maxEvidenceAgeDays?: number;
+    },
     signal: undefined,
   ) => Promise<ToolResult>;
 };
@@ -3439,6 +3448,49 @@ test("search_paper_wiki delegates to the injected wiki search dependency and ret
     }, undefined);
 
     assert.equal((result.details as { results?: unknown[] }).results?.length, 1);
+  } finally {
+    await rm(workspace, { recursive: true, force: true });
+  }
+});
+
+test("search_paper_wiki forwards structured evidence filters to the wiki search dependency", async () => {
+  const workspace = await mkdtemp(path.join(tmpdir(), "pi-agent-tools-"));
+  const capturedCalls: unknown[] = [];
+  try {
+    const tool = getSearchPaperWikiTool(workspace, {
+      searchPaperWiki: async (options) => {
+        capturedCalls.push(options);
+        return {
+          query: options.query,
+          results: [],
+        };
+      },
+    });
+
+    await tool.execute("search-wiki-call", {
+      query: "qldpc hardware embedding",
+      maxResults: 3,
+      sourceKinds: ["paper", "code-output"],
+      pageTypes: ["finding"],
+      claimKinds: ["quantitative", "limitation"],
+      knowledgeStates: ["promising_unverified", "disputed"],
+      evidenceContracts: ["paper-backed", "code-backed"],
+      maxEvidenceAgeDays: 30,
+    }, undefined);
+
+    assert.deepEqual(capturedCalls, [
+      {
+        workspaceDir: workspace,
+        query: "qldpc hardware embedding",
+        maxResults: 3,
+        sourceKinds: ["paper", "code-output"],
+        pageTypes: ["finding"],
+        claimKinds: ["quantitative", "limitation"],
+        knowledgeStates: ["promising_unverified", "disputed"],
+        evidenceContracts: ["paper-backed", "code-backed"],
+        maxEvidenceAgeDays: 30,
+      },
+    ]);
   } finally {
     await rm(workspace, { recursive: true, force: true });
   }
