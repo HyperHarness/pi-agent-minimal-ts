@@ -1,5 +1,6 @@
+import { readFile } from "node:fs/promises";
 import { readTypedWikiPage, type WikiPageDiagnostic } from "./typed-store.js";
-import { relativeToWorkspace } from "./store.js";
+import { getPaperWikiPagePath, relativeToWorkspace } from "./store.js";
 import type {
   WikiClaimEvidence,
   WikiClaimProvenance,
@@ -46,7 +47,7 @@ export type ReviewWikiPageEvidenceResult =
   | {
     status: "missing" | "malformed";
     pageKey: string;
-    findings: [];
+    findings: WikiReviewFinding[];
     diagnostics: string[];
   };
 
@@ -102,7 +103,7 @@ function claimLooksAuthorOnly(claim: WikiClaimProvenance): boolean {
 }
 
 function hasCaveatSection(body: string): boolean {
-  return /^#{1,6}\s+(?:caveats?|limitations?|scope|known uncertainties|contradictions|open checks)\b/im.test(body);
+  return /^#{1,6}\s+(?:caveats?|limitations?|scope|known uncertaint(?:y|ies)|contradictions|open checks)\b/im.test(body);
 }
 
 function hasClaimCaveat(claims: WikiClaimProvenance[]): boolean {
@@ -228,6 +229,76 @@ function reviewPageLevelGaps(page: WikiTypedPage, findings: WikiReviewFinding[])
   }
 }
 
+function isRecord(value: unknown): value is Record<string, unknown> {
+  return typeof value === "object" && value !== null && !Array.isArray(value);
+}
+
+function rawEvidenceHasConcreteLocator(value: unknown): boolean {
+  if (!isRecord(value)) {
+    return false;
+  }
+  return typeof value.page === "number" ||
+    typeof value.figure === "string" ||
+    typeof value.table === "string" ||
+    typeof value.elementId === "string" ||
+    typeof value.chunkId === "string" ||
+    typeof value.codeOutputPath === "string";
+}
+
+function extractFrontmatter(markdown: string): string | undefined {
+  const normalized = markdown.replace(/^\uFEFF/, "");
+  const match = /^---\r?\n([\s\S]*?)\r?\n---(?:\r?\n|$)/.exec(normalized);
+  return match?.[1];
+}
+
+function parseJsonFrontmatterField(frontmatter: string, field: string): unknown {
+  const fieldPattern = new RegExp(`^${field}:\\s*(.+)$`, "m");
+  const match = fieldPattern.exec(frontmatter);
+  if (!match) {
+    return undefined;
+  }
+  try {
+    return JSON.parse(match[1]);
+  } catch {
+    return undefined;
+  }
+}
+
+async function reviewMalformedPageClaims(
+  options: ReviewWikiPageEvidenceOptions,
+  findings: WikiReviewFinding[]
+): Promise<void> {
+  let markdown: string;
+  try {
+    markdown = await readFile(getPaperWikiPagePath(options.workspaceDir, options.pageKey), "utf8");
+  } catch {
+    return;
+  }
+  const frontmatter = extractFrontmatter(markdown);
+  if (!frontmatter) {
+    return;
+  }
+  const claims = parseJsonFrontmatterField(frontmatter, "claims");
+  if (!Array.isArray(claims)) {
+    return;
+  }
+
+  for (const claim of claims) {
+    if (!isRecord(claim) || claim.kind !== "quantitative") {
+      continue;
+    }
+    const evidence = Array.isArray(claim.evidence) ? claim.evidence : [];
+    if (!evidence.some(rawEvidenceHasConcreteLocator)) {
+      findings.push(finding(
+        "weak_quantitative_provenance",
+        "high",
+        "Quantitative claim lacks concrete evidence locators.",
+        typeof claim.claimId === "string" ? claim.claimId : undefined
+      ));
+    }
+  }
+}
+
 export async function reviewWikiPageEvidence(
   options: ReviewWikiPageEvidenceOptions
 ): Promise<ReviewWikiPageEvidenceResult> {
@@ -238,10 +309,15 @@ export async function reviewWikiPageEvidence(
   const diagnostics = diagnosticsToMessages(readResult.diagnostics);
 
   if (!readResult.page) {
+    const status = pageReadStatus(readResult.diagnostics);
+    const findings: WikiReviewFinding[] = [];
+    if (status === "malformed") {
+      await reviewMalformedPageClaims(options, findings);
+    }
     return {
-      status: pageReadStatus(readResult.diagnostics),
+      status,
       pageKey: options.pageKey,
-      findings: [],
+      findings,
       diagnostics
     };
   }
