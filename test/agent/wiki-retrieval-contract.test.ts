@@ -628,6 +628,124 @@ test("retrieval contract reports wrong-shape source manifests as malformed witho
   });
 });
 
+test("searchWikiEvidence matches claim and typed relation fields", async () => {
+  await withWorkspace("wiki-structured-claim-search-", async (workspaceDir) => {
+    await writeTypedWikiPage({
+      workspaceDir,
+      page: {
+        metadata: {
+          schema_version: 1,
+          type: "finding",
+          key: "bivariate-bicycle-embedding",
+          title: "Hardware embedding comparison",
+          aliases: [],
+          tags: ["qldpc"],
+          evidence_contract: "paper-backed",
+          source_refs: ["arxiv-2406.06015"],
+          knowledge_state: "promising_unverified",
+          last_reviewed_at: "2026-05-01T00:00:00.000Z",
+          claims: [{
+            claimId: "claim-embedding",
+            kind: "qualitative",
+            statement: "Bivariate bicycle code layouts require checking nonlocal coupler pressure.",
+            sourceRefs: ["arxiv-2406.06015"],
+            evidence: [{ paperKey: "arxiv-2406.06015", sectionId: "hardware-layout" }],
+            confidence: "medium"
+          }],
+          typed_relations: [{
+            type: "contradicts",
+            target: "hypergraph-product-code",
+            targetKind: "page",
+            evidenceRefs: ["claim-embedding"],
+            status: "candidate"
+          }],
+          created_at: "2026-05-10T00:00:00.000Z",
+          updated_at: "2026-05-10T00:00:00.000Z"
+        },
+        body: "# Hardware embedding comparison\n\nNo body keyword for coupler pressure."
+      }
+    });
+
+    const claimResult = await searchWikiEvidence({
+      workspaceDir,
+      query: "nonlocal coupler pressure",
+      maxResults: 5,
+      claimKinds: ["qualitative"],
+      knowledgeStates: ["promising_unverified"]
+    });
+
+    assert.equal(claimResult.status, "ready");
+    assert.equal(claimResult.results[0].item.key, "bivariate-bicycle-embedding");
+    assert.ok(claimResult.results[0].matchReasons.includes("claim"));
+    assert.ok(claimResult.results[0].warnings.includes("promising_unverified"));
+
+    const relationResult = await searchWikiEvidence({
+      workspaceDir,
+      query: "hypergraph product contradiction",
+      maxResults: 5
+    });
+
+    assert.equal(relationResult.status, "ready");
+    assert.ok(relationResult.results[0].matchReasons.includes("typed_relation"));
+    assert.ok(relationResult.results[0].warnings.includes("unresolved_contradiction"));
+  });
+});
+
+test("searchWikiEvidence emits stale and unknown freshness warnings", async () => {
+  await withWorkspace("wiki-structured-freshness-", async (workspaceDir) => {
+    await writeTypedWikiPage({
+      workspaceDir,
+      page: {
+        metadata: {
+          schema_version: 1,
+          type: "concept",
+          key: "fixed-frequency-transmon-crowding",
+          title: "Fixed-frequency transmon crowding",
+          aliases: [],
+          tags: ["superconducting-qubits"],
+          evidence_contract: "paper-backed",
+          source_refs: ["arxiv-2601.00003"],
+          knowledge_state: "established",
+          last_reviewed_at: "2026-01-01T00:00:00.000Z",
+          created_at: "2026-01-01T00:00:00.000Z",
+          updated_at: "2026-01-01T00:00:00.000Z"
+        },
+        body: "# Fixed-frequency transmon crowding\n\nFrequency collision risk."
+      }
+    });
+    await writeTypedWikiPage({
+      workspaceDir,
+      page: {
+        metadata: {
+          schema_version: 1,
+          type: "concept",
+          key: "unknown-review-page",
+          title: "Unknown review page",
+          aliases: [],
+          tags: ["superconducting-qubits"],
+          evidence_contract: "paper-backed",
+          source_refs: ["arxiv-2601.00004"],
+          created_at: "2026-05-10T00:00:00.000Z",
+          updated_at: "2026-05-10T00:00:00.000Z"
+        },
+        body: "# Unknown review page\n\nFrequency collision risk."
+      }
+    });
+
+    const result = await searchWikiEvidence({
+      workspaceDir,
+      query: "frequency collision",
+      maxResults: 5,
+      maxEvidenceAgeDays: 30,
+      now: new Date("2026-05-18T00:00:00.000Z")
+    });
+
+    const warningsByKey = new Map(result.results.map((item) => [item.item.key, item.warnings]));
+    assert.ok(warningsByKey.get("fixed-frequency-transmon-crowding")?.includes("stale_evidence"));
+    assert.ok(warningsByKey.get("unknown-review-page")?.includes("unknown_freshness"));
+  });
+});
+
 test("retrieval contract rejects source manifests missing required fields", async () => {
   await withWorkspace("wiki-retrieval-missing-fields-manifest-", async (workspaceDir) => {
     const paperKey = "arxiv-2601.00009";

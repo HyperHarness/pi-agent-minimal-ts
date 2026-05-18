@@ -28,6 +28,12 @@ export interface PaperWikiSearchOptions {
   workspaceDir: string;
   query: string;
   maxResults?: number;
+  sourceKinds?: WikiSourceKind[];
+  pageTypes?: string[];
+  claimKinds?: string[];
+  knowledgeStates?: string[];
+  evidenceContracts?: string[];
+  maxEvidenceAgeDays?: number;
 }
 
 export type PaperWikiSearchResultKind = "source" | "page";
@@ -43,6 +49,10 @@ export interface PaperWikiSearchResult {
     title: string;
     path: string;
     snippet: string;
+    warnings?: string[];
+    matchReasons?: string[];
+    knowledgeState?: string;
+    lastReviewedAt?: string;
   }>;
 }
 

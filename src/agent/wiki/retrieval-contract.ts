@@ -16,6 +16,8 @@ import {
   type WikiClaimProvenance,
   type WikiEvidenceContract,
   type WikiExperimentRef,
+  type WikiKnowledgeState,
+  type WikiPageType,
   type WikiReviewerCritiqueItem,
   type WikiTypedPage,
   type WikiTypedRelation
@@ -39,6 +41,10 @@ export interface WikiEvidenceItem {
   tags: string[];
   aliases: string[];
   evidenceContract: WikiEvidenceContract;
+  pageType?: WikiPageType;
+  knowledgeState?: WikiKnowledgeState;
+  lastReviewedAt?: string;
+  updatedAt?: string;
   sourceRefs: string[];
   sourceKind?: WikiSourceKind;
   sourceKey?: string;
@@ -227,6 +233,7 @@ async function readSourceEvidenceItem(options: ReadWikiEvidenceItemOptions): Pro
       ? {
           sourceKind: manifest.sourceKind,
           sourceKey: manifest.sourceKey,
+          updatedAt: manifest.updatedAt,
           manifest
         }
       : {}),
@@ -250,6 +257,10 @@ function mapTypedPageToEvidenceItem(workspaceDir: string, page: WikiTypedPage): 
     tags: page.metadata.tags,
     aliases: page.metadata.aliases,
     evidenceContract: page.metadata.evidence_contract,
+    pageType: page.metadata.type,
+    ...(page.metadata.knowledge_state ? { knowledgeState: page.metadata.knowledge_state } : {}),
+    ...(page.metadata.last_reviewed_at ? { lastReviewedAt: page.metadata.last_reviewed_at } : {}),
+    updatedAt: page.metadata.updated_at,
     sourceRefs: page.metadata.source_refs,
     ...(page.metadata.claims ? { claims: page.metadata.claims } : {}),
     ...(page.metadata.typed_relations ? { typedRelations: page.metadata.typed_relations } : {}),

@@ -31,6 +31,12 @@ import {
   writeWikiSourceManifest,
   type WikiSourceManifest
 } from "./manifest-store.js";
+import type {
+  WikiClaimKind,
+  WikiEvidenceContract,
+  WikiKnowledgeState,
+  WikiPageType
+} from "./page-schema.js";
 import { searchWikiEvidence, type WikiEvidenceSearchResult } from "./retrieval-search.js";
 import {
   beginWikiOperation,
@@ -1021,7 +1027,15 @@ export async function searchPaperWiki(options: PaperWikiSearchOptions): Promise<
     query,
     preferredKinds: ["source", "page"],
     maxResults,
-    itemFilter: (item) => item.kind === "page" || item.sourceKind === "paper" || item.sourceKind === undefined
+    ...(options.sourceKinds ? { sourceKinds: options.sourceKinds } : {}),
+    ...(options.pageTypes ? { pageTypes: options.pageTypes as WikiPageType[] } : {}),
+    ...(options.claimKinds ? { claimKinds: options.claimKinds as WikiClaimKind[] } : {}),
+    ...(options.knowledgeStates ? { knowledgeStates: options.knowledgeStates as WikiKnowledgeState[] } : {}),
+    ...(options.evidenceContracts ? { evidenceContracts: options.evidenceContracts as WikiEvidenceContract[] } : {}),
+    ...(options.maxEvidenceAgeDays !== undefined ? { maxEvidenceAgeDays: options.maxEvidenceAgeDays } : {}),
+    ...(options.sourceKinds
+      ? {}
+      : { itemFilter: (item) => item.kind === "page" || item.sourceKind === "paper" || item.sourceKind === undefined })
   });
 
   if (structured.status === "ready" && structured.results.some(isMeaningfulStructuredSearchResult)) {
@@ -1042,7 +1056,11 @@ export async function searchPaperWiki(options: PaperWikiSearchOptions): Promise<
         ...(result.item.sourceKind ? { sourceKind: result.item.sourceKind } : {}),
         title: result.item.title,
         path: result.item.relativePath,
-        snippet: createBestSnippet(result.item.body, query, buildWikiSearchTerms(query))
+        snippet: createBestSnippet(result.item.body, query, buildWikiSearchTerms(query)),
+        ...(result.warnings.length > 0 ? { warnings: result.warnings } : {}),
+        ...(result.matchReasons.length > 0 ? { matchReasons: result.matchReasons } : {}),
+        ...(result.item.knowledgeState ? { knowledgeState: result.item.knowledgeState } : {}),
+        ...(result.item.lastReviewedAt ? { lastReviewedAt: result.item.lastReviewedAt } : {})
       }))
     };
   }
