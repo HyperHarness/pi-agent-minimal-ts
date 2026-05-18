@@ -20,6 +20,7 @@ import {
   updatePaperRecordParseManifest,
   writePaperRecord
 } from "../../src/agent/paper/storage/paper-store.js";
+import { writeTypedWikiPage } from "../../src/agent/wiki/typed-store.js";
 
 type ToolContentItem = {
   type?: string;
@@ -268,7 +269,15 @@ type PaperWikiRelationsTool = {
 type SearchPaperWikiTool = {
   execute: (
     toolCallId: string,
-    args: { query: string; maxResults?: number },
+    args: { query: string; maxResults?: number; maxEvidenceAgeDays?: number },
+    signal: undefined,
+  ) => Promise<ToolResult>;
+};
+
+type WikiReviewPageTool = {
+  execute: (
+    toolCallId: string,
+    args: { pageKey: string; maxEvidenceAgeDays?: number },
     signal: undefined,
   ) => Promise<ToolResult>;
 };
@@ -318,7 +327,7 @@ type WikiApplyStructurePlanTool = {
 type AnswerPaperWikiQuestionTool = {
   execute: (
     toolCallId: string,
-    args: { query: string; maxResults?: number },
+    args: { query: string; maxResults?: number; maxEvidenceAgeDays?: number },
     signal: undefined,
   ) => Promise<ToolResult>;
 };
@@ -329,6 +338,7 @@ type AnswerResearchQuestionTool = {
     args: {
       query: string;
       maxLocalResults?: number;
+      maxEvidenceAgeDays?: number;
       maxExternalCandidates?: number;
       maxDownloads?: number;
       autoDownload?: boolean;
@@ -804,6 +814,20 @@ function getSearchPaperWikiTool(
   assert.ok(tool);
   assert.equal(typeof tool.execute, "function");
   return tool as SearchPaperWikiTool;
+}
+
+function getWikiReviewPageTool(
+  workspace: string,
+  dependencies?: Parameters<typeof createTools>[1],
+): WikiReviewPageTool {
+  const tools = createTools(workspace, { ...dependencies, toolProfile: "full" }) as ReadonlyArray<{
+    name: string;
+    execute?: WikiReviewPageTool["execute"];
+  }>;
+  const tool = tools.find((candidate) => candidate.name === "wiki_review_page");
+  assert.ok(tool);
+  assert.equal(typeof tool.execute, "function");
+  return tool as WikiReviewPageTool;
 }
 
 function getWikiLintTool(
@@ -1612,6 +1636,7 @@ const EXPECTED_DEFAULT_TOOL_NAMES = [
   "clarify_research_topic",
   "research_topic_bootstrap",
   "expand_research_topic",
+  "wiki_review_page",
   "search_local_papers",
   "wiki_health",
   "wiki_lint",
@@ -3514,6 +3539,85 @@ test("wiki_lint delegates to the injected wiki lint dependency and returns detai
   }
 });
 
+test("wiki_review_page returns deterministic findings for a speculative mixed page", async () => {
+  const workspace = await mkdtemp(path.join(tmpdir(), "pi-agent-tools-"));
+
+  try {
+    await writeTypedWikiPage({
+      workspaceDir: workspace,
+      page: {
+        metadata: {
+          schema_version: 1,
+          type: "finding",
+          key: "qldpc-hardware-embedding",
+          title: "qLDPC hardware embedding",
+          aliases: [],
+          tags: ["qldpc"],
+          evidence_contract: "mixed",
+          source_refs: ["arxiv-2406.06015"],
+          knowledge_state: "speculative",
+          last_reviewed_at: "2000-01-01T00:00:00.000Z",
+          claims: [{
+            claimId: "claim-1",
+            kind: "quantitative",
+            statement: "The design has 1e-3 logical error rate according to author claims.",
+            sourceRefs: ["arxiv-2406.06015"],
+            evidence: [{ paperKey: "arxiv-2406.06015", page: 3 }],
+            confidence: "low",
+          }],
+          typed_relations: [{
+            type: "contradicts",
+            target: "surface-code-baseline",
+            targetKind: "page",
+            evidenceRefs: ["claim-1"],
+            status: "candidate",
+          }],
+          created_at: "2026-05-10T00:00:00.000Z",
+          updated_at: "2026-05-10T00:00:00.000Z",
+        },
+        body: "# qLDPC hardware embedding\n\nClaim\n\nNo caveat heading here.",
+      },
+    });
+
+    const tool = getWikiReviewPageTool(workspace);
+    const result = await tool.execute("wiki-review-call", {
+      pageKey: "qldpc-hardware-embedding",
+      maxEvidenceAgeDays: 30,
+    }, undefined);
+    const details = result.details as {
+      status?: string;
+      pageKey?: string;
+      relativePath?: string;
+      findings?: Array<{ kind?: string; severity?: string; target?: string }>;
+    };
+
+    assert.equal(details.status, "ready");
+    assert.equal(details.pageKey, "qldpc-hardware-embedding");
+    assert.equal(details.relativePath, "knowledge-base/pages/qldpc-hardware-embedding.md");
+    assert.deepEqual(details.findings?.map((finding) => finding.kind), [
+      "speculative_knowledge_state",
+      "stale_evidence",
+      "low_confidence_claim",
+      "author_claim_not_validated",
+      "unresolved_contradiction",
+      "missing_caveat",
+      "missing_experiment_ref",
+    ]);
+    assert.deepEqual(details.findings?.map((finding) => finding.severity), [
+      "medium",
+      "medium",
+      "medium",
+      "medium",
+      "medium",
+      "medium",
+      "medium",
+    ]);
+    assert.equal(details.findings?.find((finding) => finding.kind === "low_confidence_claim")?.target, "claim-1");
+  } finally {
+    await rm(workspace, { recursive: true, force: true });
+  }
+});
+
 test("wiki_structure_plan delegates to the injected planner and returns details", async () => {
   const workspace = await mkdtemp(path.join(tmpdir(), "pi-agent-tools-"));
   const capturedCalls: unknown[] = [];
@@ -3778,6 +3882,67 @@ test("answer_paper_wiki_question builds a citeable wiki evidence package", async
     assert.equal(details.evidence?.[0]?.citation, "arxiv-2406.06015 (knowledge-base/sources/arxiv-2406.06015/summary.md)");
     assert.equal(details.evidence?.[0]?.path, "knowledge-base/sources/arxiv-2406.06015/summary.md");
     assert.deepEqual(details.fallbackMatches, []);
+  } finally {
+    await rm(workspace, { recursive: true, force: true });
+  }
+});
+
+test("answer_paper_wiki_question preserves evidence warnings when maxEvidenceAgeDays is passed", async () => {
+  const workspace = await mkdtemp(path.join(tmpdir(), "pi-agent-tools-"));
+  const capturedCalls: unknown[] = [];
+
+  try {
+    const tool = getAnswerPaperWikiQuestionTool(workspace, {
+      searchPaperWiki: async (options) => {
+        capturedCalls.push(options);
+        return {
+          query: options.query,
+          results: [
+            {
+              kind: "page",
+              key: "qldpc-hardware-embedding",
+              pageKey: "qldpc-hardware-embedding",
+              title: "qLDPC hardware embedding",
+              path: "knowledge-base/pages/qldpc-hardware-embedding.md",
+              snippet: "qLDPC hardware embedding evidence",
+              warnings: ["speculative", "stale_evidence"],
+              matchReasons: ["title", "tag"],
+              knowledgeState: "speculative",
+              lastReviewedAt: "2000-01-01T00:00:00.000Z",
+            },
+          ],
+        };
+      },
+    });
+
+    const result = await tool.execute("answer-wiki-warnings-call", {
+      query: "qldpc hardware embedding",
+      maxResults: 2,
+      maxEvidenceAgeDays: 30,
+    }, undefined);
+    const details = result.details as {
+      answerPolicy?: string[];
+      evidence?: Array<{
+        warnings?: string[];
+        matchReasons?: string[];
+        knowledgeState?: string;
+        lastReviewedAt?: string;
+      }>;
+    };
+
+    assert.deepEqual(capturedCalls, [{
+      workspaceDir: workspace,
+      query: "qldpc hardware embedding",
+      maxResults: 2,
+      maxEvidenceAgeDays: 30,
+    }]);
+    assert.deepEqual(details.evidence?.[0]?.warnings, ["speculative", "stale_evidence"]);
+    assert.deepEqual(details.evidence?.[0]?.matchReasons, ["title", "tag"]);
+    assert.equal(details.evidence?.[0]?.knowledgeState, "speculative");
+    assert.equal(details.evidence?.[0]?.lastReviewedAt, "2000-01-01T00:00:00.000Z");
+    assert.ok(details.answerPolicy?.includes(
+      "Report evidence warnings such as stale, speculative, disputed, or low-confidence status before drawing conclusions."
+    ));
   } finally {
     await rm(workspace, { recursive: true, force: true });
   }

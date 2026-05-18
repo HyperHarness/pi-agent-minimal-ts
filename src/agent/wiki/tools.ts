@@ -26,6 +26,7 @@ import { paperWikiRelations } from "./relations.js";
 import { applyWikiStructurePlan } from "./structure-apply.js";
 import { planWikiStructure } from "./structure-plan.js";
 import type { WikiStructurePlanAction } from "./structure-plan.js";
+import { reviewWikiPageEvidence } from "./review.js";
 import {
   planWikiAgentWork,
   type WikiAgentAction,
@@ -119,7 +120,19 @@ const paperWikiRelationsParameters = Type.Object({
 
 const searchPaperWikiParameters = Type.Object({
   query: Type.String({ description: "Text query to search inside LLM-authored paper source summaries and synthesis pages." }),
-  maxResults: Type.Optional(Type.Integer({ description: "Maximum matching wiki items to return.", minimum: 1 }))
+  maxResults: Type.Optional(Type.Integer({ description: "Maximum matching wiki items to return.", minimum: 1 })),
+  maxEvidenceAgeDays: Type.Optional(Type.Integer({
+    description: "Warn when wiki evidence was last reviewed or updated older than this many days.",
+    minimum: 1
+  }))
+});
+
+const wikiReviewPageParameters = Type.Object({
+  pageKey: Type.String({ description: "Typed wiki page key to review." }),
+  maxEvidenceAgeDays: Type.Optional(Type.Integer({
+    description: "Warn when last_reviewed_at is older than this many days.",
+    minimum: 1
+  }))
 });
 
 const wikiLintParameters = Type.Object({
@@ -201,6 +214,12 @@ const answerPaperWikiQuestionParameters = Type.Object({
       description: "Maximum wiki source summaries or fallback local matches to return. Defaults to 8.",
       minimum: 1
     })
+  ),
+  maxEvidenceAgeDays: Type.Optional(
+    Type.Integer({
+      description: "Warn when wiki evidence was last reviewed or updated older than this many days.",
+      minimum: 1
+    })
   )
 });
 
@@ -211,6 +230,12 @@ const answerResearchQuestionParameters = Type.Object({
   }),
   maxLocalResults: Type.Optional(
     Type.Integer({ description: "Maximum local wiki evidence items to return. Defaults to 8.", minimum: 1 })
+  ),
+  maxEvidenceAgeDays: Type.Optional(
+    Type.Integer({
+      description: "Warn when local wiki evidence was last reviewed or updated older than this many days.",
+      minimum: 1
+    })
   ),
   maxExternalCandidates: Type.Optional(
     Type.Integer({ description: "Maximum external paper candidates to inspect when local evidence is insufficient. Defaults to 5.", minimum: 1 })
@@ -374,6 +399,7 @@ type WritePaperWikiSourceParameters = Static<typeof writePaperWikiSourceParamete
 type GeneratePaperWikiSummaryParameters = Static<typeof generatePaperWikiSummaryParameters>;
 type PaperWikiRelationsParameters = Static<typeof paperWikiRelationsParameters>;
 type SearchPaperWikiParameters = Static<typeof searchPaperWikiParameters>;
+type WikiReviewPageParameters = Static<typeof wikiReviewPageParameters>;
 type WikiLintParameters = Static<typeof wikiLintParameters>;
 type WikiStructurePlanParameters = Static<typeof wikiStructurePlanParameters>;
 type WikiApplyStructurePlanParameters = Static<typeof wikiApplyStructurePlanParameters>;
@@ -402,6 +428,10 @@ type SearchPaperWikiTool = AgentTool<
   typeof searchPaperWikiParameters,
   Awaited<ReturnType<typeof searchPaperWiki>>
 >;
+type WikiReviewPageTool = AgentTool<
+  typeof wikiReviewPageParameters,
+  Awaited<ReturnType<typeof reviewWikiPageEvidence>>
+>;
 type WikiLintTool = AgentTool<
   typeof wikiLintParameters,
   Awaited<ReturnType<typeof lintPaperWiki>>
@@ -427,6 +457,10 @@ type AnswerPaperWikiQuestionDetails = {
     title: string;
     path: string;
     snippet: string;
+    warnings?: string[];
+    matchReasons?: string[];
+    knowledgeState?: string;
+    lastReviewedAt?: string;
   }>;
   fallbackMatches: Array<{
     paperKey: string;
@@ -676,6 +710,7 @@ async function buildPaperWikiQuestionEvidence(input: {
   workspaceDir: string;
   query: string;
   maxResults?: number;
+  maxEvidenceAgeDays?: number;
   searchPaperWikiImpl: typeof searchPaperWiki;
   searchLocalPapersImpl: typeof searchLocalPapers;
 }): Promise<AnswerPaperWikiQuestionDetails> {
@@ -683,7 +718,8 @@ async function buildPaperWikiQuestionEvidence(input: {
   const wikiResult = await input.searchPaperWikiImpl({
     workspaceDir: input.workspaceDir,
     query: input.query,
-    maxResults
+    maxResults,
+    ...(input.maxEvidenceAgeDays !== undefined ? { maxEvidenceAgeDays: input.maxEvidenceAgeDays } : {})
   });
   const evidence = wikiResult.results.map((result) => {
     const kind = result.kind ?? (result.pageKey ? "page" : "source");
@@ -696,19 +732,29 @@ async function buildPaperWikiQuestionEvidence(input: {
       ...(result.pageKey ? { pageKey: result.pageKey } : {}),
       title: result.title,
       path: result.path,
-      snippet: result.snippet
+      snippet: result.snippet,
+      ...(result.warnings !== undefined ? { warnings: result.warnings } : {}),
+      ...(result.matchReasons !== undefined ? { matchReasons: result.matchReasons } : {}),
+      ...(result.knowledgeState !== undefined ? { knowledgeState: result.knowledgeState } : {}),
+      ...(result.lastReviewedAt !== undefined ? { lastReviewedAt: result.lastReviewedAt } : {})
     };
   });
 
   if (evidence.length > 0) {
+    const answerPolicy = [
+      "Answer from the evidence list only for wiki-grounded claims.",
+      "Cite paperKey, pageKey, or path next to substantive claims.",
+      "Separate any unsupported background knowledge from wiki-grounded conclusions."
+    ];
+    if (evidence.some((item) => (item.warnings?.length ?? 0) > 0)) {
+      answerPolicy.push(
+        "Report evidence warnings such as stale, speculative, disputed, or low-confidence status before drawing conclusions."
+      );
+    }
     return {
       query: wikiResult.query,
       status: "has_wiki_evidence",
-      answerPolicy: [
-        "Answer from the evidence list only for wiki-grounded claims.",
-        "Cite paperKey, pageKey, or path next to substantive claims.",
-        "Separate any unsupported background knowledge from wiki-grounded conclusions."
-      ],
+      answerPolicy,
       evidence,
       fallbackMatches: []
     };
@@ -1391,7 +1437,28 @@ export function createWikiTools(input: {
       const result = await searchPaperWikiImpl({
         workspaceDir: resolvedWorkspaceDir,
         query: args.query,
-        ...(args.maxResults !== undefined ? { maxResults: args.maxResults } : {})
+        ...(args.maxResults !== undefined ? { maxResults: args.maxResults } : {}),
+        ...(args.maxEvidenceAgeDays !== undefined ? { maxEvidenceAgeDays: args.maxEvidenceAgeDays } : {})
+      });
+
+      return {
+        content: [{ type: "text", text: JSON.stringify(result) }],
+        details: result
+      };
+    }
+  };
+
+  const wikiReviewPageTool: WikiReviewPageTool = {
+    name: "wiki_review_page",
+    label: "Review Wiki Page",
+    description:
+      "Reviews a typed wiki page for evidence-contract risks such as unsupported claims, stale evidence, speculative or disputed state, and missing caveats.",
+    parameters: wikiReviewPageParameters,
+    execute: async (_toolCallId: string, args: WikiReviewPageParameters) => {
+      const result = await reviewWikiPageEvidence({
+        workspaceDir: resolvedWorkspaceDir,
+        pageKey: args.pageKey,
+        ...(args.maxEvidenceAgeDays !== undefined ? { maxEvidenceAgeDays: args.maxEvidenceAgeDays } : {})
       });
 
       return {
@@ -1483,6 +1550,7 @@ export function createWikiTools(input: {
         workspaceDir: resolvedWorkspaceDir,
         query: args.query,
         ...(args.maxResults !== undefined ? { maxResults: args.maxResults } : {}),
+        ...(args.maxEvidenceAgeDays !== undefined ? { maxEvidenceAgeDays: args.maxEvidenceAgeDays } : {}),
         searchPaperWikiImpl,
         searchLocalPapersImpl
       });
@@ -1524,6 +1592,7 @@ export function createWikiTools(input: {
         workspaceDir: resolvedWorkspaceDir,
         query: args.query,
         maxResults: maxLocalResults,
+        ...(args.maxEvidenceAgeDays !== undefined ? { maxEvidenceAgeDays: args.maxEvidenceAgeDays } : {}),
         searchPaperWikiImpl,
         searchLocalPapersImpl
       });
@@ -1556,6 +1625,7 @@ export function createWikiTools(input: {
           answerPolicy: [
             "Answer from localEvidence.evidence.",
             "Cite paperKey or source path next to substantive claims.",
+            "Preserve and report any local evidence warnings before presenting conclusions.",
             "Do not use network search because local wiki evidence was found."
           ]
         };
@@ -1760,6 +1830,7 @@ export function createWikiTools(input: {
           workspaceDir: resolvedWorkspaceDir,
           query: args.query,
           maxResults: maxLocalResults,
+          ...(args.maxEvidenceAgeDays !== undefined ? { maxEvidenceAgeDays: args.maxEvidenceAgeDays } : {}),
           searchPaperWikiImpl,
           searchLocalPapersImpl
         });
@@ -1840,6 +1911,7 @@ export function createWikiTools(input: {
           ? [
               "Answer from refreshedEvidence.evidence.",
               "Cite newly written or existing wiki source paths.",
+              "Preserve and report any local evidence warnings before presenting conclusions.",
               "Mention which sources were ingested during this turn when relevant."
             ]
           : [
@@ -2457,7 +2529,8 @@ export function createWikiTools(input: {
     mergeWikiAliasesTool,
     clarifyResearchTopicTool,
     researchTopicBootstrapTool,
-    expandResearchTopicTool
+    expandResearchTopicTool,
+    wikiReviewPageTool
   ];
   const lintTools = [wikiLintTool, wikiStructurePlanTool, wikiApplyStructurePlanTool];
 

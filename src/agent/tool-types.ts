@@ -70,6 +70,7 @@ type ToolName =
   | "wiki_health_fix"
   | "wiki_apply_structure_plan"
   | "wiki_lint"
+  | "wiki_review_page"
   | "wiki_structure_plan"
   | "write_design_artifact"
   | "write_file"
@@ -91,6 +92,7 @@ export const TOOL_BOUNDARY_NAMES: Record<ToolBoundaryRole, readonly ToolName[]> 
     "search_paper_wiki",
     "wiki_health",
     "wiki_lint",
+    "wiki_review_page",
     "wiki_structure_plan",
     "wiki_apply_structure_plan"
   ],
@@ -143,7 +145,8 @@ export const TOOL_BOUNDARY_NAMES: Record<ToolBoundaryRole, readonly ToolName[]> 
     "compile_latex",
     "answer_paper_wiki_question",
     "search_paper_wiki",
-    "wiki_lint"
+    "wiki_lint",
+    "wiki_review_page"
   ]
 };
 
