@@ -31,12 +31,6 @@ import {
   writeWikiSourceManifest,
   type WikiSourceManifest
 } from "./manifest-store.js";
-import type {
-  WikiClaimKind,
-  WikiEvidenceContract,
-  WikiKnowledgeState,
-  WikiPageType
-} from "./page-schema.js";
 import { searchWikiEvidence, type WikiEvidenceSearchResult } from "./retrieval-search.js";
 import {
   beginWikiOperation,
@@ -1014,6 +1008,37 @@ function isMeaningfulStructuredSearchResult(result: WikiEvidenceSearchResult): b
   return result.score >= 2;
 }
 
+function hasStructuredSearchConstraints(options: PaperWikiSearchOptions): boolean {
+  return Boolean(
+    options.sourceKinds?.length ||
+    options.pageTypes?.length ||
+    options.claimKinds?.length ||
+    options.knowledgeStates?.length ||
+    options.evidenceContracts?.length ||
+    options.maxEvidenceAgeDays !== undefined ||
+    options.now
+  );
+}
+
+function mapStructuredPaperWikiResult(
+  result: WikiEvidenceSearchResult,
+  query: string
+): PaperWikiSearchResult["results"][number] {
+  return {
+    kind: result.item.kind,
+    key: result.item.key,
+    ...(result.item.kind === "source" ? { paperKey: result.item.key } : { pageKey: result.item.key }),
+    ...(result.item.sourceKind ? { sourceKind: result.item.sourceKind } : {}),
+    title: result.item.title,
+    path: result.item.relativePath,
+    snippet: createBestSnippet(result.item.body, query, buildWikiSearchTerms(query)),
+    ...(result.warnings.length > 0 ? { warnings: result.warnings } : {}),
+    ...(result.matchReasons.length > 0 ? { matchReasons: result.matchReasons } : {}),
+    ...(result.item.knowledgeState ? { knowledgeState: result.item.knowledgeState } : {}),
+    ...(result.item.lastReviewedAt ? { lastReviewedAt: result.item.lastReviewedAt } : {})
+  };
+}
+
 export async function searchPaperWiki(options: PaperWikiSearchOptions): Promise<PaperWikiSearchResult> {
   const query = options.query.trim();
   if (!query) {
@@ -1028,16 +1053,25 @@ export async function searchPaperWiki(options: PaperWikiSearchOptions): Promise<
     preferredKinds: ["source", "page"],
     maxResults,
     ...(options.sourceKinds ? { sourceKinds: options.sourceKinds } : {}),
-    ...(options.pageTypes ? { pageTypes: options.pageTypes as WikiPageType[] } : {}),
-    ...(options.claimKinds ? { claimKinds: options.claimKinds as WikiClaimKind[] } : {}),
-    ...(options.knowledgeStates ? { knowledgeStates: options.knowledgeStates as WikiKnowledgeState[] } : {}),
-    ...(options.evidenceContracts ? { evidenceContracts: options.evidenceContracts as WikiEvidenceContract[] } : {}),
+    ...(options.pageTypes ? { pageTypes: options.pageTypes } : {}),
+    ...(options.claimKinds ? { claimKinds: options.claimKinds } : {}),
+    ...(options.knowledgeStates ? { knowledgeStates: options.knowledgeStates } : {}),
+    ...(options.evidenceContracts ? { evidenceContracts: options.evidenceContracts } : {}),
     ...(options.maxEvidenceAgeDays !== undefined ? { maxEvidenceAgeDays: options.maxEvidenceAgeDays } : {}),
     ...(options.now ? { now: options.now } : {}),
     ...(options.sourceKinds
       ? {}
       : { itemFilter: (item) => item.kind === "page" || item.sourceKind === "paper" || item.sourceKind === undefined })
   });
+
+  if (hasStructuredSearchConstraints(options)) {
+    return {
+      query,
+      results: structured.status === "ready"
+        ? structured.results.map((result) => mapStructuredPaperWikiResult(result, query))
+        : []
+    };
+  }
 
   if (structured.status === "ready" && structured.results.some(isMeaningfulStructuredSearchResult)) {
     const meaningfulResults = structured.results.filter(isMeaningfulStructuredSearchResult);
@@ -1050,19 +1084,7 @@ export async function searchPaperWiki(options: PaperWikiSearchOptions): Promise<
     }
     return {
       query,
-      results: meaningfulResults.map((result) => ({
-        kind: result.item.kind,
-        key: result.item.key,
-        ...(result.item.kind === "source" ? { paperKey: result.item.key } : { pageKey: result.item.key }),
-        ...(result.item.sourceKind ? { sourceKind: result.item.sourceKind } : {}),
-        title: result.item.title,
-        path: result.item.relativePath,
-        snippet: createBestSnippet(result.item.body, query, buildWikiSearchTerms(query)),
-        ...(result.warnings.length > 0 ? { warnings: result.warnings } : {}),
-        ...(result.matchReasons.length > 0 ? { matchReasons: result.matchReasons } : {}),
-        ...(result.item.knowledgeState ? { knowledgeState: result.item.knowledgeState } : {}),
-        ...(result.item.lastReviewedAt ? { lastReviewedAt: result.item.lastReviewedAt } : {})
-      }))
+      results: meaningfulResults.map((result) => mapStructuredPaperWikiResult(result, query))
     };
   }
 

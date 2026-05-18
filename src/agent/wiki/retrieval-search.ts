@@ -36,7 +36,7 @@ export interface WikiEvidenceSearchResult {
   item: WikiEvidenceItem;
   score: number;
   matchReasons: WikiEvidenceMatchReason[];
-  warnings: WikiEvidenceSearchWarning[];
+  warnings: string[];
 }
 
 export interface WikiEvidenceSearchResponse {
@@ -327,7 +327,7 @@ function scoreItem(item: WikiEvidenceItem, needles: string[], options: SearchWik
     item,
     score,
     matchReasons,
-    warnings: itemWarnings(item, options)
+    warnings: [...item.diagnostics, ...itemWarnings(item, options)]
   };
 }
 

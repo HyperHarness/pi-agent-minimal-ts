@@ -783,6 +783,61 @@ test("searchPaperWiki preserves structured freshness warnings with caller clock"
   });
 });
 
+test("searchPaperWiki honors structured filters without legacy fallback", async () => {
+  await withWorkspace("wiki-public-search-filtered-fallback-", async (workspaceDir) => {
+    await writeTypedWikiPage({
+      workspaceDir,
+      page: {
+        metadata: {
+          schema_version: 1,
+          type: "concept",
+          key: "concept-filter-leak",
+          title: "Concept filter leak",
+          aliases: [],
+          tags: ["superconducting-qubits"],
+          evidence_contract: "paper-backed",
+          source_refs: ["arxiv-2601.00003"],
+          created_at: "2026-05-10T00:00:00.000Z",
+          updated_at: "2026-05-10T00:00:00.000Z"
+        },
+        body: "# Concept filter leak\n\nDataset-only query phrase appears here."
+      }
+    });
+
+    const result = await searchPaperWiki({
+      workspaceDir,
+      query: "dataset only query phrase",
+      maxResults: 5,
+      pageTypes: ["dataset"]
+    });
+
+    assert.deepEqual(result.results, []);
+  });
+});
+
+test("searchWikiEvidence preserves diagnostic warnings", async () => {
+  await withWorkspace("wiki-search-diagnostic-warnings-", async (workspaceDir) => {
+    await writeWorkspaceFile(
+      workspaceDir,
+      "knowledge-base/sources/arxiv-2601.00004/summary.md",
+      "# Diagnostic warning source\n\nDiagnostic keyword body."
+    );
+
+    const result = await searchWikiEvidence({
+      workspaceDir,
+      query: "diagnostic keyword",
+      maxResults: 5
+    });
+
+    assert.equal(result.status, "ready");
+    assert.equal(result.results[0].item.key, "arxiv-2601.00004");
+    assert.ok(
+      result.results[0].warnings.some((warning) => warning.toLowerCase().includes("missing manifest")),
+      `expected missing manifest warning, got ${JSON.stringify(result.results[0].warnings)}`
+    );
+  });
+});
+
 test("retrieval contract rejects source manifests missing required fields", async () => {
   await withWorkspace("wiki-retrieval-missing-fields-manifest-", async (workspaceDir) => {
     const paperKey = "arxiv-2601.00009";

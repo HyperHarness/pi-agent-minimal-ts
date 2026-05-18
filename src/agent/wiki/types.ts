@@ -1,4 +1,10 @@
 import type { WikiSourceKind } from "./manifest-store.js";
+import type {
+  WikiClaimKind,
+  WikiEvidenceContract,
+  WikiKnowledgeState,
+  WikiPageType
+} from "./page-schema.js";
 
 export interface PaperWikiSourceInput {
   workspaceDir: string;
@@ -29,10 +35,10 @@ export interface PaperWikiSearchOptions {
   query: string;
   maxResults?: number;
   sourceKinds?: WikiSourceKind[];
-  pageTypes?: string[];
-  claimKinds?: string[];
-  knowledgeStates?: string[];
-  evidenceContracts?: string[];
+  pageTypes?: WikiPageType[];
+  claimKinds?: WikiClaimKind[];
+  knowledgeStates?: WikiKnowledgeState[];
+  evidenceContracts?: WikiEvidenceContract[];
   maxEvidenceAgeDays?: number;
   now?: Date;
 }
