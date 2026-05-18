@@ -914,6 +914,63 @@ updated_at: 2026-05-10T00:00:00.000Z
   }
 });
 
+test("wiki_lint quality audit reports missing knowledge state and review date", async () => {
+  const workspace = await mkdtemp(path.join(tmpdir(), "wiki-lint-knowledge-state-"));
+  try {
+    await writeMarkdown(path.join(workspace, "knowledge-base/pages/unreviewed-finding.md"), [
+      "---",
+      "schema_version: 1",
+      "type: finding",
+      "key: unreviewed-finding",
+      "title: Unreviewed finding",
+      "aliases: []",
+      "tags: []",
+      "evidence_contract: paper-backed",
+      "source_refs:",
+      '  - "arxiv-2406.06015"',
+      "created_at: 2026-05-10T00:00:00.000Z",
+      "updated_at: 2026-05-10T00:00:00.000Z",
+      "---",
+      "",
+      "# Unreviewed finding",
+      "",
+      "Claim text."
+    ].join("\n"));
+    await writeMarkdown(path.join(workspace, "knowledge-base/pages/disputed-without-relation.md"), [
+      "---",
+      "schema_version: 1",
+      "type: finding",
+      "key: disputed-without-relation",
+      "title: Disputed without relation",
+      "aliases: []",
+      "tags: []",
+      "evidence_contract: paper-backed",
+      "source_refs:",
+      '  - "arxiv-2406.06016"',
+      "knowledge_state: disputed",
+      "last_reviewed_at: 2026-05-01T00:00:00.000Z",
+      "created_at: 2026-05-10T00:00:00.000Z",
+      "updated_at: 2026-05-10T00:00:00.000Z",
+      "---",
+      "",
+      "# Disputed without relation"
+    ].join("\n"));
+
+    const result = await lintPaperWiki({
+      workspaceDir: workspace,
+      includeQualityAudit: true,
+      maxItems: 20
+    });
+
+    const kinds = result.issues.map((issue) => issue.kind);
+    assert.ok(kinds.includes("missing_knowledge_state"));
+    assert.ok(kinds.includes("missing_last_reviewed_at"));
+    assert.ok(kinds.includes("disputed_without_contradiction"));
+  } finally {
+    await rm(workspace, { recursive: true, force: true });
+  }
+});
+
 test("lintPaperWiki reports code-backed pages without experiment refs", async () => {
   const workspace = await createWorkspace();
   try {

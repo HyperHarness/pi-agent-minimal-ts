@@ -45,6 +45,9 @@ export type PaperWikiLintIssueKind =
   | "missing_claim_provenance"
   | "unresolved_contradiction"
   | "missing_typed_relation"
+  | "missing_knowledge_state"
+  | "missing_last_reviewed_at"
+  | "disputed_without_contradiction"
   | "missing_experiment_ref"
   | "code_backed_without_experiment"
   | "material_parameter_missing_unit"
@@ -116,6 +119,9 @@ const ISSUE_KINDS: PaperWikiLintIssueKind[] = [
   "missing_claim_provenance",
   "unresolved_contradiction",
   "missing_typed_relation",
+  "missing_knowledge_state",
+  "missing_last_reviewed_at",
+  "disputed_without_contradiction",
   "missing_experiment_ref",
   "code_backed_without_experiment",
   "material_parameter_missing_unit",
@@ -124,6 +130,11 @@ const ISSUE_KINDS: PaperWikiLintIssueKind[] = [
   "design_record_without_uses_relation",
   "software_doc_version_missing"
 ];
+const ISSUE_KIND_ZERO_SUMMARY_EXCLUSIONS = new Set<PaperWikiLintIssueKind>([
+  "missing_knowledge_state",
+  "missing_last_reviewed_at",
+  "disputed_without_contradiction"
+]);
 const DEFAULT_MAX_ITEMS = 30;
 const DEFAULT_ISSUE_KIND_DISPLAY_LIMIT = 8;
 const ISSUE_KIND_DISPLAY_LIMITS: Partial<Record<PaperWikiLintIssueKind, number>> = {
@@ -652,6 +663,9 @@ function summarizeActions(issues: PaperWikiLintIssue[]): string[] {
     ["missing_claim_provenance", "Add concrete page, figure, table, element, chunk, or code-output provenance to quantitative claims."],
     ["unresolved_contradiction", "Review contradiction candidates and mark them confirmed or rejected."],
     ["missing_typed_relation", "Replace legacy related_pages with typed_relations."],
+    ["missing_knowledge_state", "Classify typed research pages as established, promising_unverified, speculative, or disputed."],
+    ["missing_last_reviewed_at", "Review typed research pages and record last_reviewed_at."],
+    ["disputed_without_contradiction", "Add typed contradiction relations to disputed pages."],
     ["missing_experiment_ref", "Fix experiment_refs paths or update the experiment status."],
     ["code_backed_without_experiment", "Attach local experiment_refs to code-backed or mixed pages when claims depend on code."],
     ["material_parameter_missing_unit", "Add units to dataset parameter rows that contain quantitative values."],
@@ -1317,6 +1331,41 @@ export async function lintPaperWiki(options: PaperWikiLintOptions): Promise<Pape
     for (const page of typedPages.pages) {
       const relativePath = relativeToWorkspace(workspaceDir, page.path);
       if (
+        page.metadata.type !== "alias" &&
+        page.metadata.evidence_contract !== "none" &&
+        !page.metadata.knowledge_state
+      ) {
+        issues.push({
+          kind: "missing_knowledge_state",
+          severity: "low",
+          path: relativePath,
+          reason: "Evidence-backed typed page has no knowledge_state."
+        });
+      }
+      if (
+        page.metadata.type !== "alias" &&
+        page.metadata.evidence_contract !== "none" &&
+        !page.metadata.last_reviewed_at
+      ) {
+        issues.push({
+          kind: "missing_last_reviewed_at",
+          severity: "low",
+          path: relativePath,
+          reason: "Evidence-backed typed page has no last_reviewed_at."
+        });
+      }
+      if (
+        page.metadata.knowledge_state === "disputed" &&
+        !(page.metadata.typed_relations ?? []).some((relation) => relation.type === "contradicts")
+      ) {
+        issues.push({
+          kind: "disputed_without_contradiction",
+          severity: "medium",
+          path: relativePath,
+          reason: "Disputed page has no typed_relations entry with type contradicts."
+        });
+      }
+      if (
         page.metadata.type === "dataset" ||
         page.metadata.type === "method" ||
         page.metadata.type === "finding" ||
@@ -1495,7 +1544,11 @@ export async function lintPaperWiki(options: PaperWikiLintOptions): Promise<Pape
     }
   }
 
-  const summary = Object.fromEntries(ISSUE_KINDS.map((kind) => [kind, 0])) as Record<string, number>;
+  const summary = Object.fromEntries(
+    ISSUE_KINDS
+      .filter((kind) => !ISSUE_KIND_ZERO_SUMMARY_EXCLUSIONS.has(kind))
+      .map((kind) => [kind, 0])
+  ) as Record<string, number>;
   for (const issue of issues) {
     summary[issue.kind] = (summary[issue.kind] ?? 0) + 1;
   }
