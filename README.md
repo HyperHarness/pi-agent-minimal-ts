@@ -11,7 +11,7 @@ This repository is a practical agent harness for literature ingestion, local wik
 - exposes a Feishu long-connection bridge with streaming replies and per-chat memory
 - searches, downloads, parses, summarizes, and indexes papers into a local knowledge base
 - builds durable typed wiki pages from fixed evidence rather than one-off answers
-- records claim-level provenance, typed page/source/experiment relations, experiment references, and reviewer-risk critique metadata on wiki pages
+- records claim-level provenance, knowledge-state/freshness metadata, typed page/source/experiment relations, experiment references, and reviewer-risk critique metadata on wiki pages
 - maintains source manifests, operation journals, evidence contracts, and wiki governance diagnostics
 - plans wiki-agent work with deterministic owner boundaries for acquisition, evidence construction, page writing, and blocked cases
 - provides `design-projects/` as the recommended code workspace root for design subagent projects
@@ -91,9 +91,9 @@ The current wiki core is schema-first:
 
 - `workspace-contract.ts` defines the authoritative `knowledge-base/` lifecycle roots for raw inputs, source records, parse artifacts, summaries, pages, manifests, assets, runtime state, index, and human log.
 - `page-schema.ts` and `typed-store.ts` parse, validate, list, and write human-editable Markdown pages with typed frontmatter. Supported page types include `paper-source`, `synthesis`, `concept`, `method`, `finding`, `dataset`, `question`, `design-record`, and `alias`.
-- `page-schema.ts` also owns the wiki evidence-audit contract. Pages can carry `claims`, `typed_relations`, `experiment_refs`, and `reviewer_critique` metadata. Quantitative claims must point at concrete provenance such as a page, figure, table, parser element, chunk, or code-output path.
+- `page-schema.ts` also owns the wiki evidence-audit contract. Pages can carry `knowledge_state`, `last_reviewed_at`, `claims`, `typed_relations`, `experiment_refs`, and `reviewer_critique` metadata. Quantitative claims must point at concrete provenance such as a page, figure, table, parser element, chunk, or code-output path.
 - `manifest-store.ts` and `retrieval-contract.ts` make source provenance and read-only downstream consumption explicit. Downstream agents can search/read wiki evidence without depending on the physical directory layout.
-- `retrieval-search.ts` returns structured evidence matches, match reasons, preferred evidence-kind ordering, and insufficient-evidence status.
+- `retrieval-search.ts` returns structured evidence matches, match reasons, stale/speculative/disputed warnings, preferred evidence-kind ordering, and insufficient-evidence status.
 - `journal.ts` records multi-file wiki operations so interrupted writes can be reported by health checks.
 - `coordinator.ts` plans wiki-agent work with explicit owner assignments such as `paper-download-subagent`, `wiki-evidence-worker`, `wiki-synthesis-worker`, and `wiki-agent`.
 - `domain-bindings.ts` provides a metadata-only registry for validated executable helper bindings. Bindings are described in typed page metadata; arbitrary page content is not executed.
@@ -302,7 +302,7 @@ Publisher and external URLs use the browser extension bridge by default when con
 
 ### Wiki And Research Tools
 
-- `answer_paper_wiki_question`: local-wiki-only Q&A over wiki source summaries and synthesis pages
+- `answer_paper_wiki_question`: local-wiki-only Q&A over wiki source summaries and synthesis pages. It preserves evidence warnings, including stale, speculative, disputed, or low-confidence evidence, so conclusions can report uncertainty before synthesis.
 - `answer_research_question`: evidence-first research workflow; checks local wiki first, then acquires external evidence only when needed. Tool details include `evidenceStatus`, local/new evidence items, limitations, and a coordination plan explaining which worker owns each step.
 - `bootstrap_wiki_page_evidence`: prepares source evidence for a new topic page before a page exists, reports missing summaries, and returns coordination metadata for fixed-evidence page construction.
 - `build_wiki_page`: writes durable synthesis pages under `knowledge-base/pages/` from local source-summary evidence. It supports explicit evidence contracts, minimum source counts, required source keys, external-evidence blocking, optional write-after lint verification, page-worker draft generation, and coordination metadata.
@@ -310,7 +310,8 @@ Publisher and external URLs use the browser extension bridge by default when con
 - `clarify_research_topic`: turns an ambiguous research request into concrete subtopics and evidence needs
 - `research_topic_bootstrap`: creates an initial evidence plan for a research topic
 - `expand_research_topic`: expands a topic through discovered gaps and related references
-- `search_paper_wiki`: full-mode direct retrieval over source summaries and synthesis pages. Search uses structured wiki evidence scoring before falling back to legacy body search for weak matches.
+- `search_paper_wiki`: full-mode direct retrieval over source summaries and synthesis pages. Search uses structured wiki evidence scoring before falling back to legacy body search for weak matches. It accepts `sourceKinds`, `pageTypes`, `claimKinds`, `knowledgeStates`, `evidenceContracts`, and `maxEvidenceAgeDays` filters for deterministic evidence slicing.
+- `wiki_review_page`: deterministic adversarial review for a typed page. It reports unsupported or weakly supported claims, stale evidence, speculative/disputed state, missing caveats, malformed quantitative provenance, and other evidence-contract risks before a page is treated as settled knowledge.
 - `write_paper_wiki_source`: full-mode source-summary writer
 - `generate_paper_wiki_summary`: full-mode clean-context source summary generation
 - `paper_wiki_relations`: full-mode relation discovery and `related_papers` maintenance
@@ -319,18 +320,20 @@ The key distinction is that `sources/*/summary.md` are evidence summaries for in
 
 Wiki pages may also include evidence-audit metadata:
 
+- `knowledge_state`: one of `established`, `promising_unverified`, `speculative`, or `disputed`.
+- `last_reviewed_at`: ISO date used by search/review tools to warn about stale evidence when a caller supplies `maxEvidenceAgeDays`.
 - `claims`: per-claim provenance records. Quantitative claims require concrete original-location or code-output evidence.
 - `typed_relations`: typed graph edges to pages, sources, experiments, or code, with candidate/confirmed/rejected status.
 - `experiment_refs`: workspace-relative local scripts, commands, logs, result files, and artifacts that support or test a page.
 - `reviewer_critique`: structured critique items for likely reviewer objections and the suggested fix.
 
-This v0 is deterministic schema and lint support. It does not run background freshness checks, poll arXiv/publishers/GitHub on a schedule, or execute third-party paper repositories automatically.
+This is deterministic schema, retrieval, review, and lint support. It does not run background freshness checks, poll arXiv/publishers/GitHub on a schedule, or execute third-party paper repositories automatically. Freshness is explicit: tools warn only when the caller asks for an evidence-age threshold.
 
 ### Wiki Maintenance Tools
 
 - `wiki_health`: reports acquisition state, downloads, authorization state, parse quality, incomplete `source.json` citation metadata, missing summaries, missing artifacts, missing source manifests, unsafe or missing manifest artifact paths, malformed typed wiki pages, weak evidence contracts, and interrupted wiki operations.
 - `wiki_health_fix`: orchestrates supported repairs. Download and citation-metadata repairs go through the paper-download-subagent boundary; citation refresh first reuses local parse artifacts, then uses arXiv/Crossref metadata when an identifier is available. Parsing stays in the ingestion path; missing summaries go through the `wiki-evidence-worker` summary pass; missing source manifests can be backfilled from existing source summaries.
-- `wiki_lint`: checks wiki structure, source-to-page coverage, repeated concept gaps, evidence-contract gaps, typed `source_refs`, semantic alias candidates, low-risk singular/plural or compact-spelling duplicate page merge candidates, existing simple alias pages that should be deleted, medium-risk source-backed contained-concept duplicate candidates, scope drift, stale index entries, broken links, missing citations, orphan pages, duplicate titles, repeated sections, weak uncited pages, rendered wiki-link failures, ready source summaries not covered by synthesis pages, missing quantitative claim provenance, unresolved contradiction candidates, legacy `related_pages` without typed relations, broken experiment references, and code-backed pages without experiment refs. Goal/focus options can prioritize concept gaps for a current research direction. Default issue display is capped per issue kind before applying the final response-size cap, so many concept gaps cannot hide duplicate-page cleanup candidates.
+- `wiki_lint`: checks wiki structure, source-to-page coverage, repeated concept gaps, evidence-contract gaps, typed `source_refs`, semantic alias candidates, low-risk singular/plural or compact-spelling duplicate page merge candidates, existing simple alias pages that should be deleted, medium-risk source-backed contained-concept duplicate candidates, scope drift, stale index entries, broken links, missing citations, orphan pages, duplicate titles, repeated sections, weak uncited pages, rendered wiki-link failures, ready source summaries not covered by synthesis pages, missing knowledge states, missing review dates, disputed pages without contradiction evidence, missing quantitative claim provenance, unresolved contradiction candidates, legacy `related_pages` without typed relations, broken experiment references, and code-backed pages without experiment refs. Goal/focus options can prioritize concept gaps for a current research direction. Default issue display is capped per issue kind before applying the final response-size cap, so many concept gaps cannot hide duplicate-page cleanup candidates.
 - `wiki_structure_plan`: turns `wiki_lint` findings into a reviewable, budgeted, goal-aware maintenance plan with owner, risk, recommended tool args, and verification actions. It suggests low-risk actions by default, including deterministic duplicate concept-page merges such as singular/plural page pairs and compact spellings like `su2`/`su-2`, and does not rewrite wiki content. Its `maxItems` cap limits primary maintenance actions; verification actions are appended separately so they do not displace cleanup work.
 - `wiki_apply_structure_plan`: applies approved low-risk `wiki_structure_plan` actions with dry-run, preflight, journal, and verification safeguards. Supported writes are deterministic duplicate-section cleanup, safe duplicate-page merge and deletion with inbound-link rewrites, cleanup of existing simple alias pages, safe deliberate alias creation, deterministic index rebuild, and constrained `## Scope Note` updates.
 
