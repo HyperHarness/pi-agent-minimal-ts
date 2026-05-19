@@ -690,6 +690,99 @@ No synthesis page cites this source.
   }
 });
 
+test("lintPaperWiki treats inline paper-key citations as synthesis evidence", async () => {
+  const workspace = await createWorkspace();
+
+  try {
+    const paperKey = "aps-10.1103-PhysRevLett.127.080505";
+    await writeReadySourceManifest(workspace, paperKey, ["agentic-chip-design"]);
+    await writeSource(
+      workspace,
+      paperKey,
+      `
+---
+paper_key: ${paperKey}
+title: Tunable Coupler Evidence
+tags:
+  - agentic-chip-design
+---
+
+Source-backed evidence for a chip-design page.
+`
+    );
+    await writePage(
+      workspace,
+      "agentic-chip-design",
+      `
+---
+type: "wiki-synthesis-page"
+page_key: "agentic-chip-design"
+title: "Agentic Chip Design"
+related_pages: []
+---
+
+# Agentic Chip Design
+
+The page cites an existing source in the body [${paperKey}], but it has no legacy frontmatter sources list.
+`
+    );
+
+    const result = await lintPaperWiki({
+      workspaceDir: workspace,
+      includeCoverage: true,
+      includeQualityAudit: true,
+      maxItems: 50
+    });
+
+    assert.equal(result.summary.evidence_contract_gap, 0);
+    assert.equal(result.summary.source_without_synthesis_coverage, 0);
+  } finally {
+    await rm(workspace, { recursive: true, force: true });
+  }
+});
+
+test("lintPaperWiki does not require synthesis coverage for needs_review V2 sources", async () => {
+  const workspace = await createWorkspace();
+
+  try {
+    const sourceKey = "design-artifact-single-xmon-concept";
+    await writeSource(
+      workspace,
+      sourceKey,
+      `
+# Single Xmon Concept Layout
+
+Local design artifact awaiting review.
+`
+    );
+    await writeJson(path.join(workspace, "knowledge-base", "manifests", `${sourceKey}.json`), {
+      schemaVersion: 2,
+      sourceKind: "design-artifact",
+      sourceKey,
+      title: "Single Xmon Concept Layout",
+      status: "needs_review",
+      createdAt: "2026-05-19T00:00:00.000Z",
+      updatedAt: "2026-05-19T00:00:00.000Z",
+      summaryPath: `knowledge-base/sources/${sourceKey}/summary.md`,
+      provenance: {},
+      artifacts: [],
+      tags: ["design-artifact"],
+      relatedSourceKeys: [],
+      synthesisPageKeys: []
+    });
+
+    const result = await lintPaperWiki({
+      workspaceDir: workspace,
+      includeCoverage: true,
+      maxItems: 50
+    });
+
+    assert.equal(result.summary.source_without_synthesis_coverage, 0);
+  } finally {
+    await rm(workspace, { recursive: true, force: true });
+  }
+});
+
 test("lintPaperWiki skips manifest-only sources with unsafe sourceSummaryPath", async () => {
   const workspace = await createWorkspace();
   const outside = await createWorkspace();

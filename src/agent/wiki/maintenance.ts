@@ -168,6 +168,11 @@ type ParsedMarkdown = {
   body: string;
 };
 
+interface SourceManifestReadiness {
+  sourceKey: string;
+  ready: boolean;
+}
+
 export async function readWikiMaintenanceDocuments(workspaceDir: string): Promise<WikiMaintenanceDocuments> {
   const [sourceFiles, manifestFiles, pageFiles] = await Promise.all([
     listPaperWikiSourceFiles(workspaceDir),
@@ -175,12 +180,19 @@ export async function readWikiMaintenanceDocuments(workspaceDir: string): Promis
     listPaperWikiPageFiles(workspaceDir)
   ]);
 
-  const [summarySources, manifestSources] = await Promise.all([
+  const [summarySources, manifestSources, manifestReadiness] = await Promise.all([
     Promise.all(sourceFiles.map((filePath) => readSourceDocument(workspaceDir, filePath))),
-    Promise.all(manifestFiles.map((filePath) => readSourceManifestDocument(workspaceDir, filePath)))
+    Promise.all(manifestFiles.map((filePath) => readSourceManifestDocument(workspaceDir, filePath))),
+    Promise.all(manifestFiles.map((filePath) => readSourceManifestReadiness(filePath)))
   ]);
-  const pages = await Promise.all(pageFiles.map((filePath) => readPageDocument(workspaceDir, filePath)));
-  const sources = mergeSourceDocuments(summarySources, manifestSources.filter((source): source is WikiMaintenanceSourceDocument => Boolean(source)));
+  const nonReadyManifestKeys = new Set(manifestReadiness
+    .filter((source): source is SourceManifestReadiness => source !== undefined)
+    .filter((source) => !source.ready)
+    .map((source) => source.sourceKey));
+  const sources = mergeSourceDocuments(summarySources, manifestSources.filter((source): source is WikiMaintenanceSourceDocument => Boolean(source)))
+    .filter((source) => !nonReadyManifestKeys.has(source.paperKey));
+  const pages = (await Promise.all(pageFiles.map((filePath) => readPageDocument(workspaceDir, filePath))))
+    .map((page) => addInlineSourceCitations(page, sources));
   return { workspaceDir, sources, pages };
 }
 
@@ -581,6 +593,29 @@ async function readSourceManifestDocument(
   };
 }
 
+async function readSourceManifestReadiness(filePath: string): Promise<SourceManifestReadiness | undefined> {
+  let manifest: unknown;
+  try {
+    manifest = JSON.parse(await readFile(filePath, "utf8"));
+  } catch {
+    return undefined;
+  }
+  if (!manifest || typeof manifest !== "object") {
+    return undefined;
+  }
+  const record = manifest as Record<string, unknown>;
+  const sourceKey =
+    stringValue(record.sourceKey) ??
+    stringValue(record.paperKey) ??
+    stringValue(record.paper_key) ??
+    path.basename(filePath, ".json");
+  const status = stringValue(record.status);
+  return {
+    sourceKey,
+    ready: status === "ready"
+  };
+}
+
 function mergeSourceDocuments(
   summarySources: WikiMaintenanceSourceDocument[],
   manifestSources: WikiMaintenanceSourceDocument[]
@@ -780,6 +815,33 @@ function sourceCitationList(value: unknown): WikiMaintenanceSourceCitation[] {
 
 function sourceRefCitationList(value: unknown): WikiMaintenanceSourceCitation[] {
   return listValue(value).map((paperKey) => ({ paperKey }));
+}
+
+function sourceKeyMentionedInBody(body: string, paperKey: string): boolean {
+  const lowerBody = body.toLowerCase();
+  const lowerKey = paperKey.toLowerCase();
+  return lowerBody.includes(`[${lowerKey}]`) || lowerBody.includes(`\`${lowerKey}\``);
+}
+
+function addInlineSourceCitations(
+  page: WikiMaintenancePageDocument,
+  sources: WikiMaintenanceSourceDocument[]
+): WikiMaintenancePageDocument {
+  const existing = new Set(page.sourceCitations.map((citation) => citation.paperKey));
+  const inlineCitations = sources
+    .filter((source) => !existing.has(source.paperKey) && sourceKeyMentionedInBody(page.body, source.paperKey))
+    .map((source) => ({
+      paperKey: source.paperKey,
+      title: source.title,
+      path: source.path
+    }));
+  if (inlineCitations.length === 0) {
+    return page;
+  }
+  return {
+    ...page,
+    sourceCitations: [...page.sourceCitations, ...inlineCitations]
+  };
 }
 
 function listValue(value: unknown): string[] {

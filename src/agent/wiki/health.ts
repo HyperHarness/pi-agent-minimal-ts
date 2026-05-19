@@ -242,6 +242,23 @@ async function readRecord(workspaceDir: string, entry: LocalPaperEntry): Promise
   }
 }
 
+async function entryHasNonPaperSourceManifest(workspaceDir: string, entry: LocalPaperEntry): Promise<boolean> {
+  const manifestPath = getPaperWikiSourceManifestPath(workspaceDir, entry.paperKey);
+  let manifest: unknown;
+  try {
+    manifest = JSON.parse(await readFile(manifestPath, "utf8"));
+  } catch {
+    return false;
+  }
+  if (!manifest || typeof manifest !== "object") {
+    return false;
+  }
+  const record = manifest as Record<string, unknown>;
+  return record.schemaVersion === 2 &&
+    typeof record.sourceKind === "string" &&
+    record.sourceKind !== "paper";
+}
+
 function baseIssue(
   entry: LocalPaperEntry,
   kind: WikiHealthIssueKind,
@@ -774,10 +791,16 @@ export async function checkWikiHealth(options: WikiHealthOptions): Promise<WikiH
     status: "all",
     maxResults: Number.MAX_SAFE_INTEGER
   });
+  const paperEntries: LocalPaperEntry[] = [];
+  for (const entry of localPapers.results) {
+    if (!(await entryHasNonPaperSourceManifest(workspaceDir, entry))) {
+      paperEntries.push(entry);
+    }
+  }
   const jobEvents = await readPaperDownloadJobEvents({ workspaceDir });
   const issues: WikiHealthIssue[] = [];
 
-  for (const entry of localPapers.results) {
+  for (const entry of paperEntries) {
     const entryIssues: WikiHealthIssue[] = [];
     const blocked = await findBlockedEntry(workspaceDir, entry);
     const record = await readRecord(workspaceDir, entry);
@@ -932,7 +955,7 @@ export async function checkWikiHealth(options: WikiHealthOptions): Promise<WikiH
   });
 
   return {
-    totalPapers: localPapers.total,
+    totalPapers: paperEntries.length,
     issueCount: issues.length,
     summary,
     issues: sortedIssues.slice(0, maxItems),

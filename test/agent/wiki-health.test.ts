@@ -215,6 +215,56 @@ test("checkWikiHealth reports legacy source metadata without citation status fie
   }
 });
 
+test("checkWikiHealth excludes non-paper source manifests from paper repair issues", async () => {
+  const workspace = await createWorkspace();
+
+  try {
+    const sourceKey = "design-artifact-single-xmon-concept";
+    await writeText(
+      path.join(workspace, "knowledge-base", "sources", sourceKey, "summary.md"),
+      "# Single Xmon Concept Layout\n\nA local design artifact summary.\n"
+    );
+    await writeText(
+      path.join(workspace, "knowledge-base", "design-artifacts", "single-xmon-concept", "README.md"),
+      "# Single Xmon Concept\n"
+    );
+    await writeText(
+      path.join(workspace, "knowledge-base", "design-artifacts", "single-xmon-concept", "code", "layout.py"),
+      "print('layout')\n"
+    );
+    await writeJson(path.join(workspace, "knowledge-base", "manifests", `${sourceKey}.json`), {
+      schemaVersion: 2,
+      sourceKind: "design-artifact",
+      sourceKey,
+      title: "Single Xmon Concept Layout",
+      status: "needs_review",
+      createdAt: "2026-05-19T00:00:00.000Z",
+      updatedAt: "2026-05-19T00:00:00.000Z",
+      summaryPath: `knowledge-base/sources/${sourceKey}/summary.md`,
+      provenance: {
+        recordPath: "knowledge-base/design-artifacts/single-xmon-concept/README.md"
+      },
+      artifacts: [{
+        kind: "script",
+        path: "knowledge-base/design-artifacts/single-xmon-concept/code/layout.py"
+      }],
+      tags: ["design-artifact"],
+      relatedSourceKeys: [],
+      synthesisPageKeys: []
+    });
+
+    const result = await checkWikiHealth({ workspaceDir: workspace });
+
+    assert.equal(result.totalPapers, 0);
+    assert.equal(result.summary.needs_download, 0);
+    assert.equal(result.summary.citation_incomplete, 0);
+    assert.equal(result.summary.source_manifest_artifact_missing, 0);
+    assert.ok(!result.issues.some((issue) => issue.paperKey === sourceKey));
+  } finally {
+    await rm(workspace, { recursive: true, force: true });
+  }
+});
+
 test("checkWikiHealth initializes typed wiki page summary counts", async () => {
   const workspace = await createWorkspace();
   try {
