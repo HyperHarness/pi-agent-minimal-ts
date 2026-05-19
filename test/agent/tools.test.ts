@@ -80,6 +80,19 @@ type WriteDesignArtifactTool = {
   ) => Promise<ToolResult>;
 };
 
+type RunDesignScriptTool = {
+  execute: (
+    toolCallId: string,
+    args: {
+      scriptPath: string;
+      runner?: "auto" | "python" | "klayout";
+      outputPaths?: string[];
+      maxOutputChars?: number;
+    },
+    signal: undefined,
+  ) => Promise<ToolResult>;
+};
+
 type ReplaceFileTextTool = {
   execute: (
     toolCallId: string,
@@ -555,6 +568,17 @@ function getWriteDesignArtifactTool(workspace: string): WriteDesignArtifactTool 
   assert.ok(writeDesignArtifactTool);
   assert.equal(typeof writeDesignArtifactTool.execute, "function");
   return writeDesignArtifactTool as WriteDesignArtifactTool;
+}
+
+function getRunDesignScriptTool(workspace: string): RunDesignScriptTool {
+  const tools = createTools(workspace, { toolProfile: "full" }) as ReadonlyArray<{
+    name: string;
+    execute?: RunDesignScriptTool["execute"];
+  }>;
+  const runDesignScriptTool = tools.find((tool) => tool.name === "run_design_script");
+  assert.ok(runDesignScriptTool);
+  assert.equal(typeof runDesignScriptTool.execute, "function");
+  return runDesignScriptTool as RunDesignScriptTool;
 }
 
 function getReplaceFileTextTool(workspace: string): ReplaceFileTextTool {
@@ -1334,6 +1358,52 @@ test("write_design_artifact writes design subagent records under knowledge-base/
   }
 });
 
+test("run_design_script executes a workspace Python design script and reports generated GDS outputs", async () => {
+  const workspace = await mkdtemp(path.join(tmpdir(), "pi-agent-tools-"));
+
+  try {
+    await writeFile(
+      path.join(workspace, "single_xmon_concept_klayout.py"),
+      [
+        "from pathlib import Path",
+        "Path('single_xmon_concept.gds').write_bytes(b'GDSII placeholder')",
+        "print('wrote single_xmon_concept.gds')",
+        ""
+      ].join("\n"),
+      "utf8",
+    );
+
+    const runDesignScriptTool = getRunDesignScriptTool(workspace);
+    const result = await runDesignScriptTool.execute(
+      "call-run-design-script",
+      {
+        scriptPath: "single_xmon_concept_klayout.py",
+        runner: "python",
+        outputPaths: ["single_xmon_concept.gds"],
+      },
+      undefined,
+    );
+
+    assert.deepEqual(result.details, {
+      status: "completed",
+      runner: "python",
+      scriptPath: "single_xmon_concept_klayout.py",
+      command: "python3 single_xmon_concept_klayout.py",
+      exitCode: 0,
+      stdout: "wrote single_xmon_concept.gds\n",
+      stderr: "",
+      outputs: [
+        {
+          path: "single_xmon_concept.gds",
+          bytes: Buffer.byteLength("GDSII placeholder"),
+        },
+      ],
+    });
+  } finally {
+    await rm(workspace, { recursive: true, force: true });
+  }
+});
+
 test("replace_file_text replaces a unique exact block", async () => {
   const workspace = await mkdtemp(path.join(tmpdir(), "pi-agent-tools-"));
   const target = path.join(workspace, "manuscript.tex");
@@ -1660,6 +1730,7 @@ const EXPECTED_FULL_ONLY_TOOL_NAMES = [
   "paper_wiki_relations",
   "search_paper_wiki",
   "write_design_artifact",
+  "run_design_script",
   "paper_orchestra_prepare_workspace",
   "paper_orchestra_check_draft",
   "paper_orchestra_score_delta",
@@ -1759,6 +1830,7 @@ test("createToolsForBoundary exposes isolated wiki and worker tool surfaces", as
     assert.ok(designTools.some((tool) => tool.name === "answer_paper_wiki_question"));
     assert.ok(designTools.some((tool) => tool.name === "search_paper_wiki"));
     assert.ok(designTools.some((tool) => tool.name === "write_design_artifact"));
+    assert.ok(designTools.some((tool) => tool.name === "run_design_script"));
     assert.ok(!designTools.some((tool) => tool.name === "download_paper"));
     assert.ok(!designTools.some((tool) => tool.name === "web_search"));
     assert.ok(!designTools.some((tool) => tool.name === "build_wiki_page"));

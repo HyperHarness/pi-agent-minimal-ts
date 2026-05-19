@@ -145,6 +145,37 @@ const writeDesignArtifactParameters = Type.Object({
   )
 });
 
+const runDesignScriptParameters = Type.Object({
+  scriptPath: Type.String({
+    description:
+      "Workspace-relative or workspace-absolute Python layout/verification script to run. Use KLayout scripts with runner=klayout."
+  }),
+  runner: Type.Optional(
+    Type.Union([
+      Type.Literal("auto"),
+      Type.Literal("python"),
+      Type.Literal("klayout")
+    ], {
+      description:
+        "Script runner. Defaults to auto; auto uses klayout for filenames containing 'klayout' and python otherwise."
+    })
+  ),
+  outputPaths: Type.Optional(
+    Type.Array(
+      Type.String({
+        description:
+          "Expected generated workspace file path, such as single_xmon_concept.gds. Each path is verified after the script completes."
+      })
+    )
+  ),
+  maxOutputChars: Type.Optional(
+    Type.Integer({
+      description: "Maximum combined stdout/stderr characters to return. Defaults to 12000.",
+      minimum: 1000
+    })
+  )
+});
+
 type GetTimeParameters = Static<typeof getTimeParameters>;
 type LoadPaperWritingSkillParameters = Static<typeof loadPaperWritingSkillParameters>;
 type ReadFileParameters = Static<typeof readFileParameters>;
@@ -154,6 +185,8 @@ type ReplaceFileTextParameters = Static<typeof replaceFileTextParameters>;
 type DeleteFileParameters = Static<typeof deleteFileParameters>;
 type CompileLatexParameters = Static<typeof compileLatexParameters>;
 type WriteDesignArtifactParameters = Static<typeof writeDesignArtifactParameters>;
+type RunDesignScriptParameters = Static<typeof runDesignScriptParameters>;
+type ResolvedDesignScriptRunner = "python" | "klayout";
 
 const DESIGN_ARTIFACT_DIRECTORIES: Record<WriteDesignArtifactParameters["artifactType"], string> = {
   design_record: "design-records",
@@ -377,6 +410,116 @@ async function runLatexCommand(input: {
     const failed = error as { stdout?: string | Buffer; stderr?: string | Buffer; message?: string };
     const output = [
       commandLine,
+      failed.stdout?.toString() ?? "",
+      failed.stderr?.toString() ?? "",
+      failed.message ?? String(error)
+    ].filter((part) => part.trim().length > 0).join("\n");
+    throw new Error(truncateOutput(output, input.maxOutputChars));
+  }
+}
+
+function resolveDesignScriptRunner(
+  requestedRunner: RunDesignScriptParameters["runner"] | undefined,
+  scriptPath: string
+): ResolvedDesignScriptRunner {
+  if (requestedRunner === "python" || requestedRunner === "klayout") {
+    return requestedRunner;
+  }
+
+  const scriptName = path.basename(scriptPath).toLowerCase();
+  return scriptName.includes("klayout") ? "klayout" : "python";
+}
+
+function designScriptCommandForRunner(runner: ResolvedDesignScriptRunner, scriptFile: string): {
+  command: string;
+  args: string[];
+} {
+  if (runner === "klayout") {
+    return { command: "klayout", args: ["-b", "-r", scriptFile] };
+  }
+
+  return { command: "python3", args: [scriptFile] };
+}
+
+async function collectDesignScriptOutputs(input: {
+  workspaceDir: string;
+  outputPaths: readonly string[] | undefined;
+}): Promise<Array<{ path: string; bytes: number }>> {
+  const outputs: Array<{ path: string; bytes: number }> = [];
+
+  for (const outputPath of input.outputPaths ?? []) {
+    const resolvedOutputPath = await resolveWorkspacePath(input.workspaceDir, outputPath);
+    const outputStats = await stat(resolvedOutputPath);
+    if (!outputStats.isFile()) {
+      throw new Error(`Expected design script output is not a file: ${outputPath}`);
+    }
+    outputs.push({
+      path: relativeWorkspacePath(input.workspaceDir, resolvedOutputPath),
+      bytes: outputStats.size
+    });
+  }
+
+  return outputs;
+}
+
+async function runDesignScript(input: {
+  workspaceDir: string;
+  scriptPath: string;
+  runner?: RunDesignScriptParameters["runner"];
+  outputPaths?: readonly string[];
+  maxOutputChars: number;
+}): Promise<{
+  status: "completed";
+  runner: ResolvedDesignScriptRunner;
+  scriptPath: string;
+  command: string;
+  exitCode: 0;
+  stdout: string;
+  stderr: string;
+  outputs: Array<{ path: string; bytes: number }>;
+}> {
+  const resolvedScriptPath = await resolveWorkspacePath(input.workspaceDir, input.scriptPath);
+  const scriptStats = await stat(resolvedScriptPath);
+  if (!scriptStats.isFile()) {
+    throw new Error(`run_design_script path is not a file: ${input.scriptPath}`);
+  }
+  if (path.extname(resolvedScriptPath).toLowerCase() !== ".py") {
+    throw new Error("run_design_script only runs .py layout or verification scripts.");
+  }
+
+  const runner = resolveDesignScriptRunner(input.runner, resolvedScriptPath);
+  const workingDir = path.dirname(resolvedScriptPath);
+  const scriptFile = path.basename(resolvedScriptPath);
+  const commandSpec = designScriptCommandForRunner(runner, scriptFile);
+  const commandLine = [commandSpec.command, ...commandSpec.args].join(" ");
+
+  try {
+    const { stdout, stderr } = await execFileAsync(commandSpec.command, commandSpec.args, {
+      cwd: workingDir,
+      timeout: 120000,
+      maxBuffer: Math.max(input.maxOutputChars * 2, 1024 * 1024)
+    }) as { stdout: string | Buffer; stderr: string | Buffer };
+    const stdoutText = truncateOutput(stdout.toString(), input.maxOutputChars);
+    const stderrText = truncateOutput(stderr.toString(), input.maxOutputChars);
+    const outputs = await collectDesignScriptOutputs({
+      workspaceDir: input.workspaceDir,
+      outputPaths: input.outputPaths
+    });
+
+    return {
+      status: "completed",
+      runner,
+      scriptPath: relativeWorkspacePath(input.workspaceDir, resolvedScriptPath),
+      command: commandLine,
+      exitCode: 0,
+      stdout: stdoutText,
+      stderr: stderrText,
+      outputs
+    };
+  } catch (error) {
+    const failed = error as { stdout?: string | Buffer; stderr?: string | Buffer; message?: string };
+    const output = [
+      `$ ${commandLine}`,
       failed.stdout?.toString() ?? "",
       failed.stderr?.toString() ?? "",
       failed.message ?? String(error)
@@ -683,6 +826,10 @@ type WriteDesignArtifactTool = AgentTool<
   typeof writeDesignArtifactParameters,
   Awaited<ReturnType<typeof writeDesignArtifact>>
 >;
+type RunDesignScriptTool = AgentTool<
+  typeof runDesignScriptParameters,
+  Awaited<ReturnType<typeof runDesignScript>>
+>;
 
 interface ListFilesEntry {
   path: string;
@@ -943,6 +1090,30 @@ export function createFileTools(input: {
     }
   };
 
+  const runDesignScriptTool: RunDesignScriptTool = {
+    name: "run_design_script",
+    label: "Run Design Script",
+    description:
+      "Runs a workspace-local Python design layout or verification script with python3 or KLayout batch mode, then verifies expected generated files such as .gds outputs. This is not a general shell.",
+    parameters: runDesignScriptParameters,
+    executionMode: "sequential",
+    execute: async (_toolCallId: string, args: RunDesignScriptParameters) => {
+      const maxOutputChars = Math.max(1000, Math.trunc(args.maxOutputChars ?? 12000));
+      const result = await runDesignScript({
+        workspaceDir: resolvedWorkspaceDir,
+        scriptPath: args.scriptPath,
+        runner: args.runner,
+        outputPaths: args.outputPaths,
+        maxOutputChars
+      });
+
+      return {
+        content: [{ type: "text", text: JSON.stringify(result) }],
+        details: result
+      };
+    }
+  };
+
   return {
     defaultTools: [
       listFilesTool,
@@ -956,7 +1127,8 @@ export function createFileTools(input: {
       getTimeTool
     ],
     artifactFullTools: [
-      writeDesignArtifactTool
+      writeDesignArtifactTool,
+      runDesignScriptTool
     ],
     tailFullTools: [
       loadPaperWritingSkillTool
