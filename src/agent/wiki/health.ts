@@ -203,6 +203,7 @@ const TYPED_WIKI_PAGE_TYPES = new Set([
   "finding",
   "dataset",
   "question",
+  "capability-boundary",
   "design-record",
   "alias"
 ]);

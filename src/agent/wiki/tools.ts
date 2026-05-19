@@ -145,6 +145,7 @@ const wikiPageTypeParameter = Type.Union([
   Type.Literal("finding"),
   Type.Literal("dataset"),
   Type.Literal("question"),
+  Type.Literal("capability-boundary"),
   Type.Literal("design-record"),
   Type.Literal("alias")
 ], { description: "Typed wiki page type to include." });

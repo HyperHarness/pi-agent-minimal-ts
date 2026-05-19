@@ -157,6 +157,7 @@ const TYPED_WIKI_PAGE_TYPES = new Set([
   "finding",
   "dataset",
   "question",
+  "capability-boundary",
   "design-record",
   "alias"
 ]);
@@ -1369,6 +1370,7 @@ export async function lintPaperWiki(options: PaperWikiLintOptions): Promise<Pape
         page.metadata.type === "dataset" ||
         page.metadata.type === "method" ||
         page.metadata.type === "finding" ||
+        page.metadata.type === "capability-boundary" ||
         page.metadata.type === "design-record"
       ) {
         const templateAudit = validateRequiredTemplateSections({

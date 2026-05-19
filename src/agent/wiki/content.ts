@@ -43,6 +43,7 @@ import type {
   PaperWikiAliasMergeItem,
   PaperWikiAliasMergeResult,
   PaperWikiPageSourceCitation,
+  PaperWikiSourceEvidenceAnchor,
   PaperWikiSearchOptions,
   PaperWikiSearchResult,
   PaperWikiSourceInput,
@@ -158,6 +159,42 @@ function sectionList(title: string, values: string[] | undefined): string {
     return "";
   }
   return `\n## ${title}\n\n${cleaned.map((value) => `- ${value}`).join("\n")}\n`;
+}
+
+function evidenceAnchorList(values: PaperWikiSourceEvidenceAnchor[] | undefined): string {
+  const anchors = (values ?? [])
+    .map((anchor) => ({
+      summary: anchor.summary.trim(),
+      quote: anchor.quote.trim(),
+      paperKey: anchor.paperKey?.trim(),
+      sectionId: anchor.sectionId?.trim(),
+      page: anchor.page,
+      figure: anchor.figure?.trim(),
+      table: anchor.table?.trim(),
+      chunkId: anchor.chunkId?.trim(),
+      elementId: anchor.elementId?.trim()
+    }))
+    .filter((anchor) => anchor.summary && anchor.quote);
+  if (anchors.length === 0) {
+    return "";
+  }
+  const lines = anchors.map((anchor) => {
+    const locators = [
+      anchor.paperKey ? `paper=${anchor.paperKey}` : undefined,
+      anchor.sectionId ? `section=${anchor.sectionId}` : undefined,
+      anchor.page !== undefined ? `page=${anchor.page}` : undefined,
+      anchor.figure ? `figure=${anchor.figure}` : undefined,
+      anchor.table ? `table=${anchor.table}` : undefined,
+      anchor.chunkId ? `chunk=${anchor.chunkId}` : undefined,
+      anchor.elementId ? `element=${anchor.elementId}` : undefined
+    ].filter(Boolean).join("; ");
+    return [
+      `- ${anchor.summary}`,
+      `  - Quote: "${anchor.quote}"`,
+      ...(locators ? [`  - Locator: ${locators}`] : [])
+    ].join("\n");
+  });
+  return `\n## Evidence Anchors\n\n${lines.join("\n")}\n`;
 }
 
 function normalizeMarkdownSectionTitle(value: string): string {
@@ -520,6 +557,7 @@ related_papers: ${yamlList(input.relatedPaperKeys)}
 
 ${summaryMarkdown}
 ${sectionList("Key Findings", input.keyFindings)}
+${evidenceAnchorList(input.evidenceAnchors)}
 ${sectionList("Limitations", input.limitations)}
 ${sectionList("Open Questions", input.openQuestions)}
 ## Provenance

@@ -81,7 +81,29 @@ function parsePaperSummaryWorkerOutput(value: unknown): PaperSummaryWorkerOutput
       ? candidate.filter((item): item is string => typeof item === "string")
       : undefined;
   };
+  const readEvidenceAnchors = () => {
+    const candidate = value.evidenceAnchors;
+    if (!Array.isArray(candidate)) {
+      return undefined;
+    }
+    const anchors = candidate
+      .filter(isRecord)
+      .map((item) => ({
+        summary: typeof item.summary === "string" ? item.summary : "",
+        quote: typeof item.quote === "string" ? item.quote : "",
+        ...(typeof item.paperKey === "string" ? { paperKey: item.paperKey } : {}),
+        ...(typeof item.sectionId === "string" ? { sectionId: item.sectionId } : {}),
+        ...(typeof item.page === "number" ? { page: item.page } : {}),
+        ...(typeof item.figure === "string" ? { figure: item.figure } : {}),
+        ...(typeof item.table === "string" ? { table: item.table } : {}),
+        ...(typeof item.chunkId === "string" ? { chunkId: item.chunkId } : {}),
+        ...(typeof item.elementId === "string" ? { elementId: item.elementId } : {})
+      }))
+      .filter((item) => item.summary.trim() && item.quote.trim());
+    return anchors.length > 0 ? anchors : undefined;
+  };
   const confidence = readString("confidence");
+  const evidenceAnchors = readEvidenceAnchors();
 
   return {
     summaryMarkdown,
@@ -91,6 +113,7 @@ function parsePaperSummaryWorkerOutput(value: unknown): PaperSummaryWorkerOutput
     ...(readStringList("limitations") ? { limitations: readStringList("limitations") } : {}),
     ...(readStringList("openQuestions") ? { openQuestions: readStringList("openQuestions") } : {}),
     ...(readStringList("relatedPaperKeys") ? { relatedPaperKeys: readStringList("relatedPaperKeys") } : {}),
+    ...(evidenceAnchors ? { evidenceAnchors } : {}),
     ...(confidence === "high" || confidence === "medium" || confidence === "low" ? { confidence } : {}),
     ...(readStringList("groundingWarnings") ? { groundingWarnings: readStringList("groundingWarnings") } : {})
   };
@@ -158,9 +181,10 @@ export function createWikiEvidenceWorker(model: Model<Api>, workspaceDir: string
       content: [
         "Create a grounded paper wiki source summary from the evidence JSON below.",
         "Use only the supplied evidence. Do not invent claims, metrics, or citations.",
-        "Return only a JSON object with these fields: title, summaryMarkdown, tags, keyFindings, limitations, openQuestions, relatedPaperKeys, confidence, groundingWarnings.",
+        "Return only a JSON object with these fields: title, summaryMarkdown, tags, keyFindings, evidenceAnchors, limitations, openQuestions, relatedPaperKeys, confidence, groundingWarnings.",
         "summaryMarkdown should be concise Markdown suitable for a retrieval source page, normally 3 to 6 paragraphs.",
         "keyFindings, limitations, openQuestions, tags, relatedPaperKeys, and groundingWarnings must be arrays of strings.",
+        "For every important keyFinding, add an evidenceAnchors item with summary, exact short quote, and any available paperKey, sectionId, page, figure, table, chunkId, or elementId from the supplied parsed artifact.",
         "If relatedCandidates are supplied, choose relatedPaperKeys only from those candidate paperKey values when there is a real conceptual or methodological connection.",
         "confidence must be high, medium, or low.",
         JSON.stringify({

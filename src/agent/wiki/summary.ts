@@ -13,7 +13,10 @@ import type {
 } from "../paper/reading/types.js";
 import { PaperReaderError } from "../paper/reading/types.js";
 import { writePaperWikiSource } from "./content.js";
-import type { PaperWikiSourceResult } from "./types.js";
+import type {
+  PaperWikiSourceEvidenceAnchor,
+  PaperWikiSourceResult
+} from "./types.js";
 import {
   findPaperWikiRelations,
   type PaperWikiRelationCandidate
@@ -64,6 +67,7 @@ export interface PaperSummaryWorkerOutput {
   limitations?: string[];
   openQuestions?: string[];
   relatedPaperKeys?: string[];
+  evidenceAnchors?: PaperWikiSourceEvidenceAnchor[];
   confidence?: "high" | "medium" | "low";
   groundingWarnings?: string[];
 }
@@ -219,8 +223,28 @@ function cleanStringList(values: string[] | undefined): string[] | undefined {
   return cleaned.length > 0 ? cleaned : undefined;
 }
 
+function normalizeEvidenceAnchors(
+  values: PaperWikiSourceEvidenceAnchor[] | undefined
+): PaperWikiSourceEvidenceAnchor[] | undefined {
+  const cleaned = (values ?? [])
+    .map((anchor) => ({
+      summary: anchor.summary?.trim() ?? "",
+      quote: anchor.quote?.trim() ?? "",
+      ...(anchor.paperKey?.trim() ? { paperKey: anchor.paperKey.trim() } : {}),
+      ...(anchor.sectionId?.trim() ? { sectionId: anchor.sectionId.trim() } : {}),
+      ...(typeof anchor.page === "number" && Number.isFinite(anchor.page) ? { page: anchor.page } : {}),
+      ...(anchor.figure?.trim() ? { figure: anchor.figure.trim() } : {}),
+      ...(anchor.table?.trim() ? { table: anchor.table.trim() } : {}),
+      ...(anchor.chunkId?.trim() ? { chunkId: anchor.chunkId.trim() } : {}),
+      ...(anchor.elementId?.trim() ? { elementId: anchor.elementId.trim() } : {})
+    }))
+    .filter((anchor) => anchor.summary && anchor.quote);
+  return cleaned.length > 0 ? cleaned : undefined;
+}
+
 function normalizeWorkerOutput(output: PaperSummaryWorkerOutput): PaperSummaryWorkerOutput {
   const summaryMarkdown = output.summaryMarkdown.trim();
+  const evidenceAnchors = normalizeEvidenceAnchors(output.evidenceAnchors);
   if (!summaryMarkdown) {
     throw new Error("Summary worker returned an empty summaryMarkdown.");
   }
@@ -232,6 +256,7 @@ function normalizeWorkerOutput(output: PaperSummaryWorkerOutput): PaperSummaryWo
     ...(cleanStringList(output.limitations) ? { limitations: cleanStringList(output.limitations) } : {}),
     ...(cleanStringList(output.openQuestions) ? { openQuestions: cleanStringList(output.openQuestions) } : {}),
     ...(cleanStringList(output.relatedPaperKeys) ? { relatedPaperKeys: cleanStringList(output.relatedPaperKeys) } : {}),
+    ...(evidenceAnchors ? { evidenceAnchors } : {}),
     ...(output.confidence ? { confidence: output.confidence } : {}),
     ...(cleanStringList(output.groundingWarnings) ? { groundingWarnings: cleanStringList(output.groundingWarnings) } : {})
   };
@@ -422,7 +447,8 @@ export async function generatePaperWikiSummary(
     ...(draft.keyFindings ? { keyFindings: draft.keyFindings } : {}),
     ...(draft.limitations ? { limitations: draft.limitations } : {}),
     ...(draft.openQuestions ? { openQuestions: draft.openQuestions } : {}),
-    ...(draft.relatedPaperKeys ? { relatedPaperKeys: draft.relatedPaperKeys } : {})
+    ...(draft.relatedPaperKeys ? { relatedPaperKeys: draft.relatedPaperKeys } : {}),
+    ...(draft.evidenceAnchors ? { evidenceAnchors: draft.evidenceAnchors } : {})
   });
   await options.onProgress?.({
     stage: "summary_written",

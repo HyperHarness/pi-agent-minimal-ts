@@ -27,6 +27,13 @@ test("inferWikiPageTypeForEvidence maps generic software queries to method pages
   }), "method");
 });
 
+test("inferWikiPageTypeForEvidence maps capability-boundary queries to boundary pages", () => {
+  assert.equal(inferWikiPageTypeForEvidence({
+    query: "superconducting chip design agent capability boundary cannot support tapeout",
+    sourceKinds: []
+  }), "capability-boundary");
+});
+
 test("getWikiPageTemplate returns concrete required sections", () => {
   const template = getWikiPageTemplate("design-record");
   assert.equal(template.pageType, "design-record");
@@ -39,6 +46,17 @@ test("getWikiPageTemplate returns concrete required sections", () => {
     "Status"
   ]);
   assert.match(template.guidance, /uses/);
+});
+
+test("getWikiPageTemplate returns capability boundary sections", () => {
+  const template = getWikiPageTemplate("capability-boundary");
+  assert.deepEqual(template.requiredSections, [
+    "Can Support",
+    "Cannot Support Yet",
+    "Evidence Boundary",
+    "Escalation Criteria"
+  ]);
+  assert.match(template.guidance, /overclaim/i);
 });
 
 test("validateRequiredTemplateSections reports missing method inputs and outputs", () => {

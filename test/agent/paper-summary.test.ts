@@ -94,6 +94,13 @@ test("generatePaperWikiSummary writes a wiki source through an injected summary 
             "This paper summary is grounded in parsed text about repeated stabilizer measurements.",
           tags: ["quantum-error-correction"],
           keyFindings: ["Repeated stabilizer measurements are used to detect correlated errors."],
+          evidenceAnchors: [{
+            summary: "Repeated stabilizer measurements are used to detect correlated errors.",
+            quote: "A quantum processor uses repeated stabilizer measurements to detect correlated errors.",
+            page: 1,
+            sectionId: "plain-text",
+            chunkId: "chunk-0001"
+          }],
           confidence: "high"
         };
       }
@@ -106,6 +113,9 @@ test("generatePaperWikiSummary writes a wiki source through an injected summary 
     const markdown = await readFile(path.join(workspace, result.source!.sourcePath), "utf8");
     assert.match(markdown, /paper-source-summary/);
     assert.match(markdown, /Repeated stabilizer measurements/);
+    assert.match(markdown, /## Evidence Anchors/);
+    assert.match(markdown, /chunk-0001/);
+    assert.match(markdown, /A quantum processor uses repeated stabilizer measurements/);
     assert.deepEqual(progressStages, [
       "building_evidence",
       "evidence_ready",

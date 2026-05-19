@@ -289,6 +289,59 @@ test("parseWikiPageMarkdown accepts evidence audit metadata", () => {
   assert.match(serialized, /reviewer_critique: \[/);
 });
 
+test("parseWikiPageMarkdown accepts freshness audit metadata", () => {
+  const freshnessAudit = {
+    latestExternalSearchAt: "2026-05-19T00:00:00.000Z",
+    knownMissingRecentPapers: ["Check arXiv after next qLDPC benchmark release."],
+    staleWarning: "High freshness risk for active LLM4EDA work.",
+    domainUpdateFrequency: "fast",
+    note: "Use explicit external search before SOTA claims."
+  };
+  const markdown = [
+    "---",
+    "schema_version: 1",
+    'type: "synthesis"',
+    'key: "llm4eda-frontier"',
+    'title: "LLM4EDA frontier"',
+    "aliases: []",
+    'tags: ["llm4eda"]',
+    'evidence_contract: "paper-backed"',
+    'source_refs: ["arxiv-2601.00003"]',
+    `freshness_audit: ${JSON.stringify(freshnessAudit)}`,
+    'created_at: "2026-05-10T00:00:00.000Z"',
+    'updated_at: "2026-05-10T00:00:00.000Z"',
+    "---",
+    "",
+    "# LLM4EDA frontier"
+  ].join("\n");
+
+  const parsed = parseWikiPageMarkdown(markdown, "knowledge-base/pages/llm4eda-frontier.md");
+
+  assert.equal(parsed.ok, true);
+  assert.deepEqual(parsed.page?.metadata.freshness_audit, freshnessAudit);
+
+  const serialized = serializeWikiPageMarkdown({
+    metadata: parsed.page!.metadata,
+    body: parsed.page!.body
+  });
+
+  assert.match(serialized, /freshness_audit: \{/);
+  assert.match(serialized, /latestExternalSearchAt/);
+});
+
+test("validateWikiPageMetadata rejects invalid freshness audit metadata", () => {
+  const result = validateWikiPageMetadata(validMetadata({
+    freshness_audit: {
+      latestExternalSearchAt: "not-a-date",
+      knownMissingRecentPapers: ["valid", 42],
+      domainUpdateFrequency: "hourly"
+    }
+  }));
+
+  assert.equal(result.ok, false);
+  assert.deepEqual(result.errors.map((error) => error.code), ["invalid_freshness_audit"]);
+});
+
 test("validateWikiPageMetadata rejects quantitative claims without concrete provenance", () => {
   const result = validateWikiPageMetadata(validMetadata({
     claims: [{

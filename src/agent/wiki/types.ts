@@ -17,6 +17,19 @@ export interface PaperWikiSourceInput {
   limitations?: string[];
   openQuestions?: string[];
   relatedPaperKeys?: string[];
+  evidenceAnchors?: PaperWikiSourceEvidenceAnchor[];
+}
+
+export interface PaperWikiSourceEvidenceAnchor {
+  summary: string;
+  quote: string;
+  paperKey?: string;
+  sectionId?: string;
+  page?: number;
+  figure?: string;
+  table?: string;
+  chunkId?: string;
+  elementId?: string;
 }
 
 export interface PaperWikiSourceResult {

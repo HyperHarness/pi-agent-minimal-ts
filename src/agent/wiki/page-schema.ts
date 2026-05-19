@@ -8,6 +8,7 @@ export type WikiPageType =
   | "finding"
   | "dataset"
   | "question"
+  | "capability-boundary"
   | "design-record"
   | "alias";
 
@@ -38,6 +39,7 @@ export type WikiRelationTargetKind = "page" | "source" | "experiment" | "code";
 export type WikiRelationStatus = "confirmed" | "candidate" | "rejected";
 export type WikiExperimentStatus = "planned" | "ran" | "failed" | "blocked";
 export type WikiReviewerCritiqueSeverity = "high" | "medium" | "low";
+export type WikiDomainUpdateFrequency = "fast" | "medium" | "slow" | "unknown";
 
 export interface WikiClaimEvidence {
   paperKey?: string;
@@ -94,6 +96,14 @@ export interface WikiReviewerCritiqueItem {
   suggestedFix: string;
 }
 
+export interface WikiFreshnessAudit {
+  latestExternalSearchAt?: string;
+  knownMissingRecentPapers?: string[];
+  staleWarning?: string;
+  domainUpdateFrequency?: WikiDomainUpdateFrequency;
+  note?: string;
+}
+
 export interface WikiPageMetadata {
   schema_version: 1;
   type: WikiPageType;
@@ -107,6 +117,7 @@ export interface WikiPageMetadata {
   related_papers?: string[];
   knowledge_state?: WikiKnowledgeState;
   last_reviewed_at?: string;
+  freshness_audit?: WikiFreshnessAudit;
   claims?: WikiClaimProvenance[];
   typed_relations?: WikiTypedRelation[];
   experiment_refs?: WikiExperimentRef[];
@@ -136,6 +147,7 @@ export interface WikiPageSchemaError {
     | "missing_canonical_page"
     | "invalid_knowledge_state"
     | "invalid_last_reviewed_at"
+    | "invalid_freshness_audit"
     | "unknown_execution_binding"
     | "invalid_claim_provenance"
     | "invalid_typed_relation"
@@ -165,6 +177,7 @@ const WIKI_PAGE_TYPES: readonly WikiPageType[] = [
   "finding",
   "dataset",
   "question",
+  "capability-boundary",
   "design-record",
   "alias"
 ];
@@ -231,6 +244,13 @@ const WIKI_REVIEWER_CRITIQUE_SEVERITIES: readonly WikiReviewerCritiqueSeverity[]
   "high",
   "medium",
   "low"
+];
+
+const WIKI_DOMAIN_UPDATE_FREQUENCIES: readonly WikiDomainUpdateFrequency[] = [
+  "fast",
+  "medium",
+  "slow",
+  "unknown"
 ];
 
 const SOURCE_REQUIRED_CONTRACTS = new Set<WikiEvidenceContract>([
@@ -593,6 +613,44 @@ function cleanReviewerCritique(value: unknown): {
   return values.length > 0 ? { values, invalid: false } : { invalid: false };
 }
 
+function cleanFreshnessAudit(value: unknown): {
+  value?: WikiFreshnessAudit;
+  invalid: boolean;
+} {
+  if (value === undefined) {
+    return { invalid: false };
+  }
+  if (!isRecord(value)) {
+    return { invalid: true };
+  }
+
+  const latestExternalSearchAt = cleanOptionalString(value.latestExternalSearchAt);
+  const knownMissingRecentPapers = cleanStringArray(value.knownMissingRecentPapers);
+  const staleWarning = cleanOptionalString(value.staleWarning);
+  const domainUpdateFrequency = cleanOptionalString(value.domainUpdateFrequency) as WikiDomainUpdateFrequency | undefined;
+  const note = cleanOptionalString(value.note);
+
+  if (
+    (latestExternalSearchAt !== undefined && !isValidIsoDate(latestExternalSearchAt)) ||
+    (value.knownMissingRecentPapers !== undefined && !isStringArray(value.knownMissingRecentPapers)) ||
+    (domainUpdateFrequency !== undefined && !WIKI_DOMAIN_UPDATE_FREQUENCIES.includes(domainUpdateFrequency))
+  ) {
+    return { invalid: true };
+  }
+
+  const cleaned: WikiFreshnessAudit = {
+    ...(latestExternalSearchAt ? { latestExternalSearchAt } : {}),
+    ...(knownMissingRecentPapers.length > 0 ? { knownMissingRecentPapers } : {}),
+    ...(staleWarning ? { staleWarning } : {}),
+    ...(domainUpdateFrequency ? { domainUpdateFrequency } : {}),
+    ...(note ? { note } : {})
+  };
+
+  return Object.keys(cleaned).length > 0
+    ? { value: cleaned, invalid: false }
+    : { invalid: false };
+}
+
 function quoteYamlString(value: string): string {
   return JSON.stringify(value);
 }
@@ -639,6 +697,7 @@ export function validateWikiPageMetadata(
   const relatedPapers = cleanOptionalStringArray(metadata.related_papers);
   const knowledgeState = cleanOptionalString(metadata.knowledge_state);
   const lastReviewedAt = cleanOptionalString(metadata.last_reviewed_at);
+  const freshnessAudit = cleanFreshnessAudit(metadata.freshness_audit);
   const claims = cleanClaims(metadata.claims);
   const typedRelations = cleanTypedRelations(metadata.typed_relations);
   const experimentRefs = cleanExperimentRefs(metadata.experiment_refs);
@@ -662,6 +721,10 @@ export function validateWikiPageMetadata(
 
   if (hasOwnField(metadata, "last_reviewed_at") && !isValidIsoDate(lastReviewedAt)) {
     errors.push(schemaError("invalid_last_reviewed_at", "Wiki last_reviewed_at must be a valid date string.", path));
+  }
+
+  if (freshnessAudit.invalid) {
+    errors.push(schemaError("invalid_freshness_audit", "Wiki freshness_audit must include valid dates, string lists, and domain update frequency.", path));
   }
 
   if (claims.invalid) {
@@ -731,6 +794,7 @@ export function validateWikiPageMetadata(
       ...(relatedPapers ? { related_papers: relatedPapers } : {}),
       ...(isWikiKnowledgeState(knowledgeState) ? { knowledge_state: knowledgeState } : {}),
       ...(lastReviewedAt ? { last_reviewed_at: lastReviewedAt } : {}),
+      ...(freshnessAudit.value ? { freshness_audit: freshnessAudit.value } : {}),
       ...(claims.values ? { claims: claims.values } : {}),
       ...(typedRelations.values ? { typed_relations: typedRelations.values } : {}),
       ...(experimentRefs.values ? { experiment_refs: experimentRefs.values } : {}),
@@ -810,6 +874,7 @@ export function serializeWikiPageMarkdown(page: {
     ...(metadata.reviewer_critique ? [`reviewer_critique: ${JSON.stringify(metadata.reviewer_critique)}`] : []),
     ...(metadata.knowledge_state ? [`knowledge_state: ${quoteYamlString(metadata.knowledge_state)}`] : []),
     ...(metadata.last_reviewed_at ? [`last_reviewed_at: ${quoteYamlString(metadata.last_reviewed_at)}`] : []),
+    ...(metadata.freshness_audit ? [`freshness_audit: ${JSON.stringify(metadata.freshness_audit)}`] : []),
     ...(metadata.canonical_page ? [`canonical_page: ${quoteYamlString(metadata.canonical_page)}`] : []),
     ...(metadata.execution_binding ? [`execution_binding: ${quoteYamlString(metadata.execution_binding)}`] : []),
     `created_at: ${quoteYamlString(metadata.created_at)}`,

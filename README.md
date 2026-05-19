@@ -90,8 +90,8 @@ The wiki agent is the durable knowledge coordinator. It decides what concepts ne
 The current wiki core is schema-first:
 
 - `workspace-contract.ts` defines the authoritative `knowledge-base/` lifecycle roots for raw inputs, source records, parse artifacts, summaries, pages, manifests, assets, runtime state, index, and human log.
-- `page-schema.ts` and `typed-store.ts` parse, validate, list, and write human-editable Markdown pages with typed frontmatter. Supported page types include `paper-source`, `synthesis`, `concept`, `method`, `finding`, `dataset`, `question`, `design-record`, and `alias`.
-- `page-schema.ts` also owns the wiki evidence-audit contract. Pages can carry `knowledge_state`, `last_reviewed_at`, `claims`, `typed_relations`, `experiment_refs`, and `reviewer_critique` metadata. Quantitative claims must point at concrete provenance such as a page, figure, table, parser element, chunk, or code-output path.
+- `page-schema.ts` and `typed-store.ts` parse, validate, list, and write human-editable Markdown pages with typed frontmatter. Supported page types include `paper-source`, `synthesis`, `concept`, `method`, `finding`, `dataset`, `question`, `capability-boundary`, `design-record`, and `alias`.
+- `page-schema.ts` also owns the wiki evidence-audit contract. Pages can carry `knowledge_state`, `last_reviewed_at`, `freshness_audit`, `claims`, `typed_relations`, `experiment_refs`, and `reviewer_critique` metadata. Quantitative claims must point at concrete provenance such as a page, figure, table, parser element, chunk, or code-output path.
 - `manifest-store.ts` and `retrieval-contract.ts` make source provenance and read-only downstream consumption explicit. Downstream agents can search/read wiki evidence without depending on the physical directory layout.
 - `retrieval-search.ts` returns structured evidence matches, match reasons, stale/speculative/disputed warnings, preferred evidence-kind ordering, and insufficient-evidence status.
 - `journal.ts` records multi-file wiki operations so interrupted writes can be reported by health checks.

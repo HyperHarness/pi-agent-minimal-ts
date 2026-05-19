@@ -3,7 +3,7 @@ import type { WikiPageType } from "./page-schema.js";
 
 type TemplatePageType = Extract<
   WikiPageType,
-  "concept" | "method" | "finding" | "dataset" | "design-record"
+  "concept" | "method" | "finding" | "dataset" | "capability-boundary" | "design-record"
 >;
 
 export interface WikiPageTemplate {
@@ -37,6 +37,11 @@ const WIKI_PAGE_TEMPLATES: Record<TemplatePageType, WikiPageTemplate> = {
     pageType: "finding",
     requiredSections: ["Claim", "Evidence", "Scope", "Confidence", "Implications", "Contradictions or Open Checks"],
     guidance: "Use finding pages for evidence-backed conclusions. Attach claim provenance and unresolved contradiction candidates."
+  },
+  "capability-boundary": {
+    pageType: "capability-boundary",
+    requiredSections: ["Can Support", "Cannot Support Yet", "Evidence Boundary", "Escalation Criteria"],
+    guidance: "Use capability-boundary pages to prevent agent overclaim. Separate supported workflows from unsupported engineering decisions and name the evidence required before escalation."
   },
   "design-record": {
     pageType: "design-record",
@@ -80,6 +85,10 @@ export function inferWikiPageTypeForEvidence(input: InferWikiPageTypeInput): Tem
 
   if (containsAny(query, ["decision", "design record", "selected", "tradeoff", "alternative"])) {
     return "design-record";
+  }
+
+  if (containsAny(query, ["capability boundary", "ability boundary", "can support", "cannot support", "can't support", "overclaim", "tapeout-ready", "tapeout ready"])) {
+    return "capability-boundary";
   }
 
   if (containsAny(query, ["risk", "finding", "conclusion", "evidence shows", "suspected"])) {
