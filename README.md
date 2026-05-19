@@ -383,6 +383,11 @@ By default the local knowledge base lives in `knowledge-base/`, which is gitigno
 ```text
 knowledge-base/
   raw/pdfs/                         # original PDFs
+  design-artifacts/<experiment-key>/
+    code/                            # design-subagent scripts and helper modules
+    layouts/                         # generated GDS/OAS/DXF and other layout data
+    logs/                            # tool stdout/stderr, DRC/LVS/simulation logs
+    results/                         # derived metrics, reports, screenshots, and tables
   design-records/
     design-records/
     verification-reports/
@@ -420,7 +425,26 @@ design-projects/
     src/pi_chip_design/
 ```
 
-Use `design-projects/` for executable design code, Python package modules, simulations, generated-layout scripts, and project-local tests. Use `knowledge-base/design-records/` for structured design evidence that should feed the data flywheel back into the wiki.
+Use `design-projects/` for maintained executable design code, Python package modules, simulations, generated-layout scripts, and project-local tests. Use `knowledge-base/design-records/` for structured design evidence that should feed the data flywheel back into the wiki.
+
+Use `knowledge-base/design-artifacts/<experiment-key>/` for design-subagent experiment outputs that should become part of the local searchable knowledge base. The path contract is:
+
+```text
+knowledge-base/design-artifacts/<experiment-key>/
+  code/       # runnable experiment scripts, notebooks, and small helper modules
+  layouts/    # generated layout data such as GDS/OAS/DXF
+  logs/       # DRC/LVS/simulation/tool logs
+  results/    # extracted metrics, tables, reports, screenshots, and summaries
+```
+
+Every searchable design artifact should also publish a wiki source summary and manifest:
+
+```text
+knowledge-base/sources/design-artifact-<experiment-key>/summary.md
+knowledge-base/manifests/design-artifact-<experiment-key>.json
+```
+
+The manifest should use `sourceKind: "design-artifact"` and list scripts, layout files, logs, and results in `artifacts`. The summary is the wiki-agent retrieval surface; large binary layout files stay under `design-artifacts/`. For explicit retrieval, call `search_paper_wiki` with `sourceKinds: ["design-artifact"]` or build a durable `pages/` synthesis page that cites the design-artifact source.
 
 The initial design workspace is the `pi_chip_design` Python package under `design-projects/superconducting-qubit-chip/`. It should hold reusable layout-generation and verification code, with layout families added under `src/pi_chip_design/layouts/`. Its local development setup is:
 

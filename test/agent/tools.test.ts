@@ -4845,6 +4845,63 @@ test("build_wiki_page writes a synthesis page from local wiki evidence", async (
   }
 });
 
+test("build_wiki_page accepts concept drafts with structured open questions and related pages", async () => {
+  const workspace = await mkdtemp(path.join(tmpdir(), "pi-agent-tools-"));
+
+  try {
+    const tool = getBuildWikiPageTool(workspace, {
+      searchPaperWiki: async (options) => ({
+        query: options.query,
+        results: [
+          {
+            paperKey: "arxiv-2507.09690",
+            title: "Small Quantum LDPC Codes",
+            path: "knowledge-base/sources/arxiv-2507.09690/summary.md",
+            snippet: "LDPC implementation evidence.",
+          },
+        ],
+      }),
+      paperWikiPageWorker: async () => ({
+        title: "qLDPC Concept Page",
+        pageMarkdown: [
+          "## Overview",
+          "",
+          "qLDPC implementation needs grounded chip-design evidence [arxiv-2507.09690].",
+          "",
+          "## Key Concepts",
+          "",
+          "Connectivity and decoding assumptions shape the hardware implications.",
+          "",
+          "## Evidence",
+          "",
+          "The local source summary is the evidence anchor."
+        ].join("\n"),
+        tags: ["qldpc", "superconducting-qubits"],
+        openQuestions: ["Which connectivity assumptions remain unverified?"],
+        relatedPageKeys: ["superconducting-chip-design"],
+        confidence: "high",
+      }),
+    });
+
+    const result = await tool.execute("build-concept-structured-sections", {
+      topic: "qLDPC concept page",
+      pageKey: "qldpc-concept-page",
+      forbidExternalEvidence: true,
+    }, undefined);
+    const details = result.details as { status?: string; page?: { pagePath?: string } };
+
+    assert.equal(details.status, "written");
+    assert.equal(details.page?.pagePath, "knowledge-base/pages/qldpc-concept-page.md");
+    const page = await readFile(path.join(workspace, "knowledge-base/pages/qldpc-concept-page.md"), "utf8");
+    assert.match(page, /## Open Questions/);
+    assert.match(page, /Which connectivity assumptions remain unverified\?/);
+    assert.match(page, /## Related Pages/);
+    assert.match(page, /\[\[superconducting-chip-design\]\]/);
+  } finally {
+    await rm(workspace, { recursive: true, force: true });
+  }
+});
+
 test("build_wiki_page avoids source-derived page keys", async () => {
   const workspace = await mkdtemp(path.join(tmpdir(), "pi-agent-tools-"));
 

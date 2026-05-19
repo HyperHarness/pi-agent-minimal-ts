@@ -951,6 +951,57 @@ function formatWikiPageTemplateGuidance(
   ].join("\n");
 }
 
+function normalizeMarkdownSectionTitle(value: string): string {
+  return value
+    .toLowerCase()
+    .replace(/\s+/g, " ")
+    .trim();
+}
+
+function hasSecondLevelMarkdownSection(markdown: string, title: string): boolean {
+  const expected = normalizeMarkdownSectionTitle(title);
+  return [...markdown.matchAll(/^##\s+(.+?)\s*#*\s*$/gm)]
+    .some((match) => normalizeMarkdownSectionTitle(match[1] ?? "") === expected);
+}
+
+function markdownBulletSection(title: string, values: string[], emptyText: string): string {
+  const cleaned = values.map((value) => value.trim()).filter(Boolean);
+  const body = cleaned.length > 0
+    ? cleaned.map((value) => `- ${value}`).join("\n")
+    : emptyText;
+  return `\n\n## ${title}\n\n${body}`;
+}
+
+function normalizeWikiPageDraftForTemplate(
+  draft: PaperWikiPageWorkerOutput,
+  template: ReturnType<typeof getWikiPageTemplate>
+): PaperWikiPageWorkerOutput {
+  if (template.pageType !== "concept") {
+    return draft;
+  }
+
+  let pageMarkdown = draft.pageMarkdown.trimEnd();
+  if (!hasSecondLevelMarkdownSection(pageMarkdown, "Open Questions")) {
+    pageMarkdown += markdownBulletSection(
+      "Open Questions",
+      draft.openQuestions ?? [],
+      "No open questions recorded yet."
+    );
+  }
+  if (!hasSecondLevelMarkdownSection(pageMarkdown, "Related Pages")) {
+    pageMarkdown += markdownBulletSection(
+      "Related Pages",
+      (draft.relatedPageKeys ?? []).map((pageKey) => `[[${pageKey}]]`),
+      "No related pages recorded yet."
+    );
+  }
+
+  return {
+    ...draft,
+    pageMarkdown
+  };
+}
+
 function markCoordinationInsufficient(
   coordination: WikiAgentCoordinationPlan,
   reason: string,
@@ -2286,12 +2337,13 @@ export function createWikiTools(input: {
         query: [args.topic, args.question].filter(Boolean).join("\n"),
         sourceKinds: inferWikiSourceKindsForTemplate(evidence)
       }));
-      const draft = await dependencies.paperWikiPageWorker({
+      const rawDraft = await dependencies.paperWikiPageWorker({
         topic: args.topic,
         ...(args.question ? { question: args.question } : {}),
         templateGuidance: formatWikiPageTemplateGuidance(template),
         evidence
       });
+      const draft = normalizeWikiPageDraftForTemplate(rawDraft, template);
       emitToolProgress(onUpdate, {
         stage: "wiki_page_worker_done",
         query,
