@@ -251,6 +251,102 @@ test("searchWikiEvidence includes two-letter query terms", async () => {
   });
 });
 
+test("searchWikiEvidence ranks qLDPC implementation evidence above broad superconducting lexical matches", async () => {
+  await withWorkspace("wiki-structured-search-qldpc-implementation-", async (workspaceDir) => {
+    await writeLegacySourceWithManifest({
+      workspace: workspaceDir,
+      paperKey: "aaa-broad-superconducting-readout",
+      title: "Superconducting qubit readout implementation bottlenecks",
+      summaryMarkdown: [
+        "# Superconducting qubit readout implementation bottlenecks",
+        "",
+        "This broad source mentions superconducting chips and implementation bottlenecks, but it is about readout calibration rather than error-correction layouts."
+      ].join("\n"),
+      tags: ["superconducting-qubits"]
+    });
+    await writeTypedWikiPage({
+      workspaceDir,
+      page: {
+        metadata: {
+          schema_version: 1,
+          type: "finding",
+          key: "qldpc-superconducting-layout-bottlenecks",
+          title: "qLDPC layout bottlenecks on superconducting chips",
+          aliases: [],
+          tags: ["qldpc", "hardware-layout"],
+          evidence_contract: "paper-backed",
+          source_refs: ["arxiv-2404.17676", "arxiv-2507.09690"],
+          claims: [{
+            claimId: "claim-qldpc-layout",
+            kind: "qualitative",
+            statement: "qLDPC implementation on superconducting chips is bottlenecked by non-local checks, routing overhead, coupler pressure, and syndrome extraction.",
+            sourceRefs: ["arxiv-2404.17676", "arxiv-2507.09690"],
+            evidence: [{ paperKey: "arxiv-2404.17676", sectionId: "2d-local-routing" }],
+            confidence: "medium"
+          }],
+          created_at: "2026-05-10T00:00:00.000Z",
+          updated_at: "2026-05-10T00:00:00.000Z"
+        },
+        body: [
+          "# qLDPC layout bottlenecks on superconducting chips",
+          "",
+          "Relevant evidence discusses non-local checks, routing, coupler overhead, syndrome extraction, bilayer layouts, flip-chip connectivity, long-range links, and modular architecture."
+        ].join("\n")
+      }
+    });
+
+    const result = await searchWikiEvidence({
+      workspaceDir,
+      query: "qLDPC superconducting chips implementation bottlenecks",
+      maxResults: 2
+    });
+
+    assert.equal(result.status, "ready");
+    assert.equal(result.results[0].item.key, "qldpc-superconducting-layout-bottlenecks");
+    assert.ok(result.results[0].matchReasons.includes("semantic_expansion"));
+  });
+});
+
+test("searchWikiEvidence warns when evidence is summary-only or lacks claim provenance", async () => {
+  await withWorkspace("wiki-structured-search-provenance-warnings-", async (workspaceDir) => {
+    await writeLegacySourceWithManifest({
+      workspace: workspaceDir,
+      paperKey: "arxiv-summary-layer",
+      title: "qLDPC hardware summary",
+      summaryMarkdown: "# qLDPC hardware summary\n\nSummary-only evidence for qLDPC routing.",
+      tags: ["qldpc"]
+    });
+    await writeTypedWikiPage({
+      workspaceDir,
+      page: {
+        metadata: {
+          schema_version: 1,
+          type: "concept",
+          key: "qldpc-page-without-claim-provenance",
+          title: "qLDPC page without claim provenance",
+          aliases: [],
+          tags: ["qldpc"],
+          evidence_contract: "paper-backed",
+          source_refs: ["arxiv-summary-layer"],
+          created_at: "2026-05-10T00:00:00.000Z",
+          updated_at: "2026-05-10T00:00:00.000Z"
+        },
+        body: "# qLDPC page without claim provenance\n\nqLDPC routing evidence."
+      }
+    });
+
+    const result = await searchWikiEvidence({
+      workspaceDir,
+      query: "qLDPC routing",
+      maxResults: 5
+    });
+
+    const warningsByKey = new Map(result.results.map((item) => [item.item.key, item.warnings]));
+    assert.ok(warningsByKey.get("arxiv-summary-layer")?.includes("summary_only_evidence"));
+    assert.ok(warningsByKey.get("qldpc-page-without-claim-provenance")?.includes("missing_claim_provenance"));
+  });
+});
+
 test("retrieval contract reads source evidence by key from legacy summary and manifest", async () => {
   await withWorkspace("wiki-retrieval-source-", async (workspaceDir) => {
     const paperKey = "arxiv-2601.00003";

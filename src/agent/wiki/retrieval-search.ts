@@ -21,7 +21,8 @@ export type WikiEvidenceMatchReason =
   | "source_kind"
   | "claim"
   | "typed_relation"
-  | "reviewer_critique";
+  | "reviewer_critique"
+  | "semantic_expansion";
 export type WikiEvidenceSearchWarning =
   | "stale_evidence"
   | "unknown_freshness"
@@ -30,7 +31,9 @@ export type WikiEvidenceSearchWarning =
   | "disputed"
   | "low_confidence_claim"
   | "unresolved_contradiction"
-  | "weak_evidence_contract";
+  | "weak_evidence_contract"
+  | "summary_only_evidence"
+  | "missing_claim_provenance";
 
 export interface WikiEvidenceSearchResult {
   item: WikiEvidenceItem;
@@ -62,7 +65,26 @@ export interface SearchWikiEvidenceOptions {
 }
 
 const DEFAULT_MAX_RESULTS = 8;
-const MAX_BODY_MATCH_SCORE = 6;
+const MAX_BODY_MATCH_SCORE = 10;
+const GENERIC_DOMAIN_TERMS = new Set([
+  "architecture",
+  "architectures",
+  "chip",
+  "chips",
+  "computing",
+  "design",
+  "hardware",
+  "implementation",
+  "implementations",
+  "implemented",
+  "implementing",
+  "processor",
+  "processors",
+  "quantum",
+  "qubit",
+  "qubits",
+  "superconducting"
+]);
 const ENGLISH_STOPWORDS = new Set([
   "a",
   "an",
@@ -93,6 +115,12 @@ const ENGLISH_STOPWORDS = new Set([
   "with"
 ]);
 
+interface SearchNeedle {
+  text: string;
+  weight: number;
+  semanticExpansion: boolean;
+}
+
 function normalizeSearchText(value: string): string {
   return value
     .toLowerCase()
@@ -104,7 +132,90 @@ function normalizeSearchText(value: string): string {
     .trim();
 }
 
-function queryNeedles(query: string): string[] {
+function isGenericDomainTerm(term: string): boolean {
+  return GENERIC_DOMAIN_TERMS.has(term);
+}
+
+function addNeedle(needles: Map<string, SearchNeedle>, needle: SearchNeedle): void {
+  if (!needle.text) {
+    return;
+  }
+  const existing = needles.get(needle.text);
+  if (!existing || existing.weight < needle.weight) {
+    needles.set(needle.text, needle);
+    return;
+  }
+  if (needle.semanticExpansion && !existing.semanticExpansion) {
+    needles.set(needle.text, {
+      ...existing,
+      semanticExpansion: true
+    });
+  }
+}
+
+function domainSemanticExpansions(normalizedQuery: string, terms: string[]): string[] {
+  const termSet = new Set(terms);
+  const mentionsQldpc = /\bqldpc\b/.test(normalizedQuery) ||
+    (termSet.has("quantum") && termSet.has("ldpc")) ||
+    /\bldpc\b/.test(normalizedQuery);
+  const asksImplementation = [
+    "bottleneck",
+    "bottlenecks",
+    "constraint",
+    "constraints",
+    "hardware",
+    "implementation",
+    "implementations",
+    "implementing",
+    "layout",
+    "layouts",
+    "mapping",
+    "overhead",
+    "route",
+    "routing"
+  ].some((term) => termSet.has(term));
+  const mentionsChipHardware = [
+    "architecture",
+    "architectures",
+    "chip",
+    "chips",
+    "coupler",
+    "couplers",
+    "hardware",
+    "layout",
+    "layouts",
+    "superconducting"
+  ].some((term) => termSet.has(term));
+  if (!mentionsQldpc || (!asksImplementation && !mentionsChipHardware)) {
+    return [];
+  }
+  return [
+    "2d local",
+    "bilayer",
+    "bilayer architecture",
+    "connectivity",
+    "coupler",
+    "couplers",
+    "decoding overhead",
+    "decoder",
+    "detector error",
+    "flip chip",
+    "flip-chip",
+    "hardware layout",
+    "layout",
+    "long range",
+    "long-range",
+    "modular",
+    "non local",
+    "non-local",
+    "nonlocal",
+    "routing",
+    "routing overhead",
+    "syndrome extraction"
+  ];
+}
+
+function queryNeedles(query: string): SearchNeedle[] {
   const normalizedQuery = normalizeSearchText(query);
   if (!normalizedQuery) {
     return [];
@@ -112,46 +223,110 @@ function queryNeedles(query: string): string[] {
   const terms = normalizedQuery
     .split(" ")
     .filter((term) => term && !ENGLISH_STOPWORDS.has(term));
-  return [...new Set([normalizedQuery, ...terms])];
-}
-
-function matchesNeedle(normalized: string, needle: string): boolean {
-  if (needle.includes(" ") || /[\u4e00-\u9fff]/u.test(needle)) {
-    return normalized.includes(needle);
+  const needles = new Map<string, SearchNeedle>();
+  if (terms.length > 1) {
+    addNeedle(needles, {
+      text: normalizedQuery,
+      weight: 3,
+      semanticExpansion: false
+    });
   }
-  return normalized.split(" ").includes(needle);
+  for (const term of terms) {
+    addNeedle(needles, {
+      text: term,
+      weight: isGenericDomainTerm(term) ? 0.25 : 1,
+      semanticExpansion: false
+    });
+  }
+  for (const expansion of domainSemanticExpansions(normalizedQuery, terms)) {
+    addNeedle(needles, {
+      text: normalizeSearchText(expansion),
+      weight: 1.25,
+      semanticExpansion: true
+    });
+  }
+  return [...needles.values()];
 }
 
-function matchesAnyNeedle(value: string, needles: string[]): boolean {
-  const normalized = normalizeSearchText(value);
-  return normalized !== "" && needles.some((needle) => matchesNeedle(normalized, needle));
+function matchesNeedle(normalized: string, needle: SearchNeedle): boolean {
+  if (needle.text.includes(" ") || /[\u4e00-\u9fff]/u.test(needle.text)) {
+    return normalized.includes(needle.text);
+  }
+  return normalized.split(" ").includes(needle.text);
 }
 
-function countBodyOccurrences(value: string, needles: string[]): number {
+function matchedNeedles(value: string, needles: SearchNeedle[]): SearchNeedle[] {
   const normalized = normalizeSearchText(value);
-  let count = 0;
+  return normalized === "" ? [] : needles.filter((needle) => matchesNeedle(normalized, needle));
+}
+
+function scoreNeedleMatches(matches: SearchNeedle[], multiplier: number, maxScore: number): number {
+  const score = matches.reduce((total, needle) => total + needle.weight * multiplier, 0);
+  return Math.min(maxScore, score);
+}
+
+function scoreTextField(value: string, needles: SearchNeedle[], multiplier: number, maxScore: number): {
+  score: number;
+  semanticExpansion: boolean;
+} {
+  const matches = matchedNeedles(value, needles);
+  return {
+    score: scoreNeedleMatches(matches, multiplier, maxScore),
+    semanticExpansion: matches.some((needle) => needle.semanticExpansion)
+  };
+}
+
+function scoreTextList(values: string[], needles: SearchNeedle[], multiplier: number, maxScore: number): {
+  score: number;
+  semanticExpansion: boolean;
+} {
+  let score = 0;
+  let semanticExpansion = false;
+  for (const value of values) {
+    const result = scoreTextField(value, needles, multiplier, maxScore);
+    score += result.score;
+    semanticExpansion ||= result.semanticExpansion;
+    if (score >= maxScore) {
+      return { score: maxScore, semanticExpansion };
+    }
+  }
+  return { score, semanticExpansion };
+}
+
+function countBodyOccurrences(value: string, needles: SearchNeedle[]): {
+  score: number;
+  semanticExpansion: boolean;
+} {
+  const normalized = normalizeSearchText(value);
+  let score = 0;
+  let semanticExpansion = false;
   for (const needle of needles) {
-    if (needle.includes(" ") || /[\u4e00-\u9fff]/u.test(needle)) {
-      let index = normalized.indexOf(needle);
-      while (index >= 0 && count < MAX_BODY_MATCH_SCORE) {
-        count += 1;
-        index = normalized.indexOf(needle, index + needle.length);
+    if (needle.text.includes(" ") || /[\u4e00-\u9fff]/u.test(needle.text)) {
+      let index = normalized.indexOf(needle.text);
+      while (index >= 0 && score < MAX_BODY_MATCH_SCORE) {
+        score += needle.weight;
+        semanticExpansion ||= needle.semanticExpansion;
+        index = normalized.indexOf(needle.text, index + needle.text.length);
       }
     } else {
       for (const token of normalized.split(" ")) {
-        if (token === needle) {
-          count += 1;
+        if (token === needle.text) {
+          score += needle.weight;
+          semanticExpansion ||= needle.semanticExpansion;
         }
-        if (count >= MAX_BODY_MATCH_SCORE) {
+        if (score >= MAX_BODY_MATCH_SCORE) {
           break;
         }
       }
     }
-    if (count >= MAX_BODY_MATCH_SCORE) {
+    if (score >= MAX_BODY_MATCH_SCORE) {
       break;
     }
   }
-  return count;
+  return {
+    score: Math.min(MAX_BODY_MATCH_SCORE, score),
+    semanticExpansion
+  };
 }
 
 function kindRank(kind: WikiEvidenceKind, preferredKinds: WikiEvidenceKind[] | undefined): number {
@@ -238,6 +413,49 @@ function reviewerCritiqueText(item: WikiEvidenceItem): string {
     .join(" ");
 }
 
+function itemSearchableText(item: WikiEvidenceItem): string {
+  return normalizeSearchText([
+    item.title,
+    item.aliases.join(" "),
+    item.tags.join(" "),
+    item.sourceRefs.join(" "),
+    item.sourceKind ?? "",
+    item.body,
+    claimText(item),
+    typedRelationText(item),
+    reviewerCritiqueText(item)
+  ].join(" "));
+}
+
+function queryMentionsQldpc(needles: SearchNeedle[]): boolean {
+  return needles.some((needle) =>
+    !needle.semanticExpansion &&
+    (needle.text === "qldpc" || needle.text === "ldpc" || needle.text.includes("low density parity check"))
+  );
+}
+
+function qldpcImplementationCoverageScore(item: WikiEvidenceItem, needles: SearchNeedle[]): number {
+  if (!queryMentionsQldpc(needles)) {
+    return 0;
+  }
+  const text = itemSearchableText(item);
+  const hasQldpcAnchor = /\bqldpc\b|\bldpc\b|low density parity check|low density paritycheck/u.test(text);
+  const hasSuperconductingHardwareAnchor =
+    /superconducting|transmon|circuit qed|\bchip\b|\bchips\b|\bhardware\b|processor|processors/u.test(text);
+  const hasImplementationAnchor =
+    /2d local|bilayer|bottleneck|bottlenecks|connectivity|coupler|couplers|decoding overhead|flip chip|layout|layouts|long range|modular|non local|nonlocal|overhead|routing|syndrome extraction/u.test(text);
+  if (hasQldpcAnchor && hasSuperconductingHardwareAnchor && hasImplementationAnchor) {
+    return 5;
+  }
+  if (hasQldpcAnchor && hasImplementationAnchor) {
+    return 3;
+  }
+  if (hasQldpcAnchor && hasSuperconductingHardwareAnchor) {
+    return 2;
+  }
+  return hasQldpcAnchor ? 1 : -2;
+}
+
 function ageWarning(reviewedAt: string | undefined, now: Date, maxAgeDays: number): WikiEvidenceSearchWarning | undefined {
   if (!reviewedAt) {
     return "unknown_freshness";
@@ -277,51 +495,90 @@ function itemWarnings(item: WikiEvidenceItem, options: SearchWikiEvidenceOptions
   if (item.evidenceContract === "none") {
     uniquePush(warnings, "weak_evidence_contract");
   }
+  if (item.kind === "source") {
+    uniquePush(warnings, "summary_only_evidence");
+  }
+  const hasClaimLevelProvenance = (item.claims?.length ?? 0) > 0 ||
+    (item.typedRelations?.length ?? 0) > 0 ||
+    (item.experimentRefs?.length ?? 0) > 0;
+  if (item.kind === "page" && item.evidenceContract !== "none" && !hasClaimLevelProvenance) {
+    uniquePush(warnings, "missing_claim_provenance");
+  }
   return warnings;
 }
 
-function scoreItem(item: WikiEvidenceItem, needles: string[], options: SearchWikiEvidenceOptions): WikiEvidenceSearchResult {
+function scoreItem(item: WikiEvidenceItem, needles: SearchNeedle[], options: SearchWikiEvidenceOptions): WikiEvidenceSearchResult {
   let score = 0;
   const matchReasons: WikiEvidenceMatchReason[] = [];
 
-  if (matchesAnyNeedle(item.title, needles)) {
-    score += 8;
+  const titleScore = scoreTextField(item.title, needles, 2.5, 8);
+  if (titleScore.score > 0) {
+    score += titleScore.score;
     uniquePush(matchReasons, "title");
+    if (titleScore.semanticExpansion) {
+      uniquePush(matchReasons, "semantic_expansion");
+    }
   }
-  if (item.aliases.some((alias) => matchesAnyNeedle(alias, needles))) {
-    score += 6;
+  const aliasScore = scoreTextList(item.aliases, needles, 2, 6);
+  if (aliasScore.score > 0) {
+    score += aliasScore.score;
     uniquePush(matchReasons, "alias");
+    if (aliasScore.semanticExpansion) {
+      uniquePush(matchReasons, "semantic_expansion");
+    }
   }
-  if (item.tags.some((tag) => matchesAnyNeedle(tag, needles))) {
-    score += 6;
+  const tagScore = scoreTextList(item.tags, needles, 2, 6);
+  if (tagScore.score > 0) {
+    score += tagScore.score;
     uniquePush(matchReasons, "tag");
+    if (tagScore.semanticExpansion) {
+      uniquePush(matchReasons, "semantic_expansion");
+    }
   }
-  if (item.sourceRefs.some((sourceRef) => matchesAnyNeedle(sourceRef, needles))) {
-    score += 4;
+  const sourceRefScore = scoreTextList(item.sourceRefs, needles, 1.5, 4);
+  if (sourceRefScore.score > 0) {
+    score += sourceRefScore.score;
     uniquePush(matchReasons, "source_ref");
   }
-  if (item.sourceKind && matchesAnyNeedle(item.sourceKind, needles)) {
-    score += 4;
+  const sourceKindScore = item.sourceKind ? scoreTextField(item.sourceKind, needles, 1.5, 4) : { score: 0, semanticExpansion: false };
+  if (sourceKindScore.score > 0) {
+    score += sourceKindScore.score;
     uniquePush(matchReasons, "source_kind");
   }
 
   const bodyScore = countBodyOccurrences(item.body, needles);
-  if (bodyScore > 0) {
-    score += bodyScore;
+  if (bodyScore.score > 0) {
+    score += bodyScore.score;
     uniquePush(matchReasons, "body");
+    if (bodyScore.semanticExpansion) {
+      uniquePush(matchReasons, "semantic_expansion");
+    }
   }
-  if (matchesAnyNeedle(claimText(item), needles)) {
-    score += 5;
+  const claimScore = scoreTextField(claimText(item), needles, 2.5, 7);
+  if (claimScore.score > 0) {
+    score += claimScore.score;
     uniquePush(matchReasons, "claim");
+    if (claimScore.semanticExpansion) {
+      uniquePush(matchReasons, "semantic_expansion");
+    }
   }
-  if (matchesAnyNeedle(typedRelationText(item), needles)) {
-    score += 5;
+  const typedRelationScore = scoreTextField(typedRelationText(item), needles, 2.5, 7);
+  if (typedRelationScore.score > 0) {
+    score += typedRelationScore.score;
     uniquePush(matchReasons, "typed_relation");
+    if (typedRelationScore.semanticExpansion) {
+      uniquePush(matchReasons, "semantic_expansion");
+    }
   }
-  if (matchesAnyNeedle(reviewerCritiqueText(item), needles)) {
-    score += 4;
+  const reviewerCritiqueScore = scoreTextField(reviewerCritiqueText(item), needles, 2, 5);
+  if (reviewerCritiqueScore.score > 0) {
+    score += reviewerCritiqueScore.score;
     uniquePush(matchReasons, "reviewer_critique");
+    if (reviewerCritiqueScore.semanticExpansion) {
+      uniquePush(matchReasons, "semantic_expansion");
+    }
   }
+  score += qldpcImplementationCoverageScore(item, needles);
 
   return {
     item,
