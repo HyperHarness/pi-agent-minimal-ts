@@ -2440,6 +2440,135 @@ test("download_paper prefers arXiv HTML webpage markdown before TeX source and P
   }
 });
 
+test("download_paper refreshes arXiv webpage parsing when only a PDF parse exists", async () => {
+  const workspace = await mkdtemp(path.join(tmpdir(), "pi-agent-tools-"));
+  const pdfPath = path.join(workspace, "papers", "arxiv-2603.11188.pdf");
+  const calls: string[] = [];
+
+  try {
+    await mkdir(path.dirname(pdfPath), { recursive: true });
+    await writeFile(pdfPath, "%PDF-1.7\nmock pdf\n", "utf8");
+    const recordPath = await writePaperRecord({
+      workspaceDir: workspace,
+      record: {
+        source: "arxiv",
+        articleUrl: "https://arxiv.org/abs/2603.11188",
+        recordedAt: "2026-05-20T02:17:55.737Z",
+        handlingMethod: "direct_http",
+        status: "downloaded",
+        canonicalId: "2603.11188",
+        pdfUrl: "https://arxiv.org/pdf/2603.11188.pdf",
+        downloadPath: pdfPath,
+      },
+    });
+    const managerResult: PaperDownloadResult = {
+      status: "already_downloaded",
+      source: "arxiv",
+      canonicalId: "2603.11188",
+      articleUrl: "https://arxiv.org/abs/2603.11188",
+      finalPdfUrl: "https://arxiv.org/pdf/2603.11188.pdf",
+      path: pdfPath,
+      recordPath,
+      recordedAt: "2026-05-20T02:17:55.737Z",
+    };
+    await updatePaperRecordParseManifest({
+      workspaceDir: workspace,
+      recordPath,
+      strategy: "pdf_parse",
+      status: "parsed",
+      paperKey: "arxiv-2603.11188",
+      engine: "opendataloader-local",
+      sourceSha256: "pdf-hash",
+      artifacts: {
+        markdownPath: path.join(workspace, "knowledge-base/sources/arxiv-2603.11188/parses/opendataloader-local/document.md"),
+        parsePath: path.join(workspace, "knowledge-base/sources/arxiv-2603.11188/parses/opendataloader-local/parse.json"),
+        qualityPath: path.join(workspace, "knowledge-base/sources/arxiv-2603.11188/parses/opendataloader-local/quality.json"),
+        chunksPath: path.join(workspace, "knowledge-base/sources/arxiv-2603.11188/chunks/opendataloader-local.jsonl"),
+      },
+      quality: {
+        status: "good",
+        score: 0.94,
+        pages: 18,
+        totalTextLength: 73026,
+        warnings: [],
+      },
+    });
+
+    const downloadPaperTool = getDownloadPaperTool(workspace, {
+      downloadPaper: async () => managerResult,
+      fetchPaperWebPage: async (options) => {
+        calls.push(`fetch:${options.url}`);
+        return {
+          url: options.url,
+          title: "Rhenium as a material platform for long-lived transmon qubits",
+          markdown: "# Rhenium as a material platform for long-lived transmon qubits\n\nHTML full text.",
+          metadata: {
+            title: "Rhenium as a material platform for long-lived transmon qubits",
+            authors: [],
+          },
+          access: {
+            status: "full_text",
+            signals: [],
+          },
+          stats: {
+            chars: 86,
+            wordsApprox: 12,
+            navigationLinesRemoved: 0,
+            extractedFrom: "article",
+          },
+        };
+      },
+      savePaperWebPageParse: async (options) => {
+        calls.push(`save:${options.paperKey}`);
+        return {
+          status: "parsed",
+          paperKey: options.paperKey ?? "arxiv-2603.11188",
+          engine: "webpage",
+          pdfSha256: "webpage-hash",
+          artifacts: {
+            sourcePath: path.join(workspace, "knowledge-base/sources/arxiv-2603.11188/source.json"),
+            parsePath: path.join(workspace, "knowledge-base/sources/arxiv-2603.11188/parses/webpage/parse.json"),
+            markdownPath: path.join(workspace, "knowledge-base/sources/arxiv-2603.11188/parses/webpage/document.md"),
+            qualityPath: path.join(workspace, "knowledge-base/sources/arxiv-2603.11188/parses/webpage/quality.json"),
+            chunksPath: path.join(workspace, "knowledge-base/sources/arxiv-2603.11188/chunks/webpage.jsonl"),
+          },
+          quality: {
+            status: "good",
+            score: 1,
+            pages: 1,
+            totalTextLength: 2048,
+            emptyPageCount: 0,
+            headingCount: 5,
+            tableCount: 0,
+            figureOrCaptionCount: 2,
+            warnings: [],
+          },
+          sections: [],
+        };
+      },
+      parsePaper: async () => {
+        throw new Error("PDF parsing should not run when arXiv webpage refresh succeeds");
+      },
+    });
+
+    const result = await downloadPaperTool.execute(
+      "call-arxiv-webpage-refresh",
+      { url: "https://arxiv.org/abs/2603.11188" },
+      undefined,
+    );
+
+    assert.deepEqual(calls, [
+      "fetch:https://arxiv.org/html/2603.11188",
+      "save:arxiv-2603.11188",
+    ]);
+    assert.equal((result.details as { reading?: { status?: string } }).reading?.status, "parsed");
+    assert.equal((result.details as { reading?: { strategy?: string } }).reading?.strategy, "webpage");
+    assert.equal((result.details as { reading?: { engine?: string } }).reading?.engine, "webpage");
+  } finally {
+    await rm(workspace, { recursive: true, force: true });
+  }
+});
+
 test("download_paper falls back from arxiv.org HTML to ar5iv labs HTML before TeX parsing", async () => {
   const workspace = await mkdtemp(path.join(tmpdir(), "pi-agent-tools-"));
   const recordPath = path.join(workspace, "papers", "arxiv-2601.00425.json");

@@ -37,6 +37,7 @@ import { searchApsPapers } from "./acquisition/aps-search.js";
 import { getPublisherAdapter } from "./acquisition/publisher-adapters/index.js";
 import { fetchPaperWebPage } from "./acquisition/paper-webpage-fetch.js";
 import type { PaperDownloadResult, PaperSearchResult, SupportedPaperSource } from "./types.js";
+import type { PaperRecordReadingPreferredSource } from "./types.js";
 import { buildArxivHtmlUrls } from "./acquisition/arxiv.js";
 import {
   blockPaperDownload,
@@ -302,12 +303,15 @@ function summarizeParseResult(
   };
 }
 
-function summarizeReadyRecordReading(record: PaperRecord): DownloadPaperReadingClosure | undefined {
+function summarizeReadyRecordReadingSource(
+  record: PaperRecord,
+  preferredSource: PaperRecordReadingPreferredSource
+): DownloadPaperReadingClosure | undefined {
   if (record.reading?.status !== "ready") {
     return undefined;
   }
 
-  const artifact = record.reading.preferredSource === "webpage" ? record.webpage : record.parse;
+  const artifact = preferredSource === "webpage" ? record.webpage : record.parse;
   if (
     !artifact?.paperKey ||
     !artifact.engine ||
@@ -322,7 +326,7 @@ function summarizeReadyRecordReading(record: PaperRecord): DownloadPaperReadingC
 
   return {
     status: "already_parsed",
-    strategy: record.reading.preferredSource === "webpage" ? "webpage" : "pdf",
+    strategy: preferredSource === "webpage" ? "webpage" : "pdf",
     paperKey: artifact.paperKey,
     engine: artifact.engine as Awaited<ReturnType<typeof parsePaper>>["engine"],
     markdownPath: artifact.markdownPath,
@@ -333,13 +337,27 @@ function summarizeReadyRecordReading(record: PaperRecord): DownloadPaperReadingC
   };
 }
 
+function summarizeReadyRecordReading(record: PaperRecord): DownloadPaperReadingClosure | undefined {
+  return summarizeReadyRecordReadingSource(
+    record,
+    record.reading?.preferredSource === "webpage" ? "webpage" : "pdf_parse"
+  );
+}
+
 async function readReadyRecordReading(input: {
   workspaceDir: string;
   recordPath: string;
+  preferredSource?: PaperRecordReadingPreferredSource;
 }): Promise<DownloadPaperReadingClosure | undefined> {
   try {
     const saved = await readPaperRecordByPath(input);
-    return saved ? summarizeReadyRecordReading(saved.record) : undefined;
+    if (!saved) {
+      return undefined;
+    }
+
+    return input.preferredSource
+      ? summarizeReadyRecordReadingSource(saved.record, input.preferredSource)
+      : summarizeReadyRecordReading(saved.record);
   } catch {
     return undefined;
   }
@@ -713,20 +731,40 @@ export function createPaperTools(input: {
     result: PaperDownloadResult
   ): Promise<DownloadPaperReadingClosure | undefined> => {
     if (result.status === "downloaded" || result.status === "already_downloaded") {
+      if (result.source === "arxiv") {
+        const readyWebpage = await readReadyRecordReading({
+          workspaceDir: resolvedWorkspaceDir,
+          recordPath: result.recordPath,
+          preferredSource: "webpage"
+        });
+        if (readyWebpage) {
+          return readyWebpage;
+        }
+
+        const refreshedWebpage = await parseArxivWebpageForReading(result.canonicalId, result.recordPath);
+        if (refreshedWebpage) {
+          return refreshedWebpage;
+        }
+
+        const ready = await readReadyRecordReading({
+          workspaceDir: resolvedWorkspaceDir,
+          recordPath: result.recordPath
+        });
+        if (ready) {
+          return ready;
+        }
+
+        return (
+          await parseDownloadedTexSourceForReading(result.recordPath)
+        ) ?? parseDownloadedPdfForReading(result.recordPath);
+      }
+
       const ready = await readReadyRecordReading({
         workspaceDir: resolvedWorkspaceDir,
         recordPath: result.recordPath
       });
       if (ready) {
         return ready;
-      }
-
-      if (result.source === "arxiv") {
-        return (
-          await parseArxivWebpageForReading(result.canonicalId, result.recordPath)
-        ) ?? (
-          await parseDownloadedTexSourceForReading(result.recordPath)
-        ) ?? parseDownloadedPdfForReading(result.recordPath);
       }
 
       if (result.source === "external") {
@@ -834,7 +872,7 @@ export function createPaperTools(input: {
     name: "download_paper",
     label: "Download Paper",
     description:
-      "Downloads a paper by id or URL through the unified paper manager and closes the reading loop by generating or queuing markdown artifacts. Before downloading, it checks the local paper blocklist and returns blocked for known irrelevant, license-denied, non-paper, duplicate, or repeatedly failed papers. APS, Nature, Science, and arXiv use webpage markdown first; arXiv falls back to TeX source and then PDF parsing, while other PDFs are parsed after download. If a non-arXiv publisher download is blocked, incomplete, or unavailable, the manager tries an exact-title arXiv preprint fallback, deriving the title from publisher metadata when the caller did not pass one. For APS short DOIs, use the exact URL returned by search_papers or a DOI resolver URL such as https://link.aps.org/doi/<doi>; do not fabricate https://journals.aps.org/doi/<doi> URLs.",
+      "Downloads a paper by id or URL through the unified paper manager and closes the reading loop by generating or queuing markdown artifacts. Before downloading, it checks the local paper blocklist and returns blocked for known irrelevant, license-denied, non-paper, duplicate, or repeatedly failed papers. APS, Nature, Science, and arXiv use webpage markdown first; arXiv refreshes webpage parsing when only PDF or TeX parsing exists, then falls back to TeX source and PDF parsing, while other PDFs are parsed after download. If a non-arXiv publisher download is blocked, incomplete, or unavailable, the manager tries an exact-title arXiv preprint fallback, deriving the title from publisher metadata when the caller did not pass one. For APS short DOIs, use the exact URL returned by search_papers or a DOI resolver URL such as https://link.aps.org/doi/<doi>; do not fabricate https://journals.aps.org/doi/<doi> URLs.",
     parameters: downloadPaperParameters,
     executionMode: "sequential",
     execute: async (_toolCallId: string, args: DownloadPaperParameters) => {
