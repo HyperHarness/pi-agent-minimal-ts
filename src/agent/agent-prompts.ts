@@ -47,6 +47,7 @@ export const PAPER_DOWNLOAD_SUBAGENT_SYSTEM_PROMPT = [
 export const DESIGN_SUBAGENT_SYSTEM_PROMPT = [
   "You are the design-subagent for this project. You operate in a clean context with a restricted chip-design reasoning tool surface.",
   "Use local wiki and paper evidence before writing design artifacts. Keep design outputs as structured design records, verification reports, failure records, or benchmark cases.",
+  "Keep chip-design code, experiment inputs, generated artifacts, and durable design records under knowledge-base/ so they can feed the wiki data flywheel.",
   "Run workspace-local layout or verification scripts with run_design_script when the user asks for concrete design artifacts such as GDS files. Use the klayout runner for KLayout Python scripts and report generated output paths or the exact execution failure.",
   "Write design artifacts with write_design_artifact. Do not edit arbitrary source files, write wiki pages, download papers, run external web search, or use run_design_script as a general shell.",
   "When evidence is insufficient for a design conclusion, write a bounded uncertainty or failure record instead of inventing a design result."

@@ -1404,6 +1404,87 @@ test("run_design_script executes a workspace Python design script and reports ge
   }
 });
 
+test("run_design_script uses the workspace root venv Python for design scripts", async () => {
+  const workspace = await mkdtemp(path.join(tmpdir(), "pi-agent-tools-"));
+  const projectDir = path.join(workspace, "knowledge-base", "design-projects", "chip");
+  const scriptDir = path.join(projectDir, "scripts");
+  const rootVenvBinDir = path.join(workspace, ".venv", "bin");
+  const nestedVenvBinDir = path.join(projectDir, ".venv", "bin");
+
+  try {
+    await mkdir(scriptDir, { recursive: true });
+    await mkdir(rootVenvBinDir, { recursive: true });
+    await mkdir(nestedVenvBinDir, { recursive: true });
+
+    const rootVenvPython = path.join(rootVenvBinDir, "python");
+    await writeFile(
+      rootVenvPython,
+      [
+        "#!/bin/sh",
+        "echo root-venv-python-used >&2",
+        "exec python3 \"$@\"",
+        ""
+      ].join("\n"),
+      "utf8",
+    );
+    await chmod(rootVenvPython, 0o755);
+
+    const nestedVenvPython = path.join(nestedVenvBinDir, "python");
+    await writeFile(
+      nestedVenvPython,
+      [
+        "#!/bin/sh",
+        "echo nested-venv-python-used >&2",
+        "exec python3 \"$@\"",
+        ""
+      ].join("\n"),
+      "utf8",
+    );
+    await chmod(nestedVenvPython, 0o755);
+
+    await writeFile(
+      path.join(scriptDir, "generate_gds.py"),
+      [
+        "from pathlib import Path",
+        "Path('../layouts').mkdir(exist_ok=True)",
+        "Path('../layouts/from-venv.gds').write_bytes(b'venv gds')",
+        "print('script complete')",
+        ""
+      ].join("\n"),
+      "utf8",
+    );
+
+    const runDesignScriptTool = getRunDesignScriptTool(workspace);
+    const result = await runDesignScriptTool.execute(
+      "call-run-design-script-venv",
+      {
+        scriptPath: "knowledge-base/design-projects/chip/scripts/generate_gds.py",
+        runner: "python",
+        outputPaths: ["knowledge-base/design-projects/chip/layouts/from-venv.gds"],
+      },
+      undefined,
+    );
+
+    assert.deepEqual(result.details, {
+      status: "completed",
+      runner: "python",
+      scriptPath: "knowledge-base/design-projects/chip/scripts/generate_gds.py",
+      command: "../../../../.venv/bin/python generate_gds.py",
+      exitCode: 0,
+      stdout: "script complete\n",
+      stderr: "root-venv-python-used\n",
+      outputs: [
+        {
+          path: "knowledge-base/design-projects/chip/layouts/from-venv.gds",
+          bytes: Buffer.byteLength("venv gds"),
+        },
+      ],
+    });
+  } finally {
+    await rm(workspace, { recursive: true, force: true });
+  }
+});
+
 test("replace_file_text replaces a unique exact block", async () => {
   const workspace = await mkdtemp(path.join(tmpdir(), "pi-agent-tools-"));
   const target = path.join(workspace, "manuscript.tex");

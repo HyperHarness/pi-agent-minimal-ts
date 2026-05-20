@@ -1,27 +1,25 @@
-# Design Projects
+# Design Projects Redirect
 
-This directory is the recommended home for code repositories that the design subagent will use for chip-design work. The default design workspace is a Python package so the project can maintain reusable layout-generation code instead of scattering one-off scripts across wiki pages or manuscript folders.
+Chip-design source code is now managed as knowledge-base content under:
 
-Keep this separate from `knowledge-base/design-records/`:
+```text
+knowledge-base/design-projects/
+```
 
-- `design-projects/` contains executable design code, reusable Python packages, scripts, simulation setup, generated-layout code, and project-local tests.
-- `knowledge-base/design-records/` contains design records, verification reports, failure records, and benchmark cases written through `write_design_artifact`.
-- `knowledge-base/` contains durable knowledge pages and evidence summaries that inform design work, but it should not own design code.
+This keeps design code, generated artifacts, design records, source summaries, manifests, and synthesis pages in one data flywheel. Do not add new design projects under this directory.
 
 Recommended repo-manager configuration for the first design workspace:
 
 ```sh
-BRIDGE_DESIGN_WORKSPACE_DIR=<repo-root>/design-projects/superconducting-qubit-chip
+BRIDGE_DESIGN_WORKSPACE_DIR=<repo-root>/knowledge-base/design-projects/superconducting-qubit-chip
 ```
-
-Project directories under this root are treated as independent design workspaces. The parent agent repository should track this README, but should ignore concrete project repositories such as `superconducting-qubit-chip/`. Point `BRIDGE_DESIGN_WORKSPACE_DIR` at the concrete project repository that repo manager should control.
 
 ## Python Package Convention
 
 The first package workspace is:
 
 ```text
-design-projects/superconducting-qubit-chip/
+knowledge-base/design-projects/superconducting-qubit-chip/
   pyproject.toml
   src/pi_chip_design/
     __init__.py
@@ -39,25 +37,29 @@ Keep the package responsibilities narrow:
 - run local verification checks that can be repeated by the design subagent
 - export files needed by downstream EDA tools
 
-Do not put literature summaries, benchmark conclusions, or design failure narratives in the Python package. Those belong in `knowledge-base/` or `knowledge-base/design-records/`.
+Do not put literature summaries, benchmark conclusions, or design failure narratives directly in the Python package. Those belong in `knowledge-base/sources/`, `knowledge-base/manifests/`, `knowledge-base/pages/`, or `knowledge-base/design-records/`.
 
 ## Python Development Environment
 
-From the design workspace:
+Use a single repository-root virtual environment:
 
 ```sh
-cd design-projects/superconducting-qubit-chip
+cd <repo-root>
 python3 -m venv .venv
 source .venv/bin/activate
 python -m pip install --upgrade pip
-python -m pip install -e ".[dev]"
+python -m pip install -e "knowledge-base/design-projects/superconducting-qubit-chip[dev]"
 ```
+
+On WSL images without `python3-venv`, use `uv venv --seed .venv` and then run the same activation and install commands.
+
+The parent agent process does not need to be started from an activated shell. When the design-subagent runs a Python script through `run_design_script`, it uses the repository root `.venv/bin/python` before falling back to WSL/system `python3`.
 
 Basic checks:
 
 ```sh
-python -m pytest
-python -m ruff check src tests
+.venv/bin/python -m pytest knowledge-base/design-projects/superconducting-qubit-chip/tests
+.venv/bin/python -m ruff check knowledge-base/design-projects/superconducting-qubit-chip/src knowledge-base/design-projects/superconducting-qubit-chip/tests
 ```
 
 The repository currently keeps dependencies minimal. Add heavy EDA, geometry, simulator, or GDS/OASIS dependencies only when a concrete layout workflow needs them, and document the reason in the project README.

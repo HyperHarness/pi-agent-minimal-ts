@@ -252,17 +252,19 @@ design request
 
 # 设计工作区与知识库分层
 
-设计代码和知识记录需要分开：
+设计代码、实验产物和知识记录统一纳入 knowledge-base，但保留不同子目录边界：
 
-- `design-projects/superconducting-qubit-chip/`
+- `knowledge-base/design-projects/superconducting-qubit-chip/`
   - Python package：`pi_chip_design`
   - layout family、parameter schema、generator、verification helper、exporter。
+- `knowledge-base/design-artifacts/`
+  - generated layout、logs、results、experiment code snapshots。
 - `knowledge-base/design-records/`
   - design record、verification report、failure record、benchmark case。
 - `knowledge-base/pages/`
   - 经 wiki-agent curated 的稳定知识、方法、概念和发现。
 
-这能避免把一次性脚本、长期知识、论文写作和实验 benchmark 混在一起。
+这让设计资料进入同一个数据飞轮，同时避免把代码、二进制产物、结构化记录和稳定知识页面混在一起。
 
 ---
 
@@ -346,4 +348,3 @@ design request
 > 面向复杂科研与工程任务的 agent 系统，真正的研究对象不是一次漂亮回答，而是可追踪的工作流、可审计的状态、可复现的实验协议，以及能被专家持续修正的知识闭环。
 
 讨论重点：我们能否共同定义一个从固定证据合成走向工具验证设计任务的 agent benchmark？
-

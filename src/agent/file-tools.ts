@@ -430,15 +430,88 @@ function resolveDesignScriptRunner(
   return scriptName.includes("klayout") ? "klayout" : "python";
 }
 
-function designScriptCommandForRunner(runner: ResolvedDesignScriptRunner, scriptFile: string): {
-  command: string;
-  args: string[];
-} {
-  if (runner === "klayout") {
-    return { command: "klayout", args: ["-b", "-r", scriptFile] };
+async function fileExists(filePath: string): Promise<boolean> {
+  try {
+    const fileStats = await stat(filePath);
+    return fileStats.isFile();
+  } catch {
+    return false;
+  }
+}
+
+function candidateVenvPythonPaths(directory: string): string[] {
+  const venvDir = path.join(directory, ".venv");
+  if (process.platform === "win32") {
+    return [
+      path.join(venvDir, "Scripts", "python.exe"),
+      path.join(venvDir, "Scripts", "python")
+    ];
   }
 
-  return { command: "python3", args: [scriptFile] };
+  return [
+    path.join(venvDir, "bin", "python"),
+    path.join(venvDir, "bin", "python3")
+  ];
+}
+
+async function findWorkspaceVenvPython(workspaceDir: string): Promise<string | undefined> {
+  assertPathInsideDirectory(workspaceDir, workspaceDir);
+
+  for (const candidate of candidateVenvPythonPaths(workspaceDir)) {
+    if (await fileExists(candidate)) {
+      return candidate;
+    }
+  }
+
+  return undefined;
+}
+
+function formatCommandLine(input: {
+  command: string;
+  args: readonly string[];
+  cwd: string;
+}): string {
+  const displayCommand = path.isAbsolute(input.command)
+    ? path.relative(input.cwd, input.command)
+    : input.command;
+  return [displayCommand || input.command, ...input.args].join(" ");
+}
+
+async function designScriptCommandForRunner(input: {
+  runner: ResolvedDesignScriptRunner;
+  scriptFile: string;
+  workingDir: string;
+  workspaceDir: string;
+}): Promise<{
+  command: string;
+  args: string[];
+  commandLine: string;
+}> {
+  if (input.runner === "klayout") {
+    const args = ["-b", "-r", input.scriptFile];
+    return {
+      command: "klayout",
+      args,
+      commandLine: formatCommandLine({
+        command: "klayout",
+        args,
+        cwd: input.workingDir
+      })
+    };
+  }
+
+  const venvPython = await findWorkspaceVenvPython(input.workspaceDir);
+  const command = venvPython ?? "python3";
+  const args = [input.scriptFile];
+  return {
+    command,
+    args,
+    commandLine: formatCommandLine({
+      command,
+      args,
+      cwd: input.workingDir
+    })
+  };
 }
 
 async function collectDesignScriptOutputs(input: {
@@ -490,8 +563,13 @@ async function runDesignScript(input: {
   const runner = resolveDesignScriptRunner(input.runner, resolvedScriptPath);
   const workingDir = path.dirname(resolvedScriptPath);
   const scriptFile = path.basename(resolvedScriptPath);
-  const commandSpec = designScriptCommandForRunner(runner, scriptFile);
-  const commandLine = [commandSpec.command, ...commandSpec.args].join(" ");
+  const commandSpec = await designScriptCommandForRunner({
+    runner,
+    scriptFile,
+    workingDir,
+    workspaceDir: input.workspaceDir
+  });
+  const commandLine = commandSpec.commandLine;
 
   try {
     const { stdout, stderr } = await execFileAsync(commandSpec.command, commandSpec.args, {
