@@ -210,6 +210,58 @@ export interface PaperWikiPageWorkerInput {
     path: string;
     snippet: string;
   }>;
+  evidencePack?: PaperWikiPageEvidencePack;
+}
+
+export interface PaperWikiPageEvidencePack {
+  candidateSummaries: Array<{
+    sourceKey: string;
+    title: string;
+    path: string;
+    summary: string;
+    tags?: string[];
+    sourceKind?: WikiSourceKind;
+  }>;
+  selectedRawChunks: Array<{
+    sourceKey: string;
+    chunkId: string;
+    path: string;
+    text: string;
+    pageFrom?: number;
+    pageTo?: number;
+    sectionId?: string;
+    matchedBy: "anchor" | "query";
+  }>;
+  claimProvenance: Array<{
+    sourceKey?: string;
+    pageKey?: string;
+    claimId?: string;
+    statement: string;
+    confidence?: string;
+    sourceRefs: string[];
+    evidence: Array<{
+      paperKey?: string;
+      sourcePath?: string;
+      parsePath?: string;
+      chunkId?: string;
+      elementId?: string;
+      sectionId?: string;
+      page?: number;
+      figure?: string;
+      table?: string;
+      codeOutputPath?: string;
+      quote?: string;
+      note?: string;
+    }>;
+  }>;
+  contradictionNotes: Array<{
+    pageKey: string;
+    target: string;
+    status: string;
+    evidenceRefs: string[];
+    note?: string;
+  }>;
+  diagnostics: string[];
 }
 
 export interface PaperWikiPageWorkerOutput {

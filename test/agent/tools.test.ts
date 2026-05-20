@@ -21,6 +21,7 @@ import {
   writePaperRecord
 } from "../../src/agent/paper/storage/paper-store.js";
 import { writeTypedWikiPage } from "../../src/agent/wiki/typed-store.js";
+import type { PaperWikiPageWorkerInput } from "../../src/agent/wiki/types.js";
 
 type ToolContentItem = {
   type?: string;
@@ -5107,6 +5108,181 @@ test("build_wiki_page accepts concept drafts with structured open questions and 
     assert.match(page, /Which connectivity assumptions remain unverified\?/);
     assert.match(page, /## Related Pages/);
     assert.match(page, /\[\[superconducting-chip-design\]\]/);
+  } finally {
+    await rm(workspace, { recursive: true, force: true });
+  }
+});
+
+test("build_wiki_page sends evidence pack with raw chunks, provenance, and contradictions to page worker", async () => {
+  const workspace = await mkdtemp(path.join(tmpdir(), "pi-agent-tools-"));
+
+  try {
+    const sourceKey = "arxiv-2601.01010";
+    const sourceDir = path.join(workspace, "knowledge-base/sources", sourceKey);
+    await mkdir(path.join(sourceDir, "chunks"), { recursive: true });
+    await mkdir(path.join(workspace, "knowledge-base/manifests"), { recursive: true });
+    await writeFile(path.join(sourceDir, "summary.md"), [
+      "---",
+      `title: "qLDPC Hardware Evidence"`,
+      "---",
+      "",
+      "# qLDPC Hardware Evidence",
+      "",
+      "Summary: qLDPC layouts need non-local couplers and routing care.",
+      "",
+      "## Evidence Anchors",
+      "",
+      "- qLDPC implementation depends on non-local connectivity.",
+      "  - Quote: \"non-local couplers dominate the hardware routing overhead\"",
+      "  - Locator: paper=arxiv-2601.01010; section=hardware; page=7; chunk=chunk-0002"
+    ].join("\n"), "utf8");
+    await writeFile(path.join(sourceDir, "chunks", "webpage.jsonl"), [
+      JSON.stringify({
+        id: "chunk-0001",
+        paperKey: sourceKey,
+        engine: "webpage",
+        text: "Background material about qLDPC code families.",
+        pageFrom: 1,
+        pageTo: 1,
+        elementIds: ["e1"]
+      }),
+      JSON.stringify({
+        id: "chunk-0002",
+        paperKey: sourceKey,
+        engine: "webpage",
+        text: "The non-local couplers dominate the hardware routing overhead for qLDPC layouts on superconducting chips.",
+        pageFrom: 7,
+        pageTo: 8,
+        sectionId: "hardware",
+        elementIds: ["e2"]
+      })
+    ].join("\n") + "\n", "utf8");
+    await writeFile(path.join(workspace, "knowledge-base/manifests", `${sourceKey}.json`), `${JSON.stringify({
+      schemaVersion: 2,
+      sourceKind: "paper",
+      sourceKey,
+      title: "qLDPC Hardware Evidence",
+      status: "ready",
+      createdAt: "2026-01-01T00:00:00.000Z",
+      updatedAt: "2026-01-01T00:00:00.000Z",
+      summaryPath: `knowledge-base/sources/${sourceKey}/summary.md`,
+      provenance: {},
+      artifacts: [{
+        kind: "parse",
+        path: `knowledge-base/sources/${sourceKey}/parses/webpage/document.md`,
+        engine: "webpage",
+        markdownPath: `knowledge-base/sources/${sourceKey}/parses/webpage/document.md`
+      }],
+      tags: ["qldpc", "superconducting-chips"],
+      relatedSourceKeys: [],
+      synthesisPageKeys: []
+    }, null, 2)}\n`, "utf8");
+    await writeTypedWikiPage({
+      workspaceDir: workspace,
+      page: {
+        metadata: {
+          schema_version: 1,
+          type: "finding",
+          key: "qldpc-routing-risk",
+          title: "qLDPC routing risk",
+          aliases: [],
+          tags: ["qldpc"],
+          evidence_contract: "paper-backed",
+          source_refs: [sourceKey],
+          claims: [{
+            claimId: "claim-routing",
+            kind: "qualitative",
+            statement: "qLDPC routing overhead is a hardware bottleneck.",
+            sourceRefs: [sourceKey],
+            evidence: [{
+              paperKey: sourceKey,
+              chunkId: "chunk-0002",
+              quote: "non-local couplers dominate the hardware routing overhead"
+            }],
+            confidence: "medium"
+          }],
+          typed_relations: [{
+            type: "contradicts",
+            target: "local-coupler-only-qldpc",
+            targetKind: "page",
+            evidenceRefs: [sourceKey],
+            status: "candidate",
+            note: "Some summaries assume local couplers are sufficient."
+          }],
+          created_at: "2026-01-01T00:00:00.000Z",
+          updated_at: "2026-01-01T00:00:00.000Z"
+        },
+        body: "# qLDPC routing risk\n\nA prior page marks qLDPC routing as unresolved."
+      }
+    });
+
+    let capturedInput: PaperWikiPageWorkerInput | undefined;
+    const tool = getBuildWikiPageTool(workspace, {
+      searchPaperWiki: async (options) => ({
+        query: options.query,
+        results: [
+          {
+            kind: "source",
+            key: sourceKey,
+            paperKey: sourceKey,
+            title: "qLDPC Hardware Evidence",
+            path: `knowledge-base/sources/${sourceKey}/summary.md`,
+            snippet: "qLDPC implementation needs non-local couplers.",
+          },
+          {
+            kind: "page",
+            key: "qldpc-routing-risk",
+            pageKey: "qldpc-routing-risk",
+            title: "qLDPC routing risk",
+            path: "knowledge-base/pages/qldpc-routing-risk.md",
+            snippet: "A prior page marks qLDPC routing as unresolved.",
+          },
+        ],
+      }),
+      paperWikiPageWorker: async (input) => {
+        capturedInput = input;
+        return {
+          title: "qLDPC Hardware Synthesis",
+          pageMarkdown: [
+            "## Overview",
+            "",
+            "qLDPC routing depends on non-local couplers [arxiv-2601.01010].",
+            "",
+            "## Key Concepts",
+            "",
+            "Connectivity and routing overhead shape chip feasibility.",
+            "",
+            "## Evidence",
+            "",
+            "The selected chunk supports the routing-overhead claim.",
+            "",
+            "## Open Questions",
+            "",
+            "Which coupler topology is practical?",
+            "",
+            "## Related Pages",
+            "",
+            "[[qldpc-routing-risk]]"
+          ].join("\n"),
+          confidence: "high",
+        };
+      },
+    });
+
+    const result = await tool.execute("build-page-evidence-pack", {
+      topic: "qLDPC hardware synthesis",
+      question: "哪些 source chunk 支撑 qLDPC 在超导芯片上的实现瓶颈？",
+      pageKey: "qldpc-hardware-synthesis",
+      forbidExternalEvidence: true,
+    }, undefined);
+
+    assert.equal((result.details as { status?: string }).status, "written");
+    assert.equal(capturedInput?.evidencePack?.candidateSummaries[0]?.sourceKey, sourceKey);
+    assert.equal(capturedInput?.evidencePack?.selectedRawChunks[0]?.chunkId, "chunk-0002");
+    assert.match(capturedInput?.evidencePack?.selectedRawChunks[0]?.text ?? "", /non-local couplers/);
+    assert.equal(capturedInput?.evidencePack?.claimProvenance[0]?.sourceKey, sourceKey);
+    assert.equal(capturedInput?.evidencePack?.contradictionNotes[0]?.pageKey, "qldpc-routing-risk");
+    assert.match(capturedInput?.evidencePack?.contradictionNotes[0]?.note ?? "", /local couplers/);
   } finally {
     await rm(workspace, { recursive: true, force: true });
   }

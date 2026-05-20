@@ -239,19 +239,23 @@ export function createWikiEvidenceWorker(model: Model<Api>, workspaceDir: string
       timestamp: Date.now(),
       content: [
         "Create a grounded topic wiki synthesis page from the evidence JSON below.",
-        "Use only the supplied source-summary evidence. Do not invent papers, metrics, or unsupported claims.",
+        "Use only the supplied evidence. Do not invent papers, metrics, or unsupported claims.",
         "Return only a JSON object with these fields: title, pageMarkdown, tags, openQuestions, relatedPageKeys, confidence, groundingWarnings.",
         "pageMarkdown should be concise but structured Markdown with sections such as Overview, Key Concepts, Evidence, Challenges, and Representative Papers when appropriate.",
         "Do not include an Open Questions section in pageMarkdown; put open questions only in the openQuestions array.",
         "If page-structure guidance is supplied, treat it as required page structure guidance, not as the user's question.",
-        "Every substantive claim should cite supplied source keys inline, for example [arxiv-2507.09690].",
+        "Treat candidate summaries as recall and compression aids, not final evidence for claims.",
+        "Ground substantive claims in selectedRawChunks or claimProvenance when those are supplied, and cite source keys inline, for example [arxiv-2507.09690].",
+        "Preserve contradictionNotes as caveats, disputed points, or open checks instead of smoothing them away.",
+        "If only summary evidence is available for a claim, mark that limitation in groundingWarnings.",
         "tags, openQuestions, relatedPageKeys, and groundingWarnings must be arrays of strings.",
         "confidence must be high, medium, or low.",
         JSON.stringify({
           topic: input.topic,
           question: input.question,
           templateGuidance: input.templateGuidance,
-          evidence: input.evidence
+          evidence: input.evidence,
+          evidencePack: input.evidencePack
         })
       ].join("\n\n")
     };

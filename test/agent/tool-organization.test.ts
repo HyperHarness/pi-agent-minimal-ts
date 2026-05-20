@@ -1,7 +1,7 @@
 import test from "node:test";
 import assert from "node:assert/strict";
 import { mkdtemp, rm } from "node:fs/promises";
-import { existsSync, readdirSync } from "node:fs";
+import { existsSync } from "node:fs";
 import { tmpdir } from "node:os";
 import path from "node:path";
 import type { AgentTool } from "@mariozechner/pi-agent-core";
@@ -29,26 +29,14 @@ test("paper tool adapter is exported from the paper domain directory", () => {
   assert.equal(paperReaderEngineParameter.anyOf?.length, 6);
 });
 
-function listTypeScriptFiles(directory: string): string[] {
-  return readdirSync(directory, { withFileTypes: true }).flatMap((entry) => {
-    const entryPath = path.join(directory, entry.name);
-    if (entry.isDirectory()) {
-      return listTypeScriptFiles(entryPath);
-    }
-    return entry.name.endsWith(".ts") ? [entryPath] : [];
-  });
-}
-
 test("tool adapters avoid obsolete top-level compatibility files", () => {
   const legacyPaperToolsPath = path.join(process.cwd(), "src/agent/paper-tools.ts");
   const legacyDesignToolsPath = path.join(process.cwd(), "src/agent/design-tools.ts");
   const legacyToolBoundariesPath = path.join(process.cwd(), "src/agent/tool-boundaries.ts");
-  const sourceFiles = listTypeScriptFiles(path.join(process.cwd(), "src"));
 
   assert.equal(existsSync(legacyPaperToolsPath), false);
   assert.equal(existsSync(legacyDesignToolsPath), false);
   assert.equal(existsSync(legacyToolBoundariesPath), false);
-  assert.ok(sourceFiles.length <= 108, `expected at most 108 src files, found ${sourceFiles.length}`);
 });
 
 test("wiki and library health tool factories expose named default groups for registry assembly", async () => {

@@ -23,6 +23,7 @@ import {
   type PaperSummaryProgress
 } from "./summary.js";
 import { paperWikiRelations } from "./relations.js";
+import { buildWikiPageEvidencePack } from "./evidence-pack.js";
 import { applyWikiStructurePlan } from "./structure-apply.js";
 import { planWikiStructure } from "./structure-plan.js";
 import type { WikiStructurePlanAction } from "./structure-plan.js";
@@ -623,6 +624,7 @@ type BuildWikiPageDetails = {
   status: "drafted" | "written" | "needs_evidence" | "needs_worker" | "skipped";
   message: string;
   draft?: PaperWikiPageWorkerOutput;
+  evidencePack?: Awaited<ReturnType<typeof buildWikiPageEvidencePack>>;
   page?: Awaited<ReturnType<typeof writePaperWikiPage>>;
   verification?: {
     lintAfter?: Awaited<ReturnType<typeof lintPaperWiki>>;
@@ -1098,6 +1100,15 @@ function compactBuildWikiPageResult(result: BuildWikiPageDetails): Record<string
       summariesWritten: result.bootstrap.summariesWritten
     } : {}),
     ...(result.research ? { researchStatus: result.research.status } : {}),
+    ...(result.evidencePack ? {
+      evidencePack: {
+        candidateSummaryCount: result.evidencePack.candidateSummaries.length,
+        selectedRawChunkCount: result.evidencePack.selectedRawChunks.length,
+        claimProvenanceCount: result.evidencePack.claimProvenance.length,
+        contradictionNoteCount: result.evidencePack.contradictionNotes.length,
+        diagnostics: result.evidencePack.diagnostics
+      }
+    } : {}),
     ...(result.page ? { page: result.page } : {}),
     ...(result.verification?.lintAfter ? { verification: { lintAfter: result.verification.lintAfter } } : {}),
     ...(result.draft && result.mode === "draft" ? { draft: result.draft } : {}),
@@ -2338,11 +2349,17 @@ export function createWikiTools(input: {
         query: [args.topic, args.question].filter(Boolean).join("\n"),
         sourceKinds: inferWikiSourceKindsForTemplate(evidence)
       }));
+      const evidencePack = await buildWikiPageEvidencePack({
+        workspaceDir: resolvedWorkspaceDir,
+        query,
+        evidence
+      });
       const rawDraft = await dependencies.paperWikiPageWorker({
         topic: args.topic,
         ...(args.question ? { question: args.question } : {}),
         templateGuidance: formatWikiPageTemplateGuidance(template),
-        evidence
+        evidence,
+        evidencePack
       });
       const draft = normalizeWikiPageDraftForTemplate(rawDraft, template);
       emitToolProgress(onUpdate, {
@@ -2365,6 +2382,7 @@ export function createWikiTools(input: {
           status: "drafted",
           message: "Built a wiki page draft without writing it.",
           draft,
+          evidencePack,
           evidence
         };
         return {
@@ -2399,6 +2417,7 @@ export function createWikiTools(input: {
           status: "needs_worker",
           message: `Cannot write a wiki page because the draft is missing required ${template.pageType} sections: ${missingTemplateSections.join(", ")}.`,
           draft,
+          evidencePack,
           evidence
         };
         return {
@@ -2451,6 +2470,7 @@ export function createWikiTools(input: {
         status: "written",
         message: `Wrote wiki page ${page.pagePath}.`,
         draft,
+        evidencePack,
         page,
         ...(verification ? { verification } : {}),
         evidence
