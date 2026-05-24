@@ -1,6 +1,6 @@
 import type { AssistantMessage } from "@mariozechner/pi-ai";
 import {
-  DESIGN_SUBAGENT_SYSTEM_PROMPT,
+  DESIGN_AGENT_SYSTEM_PROMPT,
   PAPER_DOWNLOAD_SUBAGENT_SYSTEM_PROMPT,
   PAPER_WRITING_WORKER_SYSTEM_PROMPT,
   WIKI_EVIDENCE_WORKER_SYSTEM_PROMPT
@@ -167,7 +167,7 @@ export function systemPromptForWorker(role: RoutedWorkerRole): string {
   if (normalizedRole === "wiki-evidence-worker") {
     return WIKI_EVIDENCE_WORKER_SYSTEM_PROMPT;
   }
-  return DESIGN_SUBAGENT_SYSTEM_PROMPT;
+  return DESIGN_AGENT_SYSTEM_PROMPT;
 }
 
 function addString(set: Set<string>, value: unknown): void {

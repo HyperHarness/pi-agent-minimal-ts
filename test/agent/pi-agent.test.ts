@@ -119,21 +119,24 @@ test("router worker system prompts describe isolated responsibilities", () => {
   const wikiPrompt = (piAgent as { WIKI_EVIDENCE_WORKER_SYSTEM_PROMPT?: string }).WIKI_EVIDENCE_WORKER_SYSTEM_PROMPT;
   const downloadPrompt = (piAgent as { PAPER_DOWNLOAD_SUBAGENT_SYSTEM_PROMPT?: string })
     .PAPER_DOWNLOAD_SUBAGENT_SYSTEM_PROMPT;
-  const designPrompt = (piAgent as { DESIGN_SUBAGENT_SYSTEM_PROMPT?: string }).DESIGN_SUBAGENT_SYSTEM_PROMPT;
+  const designPrompt = (piAgent as { DESIGN_AGENT_SYSTEM_PROMPT?: string }).DESIGN_AGENT_SYSTEM_PROMPT;
+  const legacyDesignPrompt = (piAgent as { DESIGN_SUBAGENT_SYSTEM_PROMPT?: string }).DESIGN_SUBAGENT_SYSTEM_PROMPT;
   assert.equal(typeof wikiPrompt, "string");
   assert.equal(typeof downloadPrompt, "string");
   assert.equal(typeof designPrompt, "string");
+  assert.equal(legacyDesignPrompt, designPrompt);
   assert.match(wikiPrompt as string, /wiki-evidence-worker/);
   assert.match(wikiPrompt as string, /source-summary/);
   assert.match(downloadPrompt as string, /paper-download-subagent/);
   assert.match(downloadPrompt as string, /download_paper/);
   assert.match(downloadPrompt as string, /get_time first/);
   assert.match(downloadPrompt as string, /past N years/);
-  assert.match(designPrompt as string, /design-subagent/);
-  assert.match(designPrompt as string, /write_design_artifact/);
+  assert.match(designPrompt as string, /design-agent/);
+  assert.match(designPrompt as string, /layout-code/);
   assert.match(designPrompt as string, /knowledge-base\/design-code/);
   assert.match(designPrompt as string, /sync_design_environment/);
   assert.match(designPrompt as string, /root \.venv/);
+  assert.match(designPrompt as string, /Do not install packages ad hoc with pip/);
   assert.match(designPrompt as string, /design-projects\/.*deprecated/);
 });
 

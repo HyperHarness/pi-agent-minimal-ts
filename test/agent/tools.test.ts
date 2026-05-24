@@ -2076,8 +2076,13 @@ test("createToolsForBoundary exposes isolated wiki and worker tool surfaces", as
     assert.ok(!evidenceTools.some((tool) => tool.name === "wiki_structure_plan"));
     assert.ok(!evidenceTools.some((tool) => tool.name === "wiki_apply_structure_plan"));
 
-    const designTools = createToolsForBoundary(workspace, "design-subagent");
-    assert.deepEqual(designTools.map((tool) => tool.name), getToolBoundaryToolNames("design-subagent"));
+    const designTools = createToolsForBoundary(workspace, "design-agent");
+    assert.deepEqual(designTools.map((tool) => tool.name), getToolBoundaryToolNames("design-agent"));
+    const legacyDesignTools = createToolsForBoundary(workspace, "design-subagent");
+    assert.deepEqual(
+      legacyDesignTools.map((tool) => tool.name),
+      designTools.map((tool) => tool.name)
+    );
     assert.ok(designTools.some((tool) => tool.name === "answer_paper_wiki_question"));
     assert.ok(designTools.some((tool) => tool.name === "search_paper_wiki"));
     assert.ok(designTools.some((tool) => tool.name === "write_design_artifact"));
@@ -2117,6 +2122,7 @@ test("createToolsForBoundary keeps every boundary in declared order", async () =
       "wiki-agent",
       "paper-download-subagent",
       "wiki-evidence-worker",
+      "design-agent",
       "design-subagent",
       "paper-writing-worker",
     ] as const) {
@@ -2135,6 +2141,7 @@ test("tools module re-exports tool boundary names from tool types", () => {
     "wiki-agent",
     "paper-download-subagent",
     "wiki-evidence-worker",
+    "design-agent",
     "design-subagent",
     "paper-writing-worker",
   ] as const) {

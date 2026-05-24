@@ -79,7 +79,7 @@ type ToolName =
   | "write_file"
   | "write_paper_wiki_source";
 
-const DESIGN_AGENT_TOOL_NAMES = [
+export const DESIGN_AGENT_TOOL_NAMES = [
   "answer_paper_wiki_question",
   "search_paper_wiki",
   "search_local_papers",
