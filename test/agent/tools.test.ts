@@ -629,6 +629,22 @@ function getVerifyDesignPythonImportTool(workspaceDir: string) {
   return tool;
 }
 
+function rootVenvPythonRelativePathForPlatform(): string {
+  return process.platform === "win32" ? ".venv/Scripts/python.exe" : ".venv/bin/python";
+}
+
+function rootVenvPythonPathForPlatform(workspaceDir: string): string {
+  return path.join(workspaceDir, ...rootVenvPythonRelativePathForPlatform().split("/"));
+}
+
+function rootVenvPythonCommandPathForPlatform(): string {
+  return path.join(
+    ".venv",
+    process.platform === "win32" ? "Scripts" : "bin",
+    process.platform === "win32" ? "python.exe" : "python",
+  );
+}
+
 function getUpdateDesignDependencyTool(workspaceDir: string) {
   const tool = createTools(workspaceDir, { toolProfile: "full" }).find(
     (candidate) => candidate.name === "update_design_dependency",
@@ -1859,11 +1875,10 @@ test("sync_design_environment runs uv sync for knowledge-base design-code into t
 
 test("verify_design_python_import uses root venv python", async () => {
   const workspace = await mkdtemp(path.join(tmpdir(), "pi-agent-tools-"));
-  const venvBinDir = path.join(workspace, ".venv", "bin");
-  const fakePython = path.join(venvBinDir, "python");
+  const fakePython = rootVenvPythonPathForPlatform(workspace);
 
   try {
-    await mkdir(venvBinDir, { recursive: true });
+    await mkdir(path.dirname(fakePython), { recursive: true });
     await writeFile(
       fakePython,
       [
@@ -1885,10 +1900,44 @@ test("verify_design_python_import uses root venv python", async () => {
 
     assert.equal(details.status, "importable");
     assert.equal(details.moduleName, "gdsfactory");
-    assert.equal(details.pythonPath, ".venv/bin/python");
+    assert.equal(details.pythonPath, rootVenvPythonRelativePathForPlatform());
     assert.match(String(details.stdout), /fake-python:-c import gdsfactory/);
     assert.equal(details.stderr, "");
-    assert.match(String(details.command), /\.venv\/bin\/python -c/);
+    assert.ok(String(details.command).includes(`${rootVenvPythonCommandPathForPlatform()} -c`));
+  } finally {
+    await rm(workspace, { recursive: true, force: true });
+  }
+});
+
+test("verify_design_python_import caps combined success output", async () => {
+  const workspace = await mkdtemp(path.join(tmpdir(), "pi-agent-tools-"));
+  const fakePython = rootVenvPythonPathForPlatform(workspace);
+
+  try {
+    await mkdir(path.dirname(fakePython), { recursive: true });
+    await writeFile(
+      fakePython,
+      [
+        "#!/bin/sh",
+        "printf '%*s' 900 '' | tr ' ' 'o'",
+        "printf '%*s' 900 '' | tr ' ' 'e' >&2",
+        "",
+      ].join("\n"),
+      "utf8",
+    );
+    await chmod(fakePython, 0o755);
+
+    const verifyDesignPythonImportTool = getVerifyDesignPythonImportTool(workspace);
+    const result = await verifyDesignPythonImportTool.execute(
+      "call-verify-design-python-import-output-cap",
+      { moduleName: "gdsfactory", maxOutputChars: 1000 },
+      undefined,
+    );
+    const details = result.details as { stdout?: unknown; stderr?: unknown };
+    const stdout = String(details.stdout ?? "");
+    const stderr = String(details.stderr ?? "");
+
+    assert.ok(stdout.length + stderr.length <= 1000);
   } finally {
     await rm(workspace, { recursive: true, force: true });
   }

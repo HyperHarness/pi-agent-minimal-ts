@@ -458,6 +458,18 @@ function truncateOutput(text: string, maxChars: number): string {
   return `${text.slice(0, Math.max(0, maxChars - 120)).trimEnd()}\n\n[output truncated to ${maxChars} chars]`;
 }
 
+function truncateSeparatedOutput(input: {
+  stdout: string;
+  stderr: string;
+  maxChars: number;
+}): { stdout: string; stderr: string } {
+  const stdoutBudget = Math.floor(input.maxChars / 2);
+  const stdout = truncateOutput(input.stdout, stdoutBudget);
+  const stderrBudget = input.maxChars - stdout.length;
+  const stderr = stderrBudget > 0 ? truncateOutput(input.stderr, stderrBudget) : "";
+  return { stdout, stderr };
+}
+
 function normalizeDesignToolOutputChars(value: number | undefined): number {
   return Math.min(HARD_DESIGN_SCRIPT_OUTPUT_CHARS, Math.max(1000, Math.trunc(value ?? 12000)));
 }
@@ -802,14 +814,19 @@ async function verifyDesignPythonImport(input: {
       timeout: 120000,
       maxBuffer: Math.max(input.maxOutputChars * 2, 1024 * 1024)
     }) as { stdout: string | Buffer; stderr: string | Buffer };
+    const output = truncateSeparatedOutput({
+      stdout: stdout.toString(),
+      stderr: stderr.toString(),
+      maxChars: input.maxOutputChars
+    });
 
     return {
       status: "importable",
       moduleName: input.moduleName,
       pythonPath: normalizeWorkspaceRelativePath(input.workspaceDir, pythonPath),
       command: commandLine,
-      stdout: truncateOutput(stdout.toString(), input.maxOutputChars),
-      stderr: truncateOutput(stderr.toString(), input.maxOutputChars)
+      stdout: output.stdout,
+      stderr: output.stderr
     };
   } catch (error) {
     const failed = error as { stdout?: string | Buffer; stderr?: string | Buffer; message?: string };
