@@ -1455,6 +1455,97 @@ test("write_design_code_file rejects parent repo paths", async () => {
   }
 });
 
+test("write_design_code_file rejects symlink escapes outside design-code", async () => {
+  const workspace = await mkdtemp(path.join(tmpdir(), "pi-agent-tools-"));
+  const outside = await mkdtemp(path.join(tmpdir(), "pi-agent-tools-outside-"));
+  const designCodeDir = path.join(workspace, "knowledge-base", "design-code");
+  const escapedPath = path.join(outside, "escape.py");
+
+  try {
+    await mkdir(designCodeDir, { recursive: true });
+    await writeFile(path.join(designCodeDir, "pyproject.toml"), "[project]\nname = \"pi-chip-design\"\n", "utf8");
+    await symlink(outside, path.join(designCodeDir, "linked"), process.platform === "win32" ? "junction" : "dir");
+
+    const writeDesignCodeFileTool = getWriteDesignCodeFileTool(workspace);
+    await assert.rejects(
+      () => writeDesignCodeFileTool.execute(
+        "call-write-design-code-file-symlink",
+        { path: "linked/escape.py", content: "unsafe" },
+        undefined,
+      ),
+      /outside the workspace|outside.*design-code|Requested path is outside|design-code file tools only write under knowledge-base\/design-code/,
+    );
+    await assert.rejects(() => readFile(escapedPath, "utf8"), /ENOENT/);
+  } finally {
+    await rm(workspace, { recursive: true, force: true });
+    await rm(outside, { recursive: true, force: true });
+  }
+});
+
+test("write_design_code_file rejects absolute paths", async () => {
+  const workspace = await mkdtemp(path.join(tmpdir(), "pi-agent-tools-"));
+  const outside = await mkdtemp(path.join(tmpdir(), "pi-agent-tools-outside-"));
+  const designCodeDir = path.join(workspace, "knowledge-base", "design-code");
+
+  try {
+    await mkdir(designCodeDir, { recursive: true });
+    await writeFile(path.join(designCodeDir, "pyproject.toml"), "[project]\nname = \"pi-chip-design\"\n", "utf8");
+
+    const writeDesignCodeFileTool = getWriteDesignCodeFileTool(workspace);
+    await assert.rejects(
+      () => writeDesignCodeFileTool.execute(
+        "call-write-design-code-file-absolute-inside",
+        { path: path.join(designCodeDir, "absolute.py"), content: "unsafe" },
+        undefined,
+      ),
+      /design-code file tools only write under knowledge-base\/design-code|Requested path is outside/,
+    );
+    await assert.rejects(
+      () => writeDesignCodeFileTool.execute(
+        "call-write-design-code-file-absolute-outside",
+        { path: path.join(outside, "absolute.py"), content: "unsafe" },
+        undefined,
+      ),
+      /design-code file tools only write under knowledge-base\/design-code|Requested path is outside/,
+    );
+  } finally {
+    await rm(workspace, { recursive: true, force: true });
+    await rm(outside, { recursive: true, force: true });
+  }
+});
+
+test("write_design_code_file overwrites existing design-code files", async () => {
+  const workspace = await mkdtemp(path.join(tmpdir(), "pi-agent-tools-"));
+  const designCodeDir = path.join(workspace, "knowledge-base", "design-code");
+  const target = path.join(designCodeDir, "src", "pi_chip_design", "layouts", "overwrite.py");
+  const secondContent = "def build():\n    return 'second'\n";
+
+  try {
+    await mkdir(designCodeDir, { recursive: true });
+    await writeFile(path.join(designCodeDir, "pyproject.toml"), "[project]\nname = \"pi-chip-design\"\n", "utf8");
+
+    const writeDesignCodeFileTool = getWriteDesignCodeFileTool(workspace);
+    await writeDesignCodeFileTool.execute(
+      "call-write-design-code-file-overwrite-1",
+      { path: "src/pi_chip_design/layouts/overwrite.py", content: "def build():\n    return 'first'\n" },
+      undefined,
+    );
+    const result = await writeDesignCodeFileTool.execute(
+      "call-write-design-code-file-overwrite-2",
+      { path: "knowledge-base/design-code/src/pi_chip_design/layouts/overwrite.py", content: secondContent },
+      undefined,
+    );
+
+    assert.equal(await readFile(target, "utf8"), secondContent);
+    assert.deepEqual(result.details, {
+      path: "knowledge-base/design-code/src/pi_chip_design/layouts/overwrite.py",
+      bytes: Buffer.byteLength(secondContent, "utf8"),
+    });
+  } finally {
+    await rm(workspace, { recursive: true, force: true });
+  }
+});
+
 test("replace_design_code_file_text replaces a unique exact block under design-code", async () => {
   const workspace = await mkdtemp(path.join(tmpdir(), "pi-agent-tools-"));
   const designCodeDir = path.join(workspace, "knowledge-base", "design-code");
@@ -1482,6 +1573,59 @@ test("replace_design_code_file_text replaces a unique exact block under design-c
       path: "knowledge-base/design-code/src/pi_chip_design/layouts/demo.py",
       replacements: 1,
       bytes: Buffer.byteLength(updated, "utf8"),
+    });
+  } finally {
+    await rm(workspace, { recursive: true, force: true });
+  }
+});
+
+test("replace_design_code_file_text rejects duplicate search text without replaceAll", async () => {
+  const workspace = await mkdtemp(path.join(tmpdir(), "pi-agent-tools-"));
+  const designCodeDir = path.join(workspace, "knowledge-base", "design-code");
+  const target = path.join(designCodeDir, "src", "pi_chip_design", "layouts", "duplicate.py");
+
+  try {
+    await mkdir(path.dirname(target), { recursive: true });
+    await writeFile(path.join(designCodeDir, "pyproject.toml"), "[project]\nname = \"pi-chip-design\"\n", "utf8");
+    await writeFile(target, "foo foo", "utf8");
+
+    const replaceDesignCodeFileTextTool = getReplaceDesignCodeFileTextTool(workspace);
+    await assert.rejects(
+      () => replaceDesignCodeFileTextTool.execute(
+        "call-replace-design-code-file-duplicate",
+        { path: "src/pi_chip_design/layouts/duplicate.py", search: "foo", replacement: "bar" },
+        undefined,
+      ),
+      /Search text occurs 2 times/,
+    );
+    assert.equal(await readFile(target, "utf8"), "foo foo");
+  } finally {
+    await rm(workspace, { recursive: true, force: true });
+  }
+});
+
+test("replace_design_code_file_text replaces all occurrences when replaceAll is true", async () => {
+  const workspace = await mkdtemp(path.join(tmpdir(), "pi-agent-tools-"));
+  const designCodeDir = path.join(workspace, "knowledge-base", "design-code");
+  const target = path.join(designCodeDir, "src", "pi_chip_design", "layouts", "replace-all.py");
+
+  try {
+    await mkdir(path.dirname(target), { recursive: true });
+    await writeFile(path.join(designCodeDir, "pyproject.toml"), "[project]\nname = \"pi-chip-design\"\n", "utf8");
+    await writeFile(target, "foo foo", "utf8");
+
+    const replaceDesignCodeFileTextTool = getReplaceDesignCodeFileTextTool(workspace);
+    const result = await replaceDesignCodeFileTextTool.execute(
+      "call-replace-design-code-file-replace-all",
+      { path: "src/pi_chip_design/layouts/replace-all.py", search: "foo", replacement: "bar", replaceAll: true },
+      undefined,
+    );
+
+    assert.equal(await readFile(target, "utf8"), "bar bar");
+    assert.deepEqual(result.details, {
+      path: "knowledge-base/design-code/src/pi_chip_design/layouts/replace-all.py",
+      replacements: 2,
+      bytes: Buffer.byteLength("bar bar", "utf8"),
     });
   } finally {
     await rm(workspace, { recursive: true, force: true });
