@@ -621,6 +621,14 @@ function getSyncDesignEnvironmentTool(workspace: string): SyncDesignEnvironmentT
   return syncDesignEnvironmentTool as SyncDesignEnvironmentTool;
 }
 
+function getVerifyDesignPythonImportTool(workspaceDir: string) {
+  const tool = createTools(workspaceDir, { toolProfile: "full" }).find(
+    (candidate) => candidate.name === "verify_design_python_import",
+  );
+  assert.ok(tool);
+  return tool;
+}
+
 function getUpdateDesignDependencyTool(workspaceDir: string) {
   const tool = createTools(workspaceDir, { toolProfile: "full" }).find(
     (candidate) => candidate.name === "update_design_dependency",
@@ -1849,6 +1857,79 @@ test("sync_design_environment runs uv sync for knowledge-base design-code into t
   }
 });
 
+test("verify_design_python_import uses root venv python", async () => {
+  const workspace = await mkdtemp(path.join(tmpdir(), "pi-agent-tools-"));
+  const venvBinDir = path.join(workspace, ".venv", "bin");
+  const fakePython = path.join(venvBinDir, "python");
+
+  try {
+    await mkdir(venvBinDir, { recursive: true });
+    await writeFile(
+      fakePython,
+      [
+        "#!/bin/sh",
+        "echo fake-python:$@",
+        "",
+      ].join("\n"),
+      "utf8",
+    );
+    await chmod(fakePython, 0o755);
+
+    const verifyDesignPythonImportTool = getVerifyDesignPythonImportTool(workspace);
+    const result = await verifyDesignPythonImportTool.execute(
+      "call-verify-design-python-import",
+      { moduleName: "gdsfactory" },
+      undefined,
+    );
+    const details = result.details as Record<string, unknown>;
+
+    assert.equal(details.status, "importable");
+    assert.equal(details.moduleName, "gdsfactory");
+    assert.equal(details.pythonPath, ".venv/bin/python");
+    assert.match(String(details.stdout), /fake-python:-c import gdsfactory/);
+    assert.equal(details.stderr, "");
+    assert.match(String(details.command), /\.venv\/bin\/python -c/);
+  } finally {
+    await rm(workspace, { recursive: true, force: true });
+  }
+});
+
+test("verify_design_python_import rejects invalid module names", async () => {
+  const workspace = await mkdtemp(path.join(tmpdir(), "pi-agent-tools-"));
+
+  try {
+    const verifyDesignPythonImportTool = getVerifyDesignPythonImportTool(workspace);
+    await assert.rejects(
+      verifyDesignPythonImportTool.execute(
+        "call-verify-design-python-import-invalid",
+        { moduleName: "gdsfactory;import os" },
+        undefined,
+      ),
+      /Invalid Python module name/,
+    );
+  } finally {
+    await rm(workspace, { recursive: true, force: true });
+  }
+});
+
+test("verify_design_python_import rejects missing root venv python", async () => {
+  const workspace = await mkdtemp(path.join(tmpdir(), "pi-agent-tools-"));
+
+  try {
+    const verifyDesignPythonImportTool = getVerifyDesignPythonImportTool(workspace);
+    await assert.rejects(
+      verifyDesignPythonImportTool.execute(
+        "call-verify-design-python-import-missing-python",
+        { moduleName: "gdsfactory" },
+        undefined,
+      ),
+      /Root \.venv Python was not found/,
+    );
+  } finally {
+    await rm(workspace, { recursive: true, force: true });
+  }
+});
+
 test("update_design_dependency adds a main dependency to design-code pyproject", async () => {
   const workspace = await mkdtemp(path.join(tmpdir(), "pi-agent-tools-"));
   const designCodeDir = path.join(workspace, "knowledge-base", "design-code");
@@ -2501,6 +2582,7 @@ const EXPECTED_FULL_ONLY_TOOL_NAMES = [
   "replace_design_code_file_text",
   "update_design_dependency",
   "sync_design_environment",
+  "verify_design_python_import",
   "run_design_script",
   "paper_orchestra_prepare_workspace",
   "paper_orchestra_check_draft",
@@ -2609,6 +2691,7 @@ test("createToolsForBoundary exposes isolated wiki and worker tool surfaces", as
     assert.ok(designTools.some((tool) => tool.name === "write_design_code_file"));
     assert.ok(designTools.some((tool) => tool.name === "replace_design_code_file_text"));
     assert.ok(designTools.some((tool) => tool.name === "sync_design_environment"));
+    assert.ok(designTools.some((tool) => tool.name === "verify_design_python_import"));
     assert.ok(designTools.some((tool) => tool.name === "run_design_script"));
     assert.ok(!designTools.some((tool) => tool.name === "download_paper"));
     assert.ok(!designTools.some((tool) => tool.name === "web_search"));

@@ -64,6 +64,7 @@ type ToolName =
   | "replace_file_text"
   | "research_topic_bootstrap"
   | "sync_design_environment"
+  | "verify_design_python_import"
   | "update_design_dependency"
   | "run_design_script"
   | "search_local_papers"
@@ -89,6 +90,7 @@ export const DESIGN_AGENT_TOOL_NAMES = [
   "list_local_papers",
   "update_design_dependency",
   "sync_design_environment",
+  "verify_design_python_import",
   "run_design_script",
   "write_design_artifact",
   "write_design_code_file",

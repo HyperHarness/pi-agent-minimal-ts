@@ -215,6 +215,18 @@ const syncDesignEnvironmentParameters = Type.Object({
   )
 });
 
+const verifyDesignPythonImportParameters = Type.Object({
+  moduleName: Type.String({
+    description: "Python module name to import with the repository root .venv Python, such as gdsfactory."
+  }),
+  maxOutputChars: Type.Optional(
+    Type.Integer({
+      description: "Maximum combined stdout/stderr characters to return. Defaults to 12000.",
+      minimum: 1000
+    })
+  )
+});
+
 const updateDesignDependencyParameters = Type.Object({
   name: Type.String({
     description: "Python dependency package name to declare in knowledge-base/design-code/pyproject.toml."
@@ -244,6 +256,7 @@ type CompileLatexParameters = Static<typeof compileLatexParameters>;
 type WriteDesignArtifactParameters = Static<typeof writeDesignArtifactParameters>;
 type RunDesignScriptParameters = Static<typeof runDesignScriptParameters>;
 type SyncDesignEnvironmentParameters = Static<typeof syncDesignEnvironmentParameters>;
+type VerifyDesignPythonImportParameters = Static<typeof verifyDesignPythonImportParameters>;
 type UpdateDesignDependencyParameters = Static<typeof updateDesignDependencyParameters>;
 type ResolvedDesignScriptRunner = "python" | "klayout";
 
@@ -745,6 +758,61 @@ async function syncDesignEnvironment(input: {
     };
   } catch (error) {
     const failed = error as { code?: string | number; stdout?: string | Buffer; stderr?: string | Buffer; message?: string };
+    const output = [
+      `$ ${commandLine}`,
+      failed.stdout?.toString() ?? "",
+      failed.stderr?.toString() ?? "",
+      failed.message ?? String(error)
+    ].filter((part) => part.trim().length > 0).join("\n");
+    throw new Error(truncateOutput(output, input.maxOutputChars));
+  }
+}
+
+async function verifyDesignPythonImport(input: {
+  workspaceDir: string;
+  moduleName: string;
+  maxOutputChars: number;
+}): Promise<{
+  status: "importable";
+  moduleName: string;
+  pythonPath: string;
+  command: string;
+  stdout: string;
+  stderr: string;
+}> {
+  if (!/^[A-Za-z_][A-Za-z0-9_]*(\.[A-Za-z_][A-Za-z0-9_]*)*$/.test(input.moduleName)) {
+    throw new Error("Invalid Python module name.");
+  }
+
+  const pythonPath = await findRootVenvPython(input.workspaceDir);
+  if (!pythonPath) {
+    throw new Error("Root .venv Python was not found. Run sync_design_environment first.");
+  }
+
+  const args = ["-c", `import ${input.moduleName}; print("import-ok:${input.moduleName}")`];
+  const commandLine = formatCommandLine({
+    command: pythonPath,
+    args,
+    cwd: input.workspaceDir
+  });
+
+  try {
+    const { stdout, stderr } = await execFileAsync(pythonPath, args, {
+      cwd: input.workspaceDir,
+      timeout: 120000,
+      maxBuffer: Math.max(input.maxOutputChars * 2, 1024 * 1024)
+    }) as { stdout: string | Buffer; stderr: string | Buffer };
+
+    return {
+      status: "importable",
+      moduleName: input.moduleName,
+      pythonPath: normalizeWorkspaceRelativePath(input.workspaceDir, pythonPath),
+      command: commandLine,
+      stdout: truncateOutput(stdout.toString(), input.maxOutputChars),
+      stderr: truncateOutput(stderr.toString(), input.maxOutputChars)
+    };
+  } catch (error) {
+    const failed = error as { stdout?: string | Buffer; stderr?: string | Buffer; message?: string };
     const output = [
       `$ ${commandLine}`,
       failed.stdout?.toString() ?? "",
@@ -1375,6 +1443,10 @@ type SyncDesignEnvironmentTool = AgentTool<
   typeof syncDesignEnvironmentParameters,
   Awaited<ReturnType<typeof syncDesignEnvironment>>
 >;
+type VerifyDesignPythonImportTool = AgentTool<
+  typeof verifyDesignPythonImportParameters,
+  Awaited<ReturnType<typeof verifyDesignPythonImport>>
+>;
 type RunDesignScriptTool = AgentTool<
   typeof runDesignScriptParameters,
   Awaited<ReturnType<typeof runDesignScript>>
@@ -1744,6 +1816,28 @@ export function createFileTools(input: {
     }
   };
 
+  const verifyDesignPythonImportTool: VerifyDesignPythonImportTool = {
+    name: "verify_design_python_import",
+    label: "Verify Design Python Import",
+    description:
+      "Verifies a Python module imports with the repository root .venv Python after sync_design_environment. This is used after package install requests.",
+    parameters: verifyDesignPythonImportParameters,
+    executionMode: "sequential",
+    execute: async (_toolCallId: string, args: VerifyDesignPythonImportParameters) => {
+      const maxOutputChars = normalizeDesignToolOutputChars(args.maxOutputChars);
+      const result = await verifyDesignPythonImport({
+        workspaceDir: resolvedWorkspaceDir,
+        moduleName: args.moduleName,
+        maxOutputChars
+      });
+
+      return {
+        content: [{ type: "text", text: JSON.stringify(result) }],
+        details: result
+      };
+    }
+  };
+
   const runDesignScriptTool: RunDesignScriptTool = {
     name: "run_design_script",
     label: "Run Design Script",
@@ -1786,6 +1880,7 @@ export function createFileTools(input: {
       replaceDesignCodeFileTextTool,
       updateDesignDependencyTool,
       syncDesignEnvironmentTool,
+      verifyDesignPythonImportTool,
       runDesignScriptTool
     ],
     tailFullTools: [
