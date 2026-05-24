@@ -689,7 +689,10 @@ async function designScriptCommandForRunner(input: {
   }
 
   const venvPython = await findRootVenvPython(input.workspaceDir);
-  const command = venvPython ?? "python3";
+  if (!venvPython) {
+    throw new Error("Root .venv Python was not found. Run sync_design_environment first.");
+  }
+  const command = venvPython;
   const args = [input.scriptFile];
   return {
     command,
@@ -930,6 +933,92 @@ function parseTomlDependencyArrayEntries(lines: readonly string[], fieldName: st
   return entries;
 }
 
+function tomlLineBeforeComment(line: string): string {
+  let inDoubleQuotedString = false;
+  let escaped = false;
+
+  for (let index = 0; index < line.length; index += 1) {
+    const character = line[index];
+    if (inDoubleQuotedString) {
+      if (escaped) {
+        escaped = false;
+      } else if (character === "\\") {
+        escaped = true;
+      } else if (character === "\"") {
+        inDoubleQuotedString = false;
+      }
+      continue;
+    }
+
+    if (character === "\"") {
+      inDoubleQuotedString = true;
+      continue;
+    }
+    if (character === "#") {
+      return line.slice(0, index);
+    }
+  }
+
+  return line;
+}
+
+function consumeDoubleQuotedTomlString(line: string, start: number): number | undefined {
+  if (line.startsWith("\"\"\"", start)) {
+    return undefined;
+  }
+
+  let escaped = false;
+  for (let index = start + 1; index < line.length; index += 1) {
+    const character = line[index];
+    if (escaped) {
+      escaped = false;
+      continue;
+    }
+    if (character === "\\") {
+      escaped = true;
+      continue;
+    }
+    if (character === "\"") {
+      return index + 1;
+    }
+  }
+
+  return undefined;
+}
+
+function assertSupportedTomlDependencyArraySyntax(lines: readonly string[], fieldName: string): void {
+  const unsupportedMessage =
+    "Unsupported dependency array syntax in knowledge-base/design-code/pyproject.toml; use double-quoted dependency strings.";
+  const fieldPrefixPattern = new RegExp(`^\\s*${fieldName}\\s*=\\s*\\[`);
+
+  for (const line of lines) {
+    const activeLine = tomlLineBeforeComment(line);
+    let index = 0;
+    const fieldMatch = fieldPrefixPattern.exec(activeLine);
+    if (fieldMatch) {
+      index = fieldMatch[0].length;
+    }
+
+    while (index < activeLine.length) {
+      const character = activeLine[index];
+      if (/\s/.test(character) || character === "," || character === "[" || character === "]") {
+        index += 1;
+        continue;
+      }
+      if (character === "\"") {
+        const nextIndex = consumeDoubleQuotedTomlString(activeLine, index);
+        if (nextIndex === undefined) {
+          throw new Error(unsupportedMessage);
+        }
+        index = nextIndex;
+        continue;
+      }
+
+      throw new Error(unsupportedMessage);
+    }
+  }
+}
+
 function formatTomlStringArray(fieldName: string, dependencies: readonly string[]): string[] {
   if (dependencies.length === 0) {
     return [`${fieldName} = []`];
@@ -989,6 +1078,7 @@ function findTomlArrayFieldRange(lines: readonly string[], section: { start: num
     }
 
     if (fieldOneLinePattern.test(line)) {
+      assertSupportedTomlDependencyArraySyntax([line], fieldName);
       return {
         start: index,
         end: index + 1,
@@ -1003,6 +1093,7 @@ function findTomlArrayFieldRange(lines: readonly string[], section: { start: num
     if (arrayEnd >= section.end) {
       throw new Error(`Invalid pyproject.toml: ${fieldName} array is not closed.`);
     }
+    assertSupportedTomlDependencyArraySyntax(lines.slice(index, arrayEnd + 1), fieldName);
     return {
       start: index,
       end: arrayEnd + 1,
@@ -1859,7 +1950,7 @@ export function createFileTools(input: {
     name: "run_design_script",
     label: "Run Design Script",
     description:
-      "Runs a workspace-local Python design layout or verification script with python3 or KLayout batch mode, then verifies expected generated files such as .gds outputs. This is not a general shell.",
+      "Runs a workspace-local Python design layout or verification script with the repository root .venv Python or KLayout batch mode, then verifies expected generated files such as .gds outputs. This is not a general shell.",
     parameters: runDesignScriptParameters,
     executionMode: "sequential",
     execute: async (_toolCallId: string, args: RunDesignScriptParameters) => {

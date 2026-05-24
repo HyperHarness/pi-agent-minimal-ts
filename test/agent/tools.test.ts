@@ -1675,7 +1675,7 @@ test("replace_design_code_file_text replaces all occurrences when replaceAll is 
   }
 });
 
-test("run_design_script executes a workspace Python design script and reports generated GDS outputs", async () => {
+test("run_design_script rejects Python scripts when the root venv Python is missing", async () => {
   const workspace = await mkdtemp(path.join(tmpdir(), "pi-agent-tools-"));
 
   try {
@@ -1691,31 +1691,18 @@ test("run_design_script executes a workspace Python design script and reports ge
     );
 
     const runDesignScriptTool = getRunDesignScriptTool(workspace);
-    const result = await runDesignScriptTool.execute(
-      "call-run-design-script",
-      {
-        scriptPath: "single_xmon_concept_klayout.py",
-        runner: "python",
-        outputPaths: ["single_xmon_concept.gds"],
-      },
-      undefined,
-    );
-
-    assert.deepEqual(result.details, {
-      status: "completed",
-      runner: "python",
-      scriptPath: "single_xmon_concept_klayout.py",
-      command: "python3 single_xmon_concept_klayout.py",
-      exitCode: 0,
-      stdout: "wrote single_xmon_concept.gds\n",
-      stderr: "",
-      outputs: [
+    await assert.rejects(
+      runDesignScriptTool.execute(
+        "call-run-design-script-missing-root-venv",
         {
-          path: "single_xmon_concept.gds",
-          bytes: Buffer.byteLength("GDSII placeholder"),
+          scriptPath: "single_xmon_concept_klayout.py",
+          runner: "python",
+          outputPaths: ["single_xmon_concept.gds"],
         },
-      ],
-    });
+        undefined,
+      ),
+      /Root \.venv Python was not found\. Run sync_design_environment first\./,
+    );
   } finally {
     await rm(workspace, { recursive: true, force: true });
   }
@@ -2097,6 +2084,42 @@ test("update_design_dependency preserves dependency extras in multiline arrays",
     assert.doesNotMatch(updated, /"gdsfactory\[dev\]>=8"/);
     assert.equal([...updated.matchAll(/^\]\s*$/gm)].length, 1);
     assert.equal([...updated.matchAll(/^\[project\]/gm)].length, 1);
+  } finally {
+    await rm(workspace, { recursive: true, force: true });
+  }
+});
+
+test("update_design_dependency rejects unsupported single-quoted dependency arrays without rewriting", async () => {
+  const workspace = await mkdtemp(path.join(tmpdir(), "pi-agent-tools-"));
+  const designCodeDir = path.join(workspace, "knowledge-base", "design-code");
+  const pyprojectPath = path.join(designCodeDir, "pyproject.toml");
+
+  try {
+    await mkdir(designCodeDir, { recursive: true });
+    const original = [
+      "[project]",
+      "name = \"pi-chip-design\"",
+      "version = \"0.1.0\"",
+      "dependencies = ['numpy>=2']",
+      "",
+    ].join("\n");
+    await writeFile(pyprojectPath, original, "utf8");
+
+    const updateDesignDependencyTool = getUpdateDesignDependencyTool(workspace);
+    await assert.rejects(
+      updateDesignDependencyTool.execute(
+        "call-update-design-dependency-single-quoted",
+        {
+          name: "klayout",
+          specifier: ">=0.29",
+          group: "main",
+        },
+        undefined,
+      ),
+      /Unsupported dependency array syntax/,
+    );
+
+    assert.equal(await readFile(pyprojectPath, "utf8"), original);
   } finally {
     await rm(workspace, { recursive: true, force: true });
   }
