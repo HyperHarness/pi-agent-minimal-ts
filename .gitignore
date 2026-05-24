@@ -10,6 +10,7 @@ dist/
 downloads/
 knowledge-base/
 paper-projects/
-design-projects/superconducting-qubit-chip/
+design-projects/
+knowledge-base/design-code/
 scripts/paper-extension-host.cmd
 scripts/paper-extension-host.exe

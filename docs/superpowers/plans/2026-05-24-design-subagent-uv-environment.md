@@ -25,7 +25,7 @@
 **Files:**
 - Modify: `test/agent/tools.test.ts`
 
-- [ ] **Step 1: Add a helper for the new tool near `getRunDesignScriptTool`**
+- [x] **Step 1: Add a helper for the new tool near `getRunDesignScriptTool`**
 
 Add this helper after `getRunDesignScriptTool`:
 
@@ -48,7 +48,7 @@ At the top-level test helper type declarations, add:
 type SyncDesignEnvironmentTool = ExtractTool<typeof createTools, "sync_design_environment">;
 ```
 
-- [ ] **Step 2: Write the failing test for parent root `.venv` interpreter resolution**
+- [x] **Step 2: Write the failing test for parent root `.venv` interpreter resolution**
 
 Replace the existing test named `run_design_script uses the workspace root venv Python for design scripts` with this stricter version:
 
@@ -135,7 +135,7 @@ test("run_design_script uses the parent root venv Python and ignores nested desi
 });
 ```
 
-- [ ] **Step 3: Write the failing test for `sync_design_environment` happy path**
+- [x] **Step 3: Write the failing test for `sync_design_environment` happy path**
 
 Add this test after the root venv script-runner test:
 
@@ -227,7 +227,7 @@ test("sync_design_environment runs uv sync for knowledge-base design-code into t
 });
 ```
 
-- [ ] **Step 4: Write the failing test for path restriction**
+- [x] **Step 4: Write the failing test for path restriction**
 
 Add this test after the happy-path sync test:
 
@@ -254,7 +254,7 @@ test("sync_design_environment rejects projects outside knowledge-base design-cod
 });
 ```
 
-- [ ] **Step 5: Run the tests to confirm the new tests fail**
+- [x] **Step 5: Run the tests to confirm the new tests fail**
 
 Run:
 
@@ -269,7 +269,7 @@ Expected: fail because `SyncDesignEnvironmentTool` and `sync_design_environment`
 **Files:**
 - Modify: `src/agent/file-tools.ts`
 
-- [ ] **Step 1: Add parameters and types**
+- [x] **Step 1: Add parameters and types**
 
 Add this block after `runDesignScriptParameters`:
 
@@ -302,7 +302,7 @@ Add this tool type near the other tool aliases if the file uses local aliases fo
 type SyncDesignEnvironmentTool = AgentTool<SyncDesignEnvironmentParameters>;
 ```
 
-- [ ] **Step 2: Replace nested venv search with root venv resolution**
+- [x] **Step 2: Replace nested venv search with root venv resolution**
 
 Replace `candidateVenvPythonPaths` and `findWorkspaceVenvPython` with:
 
@@ -351,7 +351,7 @@ with:
 const venvPython = await findRootVenvPython(input.workspaceDir);
 ```
 
-- [ ] **Step 3: Add design-code project path helpers**
+- [x] **Step 3: Add design-code project path helpers**
 
 Add these helpers after `findRootVenvPython`:
 
@@ -383,7 +383,7 @@ async function resolveDesignCodeProjectPath(workspaceDir: string, requestedPath:
 }
 ```
 
-- [ ] **Step 4: Implement `syncDesignEnvironment`**
+- [x] **Step 4: Implement `syncDesignEnvironment`**
 
 Add this function before `runDesignScript`:
 
@@ -446,7 +446,7 @@ async function syncDesignEnvironment(input: {
 }
 ```
 
-- [ ] **Step 5: Add the tool object and expose it in full tools**
+- [x] **Step 5: Add the tool object and expose it in full tools**
 
 Add this tool before `runDesignScriptTool`:
 
@@ -484,7 +484,7 @@ artifactFullTools: [
 ],
 ```
 
-- [ ] **Step 6: Run targeted tool tests**
+- [x] **Step 6: Run targeted tool tests**
 
 Run:
 
@@ -502,7 +502,7 @@ Expected: pass for the new root `.venv` and sync tests.
 - Modify: `test/agent/tools.test.ts`
 - Modify: `test/agent/pi-agent.test.ts`
 
-- [ ] **Step 1: Add the tool name and boundary entry**
+- [x] **Step 1: Add the tool name and boundary entry**
 
 In `src/agent/tool-types.ts`, add `"sync_design_environment"` to `ToolName` immediately before `"run_design_script"`:
 
@@ -525,7 +525,7 @@ Update the `design-subagent` boundary to:
   ],
 ```
 
-- [ ] **Step 2: Update expected full tool list**
+- [x] **Step 2: Update expected full tool list**
 
 In `test/agent/tools.test.ts`, update `EXPECTED_FULL_ONLY_TOOL_NAMES`:
 
@@ -557,7 +557,7 @@ In the `createToolsForBoundary exposes isolated wiki and worker tool surfaces` t
 assert.ok(designTools.some((tool) => tool.name === "sync_design_environment"));
 ```
 
-- [ ] **Step 3: Update the design-subagent prompt**
+- [x] **Step 3: Update the design-subagent prompt**
 
 Replace `DESIGN_SUBAGENT_SYSTEM_PROMPT` with:
 
@@ -575,7 +575,7 @@ export const DESIGN_SUBAGENT_SYSTEM_PROMPT = [
 ].join(\" \");
 ```
 
-- [ ] **Step 4: Add prompt assertions**
+- [x] **Step 4: Add prompt assertions**
 
 In `test/agent/pi-agent.test.ts`, extend the existing design prompt assertions:
 
@@ -586,7 +586,7 @@ assert.match(designPrompt as string, /root \.venv/);
 assert.match(designPrompt as string, /design-projects\/.*deprecated/);
 ```
 
-- [ ] **Step 5: Run boundary and prompt tests**
+- [x] **Step 5: Run boundary and prompt tests**
 
 Run:
 
@@ -608,7 +608,7 @@ Expected: pass.
 - Create in nested repo: `knowledge-base/design-code/tests/test_import.py`
 - Delete local tree: `design-projects/`
 
-- [ ] **Step 1: Update parent `.gitignore`**
+- [x] **Step 1: Update parent `.gitignore`**
 
 Replace:
 
@@ -625,7 +625,7 @@ knowledge-base/design-code/
 
 Keep the existing top-level `.venv/` ignore entry.
 
-- [ ] **Step 2: Create the new design-code directory**
+- [x] **Step 2: Create the new design-code directory**
 
 Run:
 
@@ -635,7 +635,7 @@ mkdir -p knowledge-base/design-code/src/pi_chip_design/layouts knowledge-base/de
 
 Expected: directories exist under `/home/ququan2/pi-agent-minimal-ts/knowledge-base/design-code`.
 
-- [ ] **Step 3: Write the nested repo files**
+- [x] **Step 3: Write the nested repo files**
 
 Create `knowledge-base/design-code/.gitignore`:
 
@@ -746,7 +746,7 @@ def test_package_imports() -> None:
     assert pi_chip_design.__all__ == []
 ```
 
-- [ ] **Step 4: Initialize and commit the nested Git repository**
+- [x] **Step 4: Initialize and commit the nested Git repository**
 
 Run:
 
@@ -764,7 +764,7 @@ git -C knowledge-base/design-code config user.email "pi-design-agent@example.loc
 git -C knowledge-base/design-code commit -m "Initialize design code package"
 ```
 
-- [ ] **Step 5: Remove the deprecated design-projects tree**
+- [x] **Step 5: Remove the deprecated design-projects tree**
 
 Run:
 
@@ -774,7 +774,7 @@ rm -rf design-projects
 
 Expected: `/home/ququan2/pi-agent-minimal-ts/design-projects/` no longer exists. The useful seed package structure now exists in `knowledge-base/design-code/`.
 
-- [ ] **Step 6: Check parent Git status**
+- [x] **Step 6: Check parent Git status**
 
 Run:
 
@@ -791,7 +791,7 @@ Expected: parent repo shows changes to `.gitignore`, TypeScript/test files from 
 - Commit in nested repo: `knowledge-base/design-code`
 - Commit in parent repo: `pi-agent-minimal-ts`
 
-- [ ] **Step 1: Sync the design environment with the new tool path**
+- [x] **Step 1: Sync the design environment with the new tool path**
 
 Run:
 
@@ -801,7 +801,7 @@ UV_PROJECT_ENVIRONMENT=/home/ququan2/pi-agent-minimal-ts/.venv uv sync --project
 
 Expected: `knowledge-base/design-code/uv.lock` is created or updated, and `/home/ququan2/pi-agent-minimal-ts/.venv/bin/python` exists.
 
-- [ ] **Step 2: Run design-code package checks**
+- [x] **Step 2: Run design-code package checks**
 
 Run:
 
@@ -818,7 +818,7 @@ UV_PROJECT_ENVIRONMENT=/home/ququan2/pi-agent-minimal-ts/.venv uv sync --project
 
 Then rerun the checks.
 
-- [ ] **Step 3: Commit the nested repo lockfile**
+- [x] **Step 3: Commit the nested repo lockfile**
 
 Run:
 
@@ -830,7 +830,7 @@ git -C knowledge-base/design-code commit -m "Lock design environment dependencie
 
 Expected: nested repo has a second commit containing `uv.lock`.
 
-- [ ] **Step 4: Run targeted parent tests**
+- [x] **Step 4: Run targeted parent tests**
 
 Run:
 
@@ -840,7 +840,7 @@ npm test -- --test-name-pattern "run_design_script uses the parent root venv|syn
 
 Expected: pass.
 
-- [ ] **Step 5: Run full parent test suite**
+- [x] **Step 5: Run full parent test suite**
 
 Run:
 
@@ -850,7 +850,7 @@ npm test
 
 Expected: pass.
 
-- [ ] **Step 6: Run whitespace and status checks**
+- [x] **Step 6: Run whitespace and status checks**
 
 Run:
 
@@ -862,7 +862,7 @@ git -C knowledge-base/design-code status --short
 
 Expected: no whitespace errors. Parent status should include only intended parent repo changes. Nested repo status should be clean after the lockfile commit.
 
-- [ ] **Step 7: Commit parent repository changes**
+- [x] **Step 7: Commit parent repository changes**
 
 Run:
 

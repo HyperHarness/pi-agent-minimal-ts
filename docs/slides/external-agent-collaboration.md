@@ -254,7 +254,7 @@ design request
 
 设计代码、实验产物和知识记录统一纳入 knowledge-base，但保留不同子目录边界：
 
-- `knowledge-base/design-projects/superconducting-qubit-chip/`
+- `knowledge-base/design-code/`
   - Python package：`pi_chip_design`
   - layout family、parameter schema、generator、verification helper、exporter。
 - `knowledge-base/design-artifacts/`

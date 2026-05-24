@@ -115,6 +115,10 @@ test("router worker system prompts describe isolated responsibilities", () => {
   assert.match(downloadPrompt as string, /past N years/);
   assert.match(designPrompt as string, /design-subagent/);
   assert.match(designPrompt as string, /write_design_artifact/);
+  assert.match(designPrompt as string, /knowledge-base\/design-code/);
+  assert.match(designPrompt as string, /sync_design_environment/);
+  assert.match(designPrompt as string, /root \.venv/);
+  assert.match(designPrompt as string, /design-projects\/.*deprecated/);
 });
 
 test("runAgentTurn executes a tool call and appends the resulting messages", async () => {

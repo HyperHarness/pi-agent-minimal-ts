@@ -61,6 +61,7 @@ type ToolName =
   | "register_manual_paper_download"
   | "replace_file_text"
   | "research_topic_bootstrap"
+  | "sync_design_environment"
   | "run_design_script"
   | "search_local_papers"
   | "search_paper_text"
@@ -131,6 +132,7 @@ export const TOOL_BOUNDARY_NAMES: Record<ToolBoundaryRole, readonly ToolName[]> 
     "search_paper_wiki",
     "search_local_papers",
     "list_local_papers",
+    "sync_design_environment",
     "run_design_script",
     "write_design_artifact"
   ],

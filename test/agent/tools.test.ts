@@ -94,6 +94,14 @@ type RunDesignScriptTool = {
   ) => Promise<ToolResult>;
 };
 
+type SyncDesignEnvironmentTool = {
+  execute: (
+    toolCallId: string,
+    args: { projectPath: string },
+    signal: undefined,
+  ) => Promise<ToolResult>;
+};
+
 type ReplaceFileTextTool = {
   execute: (
     toolCallId: string,
@@ -580,6 +588,17 @@ function getRunDesignScriptTool(workspace: string): RunDesignScriptTool {
   assert.ok(runDesignScriptTool);
   assert.equal(typeof runDesignScriptTool.execute, "function");
   return runDesignScriptTool as RunDesignScriptTool;
+}
+
+function getSyncDesignEnvironmentTool(workspace: string): SyncDesignEnvironmentTool {
+  const tools = createTools(workspace, { toolProfile: "full" }) as ReadonlyArray<{
+    name: string;
+    execute?: SyncDesignEnvironmentTool["execute"];
+  }>;
+  const syncDesignEnvironmentTool = tools.find((tool) => tool.name === "sync_design_environment");
+  assert.ok(syncDesignEnvironmentTool);
+  assert.equal(typeof syncDesignEnvironmentTool.execute, "function");
+  return syncDesignEnvironmentTool as SyncDesignEnvironmentTool;
 }
 
 function getReplaceFileTextTool(workspace: string): ReplaceFileTextTool {
@@ -1405,9 +1424,9 @@ test("run_design_script executes a workspace Python design script and reports ge
   }
 });
 
-test("run_design_script uses the workspace root venv Python for design scripts", async () => {
+test("run_design_script uses the parent root venv Python and ignores nested design-code venvs", async () => {
   const workspace = await mkdtemp(path.join(tmpdir(), "pi-agent-tools-"));
-  const projectDir = path.join(workspace, "knowledge-base", "design-projects", "chip");
+  const projectDir = path.join(workspace, "knowledge-base", "design-code");
   const scriptDir = path.join(projectDir, "scripts");
   const rootVenvBinDir = path.join(workspace, ".venv", "bin");
   const nestedVenvBinDir = path.join(projectDir, ".venv", "bin");
@@ -1447,8 +1466,8 @@ test("run_design_script uses the workspace root venv Python for design scripts",
       path.join(scriptDir, "generate_gds.py"),
       [
         "from pathlib import Path",
-        "Path('../layouts').mkdir(exist_ok=True)",
-        "Path('../layouts/from-venv.gds').write_bytes(b'venv gds')",
+        "Path('../outputs').mkdir(exist_ok=True)",
+        "Path('../outputs/from-root-venv.gds').write_bytes(b'root venv gds')",
         "print('script complete')",
         ""
       ].join("\n"),
@@ -1457,11 +1476,11 @@ test("run_design_script uses the workspace root venv Python for design scripts",
 
     const runDesignScriptTool = getRunDesignScriptTool(workspace);
     const result = await runDesignScriptTool.execute(
-      "call-run-design-script-venv",
+      "call-run-design-script-root-venv",
       {
-        scriptPath: "knowledge-base/design-projects/chip/scripts/generate_gds.py",
+        scriptPath: "knowledge-base/design-code/scripts/generate_gds.py",
         runner: "python",
-        outputPaths: ["knowledge-base/design-projects/chip/layouts/from-venv.gds"],
+        outputPaths: ["knowledge-base/design-code/outputs/from-root-venv.gds"],
       },
       undefined,
     );
@@ -1469,18 +1488,167 @@ test("run_design_script uses the workspace root venv Python for design scripts",
     assert.deepEqual(result.details, {
       status: "completed",
       runner: "python",
-      scriptPath: "knowledge-base/design-projects/chip/scripts/generate_gds.py",
-      command: "../../../../.venv/bin/python generate_gds.py",
+      scriptPath: "knowledge-base/design-code/scripts/generate_gds.py",
+      command: "../../../.venv/bin/python generate_gds.py",
       exitCode: 0,
       stdout: "script complete\n",
       stderr: "root-venv-python-used\n",
       outputs: [
         {
-          path: "knowledge-base/design-projects/chip/layouts/from-venv.gds",
-          bytes: Buffer.byteLength("venv gds"),
+          path: "knowledge-base/design-code/outputs/from-root-venv.gds",
+          bytes: Buffer.byteLength("root venv gds"),
         },
       ],
     });
+  } finally {
+    await rm(workspace, { recursive: true, force: true });
+  }
+});
+
+test("sync_design_environment runs uv sync for knowledge-base design-code into the root venv", async () => {
+  const workspace = await mkdtemp(path.join(tmpdir(), "pi-agent-tools-"));
+  const designCodeDir = path.join(workspace, "knowledge-base", "design-code");
+  const fakeBinDir = path.join(workspace, "fake-bin");
+  const callsPath = path.join(workspace, "uv-calls.jsonl");
+  const originalPath = process.env.PATH;
+  const originalUvCallsPath = process.env.PI_TEST_UV_CALLS_PATH;
+
+  try {
+    await mkdir(designCodeDir, { recursive: true });
+    await mkdir(fakeBinDir, { recursive: true });
+    await writeFile(
+      path.join(designCodeDir, "pyproject.toml"),
+      [
+        "[project]",
+        "name = \"pi-chip-design\"",
+        "version = \"0.1.0\"",
+        "requires-python = \">=3.11\"",
+        "dependencies = [\"gdsfactory>=8\"]",
+        ""
+      ].join("\n"),
+      "utf8",
+    );
+
+    const fakeUv = path.join(fakeBinDir, "uv");
+    await writeFile(
+      fakeUv,
+      [
+        "#!/usr/bin/env node",
+        "const fs = require('node:fs');",
+        "const path = require('node:path');",
+        "const callsPath = process.env.PI_TEST_UV_CALLS_PATH;",
+        "fs.appendFileSync(callsPath, JSON.stringify({",
+        "  argv: process.argv.slice(2),",
+        "  cwd: process.cwd(),",
+        "  env: process.env.UV_PROJECT_ENVIRONMENT",
+        "}) + '\\n');",
+        "fs.mkdirSync(path.join(process.env.UV_PROJECT_ENVIRONMENT, 'bin'), { recursive: true });",
+        "fs.writeFileSync(path.join(process.env.UV_PROJECT_ENVIRONMENT, 'bin', 'python'), '#!/bin/sh\\necho synced-python\\n');",
+        "console.log('uv sync complete');",
+        ""
+      ].join("\n"),
+      "utf8",
+    );
+    await chmod(fakeUv, 0o755);
+
+    process.env.PATH = `${fakeBinDir}${path.delimiter}${originalPath ?? ""}`;
+    process.env.PI_TEST_UV_CALLS_PATH = callsPath;
+
+    const syncDesignEnvironmentTool = getSyncDesignEnvironmentTool(workspace);
+    const result = await syncDesignEnvironmentTool.execute(
+      "call-sync-design-environment",
+      {
+        projectPath: "knowledge-base/design-code",
+      },
+      undefined,
+    );
+
+    const details = result.details as Record<string, unknown>;
+    assert.equal(details.status, "synced");
+    assert.equal(details.projectPath, "knowledge-base/design-code");
+    assert.equal(details.environmentPath, ".venv");
+    assert.equal(details.pythonPath, ".venv/bin/python");
+    assert.equal(details.command, "uv sync --project knowledge-base/design-code --extra dev");
+    assert.equal(details.exitCode, 0);
+    assert.equal(details.stderr, "");
+    assert.equal(typeof details.stdout, "string");
+
+    const calls = (await readFile(callsPath, "utf8"))
+      .trim()
+      .split("\n")
+      .map((line) => JSON.parse(line) as { argv: string[]; cwd: string; env: string });
+    assert.deepEqual(calls, [
+      {
+        argv: ["sync", "--project", designCodeDir, "--extra", "dev"],
+        cwd: workspace,
+        env: path.join(workspace, ".venv"),
+      },
+    ]);
+  } finally {
+    process.env.PATH = originalPath;
+    if (originalUvCallsPath === undefined) {
+      delete process.env.PI_TEST_UV_CALLS_PATH;
+    } else {
+      process.env.PI_TEST_UV_CALLS_PATH = originalUvCallsPath;
+    }
+    await rm(workspace, { recursive: true, force: true });
+  }
+});
+
+test("sync_design_environment rejects projects outside knowledge-base design-code", async () => {
+  const workspace = await mkdtemp(path.join(tmpdir(), "pi-agent-tools-"));
+
+  try {
+    const syncDesignEnvironmentTool = getSyncDesignEnvironmentTool(workspace);
+
+    await assert.rejects(
+      syncDesignEnvironmentTool.execute(
+        "call-sync-design-environment-outside",
+        {
+          projectPath: "design-projects/superconducting-qubit-chip",
+        },
+        undefined,
+      ),
+      /sync_design_environment only runs for knowledge-base\/design-code/,
+    );
+  } finally {
+    await rm(workspace, { recursive: true, force: true });
+  }
+});
+
+test("sync_design_environment rejects symlinked knowledge-base design-code projects", async () => {
+  const workspace = await mkdtemp(path.join(tmpdir(), "pi-agent-tools-"));
+  const knowledgeBaseDir = path.join(workspace, "knowledge-base");
+  const otherProjectDir = path.join(workspace, "other-design-code");
+
+  try {
+    await mkdir(knowledgeBaseDir, { recursive: true });
+    await mkdir(otherProjectDir, { recursive: true });
+    await writeFile(
+      path.join(otherProjectDir, "pyproject.toml"),
+      [
+        "[project]",
+        "name = \"other-design-code\"",
+        "version = \"0.1.0\"",
+        "requires-python = \">=3.11\"",
+        ""
+      ].join("\n"),
+      "utf8",
+    );
+    await symlink(otherProjectDir, path.join(knowledgeBaseDir, "design-code"), "dir");
+
+    const syncDesignEnvironmentTool = getSyncDesignEnvironmentTool(workspace);
+
+    await assert.rejects(
+      syncDesignEnvironmentTool.execute(
+        "call-sync-design-environment-symlink",
+        {
+          projectPath: "knowledge-base/design-code",
+        },
+        undefined,
+      ),
+      /sync_design_environment requires knowledge-base\/design-code to be a real directory/,
+    );
   } finally {
     await rm(workspace, { recursive: true, force: true });
   }
@@ -1812,6 +1980,7 @@ const EXPECTED_FULL_ONLY_TOOL_NAMES = [
   "paper_wiki_relations",
   "search_paper_wiki",
   "write_design_artifact",
+  "sync_design_environment",
   "run_design_script",
   "paper_orchestra_prepare_workspace",
   "paper_orchestra_check_draft",
@@ -1912,6 +2081,7 @@ test("createToolsForBoundary exposes isolated wiki and worker tool surfaces", as
     assert.ok(designTools.some((tool) => tool.name === "answer_paper_wiki_question"));
     assert.ok(designTools.some((tool) => tool.name === "search_paper_wiki"));
     assert.ok(designTools.some((tool) => tool.name === "write_design_artifact"));
+    assert.ok(designTools.some((tool) => tool.name === "sync_design_environment"));
     assert.ok(designTools.some((tool) => tool.name === "run_design_script"));
     assert.ok(!designTools.some((tool) => tool.name === "download_paper"));
     assert.ok(!designTools.some((tool) => tool.name === "web_search"));

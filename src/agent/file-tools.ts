@@ -10,6 +10,7 @@ const execFileAsync = promisify(execFile);
 
 const DEFAULT_READ_FILE_MAX_BYTES = 256 * 1024;
 const HARD_READ_FILE_MAX_BYTES = 1024 * 1024;
+const HARD_DESIGN_SCRIPT_OUTPUT_CHARS = 120_000;
 
 const getTimeParameters = Type.Object({
   timezone: Type.Optional(Type.String({ description: "Optional IANA timezone name." }))
@@ -176,6 +177,21 @@ const runDesignScriptParameters = Type.Object({
   )
 });
 
+const syncDesignEnvironmentParameters = Type.Object({
+  projectPath: Type.Optional(
+    Type.String({
+      description:
+        "Design-code project path. Defaults to knowledge-base/design-code and must resolve exactly to that directory."
+    })
+  ),
+  maxOutputChars: Type.Optional(
+    Type.Integer({
+      description: "Maximum combined stdout/stderr characters to return. Defaults to 12000.",
+      minimum: 1000
+    })
+  )
+});
+
 type GetTimeParameters = Static<typeof getTimeParameters>;
 type LoadPaperWritingSkillParameters = Static<typeof loadPaperWritingSkillParameters>;
 type ReadFileParameters = Static<typeof readFileParameters>;
@@ -186,6 +202,7 @@ type DeleteFileParameters = Static<typeof deleteFileParameters>;
 type CompileLatexParameters = Static<typeof compileLatexParameters>;
 type WriteDesignArtifactParameters = Static<typeof writeDesignArtifactParameters>;
 type RunDesignScriptParameters = Static<typeof runDesignScriptParameters>;
+type SyncDesignEnvironmentParameters = Static<typeof syncDesignEnvironmentParameters>;
 type ResolvedDesignScriptRunner = "python" | "klayout";
 
 const DESIGN_ARTIFACT_DIRECTORIES: Record<WriteDesignArtifactParameters["artifactType"], string> = {
@@ -386,6 +403,10 @@ function truncateOutput(text: string, maxChars: number): string {
   return `${text.slice(0, Math.max(0, maxChars - 120)).trimEnd()}\n\n[output truncated to ${maxChars} chars]`;
 }
 
+function normalizeDesignToolOutputChars(value: number | undefined): number {
+  return Math.min(HARD_DESIGN_SCRIPT_OUTPUT_CHARS, Math.max(1000, Math.trunc(value ?? 12000)));
+}
+
 async function runLatexCommand(input: {
   command: string;
   args: string[];
@@ -439,31 +460,71 @@ async function fileExists(filePath: string): Promise<boolean> {
   }
 }
 
-function candidateVenvPythonPaths(directory: string): string[] {
-  const venvDir = path.join(directory, ".venv");
-  if (process.platform === "win32") {
-    return [
-      path.join(venvDir, "Scripts", "python.exe"),
-      path.join(venvDir, "Scripts", "python")
-    ];
-  }
-
-  return [
-    path.join(venvDir, "bin", "python"),
-    path.join(venvDir, "bin", "python3")
-  ];
+function rootVenvDir(workspaceDir: string): string {
+  return path.join(workspaceDir, ".venv");
 }
 
-async function findWorkspaceVenvPython(workspaceDir: string): Promise<string | undefined> {
+function rootVenvPythonCandidates(workspaceDir: string): string[] {
+  const venvDir = rootVenvDir(workspaceDir);
+  if (process.platform === "win32") {
+    return [path.join(venvDir, "Scripts", "python.exe")];
+  }
+
+  return [path.join(venvDir, "bin", "python")];
+}
+
+async function findRootVenvPython(workspaceDir: string): Promise<string | undefined> {
   assertPathInsideDirectory(workspaceDir, workspaceDir);
 
-  for (const candidate of candidateVenvPythonPaths(workspaceDir)) {
+  for (const candidate of rootVenvPythonCandidates(workspaceDir)) {
     if (await fileExists(candidate)) {
       return candidate;
     }
   }
 
   return undefined;
+}
+
+function designCodeProjectDir(workspaceDir: string): string {
+  return path.join(workspaceDir, "knowledge-base", "design-code");
+}
+
+function normalizeWorkspaceRelativePath(workspaceDir: string, resolvedPath: string): string {
+  const relativePath = path.relative(workspaceDir, resolvedPath);
+  return relativePath.length > 0 ? relativePath.split(path.sep).join("/") : ".";
+}
+
+async function resolveDesignCodeProjectPath(workspaceDir: string, requestedPath: string | undefined): Promise<string> {
+  const resolvedWorkspaceDir = path.resolve(workspaceDir);
+  const expectedProjectDir = path.resolve(designCodeProjectDir(resolvedWorkspaceDir));
+  const candidateProjectDir = path.isAbsolute(requestedPath ?? "")
+    ? path.resolve(requestedPath ?? "")
+    : path.resolve(resolvedWorkspaceDir, requestedPath ?? "knowledge-base/design-code");
+  assertPathInsideDirectory(resolvedWorkspaceDir, candidateProjectDir);
+
+  if (candidateProjectDir !== expectedProjectDir) {
+    throw new Error("sync_design_environment only runs for knowledge-base/design-code.");
+  }
+
+  const projectStats = await lstat(expectedProjectDir).catch(() => undefined);
+  if (!projectStats?.isDirectory() || projectStats.isSymbolicLink()) {
+    throw new Error("sync_design_environment requires knowledge-base/design-code to be a real directory.");
+  }
+
+  const [resolvedProjectDir, resolvedExpectedProjectDir] = await Promise.all([
+    resolveWorkspacePath(workspaceDir, requestedPath ?? "knowledge-base/design-code"),
+    realpath(expectedProjectDir)
+  ]);
+  if (resolvedProjectDir !== resolvedExpectedProjectDir) {
+    throw new Error("sync_design_environment only runs for knowledge-base/design-code.");
+  }
+
+  const pyprojectPath = path.join(resolvedProjectDir, "pyproject.toml");
+  if (!(await fileExists(pyprojectPath))) {
+    throw new Error("sync_design_environment requires knowledge-base/design-code/pyproject.toml.");
+  }
+
+  return resolvedProjectDir;
 }
 
 function formatCommandLine(input: {
@@ -500,7 +561,7 @@ async function designScriptCommandForRunner(input: {
     };
   }
 
-  const venvPython = await findWorkspaceVenvPython(input.workspaceDir);
+  const venvPython = await findRootVenvPython(input.workspaceDir);
   const command = venvPython ?? "python3";
   const args = [input.scriptFile];
   return {
@@ -533,6 +594,63 @@ async function collectDesignScriptOutputs(input: {
   }
 
   return outputs;
+}
+
+async function syncDesignEnvironment(input: {
+  workspaceDir: string;
+  projectPath?: string;
+  maxOutputChars: number;
+}): Promise<{
+  status: "synced";
+  projectPath: string;
+  environmentPath: string;
+  pythonPath: string;
+  command: string;
+  exitCode: 0;
+  stdout: string;
+  stderr: string;
+}> {
+  const projectDir = await resolveDesignCodeProjectPath(input.workspaceDir, input.projectPath);
+  const environmentDir = rootVenvDir(input.workspaceDir);
+  const args = ["sync", "--project", projectDir, "--extra", "dev"];
+  const commandLine = `uv sync --project ${normalizeWorkspaceRelativePath(input.workspaceDir, projectDir)} --extra dev`;
+
+  try {
+    const { stdout, stderr } = await execFileAsync("uv", args, {
+      cwd: input.workspaceDir,
+      env: {
+        ...process.env,
+        UV_PROJECT_ENVIRONMENT: environmentDir
+      },
+      timeout: 300000,
+      maxBuffer: Math.max(input.maxOutputChars * 2, 1024 * 1024)
+    }) as { stdout: string | Buffer; stderr: string | Buffer };
+
+    const pythonPath = await findRootVenvPython(input.workspaceDir);
+    if (!pythonPath) {
+      throw new Error("uv sync completed but root .venv Python was not found.");
+    }
+
+    return {
+      status: "synced",
+      projectPath: normalizeWorkspaceRelativePath(input.workspaceDir, projectDir),
+      environmentPath: normalizeWorkspaceRelativePath(input.workspaceDir, environmentDir),
+      pythonPath: normalizeWorkspaceRelativePath(input.workspaceDir, pythonPath),
+      command: commandLine,
+      exitCode: 0,
+      stdout: truncateOutput(stdout.toString(), input.maxOutputChars),
+      stderr: truncateOutput(stderr.toString(), input.maxOutputChars)
+    };
+  } catch (error) {
+    const failed = error as { code?: string | number; stdout?: string | Buffer; stderr?: string | Buffer; message?: string };
+    const output = [
+      `$ ${commandLine}`,
+      failed.stdout?.toString() ?? "",
+      failed.stderr?.toString() ?? "",
+      failed.message ?? String(error)
+    ].filter((part) => part.trim().length > 0).join("\n");
+    throw new Error(truncateOutput(output, input.maxOutputChars));
+  }
 }
 
 async function runDesignScript(input: {
@@ -904,6 +1022,10 @@ type WriteDesignArtifactTool = AgentTool<
   typeof writeDesignArtifactParameters,
   Awaited<ReturnType<typeof writeDesignArtifact>>
 >;
+type SyncDesignEnvironmentTool = AgentTool<
+  typeof syncDesignEnvironmentParameters,
+  Awaited<ReturnType<typeof syncDesignEnvironment>>
+>;
 type RunDesignScriptTool = AgentTool<
   typeof runDesignScriptParameters,
   Awaited<ReturnType<typeof runDesignScript>>
@@ -1168,6 +1290,28 @@ export function createFileTools(input: {
     }
   };
 
+  const syncDesignEnvironmentTool: SyncDesignEnvironmentTool = {
+    name: "sync_design_environment",
+    label: "Sync Design Environment",
+    description:
+      "Runs uv sync for knowledge-base/design-code while forcing the shared root .venv as the project environment. This is not a general shell and cannot sync arbitrary projects.",
+    parameters: syncDesignEnvironmentParameters,
+    executionMode: "sequential",
+    execute: async (_toolCallId: string, args: SyncDesignEnvironmentParameters) => {
+      const maxOutputChars = normalizeDesignToolOutputChars(args.maxOutputChars);
+      const result = await syncDesignEnvironment({
+        workspaceDir: resolvedWorkspaceDir,
+        projectPath: args.projectPath,
+        maxOutputChars
+      });
+
+      return {
+        content: [{ type: "text", text: JSON.stringify(result) }],
+        details: result
+      };
+    }
+  };
+
   const runDesignScriptTool: RunDesignScriptTool = {
     name: "run_design_script",
     label: "Run Design Script",
@@ -1176,7 +1320,7 @@ export function createFileTools(input: {
     parameters: runDesignScriptParameters,
     executionMode: "sequential",
     execute: async (_toolCallId: string, args: RunDesignScriptParameters) => {
-      const maxOutputChars = Math.max(1000, Math.trunc(args.maxOutputChars ?? 12000));
+      const maxOutputChars = normalizeDesignToolOutputChars(args.maxOutputChars);
       const result = await runDesignScript({
         workspaceDir: resolvedWorkspaceDir,
         scriptPath: args.scriptPath,
@@ -1206,6 +1350,7 @@ export function createFileTools(input: {
     ],
     artifactFullTools: [
       writeDesignArtifactTool,
+      syncDesignEnvironmentTool,
       runDesignScriptTool
     ],
     tailFullTools: [
