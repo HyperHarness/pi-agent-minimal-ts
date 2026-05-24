@@ -137,7 +137,7 @@ export function routeChatPromptToWorker(text: string): RoutedWorkerPrompt | null
   }
 
   const designExecutionIntent =
-    /(design[-\s]?agent|design[-\s]?subagent|design-code|gdsfactory|klayout|\bgds\b|版图|layout|chip|qubit|resonator|coupler|python\s*包|依赖|uv\s*环境|uv\s+sync|pyproject\.toml)/i.test(trimmed) &&
+    /(design[-\s]?agent|design[-\s]?subagent|design-code|gdsfactory|klayout|\bgds\b|版图|layout|chip|qubit|resonator|coupler|python\s*(?:包|package)|依赖|dependenc(?:y|ies)|uv\s*环境|\buv\b|uv\s+environment|uv\s+sync|\bpyproject(?:\.toml)?\b)/i.test(trimmed) &&
     /(安装|同步|更新|添加|声明|运行|生成|检查|验证|仿真|失败|记录|install|sync|update|add|declare|run|generate|check|verify|simulate|failure|record|artifact|benchmark|layout)/i.test(trimmed);
   if (designExecutionIntent) {
     return { role: "design-agent", instruction: trimmed, reason: "intent" };
