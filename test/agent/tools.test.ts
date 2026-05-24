@@ -637,6 +637,14 @@ function rootVenvPythonPath(workspaceDir: string): string {
   return path.join(workspaceDir, ...rootVenvPythonDisplayPath().split("/"));
 }
 
+async function writeFakePythonExecutable(filePath: string, scriptLines: string[]): Promise<void> {
+  if (process.platform === "win32") {
+    throw new Error("fake python.exe shell-script shims are not executable on Windows");
+  }
+  await writeFile(filePath, [...scriptLines, ""].join("\n"), "utf8");
+  await chmod(filePath, 0o755);
+}
+
 function rootVenvPythonCommandPathForPlatform(): string {
   return path.join(
     ".venv",
@@ -1713,7 +1721,7 @@ test("run_design_script executes a workspace Python design script and reports ge
   }
 });
 
-test("run_design_script uses the parent root venv Python and ignores nested design-code venvs", async () => {
+test("run_design_script uses the parent root venv Python and ignores nested design-code venvs", { skip: process.platform === "win32" ? "fake python.exe shell-script shims are not executable on Windows" : false }, async () => {
   const workspace = await mkdtemp(path.join(tmpdir(), "pi-agent-tools-"));
   const projectDir = path.join(workspace, "knowledge-base", "design-code");
   const scriptDir = path.join(projectDir, "scripts");
@@ -1725,29 +1733,17 @@ test("run_design_script uses the parent root venv Python and ignores nested desi
     await mkdir(path.dirname(rootVenvPython), { recursive: true });
     await mkdir(path.dirname(nestedVenvPython), { recursive: true });
 
-    await writeFile(
-      rootVenvPython,
-      [
-        "#!/bin/sh",
-        "echo root-venv-python-used >&2",
-        "exec python3 \"$@\"",
-        ""
-      ].join("\n"),
-      "utf8",
-    );
-    await chmod(rootVenvPython, 0o755);
+    await writeFakePythonExecutable(rootVenvPython, [
+      "#!/bin/sh",
+      "echo root-venv-python-used >&2",
+      "exec python3 \"$@\"",
+    ]);
 
-    await writeFile(
-      nestedVenvPython,
-      [
-        "#!/bin/sh",
-        "echo nested-venv-python-used >&2",
-        "exec python3 \"$@\"",
-        ""
-      ].join("\n"),
-      "utf8",
-    );
-    await chmod(nestedVenvPython, 0o755);
+    await writeFakePythonExecutable(nestedVenvPython, [
+      "#!/bin/sh",
+      "echo nested-venv-python-used >&2",
+      "exec python3 \"$@\"",
+    ]);
 
     await writeFile(
       path.join(scriptDir, "generate_gds.py"),
@@ -1883,22 +1879,16 @@ test("sync_design_environment runs uv sync for knowledge-base design-code into t
   }
 });
 
-test("verify_design_python_import uses root venv python", async () => {
+test("verify_design_python_import uses root venv python", { skip: process.platform === "win32" ? "fake python.exe shell-script shims are not executable on Windows" : false }, async () => {
   const workspace = await mkdtemp(path.join(tmpdir(), "pi-agent-tools-"));
   const fakePython = rootVenvPythonPath(workspace);
 
   try {
     await mkdir(path.dirname(fakePython), { recursive: true });
-    await writeFile(
-      fakePython,
-      [
-        "#!/bin/sh",
-        "echo fake-python:$@",
-        "",
-      ].join("\n"),
-      "utf8",
-    );
-    await chmod(fakePython, 0o755);
+    await writeFakePythonExecutable(fakePython, [
+      "#!/bin/sh",
+      "echo fake-python:$@",
+    ]);
 
     const verifyDesignPythonImportTool = getVerifyDesignPythonImportTool(workspace);
     const result = await verifyDesignPythonImportTool.execute(
@@ -1919,23 +1909,17 @@ test("verify_design_python_import uses root venv python", async () => {
   }
 });
 
-test("verify_design_python_import caps combined success output", async () => {
+test("verify_design_python_import caps combined success output", { skip: process.platform === "win32" ? "fake python.exe shell-script shims are not executable on Windows" : false }, async () => {
   const workspace = await mkdtemp(path.join(tmpdir(), "pi-agent-tools-"));
   const fakePython = rootVenvPythonPath(workspace);
 
   try {
     await mkdir(path.dirname(fakePython), { recursive: true });
-    await writeFile(
-      fakePython,
-      [
-        "#!/bin/sh",
-        "printf '%*s' 900 '' | tr ' ' 'o'",
-        "printf '%*s' 900 '' | tr ' ' 'e' >&2",
-        "",
-      ].join("\n"),
-      "utf8",
-    );
-    await chmod(fakePython, 0o755);
+    await writeFakePythonExecutable(fakePython, [
+      "#!/bin/sh",
+      "printf '%*s' 900 '' | tr ' ' 'o'",
+      "printf '%*s' 900 '' | tr ' ' 'e' >&2",
+    ]);
 
     const verifyDesignPythonImportTool = getVerifyDesignPythonImportTool(workspace);
     const result = await verifyDesignPythonImportTool.execute(
