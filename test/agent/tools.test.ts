@@ -629,16 +629,27 @@ function getVerifyDesignPythonImportTool(workspaceDir: string) {
   return tool;
 }
 
-function rootVenvPythonRelativePathForPlatform(): string {
+function rootVenvPythonDisplayPath(): string {
   return process.platform === "win32" ? ".venv/Scripts/python.exe" : ".venv/bin/python";
 }
 
-function rootVenvPythonPathForPlatform(workspaceDir: string): string {
-  return path.join(workspaceDir, ...rootVenvPythonRelativePathForPlatform().split("/"));
+function rootVenvPythonPath(workspaceDir: string): string {
+  return path.join(workspaceDir, ...rootVenvPythonDisplayPath().split("/"));
 }
 
 function rootVenvPythonCommandPathForPlatform(): string {
   return path.join(
+    ".venv",
+    process.platform === "win32" ? "Scripts" : "bin",
+    process.platform === "win32" ? "python.exe" : "python",
+  );
+}
+
+function rootVenvPythonCommandPathFromDesignScriptDir(): string {
+  return path.join(
+    "..",
+    "..",
+    "..",
     ".venv",
     process.platform === "win32" ? "Scripts" : "bin",
     process.platform === "win32" ? "python.exe" : "python",
@@ -1706,15 +1717,14 @@ test("run_design_script uses the parent root venv Python and ignores nested desi
   const workspace = await mkdtemp(path.join(tmpdir(), "pi-agent-tools-"));
   const projectDir = path.join(workspace, "knowledge-base", "design-code");
   const scriptDir = path.join(projectDir, "scripts");
-  const rootVenvBinDir = path.join(workspace, ".venv", "bin");
-  const nestedVenvBinDir = path.join(projectDir, ".venv", "bin");
+  const rootVenvPython = rootVenvPythonPath(workspace);
+  const nestedVenvPython = rootVenvPythonPath(projectDir);
 
   try {
     await mkdir(scriptDir, { recursive: true });
-    await mkdir(rootVenvBinDir, { recursive: true });
-    await mkdir(nestedVenvBinDir, { recursive: true });
+    await mkdir(path.dirname(rootVenvPython), { recursive: true });
+    await mkdir(path.dirname(nestedVenvPython), { recursive: true });
 
-    const rootVenvPython = path.join(rootVenvBinDir, "python");
     await writeFile(
       rootVenvPython,
       [
@@ -1727,7 +1737,6 @@ test("run_design_script uses the parent root venv Python and ignores nested desi
     );
     await chmod(rootVenvPython, 0o755);
 
-    const nestedVenvPython = path.join(nestedVenvBinDir, "python");
     await writeFile(
       nestedVenvPython,
       [
@@ -1767,7 +1776,7 @@ test("run_design_script uses the parent root venv Python and ignores nested desi
       status: "completed",
       runner: "python",
       scriptPath: "knowledge-base/design-code/scripts/generate_gds.py",
-      command: "../../../.venv/bin/python generate_gds.py",
+      command: `${rootVenvPythonCommandPathFromDesignScriptDir()} generate_gds.py`,
       exitCode: 0,
       stdout: "script complete\n",
       stderr: "root-venv-python-used\n",
@@ -1820,8 +1829,9 @@ test("sync_design_environment runs uv sync for knowledge-base design-code into t
         "  cwd: process.cwd(),",
         "  env: process.env.UV_PROJECT_ENVIRONMENT",
         "}) + '\\n');",
-        "fs.mkdirSync(path.join(process.env.UV_PROJECT_ENVIRONMENT, 'bin'), { recursive: true });",
-        "fs.writeFileSync(path.join(process.env.UV_PROJECT_ENVIRONMENT, 'bin', 'python'), '#!/bin/sh\\necho synced-python\\n');",
+        `const pythonPath = path.join(process.env.UV_PROJECT_ENVIRONMENT, ${process.platform === "win32" ? "'Scripts', 'python.exe'" : "'bin', 'python'"});`,
+        "fs.mkdirSync(path.dirname(pythonPath), { recursive: true });",
+        "fs.writeFileSync(pythonPath, '#!/bin/sh\\necho synced-python\\n');",
         "console.log('uv sync complete');",
         ""
       ].join("\n"),
@@ -1845,7 +1855,7 @@ test("sync_design_environment runs uv sync for knowledge-base design-code into t
     assert.equal(details.status, "synced");
     assert.equal(details.projectPath, "knowledge-base/design-code");
     assert.equal(details.environmentPath, ".venv");
-    assert.equal(details.pythonPath, ".venv/bin/python");
+    assert.equal(details.pythonPath, rootVenvPythonDisplayPath());
     assert.equal(details.command, "uv sync --project knowledge-base/design-code --extra dev");
     assert.equal(details.exitCode, 0);
     assert.equal(details.stderr, "");
@@ -1875,7 +1885,7 @@ test("sync_design_environment runs uv sync for knowledge-base design-code into t
 
 test("verify_design_python_import uses root venv python", async () => {
   const workspace = await mkdtemp(path.join(tmpdir(), "pi-agent-tools-"));
-  const fakePython = rootVenvPythonPathForPlatform(workspace);
+  const fakePython = rootVenvPythonPath(workspace);
 
   try {
     await mkdir(path.dirname(fakePython), { recursive: true });
@@ -1900,7 +1910,7 @@ test("verify_design_python_import uses root venv python", async () => {
 
     assert.equal(details.status, "importable");
     assert.equal(details.moduleName, "gdsfactory");
-    assert.equal(details.pythonPath, rootVenvPythonRelativePathForPlatform());
+    assert.equal(details.pythonPath, rootVenvPythonDisplayPath());
     assert.match(String(details.stdout), /fake-python:-c import gdsfactory/);
     assert.equal(details.stderr, "");
     assert.ok(String(details.command).includes(`${rootVenvPythonCommandPathForPlatform()} -c`));
@@ -1911,7 +1921,7 @@ test("verify_design_python_import uses root venv python", async () => {
 
 test("verify_design_python_import caps combined success output", async () => {
   const workspace = await mkdtemp(path.join(tmpdir(), "pi-agent-tools-"));
-  const fakePython = rootVenvPythonPathForPlatform(workspace);
+  const fakePython = rootVenvPythonPath(workspace);
 
   try {
     await mkdir(path.dirname(fakePython), { recursive: true });
