@@ -60,6 +60,7 @@ type ToolName =
   | "read_file"
   | "read_paper_section"
   | "register_manual_paper_download"
+  | "replace_design_code_file_text"
   | "replace_file_text"
   | "research_topic_bootstrap"
   | "sync_design_environment"
@@ -77,6 +78,7 @@ type ToolName =
   | "wiki_review_page"
   | "wiki_structure_plan"
   | "write_design_artifact"
+  | "write_design_code_file"
   | "write_file"
   | "write_paper_wiki_source";
 
@@ -88,7 +90,9 @@ export const DESIGN_AGENT_TOOL_NAMES = [
   "update_design_dependency",
   "sync_design_environment",
   "run_design_script",
-  "write_design_artifact"
+  "write_design_artifact",
+  "write_design_code_file",
+  "replace_design_code_file_text"
 ] as const satisfies readonly ToolName[];
 
 export const TOOL_BOUNDARY_NAMES: Record<ToolBoundaryRole, readonly ToolName[]> = {

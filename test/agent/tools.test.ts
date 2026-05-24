@@ -65,6 +65,8 @@ type WriteFileTool = {
   ) => Promise<ToolResult>;
 };
 
+type WriteDesignCodeFileTool = WriteFileTool;
+
 type WriteDesignArtifactTool = {
   execute: (
     toolCallId: string,
@@ -109,6 +111,8 @@ type ReplaceFileTextTool = {
     signal: undefined,
   ) => Promise<ToolResult>;
 };
+
+type ReplaceDesignCodeFileTextTool = ReplaceFileTextTool;
 
 type DeleteFileTool = {
   execute: (
@@ -577,6 +581,22 @@ function getWriteDesignArtifactTool(workspace: string): WriteDesignArtifactTool 
   assert.ok(writeDesignArtifactTool);
   assert.equal(typeof writeDesignArtifactTool.execute, "function");
   return writeDesignArtifactTool as WriteDesignArtifactTool;
+}
+
+function getWriteDesignCodeFileTool(workspaceDir: string) {
+  const tool = createTools(workspaceDir, { toolProfile: "full" }).find(
+    (candidate) => candidate.name === "write_design_code_file",
+  );
+  assert.ok(tool);
+  return tool as WriteDesignCodeFileTool;
+}
+
+function getReplaceDesignCodeFileTextTool(workspaceDir: string) {
+  const tool = createTools(workspaceDir, { toolProfile: "full" }).find(
+    (candidate) => candidate.name === "replace_design_code_file_text",
+  );
+  assert.ok(tool);
+  return tool as ReplaceDesignCodeFileTextTool;
 }
 
 function getRunDesignScriptTool(workspace: string): RunDesignScriptTool {
@@ -1380,6 +1400,88 @@ test("write_design_artifact writes design subagent records under knowledge-base/
       path: expectedPath,
       bytes: Buffer.byteLength(artifact, "utf8"),
       title: "Frequency Collision Attempt",
+    });
+  } finally {
+    await rm(workspace, { recursive: true, force: true });
+  }
+});
+
+test("write_design_code_file writes only under knowledge-base design-code", async () => {
+  const workspace = await mkdtemp(path.join(tmpdir(), "pi-agent-tools-"));
+  const designCodeDir = path.join(workspace, "knowledge-base", "design-code");
+  const content = "def build():\n    return 'layout'\n";
+
+  try {
+    await mkdir(designCodeDir, { recursive: true });
+    await writeFile(path.join(designCodeDir, "pyproject.toml"), "[project]\nname = \"pi-chip-design\"\n", "utf8");
+
+    const writeDesignCodeFileTool = getWriteDesignCodeFileTool(workspace);
+    const result = await writeDesignCodeFileTool.execute(
+      "call-write-design-code-file",
+      { path: "src/pi_chip_design/layouts/demo.py", content },
+      undefined,
+    );
+
+    const expectedPath = "knowledge-base/design-code/src/pi_chip_design/layouts/demo.py";
+    assert.equal(await readFile(path.join(workspace, expectedPath), "utf8"), content);
+    assert.deepEqual(result.details, {
+      path: expectedPath,
+      bytes: Buffer.byteLength(content, "utf8"),
+    });
+  } finally {
+    await rm(workspace, { recursive: true, force: true });
+  }
+});
+
+test("write_design_code_file rejects parent repo paths", async () => {
+  const workspace = await mkdtemp(path.join(tmpdir(), "pi-agent-tools-"));
+  const designCodeDir = path.join(workspace, "knowledge-base", "design-code");
+
+  try {
+    await mkdir(designCodeDir, { recursive: true });
+    await writeFile(path.join(designCodeDir, "pyproject.toml"), "[project]\nname = \"pi-chip-design\"\n", "utf8");
+
+    const writeDesignCodeFileTool = getWriteDesignCodeFileTool(workspace);
+    await assert.rejects(
+      () => writeDesignCodeFileTool.execute(
+        "call-write-design-code-file-parent",
+        { path: "../../src/agent/agent-prompts.ts", content: "unsafe" },
+        undefined,
+      ),
+      /design-code file tools only write under knowledge-base\/design-code/,
+    );
+  } finally {
+    await rm(workspace, { recursive: true, force: true });
+  }
+});
+
+test("replace_design_code_file_text replaces a unique exact block under design-code", async () => {
+  const workspace = await mkdtemp(path.join(tmpdir(), "pi-agent-tools-"));
+  const designCodeDir = path.join(workspace, "knowledge-base", "design-code");
+  const target = path.join(designCodeDir, "src", "pi_chip_design", "layouts", "demo.py");
+
+  try {
+    await mkdir(path.dirname(target), { recursive: true });
+    await writeFile(path.join(designCodeDir, "pyproject.toml"), "[project]\nname = \"pi-chip-design\"\n", "utf8");
+    await writeFile(target, "def build():\n    return 'old-layout'\n", "utf8");
+
+    const replaceDesignCodeFileTextTool = getReplaceDesignCodeFileTextTool(workspace);
+    const result = await replaceDesignCodeFileTextTool.execute(
+      "call-replace-design-code-file-text",
+      {
+        path: "knowledge-base/design-code/src/pi_chip_design/layouts/demo.py",
+        search: "return 'old-layout'",
+        replacement: "return 'new-layout'",
+      },
+      undefined,
+    );
+
+    const updated = "def build():\n    return 'new-layout'\n";
+    assert.equal(await readFile(target, "utf8"), updated);
+    assert.deepEqual(result.details, {
+      path: "knowledge-base/design-code/src/pi_chip_design/layouts/demo.py",
+      replacements: 1,
+      bytes: Buffer.byteLength(updated, "utf8"),
     });
   } finally {
     await rm(workspace, { recursive: true, force: true });
@@ -2251,6 +2353,8 @@ const EXPECTED_FULL_ONLY_TOOL_NAMES = [
   "paper_wiki_relations",
   "search_paper_wiki",
   "write_design_artifact",
+  "write_design_code_file",
+  "replace_design_code_file_text",
   "update_design_dependency",
   "sync_design_environment",
   "run_design_script",
@@ -2358,6 +2462,8 @@ test("createToolsForBoundary exposes isolated wiki and worker tool surfaces", as
     assert.ok(designTools.some((tool) => tool.name === "answer_paper_wiki_question"));
     assert.ok(designTools.some((tool) => tool.name === "search_paper_wiki"));
     assert.ok(designTools.some((tool) => tool.name === "write_design_artifact"));
+    assert.ok(designTools.some((tool) => tool.name === "write_design_code_file"));
+    assert.ok(designTools.some((tool) => tool.name === "replace_design_code_file_text"));
     assert.ok(designTools.some((tool) => tool.name === "sync_design_environment"));
     assert.ok(designTools.some((tool) => tool.name === "run_design_script"));
     assert.ok(!designTools.some((tool) => tool.name === "download_paper"));

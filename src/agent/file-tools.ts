@@ -70,10 +70,33 @@ const writeFileParameters = Type.Object({
   content: Type.String({ description: "Full UTF-8 file content to write." })
 });
 
+const writeDesignCodeFileParameters = Type.Object({
+  path: Type.String({
+    description:
+      "UTF-8 text file path under knowledge-base/design-code. Accepts design-code-relative paths or knowledge-base/design-code/... paths."
+  }),
+  content: Type.String({ description: "Full UTF-8 file content to write." })
+});
+
 const replaceFileTextParameters = Type.Object({
   path: Type.String({
     description:
       "UTF-8 text file path inside the workspace. Relative paths and workspace-absolute paths are accepted."
+  }),
+  search: Type.String({ description: "Exact existing text block to replace." }),
+  replacement: Type.String({ description: "Replacement text." }),
+  replaceAll: Type.Optional(
+    Type.Boolean({
+      description:
+        "Replace every occurrence. Defaults to false; when false, the search text must occur exactly once."
+    })
+  )
+});
+
+const replaceDesignCodeFileTextParameters = Type.Object({
+  path: Type.String({
+    description:
+      "UTF-8 text file path under knowledge-base/design-code. Accepts design-code-relative paths or knowledge-base/design-code/... paths."
   }),
   search: Type.String({ description: "Exact existing text block to replace." }),
   replacement: Type.String({ description: "Replacement text." }),
@@ -213,7 +236,9 @@ type LoadPaperWritingSkillParameters = Static<typeof loadPaperWritingSkillParame
 type ReadFileParameters = Static<typeof readFileParameters>;
 type ListFilesParameters = Static<typeof listFilesParameters>;
 type WriteFileParameters = Static<typeof writeFileParameters>;
+type WriteDesignCodeFileParameters = Static<typeof writeDesignCodeFileParameters>;
 type ReplaceFileTextParameters = Static<typeof replaceFileTextParameters>;
+type ReplaceDesignCodeFileTextParameters = Static<typeof replaceDesignCodeFileTextParameters>;
 type DeleteFileParameters = Static<typeof deleteFileParameters>;
 type CompileLatexParameters = Static<typeof compileLatexParameters>;
 type WriteDesignArtifactParameters = Static<typeof writeDesignArtifactParameters>;
@@ -542,6 +567,66 @@ async function resolveDesignCodeProjectPath(workspaceDir: string, requestedPath:
   }
 
   return resolvedProjectDir;
+}
+
+function assertPathInsideDesignCodeProject(rootDir: string, candidatePath: string): void {
+  try {
+    assertPathInsideDirectory(rootDir, candidatePath);
+  } catch {
+    throw new Error("design-code file tools only write under knowledge-base/design-code.");
+  }
+}
+
+function designCodeRelativeRequestedPath(requestedPath: string): string {
+  const trimmedPath = requestedPath.trim();
+  if (!trimmedPath) {
+    throw new Error("Path is required.");
+  }
+  if (path.isAbsolute(trimmedPath) || path.win32.isAbsolute(trimmedPath)) {
+    throw new Error("design-code file tools only write under knowledge-base/design-code.");
+  }
+
+  const platformPath = trimmedPath.split(/[\\/]+/).join(path.sep);
+  const designCodePrefix = path.join("knowledge-base", "design-code");
+  if (platformPath === designCodePrefix) {
+    throw new Error("Path is required.");
+  }
+
+  return platformPath.startsWith(`${designCodePrefix}${path.sep}`)
+    ? platformPath.slice(designCodePrefix.length + 1)
+    : platformPath;
+}
+
+async function resolveDesignCodeWritableFilePath(workspaceDir: string, requestedPath: string): Promise<string> {
+  const designCodeDir = await resolveDesignCodeProjectPath(workspaceDir, "knowledge-base/design-code");
+  const realDesignCodeDir = await realpath(designCodeDir);
+  const projectRelativePath = designCodeRelativeRequestedPath(requestedPath);
+  const resolvedPath = path.resolve(realDesignCodeDir, projectRelativePath);
+  assertPathInsideDesignCodeProject(realDesignCodeDir, resolvedPath);
+
+  const parentDir = path.dirname(resolvedPath);
+  let existingAncestorDir = parentDir;
+  while (!(await pathExists(existingAncestorDir))) {
+    const nextAncestorDir = path.dirname(existingAncestorDir);
+    if (nextAncestorDir === existingAncestorDir) {
+      throw new Error("design-code file tools only write under knowledge-base/design-code.");
+    }
+    existingAncestorDir = nextAncestorDir;
+  }
+  const realExistingAncestorDir = await realpath(existingAncestorDir);
+  assertPathInsideDesignCodeProject(realDesignCodeDir, realExistingAncestorDir);
+
+  await mkdir(parentDir, { recursive: true });
+  const realParentDir = await realpath(parentDir);
+  assertPathInsideDesignCodeProject(realDesignCodeDir, realParentDir);
+
+  if (await pathExists(resolvedPath)) {
+    const realResolvedPath = await realpath(resolvedPath);
+    assertPathInsideDesignCodeProject(realDesignCodeDir, realResolvedPath);
+    return realResolvedPath;
+  }
+
+  return resolvedPath;
 }
 
 function formatCommandLine(input: {
@@ -1258,8 +1343,13 @@ type LoadPaperWritingSkillTool = AgentTool<typeof loadPaperWritingSkillParameter
 type ReadFileTool = AgentTool<typeof readFileParameters, ReadFileDetails>;
 type ListFilesTool = AgentTool<typeof listFilesParameters, ListFilesDetails>;
 type WriteFileTool = AgentTool<typeof writeFileParameters, { path: string; bytes: number }>;
+type WriteDesignCodeFileTool = AgentTool<typeof writeDesignCodeFileParameters, { path: string; bytes: number }>;
 type ReplaceFileTextTool = AgentTool<
   typeof replaceFileTextParameters,
+  { path: string; replacements: number; bytes: number }
+>;
+type ReplaceDesignCodeFileTextTool = AgentTool<
+  typeof replaceDesignCodeFileTextParameters,
   { path: string; replacements: number; bytes: number }
 >;
 type DeleteFileTool = AgentTool<typeof deleteFileParameters, { path: string; bytes: number }>;
@@ -1549,6 +1639,67 @@ export function createFileTools(input: {
     }
   };
 
+  const writeDesignCodeFileTool: WriteDesignCodeFileTool = {
+    name: "write_design_code_file",
+    label: "Write Design Code File",
+    description:
+      "Creates or overwrites a UTF-8 file only under knowledge-base/design-code/. Accepts paths relative to that design-code project or prefixed with knowledge-base/design-code/. This is not a generic workspace file writer.",
+    parameters: writeDesignCodeFileParameters,
+    executionMode: "sequential",
+    execute: async (_toolCallId: string, args: WriteDesignCodeFileParameters) => {
+      const resolvedPath = await resolveDesignCodeWritableFilePath(resolvedWorkspaceDir, args.path);
+      await writeFile(resolvedPath, args.content, "utf8");
+      const relativePath = relativeWorkspacePath(resolvedWorkspaceDir, resolvedPath);
+
+      return {
+        content: [{ type: "text", text: `Wrote ${relativePath}.` }],
+        details: {
+          path: relativePath,
+          bytes: Buffer.byteLength(args.content, "utf8")
+        }
+      };
+    }
+  };
+
+  const replaceDesignCodeFileTextTool: ReplaceDesignCodeFileTextTool = {
+    name: "replace_design_code_file_text",
+    label: "Replace Design Code File Text",
+    description:
+      "Replaces an exact text block in a UTF-8 file only under knowledge-base/design-code/. Use read_file first, then replace the smallest exact block. This is not a generic workspace file editor.",
+    parameters: replaceDesignCodeFileTextParameters,
+    executionMode: "sequential",
+    execute: async (_toolCallId: string, args: ReplaceDesignCodeFileTextParameters) => {
+      if (!args.search) {
+        throw new Error("Search text is required.");
+      }
+
+      const resolvedPath = await resolveDesignCodeWritableFilePath(resolvedWorkspaceDir, args.path);
+      const original = await readFile(resolvedPath, "utf8");
+      const occurrences = countOccurrences(original, args.search);
+      if (occurrences === 0) {
+        throw new Error("Search text was not found in the file.");
+      }
+      if (!args.replaceAll && occurrences !== 1) {
+        throw new Error(`Search text occurs ${occurrences} times; set replaceAll=true or use a more specific block.`);
+      }
+
+      const updated = args.replaceAll
+        ? original.split(args.search).join(args.replacement)
+        : original.replace(args.search, args.replacement);
+      await writeFile(resolvedPath, updated, "utf8");
+      const relativePath = relativeWorkspacePath(resolvedWorkspaceDir, resolvedPath);
+
+      return {
+        content: [{ type: "text", text: `Replaced text in ${relativePath}.` }],
+        details: {
+          path: relativePath,
+          replacements: args.replaceAll ? occurrences : 1,
+          bytes: Buffer.byteLength(updated, "utf8")
+        }
+      };
+    }
+  };
+
   const updateDesignDependencyTool: UpdateDesignDependencyTool = {
     name: "update_design_dependency",
     label: "Update Design Dependency",
@@ -1631,6 +1782,8 @@ export function createFileTools(input: {
     ],
     artifactFullTools: [
       writeDesignArtifactTool,
+      writeDesignCodeFileTool,
+      replaceDesignCodeFileTextTool,
       updateDesignDependencyTool,
       syncDesignEnvironmentTool,
       runDesignScriptTool
