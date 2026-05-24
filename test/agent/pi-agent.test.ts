@@ -1072,6 +1072,44 @@ test("runSessionPrompt routes paper write commands to the paper-writing worker b
   }
 });
 
+test("runSessionPrompt routes design package requests to design-agent boundary", async () => {
+  const registration = registerFauxProvider();
+  registration.setResponses([
+    fauxAssistantMessage([fauxText("Design dependency checked.")])
+  ]);
+
+  const context: AgentContext = {
+    systemPrompt: DEFAULT_SYSTEM_PROMPT,
+    messages: [],
+    tools: []
+  };
+
+  try {
+    const result = await piAgent.runSessionPrompt({
+      model: registration.getModel(),
+      workspaceDir: process.cwd(),
+      context,
+      prompt: "请让design subagent安装gdsfactory这个python包"
+    });
+
+    const handoff = result.newMessages
+      .filter(isAssistantMessage)
+      .map((message) => {
+        try {
+          return parseWorkerHandoff(message) as { role?: string; instruction?: string };
+        } catch {
+          return undefined;
+        }
+      })
+      .find((candidate) => candidate?.role === "design-agent");
+
+    assert.ok(handoff);
+    assert.equal(handoff.instruction, "请让design subagent安装gdsfactory这个python包");
+  } finally {
+    registration.unregister();
+  }
+});
+
 test("runSessionPrompt paper download worker queues browser extension jobs", async () => {
   const runSessionPrompt = (
     piAgent as {

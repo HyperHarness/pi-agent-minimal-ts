@@ -16,6 +16,7 @@ import {
   createWorkerHandoffMessage,
   extractWorkerHandoffPaths,
   nextOwnerForWorker,
+  normalizeWorkerRole,
   routeChatPromptToWorker,
   systemPromptForWorker,
   type RoutedWorkerPrompt,
@@ -388,6 +389,7 @@ async function runRoutedWorkerPrompt(options: {
   instruction: string;
   onEvent?: AgentMessageEventHandler;
 }): Promise<{ messages: AgentMessage[]; handoff: WorkerHandoff }> {
+  const normalizedRole = normalizeWorkerRole(options.role);
   const workerTools = createToolsForBoundary(options.workspaceDir, options.role, {
     extensionBridge: createQueuedPaperExtensionBridge({ workspaceDir: options.workspaceDir })
   });
@@ -448,7 +450,7 @@ async function runRoutedWorkerPrompt(options: {
     return {
       messages: attemptResult.messages,
       handoff: {
-        role: options.role,
+        role: normalizedRole,
         instruction: options.instruction,
         routeReason: options.routeReason,
         status: isFailedTurn(attemptResult.messages) ? "failed" : "completed",
@@ -460,7 +462,7 @@ async function runRoutedWorkerPrompt(options: {
         toolsUsed: [...new Set(toolsUsed)],
         failedTools: [...new Set(failedTools)],
         finalResponse,
-        nextSuggestedOwner: nextOwnerForWorker(options.role)
+        nextSuggestedOwner: nextOwnerForWorker(normalizedRole)
       }
     };
   } finally {

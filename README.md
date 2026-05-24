@@ -32,7 +32,7 @@ main chat agent / wiki-agent coordinator
         +--> paper-download-subagent  -> acquisition files, PDFs, webpages, parses
         +--> wiki-evidence-worker     -> sources/*/summary.md and fixed-evidence page drafts
         +--> wiki-agent               -> pages/*.md and aliases
-        +--> design-subagent          -> knowledge-base/design-records/*.md
+        +--> design-agent             -> knowledge-base/design-records/*.md
         +--> paper-writing-worker     -> manuscript project files
         |
         +--> bridge repo manager      -> git status/diff/log/commit/push
@@ -59,9 +59,9 @@ The local chat/RPC runtime has a lightweight router layer before the default mai
 - PaperOrchestra-style full manuscript generation, outline, draft refinement, or submission-package requests -> `paper-writing-worker`
 - paper search, paper download, acquisition fallback, and citation-metadata repair requests -> `paper-download-subagent`
 - evidence construction, paper summarization, and source-summary relation requests -> `wiki-evidence-worker`
-- chip-design records, verification records, or design-failure cases -> `design-subagent`
+- chip-design/layout engineering requests, verification records, or design-failure cases -> `design-agent`
 
-Explicit prefixes are still supported when precision matters: `paper write ...`, `paper download ...`, `download paper ...`, `wiki evidence ...`, `evidence ...`, `design ...`, `/paper-writing-worker ...`, `/paper-download-subagent ...`, `/wiki-evidence-worker ...`, and `/design-subagent ...`. If no worker route matches, the prompt goes to the main wiki-agent coordinator.
+Explicit prefixes are still supported when precision matters: `paper write ...`, `paper download ...`, `download paper ...`, `wiki evidence ...`, `evidence ...`, `design ...`, `design-agent ...`, `/design-agent ...`, `/paper-writing-worker ...`, `/paper-download-subagent ...`, and `/wiki-evidence-worker ...`. `design-subagent ...` and `/design-subagent ...` are accepted as compatibility aliases and report handoff as `design-agent`. If no worker route matches, the prompt goes to the main wiki-agent coordinator.
 
 Worker turns do not share the main agent's full context. The router runs each worker in a clean context, streams the worker's normal reply to the user, then injects a compact structured handoff back into the main context. The handoff records the worker role, instruction, route reason, status, changed files, produced artifacts, source/page/design-record paths, tools used, failed tools, final worker response, and the next suggested owner. This keeps the main chat history continuous without copying the worker's full tool transcript into the prompt.
 
@@ -105,8 +105,8 @@ The wiki agent should not directly download papers, run web search, or author ra
 The intended workflow is:
 
 ```text
-paper-download-subagent -> wiki-evidence-worker -> wiki-agent -> design-subagent -> wiki-agent -> paper-writing-worker
-acquisition/raw/parses  -> sources/*/summary.md + page drafts -> pages/*.md -> design records  -> curated wiki -> manuscript files
+paper-download-subagent -> wiki-evidence-worker -> wiki-agent -> design-agent -> wiki-agent -> paper-writing-worker
+acquisition/raw/parses  -> sources/*/summary.md + page drafts -> pages/*.md -> design records -> curated wiki -> manuscript files
 ```
 
 For model benchmarks, give workers fixed `sources` fixtures and evaluate page synthesis without allowing autonomous evidence acquisition.
@@ -347,9 +347,9 @@ This is deterministic schema, retrieval, review, and lint support. It does not r
 
 ### Design And Paper-Writing Tools
 
-- `write_design_artifact`: full-mode / design-subagent tool that writes structured design records, verification reports, failure records, and benchmark cases under `knowledge-base/design-records/`
-- `sync_design_environment`: full-mode / design-subagent tool that runs `uv sync` for `knowledge-base/design-code/` while forcing the shared repository root `.venv` as the Python project environment. This is not a general shell and cannot sync arbitrary projects.
-- `run_design_script`: full-mode / design-subagent tool that runs workspace-local `.py` layout or verification scripts. For Python scripts it uses the repository root `.venv/bin/python` before falling back to WSL/system `python3`; KLayout scripts still run through `klayout -b -r`.
+- `write_design_artifact`: full-mode / design-agent tool that writes structured design records, verification reports, failure records, and benchmark cases under `knowledge-base/design-records/`
+- `sync_design_environment`: full-mode / design-agent tool that runs `uv sync` for `knowledge-base/design-code/` while forcing the shared repository root `.venv` as the Python project environment. This is not a general shell and cannot sync arbitrary projects.
+- `run_design_script`: full-mode / design-agent tool that runs workspace-local `.py` layout or verification scripts. For Python scripts it uses the repository root `.venv/bin/python` before falling back to WSL/system `python3`; KLayout scripts still run through `klayout -b -r`.
 - `load_paper_writing_skill`: full-mode / paper-writing-worker tool that loads worker-scoped writing prompt modules such as `skills/paper-writing-worker/sciwrite/prompt.md`
 - `paper_orchestra_prepare_workspace`: full-mode / paper-writing-worker tool that creates and validates the controlled PaperOrchestra writing workspace layout
 - `paper_orchestra_check_draft`: full-mode / paper-writing-worker tool that runs orphan-citation, LaTeX sanity, and anonymous anti-leakage draft gates
@@ -358,7 +358,7 @@ This is deterministic schema, retrieval, review, and lint support. It does not r
 - paper-writing-worker tools: project-local writing skill loading, manuscript file reading/writing, PaperOrchestra writing gates, LaTeX compilation, local wiki retrieval, and wiki-grounded Q&A
 - `get_time`: full-mode diagnostic tool for checking the current local time
 
-The design subagent records design reasoning and verification artifacts. The wiki agent later curates stable lessons from those artifacts into durable wiki pages.
+The design-agent is the engineering owner for executable layout code, dependency declarations, bounded verification scripts, and design records. It works in the nested `knowledge-base/design-code/` repository, declares Python dependencies there, uses `sync_design_environment` to run `uv sync` into the root `.venv`, executes only bounded workspace-local scripts through `run_design_script`, and returns artifacts or records to the wiki-agent for durable curation. `design-subagent` remains an accepted compatibility alias.
 
 Design code, reusable Python packages, scripts, generated-layout setup, and design notes should live under `knowledge-base/design-code/`. This directory is a separate Git repository inside the knowledge base. Keep one Python environment at the repository root `.venv` so `run_design_script` uses the same interpreter regardless of whether the agent was started from WSL, Feishu bridge, or another entrypoint.
 
@@ -371,10 +371,12 @@ Design code, reusable Python packages, scripts, generated-layout setup, and desi
 | `wiki-agent` | durable knowledge coordinator | local wiki search, page construction, aliases, wiki health/lint, local paper search | web search, paper download, source-summary generation |
 | `paper-download-subagent` | literature acquisition | search/download, browser/manual fallback, webpage capture, local-parse/arXiv/Crossref citation metadata refresh, parsing, health repair | wiki page writes, source-summary authoring |
 | `wiki-evidence-worker` | evidence construction | source summaries, relation maintenance, fixed-evidence page draft output | paper download, external search, autonomous acquisition |
-| `design-subagent` | minimal chip-design reasoning | local wiki/paper retrieval, `sync_design_environment`, workspace-local `run_design_script`, `write_design_artifact` | web search, paper download, wiki page writes, arbitrary file writes |
+| `design-agent` | chip-design/layout engineering | local wiki/paper retrieval, `sync_design_environment`, workspace-local `run_design_script`, `write_design_artifact` | web search, paper download, wiki page writes, arbitrary file writes |
 | `paper-writing-worker` | manuscript writing | project-local writing skills, manuscript read/write, PaperOrchestra workspace/gate/provenance tools, LaTeX compile, wiki retrieval/Q&A | paper download, source-summary generation, wiki page construction, web search |
 
 Use the boundary APIs in benchmarks so each model is evaluated under the same tool surface.
+
+`design-subagent` is retained only as a compatibility alias for older prompts and bridge integrations; public worker handoff records use `design-agent`.
 
 The main wiki/research tools also return compact coordination metadata. This is meant for agents and bridge logs: it records the detected intent, the decision path, ordered steps, worker owners, blocked/insufficient-evidence reasons, and the suggested next owner. `wiki-synthesis-worker` is a logical owner label for synthesis/page-writing steps, not a separate router prefix or durable runtime role. Coordination metadata is not a replacement for the worker boundary; it is an audit trail for why the boundary was chosen.
 
@@ -386,7 +388,7 @@ By default the local knowledge base lives in `knowledge-base/`, which is gitigno
 knowledge-base/
   raw/pdfs/                         # original PDFs
   design-artifacts/<experiment-key>/
-    code/                            # design-subagent scripts and helper modules
+    code/                            # design-agent scripts and helper modules
     layouts/                         # generated GDS/OAS/DXF and other layout data
     logs/                            # tool stdout/stderr, DRC/LVS/simulation logs
     results/                         # derived metrics, reports, screenshots, and tables
@@ -431,7 +433,7 @@ knowledge-base/
 
 Use `knowledge-base/design-code/` for maintained executable design code, Python package modules, simulations, generated-layout scripts, and project-local tests. Use `knowledge-base/design-records/` for structured design evidence. Both are knowledge-base content and should feed the data flywheel back into source summaries, manifests, and synthesis pages.
 
-Use `knowledge-base/design-artifacts/<experiment-key>/` for design-subagent experiment outputs that should become part of the local searchable knowledge base. The path contract is:
+Use `knowledge-base/design-artifacts/<experiment-key>/` for design-agent experiment outputs that should become part of the local searchable knowledge base. The path contract is:
 
 ```text
 knowledge-base/design-artifacts/<experiment-key>/
@@ -456,7 +458,7 @@ The initial design workspace is the `pi_chip_design` Python package under `knowl
 UV_PROJECT_ENVIRONMENT="$PWD/.venv" uv sync --project "$PWD/knowledge-base/design-code" --extra dev
 ```
 
-The design-subagent normally performs this through `sync_design_environment`; it does not require the parent agent process to activate this environment. `run_design_script` automatically resolves the repository root `.venv/bin/python` before falling back to `python3`.
+The design-agent normally performs this through `sync_design_environment`; it does not require the parent agent process to activate this environment. `run_design_script` automatically resolves the repository root `.venv/bin/python` before falling back to `python3`.
 
 Recommended paper-to-wiki path:
 
