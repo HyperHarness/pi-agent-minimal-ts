@@ -714,7 +714,7 @@ function parsePythonDependencyPackageName(dependency: string): string {
 }
 
 function findTomlSectionRange(lines: readonly string[], sectionName: string): { start: number; end: number } | undefined {
-  const sectionPattern = /^\s*\[([^\]]+)\]\s*$/;
+  const sectionPattern = /^\s*\[([^\]]+)\]\s*(?:#.*)?$/;
   const start = lines.findIndex((line) => sectionPattern.exec(line)?.[1] === sectionName);
   if (start < 0) {
     return undefined;
@@ -724,13 +724,37 @@ function findTomlSectionRange(lines: readonly string[], sectionName: string): { 
   return { start, end: nextSection >= 0 ? nextSection : lines.length };
 }
 
-function parseTomlStringArrayEntries(lines: readonly string[]): string[] {
+function parseTomlStringValue(rawValue: string): string {
+  return rawValue.replace(/\\"/g, "\"").replace(/\\\\/g, "\\");
+}
+
+function parseTomlDependencyArrayEntries(lines: readonly string[], fieldName: string): string[] {
   const entries: string[] = [];
+  const fieldPattern = new RegExp(`^\\s*${fieldName}\\s*=\\s*\\[(.*)`);
   const quotedStringPattern = /"((?:\\.|[^"\\])*)"/g;
   for (const line of lines) {
+    const trimmed = line.trim();
+    if (trimmed.length === 0 || trimmed.startsWith("#")) {
+      continue;
+    }
+
+    if (trimmed.startsWith("\"")) {
+      const match = /^"((?:\\.|[^"\\])*)"/.exec(trimmed);
+      if (match) {
+        entries.push(parseTomlStringValue(match[1]));
+      }
+      continue;
+    }
+
+    const fieldMatch = fieldPattern.exec(line);
+    if (!fieldMatch) {
+      continue;
+    }
+
+    const inlineArrayContent = fieldMatch[1].split("#", 1)[0];
     let match: RegExpExecArray | null;
-    while ((match = quotedStringPattern.exec(line)) !== null) {
-      entries.push(match[1].replace(/\\"/g, "\"").replace(/\\\\/g, "\\"));
+    while ((match = quotedStringPattern.exec(inlineArrayContent)) !== null) {
+      entries.push(parseTomlStringValue(match[1]));
     }
   }
   return entries;
@@ -786,22 +810,24 @@ function findTomlArrayFieldRange(lines: readonly string[], section: { start: num
   | { start: number; end: number; entries: string[] }
   | undefined {
   const fieldPattern = new RegExp(`^\\s*${fieldName}\\s*=\\s*\\[`);
+  const fieldOneLinePattern = new RegExp(`^\\s*${fieldName}\\s*=\\s*\\[.*\\]\\s*(?:#.*)?$`);
+  const closeArrayPattern = /^\]\s*(?:#.*)?$/;
   for (let index = section.start + 1; index < section.end; index += 1) {
     const line = lines[index];
     if (!fieldPattern.test(line)) {
       continue;
     }
 
-    if (line.includes("]")) {
+    if (fieldOneLinePattern.test(line)) {
       return {
         start: index,
         end: index + 1,
-        entries: parseTomlStringArrayEntries([line])
+        entries: parseTomlDependencyArrayEntries([line], fieldName)
       };
     }
 
     let arrayEnd = index + 1;
-    while (arrayEnd < section.end && !lines[arrayEnd].includes("]")) {
+    while (arrayEnd < section.end && !closeArrayPattern.test(lines[arrayEnd].trim())) {
       arrayEnd += 1;
     }
     if (arrayEnd >= section.end) {
@@ -810,7 +836,7 @@ function findTomlArrayFieldRange(lines: readonly string[], section: { start: num
     return {
       start: index,
       end: arrayEnd + 1,
-      entries: parseTomlStringArrayEntries(lines.slice(index, arrayEnd + 1))
+      entries: parseTomlDependencyArrayEntries(lines.slice(index, arrayEnd + 1), fieldName)
     };
   }
 

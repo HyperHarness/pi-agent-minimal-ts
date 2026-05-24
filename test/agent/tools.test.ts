@@ -1686,6 +1686,186 @@ test("update_design_dependency rejects invalid dependency names", async () => {
   }
 });
 
+test("update_design_dependency preserves dependency extras in multiline arrays", async () => {
+  const workspace = await mkdtemp(path.join(tmpdir(), "pi-agent-tools-"));
+  const designCodeDir = path.join(workspace, "knowledge-base", "design-code");
+  const pyprojectPath = path.join(designCodeDir, "pyproject.toml");
+
+  try {
+    await mkdir(designCodeDir, { recursive: true });
+    await writeFile(
+      pyprojectPath,
+      [
+        "[project] # package metadata",
+        "name = \"pi-chip-design\"",
+        "version = \"0.1.0\"",
+        "requires-python = \">=3.11\"",
+        "dependencies = [",
+        "  \"gdsfactory[dev]>=8\",",
+        "  \"numpy>=2\",",
+        "]",
+        "",
+      ].join("\n"),
+      "utf8",
+    );
+
+    const updateDesignDependencyTool = getUpdateDesignDependencyTool(workspace);
+    await updateDesignDependencyTool.execute(
+      "call-update-design-dependency-extras",
+      {
+        name: "gdsfactory",
+        specifier: ">=9",
+        group: "main",
+      },
+      undefined,
+    );
+
+    const updated = await readFile(pyprojectPath, "utf8");
+    assert.equal([...updated.matchAll(/"gdsfactory(?:\[dev\])?>=\d+"/g)].length, 1);
+    assert.match(updated, /"gdsfactory>=9"/);
+    assert.match(updated, /"numpy>=2"/);
+    assert.doesNotMatch(updated, /"gdsfactory\[dev\]>=8"/);
+    assert.equal([...updated.matchAll(/^\]\s*$/gm)].length, 1);
+    assert.equal([...updated.matchAll(/^\[project\]/gm)].length, 1);
+  } finally {
+    await rm(workspace, { recursive: true, force: true });
+  }
+});
+
+test("update_design_dependency ignores commented dependencies", async () => {
+  const workspace = await mkdtemp(path.join(tmpdir(), "pi-agent-tools-"));
+  const designCodeDir = path.join(workspace, "knowledge-base", "design-code");
+  const pyprojectPath = path.join(designCodeDir, "pyproject.toml");
+
+  try {
+    await mkdir(designCodeDir, { recursive: true });
+    await writeFile(
+      pyprojectPath,
+      [
+        "[project]",
+        "name = \"pi-chip-design\"",
+        "version = \"0.1.0\"",
+        "dependencies = [",
+        "  # \"klayout>=0.28\",",
+        "  \"gdsfactory>=8\",",
+        "]",
+        "",
+      ].join("\n"),
+      "utf8",
+    );
+
+    const updateDesignDependencyTool = getUpdateDesignDependencyTool(workspace);
+    await updateDesignDependencyTool.execute(
+      "call-update-design-dependency-commented",
+      {
+        name: "klayout",
+        specifier: ">=0.29",
+        group: "main",
+      },
+      undefined,
+    );
+
+    const updated = await readFile(pyprojectPath, "utf8");
+    assert.equal([...updated.matchAll(/"klayout>=0\.29"/g)].length, 1);
+    assert.doesNotMatch(updated, /"klayout>=0\.28"/);
+    assert.match(updated, /"gdsfactory>=8"/);
+  } finally {
+    await rm(workspace, { recursive: true, force: true });
+  }
+});
+
+test("update_design_dependency updates dev dependency group", async () => {
+  const workspace = await mkdtemp(path.join(tmpdir(), "pi-agent-tools-"));
+  const designCodeDir = path.join(workspace, "knowledge-base", "design-code");
+  const pyprojectPath = path.join(designCodeDir, "pyproject.toml");
+
+  try {
+    await mkdir(designCodeDir, { recursive: true });
+    await writeFile(
+      pyprojectPath,
+      [
+        "[project]",
+        "name = \"pi-chip-design\"",
+        "version = \"0.1.0\"",
+        "dependencies = [",
+        "  \"gdsfactory>=8\",",
+        "]",
+        "",
+        "[project.optional-dependencies]",
+        "dev = [",
+        "  \"pytest>=8\",",
+        "]",
+        "",
+      ].join("\n"),
+      "utf8",
+    );
+
+    const updateDesignDependencyTool = getUpdateDesignDependencyTool(workspace);
+    const result = await updateDesignDependencyTool.execute(
+      "call-update-design-dependency-dev",
+      {
+        name: "ruff",
+        specifier: ">=0.6",
+        group: "dev",
+      },
+      undefined,
+    );
+
+    assert.equal((result.details as { group?: string }).group, "dev");
+    const updated = await readFile(pyprojectPath, "utf8");
+    assert.match(updated, /\[project\.optional-dependencies\]\ndev = \[\n(?:  "pytest>=8",\n)?  "ruff>=0\.6",/);
+  } finally {
+    await rm(workspace, { recursive: true, force: true });
+  }
+});
+
+test("update_design_dependency is idempotent for existing dependency", async () => {
+  const workspace = await mkdtemp(path.join(tmpdir(), "pi-agent-tools-"));
+  const designCodeDir = path.join(workspace, "knowledge-base", "design-code");
+  const pyprojectPath = path.join(designCodeDir, "pyproject.toml");
+
+  try {
+    await mkdir(designCodeDir, { recursive: true });
+    await writeFile(
+      pyprojectPath,
+      [
+        "[project]",
+        "name = \"pi-chip-design\"",
+        "version = \"0.1.0\"",
+        "dependencies = [",
+        "  \"klayout>=0.29\",",
+        "]",
+        "",
+      ].join("\n"),
+      "utf8",
+    );
+
+    const updateDesignDependencyTool = getUpdateDesignDependencyTool(workspace);
+    await updateDesignDependencyTool.execute(
+      "call-update-design-dependency-idempotent-1",
+      {
+        name: "klayout",
+        specifier: ">=0.29",
+        group: "main",
+      },
+      undefined,
+    );
+    const second = await updateDesignDependencyTool.execute(
+      "call-update-design-dependency-idempotent-2",
+      {
+        name: "klayout",
+        specifier: ">=0.29",
+        group: "main",
+      },
+      undefined,
+    );
+
+    assert.equal((second.details as { changed?: boolean }).changed, false);
+  } finally {
+    await rm(workspace, { recursive: true, force: true });
+  }
+});
+
 test("sync_design_environment rejects projects outside knowledge-base design-code", async () => {
   const workspace = await mkdtemp(path.join(tmpdir(), "pi-agent-tools-"));
 
