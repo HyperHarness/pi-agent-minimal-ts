@@ -973,26 +973,20 @@ test("runSessionPrompt routes paper write commands to the paper-writing worker b
     instruction: "请同步 knowledge-base/design-code 的 uv 环境",
     reason: "intent"
   });
-  assert.deepEqual(routeChatPromptToWorker!("sync uv environment"), {
+  assert.deepEqual(routeChatPromptToWorker!("update design-code python dependency"), {
     role: "design-agent",
-    instruction: "sync uv environment",
+    instruction: "update design-code python dependency",
     reason: "intent"
   });
-  assert.deepEqual(routeChatPromptToWorker!("update python dependency"), {
+  assert.deepEqual(routeChatPromptToWorker!("check pyproject dependencies for gdsfactory layout"), {
     role: "design-agent",
-    instruction: "update python dependency",
+    instruction: "check pyproject dependencies for gdsfactory layout",
     reason: "intent"
   });
-  assert.deepEqual(routeChatPromptToWorker!("install python package"), {
-    role: "design-agent",
-    instruction: "install python package",
-    reason: "intent"
-  });
-  assert.deepEqual(routeChatPromptToWorker!("check pyproject dependencies"), {
-    role: "design-agent",
-    instruction: "check pyproject dependencies",
-    reason: "intent"
-  });
+  assert.equal(routeChatPromptToWorker!("sync uv environment"), null);
+  assert.equal(routeChatPromptToWorker!("update python dependency"), null);
+  assert.equal(routeChatPromptToWorker!("install python package"), null);
+  assert.equal(routeChatPromptToWorker!("check pyproject dependencies"), null);
   assert.equal(routeChatPromptToWorker!("请解释一下router layer的设计"), null);
 
   const registration = registerFauxProvider();

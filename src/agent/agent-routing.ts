@@ -136,9 +136,19 @@ export function routeChatPromptToWorker(text: string): RoutedWorkerPrompt | null
     return { role: "wiki-evidence-worker", instruction: trimmed, reason: "intent" };
   }
 
-  const designExecutionIntent =
-    /(design[-\s]?agent|design[-\s]?subagent|design-code|gdsfactory|klayout|\bgds\b|版图|layout|chip|qubit|resonator|coupler|python\s*(?:包|package)|依赖|dependenc(?:y|ies)|uv\s*环境|\buv\b|uv\s+environment|uv\s+sync|\bpyproject(?:\.toml)?\b)/i.test(trimmed) &&
-    /(安装|同步|更新|添加|声明|运行|生成|检查|验证|仿真|失败|记录|install|sync|update|add|declare|run|generate|check|verify|simulate|failure|record|artifact|benchmark|layout)/i.test(trimmed);
+  const designScopeIntent =
+    /(design[-\s]?agent|design[-\s]?subagent|design-code|gdsfactory|klayout|\bgds\b|版图|layout|chip|qubit|resonator|coupler|芯片|量子)/i.test(
+      trimmed
+    );
+  const dependencyIntent =
+    /(python\s*(?:包|package)|依赖|dependenc(?:y|ies)|uv\s*环境|\buv\b|uv\s+environment|uv\s+sync|\bpyproject(?:\.toml)?\b)/i.test(
+      trimmed
+    );
+  const actionIntent =
+    /(安装|同步|更新|添加|声明|运行|生成|检查|验证|仿真|失败|记录|install|sync|update|add|declare|run|generate|check|verify|simulate|failure|record|artifact|benchmark|layout)/i.test(
+      trimmed
+    );
+  const designExecutionIntent = designScopeIntent && (actionIntent || dependencyIntent);
   if (designExecutionIntent) {
     return { role: "design-agent", instruction: trimmed, reason: "intent" };
   }
