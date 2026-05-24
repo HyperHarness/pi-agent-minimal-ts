@@ -6,6 +6,7 @@ import {
   applyModelBaseUrlOverride,
   createReplEventHandler,
   DEFAULT_SYSTEM_PROMPT,
+  DESIGN_AGENT_SYSTEM_PROMPT,
   DESIGN_SUBAGENT_SYSTEM_PROMPT,
   main,
   PAPER_DOWNLOAD_SUBAGENT_SYSTEM_PROMPT,
@@ -30,7 +31,10 @@ test("public entrypoint re-exports the reusable library APIs", () => {
   assert.equal(publicApi.PAPER_DOWNLOAD_SUBAGENT_SYSTEM_PROMPT, PAPER_DOWNLOAD_SUBAGENT_SYSTEM_PROMPT);
   assert.equal(publicApi.PAPER_WRITING_WORKER_SYSTEM_PROMPT, PAPER_WRITING_WORKER_SYSTEM_PROMPT);
   assert.equal(publicApi.WIKI_EVIDENCE_WORKER_SYSTEM_PROMPT, WIKI_EVIDENCE_WORKER_SYSTEM_PROMPT);
+  assert.equal(publicApi.DESIGN_AGENT_SYSTEM_PROMPT, DESIGN_AGENT_SYSTEM_PROMPT);
   assert.equal(publicApi.DESIGN_SUBAGENT_SYSTEM_PROMPT, DESIGN_SUBAGENT_SYSTEM_PROMPT);
+  assert.equal(publicApi.DESIGN_SUBAGENT_SYSTEM_PROMPT, publicApi.DESIGN_AGENT_SYSTEM_PROMPT);
+  assert.equal(DESIGN_SUBAGENT_SYSTEM_PROMPT, DESIGN_AGENT_SYSTEM_PROMPT);
   assert.equal(publicApi.parsePaperWritingWorkerCommand, parsePaperWritingWorkerCommand);
   assert.equal(publicApi.routeChatPromptToWorker, routeChatPromptToWorker);
   assert.equal(publicApi.runSessionPrompt, runSessionPrompt);
