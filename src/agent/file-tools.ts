@@ -192,6 +192,22 @@ const syncDesignEnvironmentParameters = Type.Object({
   )
 });
 
+const updateDesignDependencyParameters = Type.Object({
+  name: Type.String({
+    description: "Python dependency package name to declare in knowledge-base/design-code/pyproject.toml."
+  }),
+  specifier: Type.Optional(
+    Type.String({
+      description: "Optional Python version specifier, such as >=0.29 or ==1.2.3."
+    })
+  ),
+  group: Type.Optional(
+    Type.Union([Type.Literal("main"), Type.Literal("dev")], {
+      description: "Dependency group to update. Defaults to main."
+    })
+  )
+});
+
 type GetTimeParameters = Static<typeof getTimeParameters>;
 type LoadPaperWritingSkillParameters = Static<typeof loadPaperWritingSkillParameters>;
 type ReadFileParameters = Static<typeof readFileParameters>;
@@ -203,6 +219,7 @@ type CompileLatexParameters = Static<typeof compileLatexParameters>;
 type WriteDesignArtifactParameters = Static<typeof writeDesignArtifactParameters>;
 type RunDesignScriptParameters = Static<typeof runDesignScriptParameters>;
 type SyncDesignEnvironmentParameters = Static<typeof syncDesignEnvironmentParameters>;
+type UpdateDesignDependencyParameters = Static<typeof updateDesignDependencyParameters>;
 type ResolvedDesignScriptRunner = "python" | "klayout";
 
 const DESIGN_ARTIFACT_DIRECTORIES: Record<WriteDesignArtifactParameters["artifactType"], string> = {
@@ -653,6 +670,218 @@ async function syncDesignEnvironment(input: {
   }
 }
 
+type DesignDependencyGroup = "main" | "dev";
+
+type UpdateDesignDependencyResult = {
+  status: "updated";
+  path: string;
+  group: DesignDependencyGroup;
+  dependency: string;
+  changed: boolean;
+};
+
+const PYTHON_DEPENDENCY_NAME_PATTERN = /^[A-Za-z0-9][A-Za-z0-9._-]*$/;
+const PYTHON_SPECIFIER_PREFIXES = ["===", "==", "~=", "!=", "<=", ">=", "<", ">", "="] as const;
+
+function validatePythonDependencyName(name: string): void {
+  if (!PYTHON_DEPENDENCY_NAME_PATTERN.test(name)) {
+    throw new Error(`Invalid Python dependency name: ${name}`);
+  }
+}
+
+function validatePythonDependencySpecifier(specifier: string | undefined): void {
+  if (specifier === undefined || specifier.length === 0) {
+    return;
+  }
+  if (
+    specifier.includes("\n") ||
+    specifier.includes("\r") ||
+    specifier.includes("\"") ||
+    !PYTHON_SPECIFIER_PREFIXES.some((prefix) => specifier.startsWith(prefix))
+  ) {
+    throw new Error(`Invalid Python dependency specifier: ${specifier}`);
+  }
+}
+
+function buildPythonDependencyString(input: UpdateDesignDependencyParameters): string {
+  validatePythonDependencyName(input.name);
+  validatePythonDependencySpecifier(input.specifier);
+  return `${input.name}${input.specifier ?? ""}`;
+}
+
+function parsePythonDependencyPackageName(dependency: string): string {
+  return dependency.split(/[<>=!~\[\];\s]/, 1)[0].toLowerCase();
+}
+
+function findTomlSectionRange(lines: readonly string[], sectionName: string): { start: number; end: number } | undefined {
+  const sectionPattern = /^\s*\[([^\]]+)\]\s*$/;
+  const start = lines.findIndex((line) => sectionPattern.exec(line)?.[1] === sectionName);
+  if (start < 0) {
+    return undefined;
+  }
+
+  const nextSection = lines.findIndex((line, index) => index > start && sectionPattern.test(line));
+  return { start, end: nextSection >= 0 ? nextSection : lines.length };
+}
+
+function parseTomlStringArrayEntries(lines: readonly string[]): string[] {
+  const entries: string[] = [];
+  const quotedStringPattern = /"((?:\\.|[^"\\])*)"/g;
+  for (const line of lines) {
+    let match: RegExpExecArray | null;
+    while ((match = quotedStringPattern.exec(line)) !== null) {
+      entries.push(match[1].replace(/\\"/g, "\"").replace(/\\\\/g, "\\"));
+    }
+  }
+  return entries;
+}
+
+function formatTomlStringArray(fieldName: string, dependencies: readonly string[]): string[] {
+  if (dependencies.length === 0) {
+    return [`${fieldName} = []`];
+  }
+
+  return [
+    `${fieldName} = [`,
+    ...dependencies.map((dependency) => `  "${dependency.replace(/\\/g, "\\\\").replace(/"/g, "\\\"")}",`),
+    "]"
+  ];
+}
+
+function sortedDesignDependencies(dependencies: readonly string[]): string[] {
+  return [...dependencies].sort((left, right) => left.localeCompare(right, "en", { sensitivity: "base" }));
+}
+
+function replaceOrAppendDesignDependency(dependencies: readonly string[], dependency: string): {
+  dependencies: string[];
+  changed: boolean;
+} {
+  const targetName = parsePythonDependencyPackageName(dependency);
+  let replaced = false;
+  let changed = false;
+  const updated = dependencies.map((existingDependency) => {
+    if (parsePythonDependencyPackageName(existingDependency) !== targetName) {
+      return existingDependency;
+    }
+    replaced = true;
+    if (existingDependency !== dependency) {
+      changed = true;
+    }
+    return dependency;
+  });
+
+  if (!replaced) {
+    updated.push(dependency);
+    changed = true;
+  }
+
+  const sorted = sortedDesignDependencies(updated);
+  return {
+    dependencies: sorted,
+    changed: changed || sorted.some((value, index) => value !== dependencies[index])
+  };
+}
+
+function findTomlArrayFieldRange(lines: readonly string[], section: { start: number; end: number }, fieldName: string):
+  | { start: number; end: number; entries: string[] }
+  | undefined {
+  const fieldPattern = new RegExp(`^\\s*${fieldName}\\s*=\\s*\\[`);
+  for (let index = section.start + 1; index < section.end; index += 1) {
+    const line = lines[index];
+    if (!fieldPattern.test(line)) {
+      continue;
+    }
+
+    if (line.includes("]")) {
+      return {
+        start: index,
+        end: index + 1,
+        entries: parseTomlStringArrayEntries([line])
+      };
+    }
+
+    let arrayEnd = index + 1;
+    while (arrayEnd < section.end && !lines[arrayEnd].includes("]")) {
+      arrayEnd += 1;
+    }
+    if (arrayEnd >= section.end) {
+      throw new Error(`Invalid pyproject.toml: ${fieldName} array is not closed.`);
+    }
+    return {
+      start: index,
+      end: arrayEnd + 1,
+      entries: parseTomlStringArrayEntries(lines.slice(index, arrayEnd + 1))
+    };
+  }
+
+  return undefined;
+}
+
+function updateTomlDependencyArray(input: {
+  content: string;
+  sectionName: string;
+  fieldName: string;
+  dependency: string;
+}): { content: string; changed: boolean } {
+  const hadTrailingNewline = input.content.endsWith("\n");
+  const lines = input.content.replace(/\n$/, "").split("\n");
+  let section = findTomlSectionRange(lines, input.sectionName);
+
+  if (!section) {
+    if (lines.length > 0 && lines[lines.length - 1] !== "") {
+      lines.push("");
+    }
+    section = { start: lines.length, end: lines.length + 1 };
+    lines.push(`[${input.sectionName}]`);
+  }
+
+  const existingArray = findTomlArrayFieldRange(lines, section, input.fieldName);
+  const { dependencies, changed } = replaceOrAppendDesignDependency(existingArray?.entries ?? [], input.dependency);
+  const replacement = formatTomlStringArray(input.fieldName, dependencies);
+
+  if (existingArray) {
+    lines.splice(existingArray.start, existingArray.end - existingArray.start, ...replacement);
+  } else {
+    lines.splice(section.end, 0, ...replacement);
+  }
+
+  return {
+    content: `${lines.join("\n")}${hadTrailingNewline ? "\n" : ""}`,
+    changed: changed || !existingArray
+  };
+}
+
+async function updateDesignDependency(input: {
+  workspaceDir: string;
+  name: string;
+  specifier?: string;
+  group?: DesignDependencyGroup;
+}): Promise<UpdateDesignDependencyResult> {
+  const projectDir = await resolveDesignCodeProjectPath(input.workspaceDir, undefined);
+  const pyprojectPath = path.join(projectDir, "pyproject.toml");
+  const group = input.group ?? "main";
+  const dependency = buildPythonDependencyString(input);
+  const original = await readFile(pyprojectPath, "utf8");
+  const updated = updateTomlDependencyArray({
+    content: original,
+    sectionName: group === "main" ? "project" : "project.optional-dependencies",
+    fieldName: group === "main" ? "dependencies" : "dev",
+    dependency
+  });
+
+  if (updated.content !== original) {
+    await writeFile(pyprojectPath, updated.content, "utf8");
+  }
+
+  return {
+    status: "updated",
+    path: normalizeWorkspaceRelativePath(input.workspaceDir, pyprojectPath),
+    group,
+    dependency,
+    changed: updated.changed && updated.content !== original
+  };
+}
+
 async function runDesignScript(input: {
   workspaceDir: string;
   scriptPath: string;
@@ -1022,6 +1251,10 @@ type WriteDesignArtifactTool = AgentTool<
   typeof writeDesignArtifactParameters,
   Awaited<ReturnType<typeof writeDesignArtifact>>
 >;
+type UpdateDesignDependencyTool = AgentTool<
+  typeof updateDesignDependencyParameters,
+  Awaited<ReturnType<typeof updateDesignDependency>>
+>;
 type SyncDesignEnvironmentTool = AgentTool<
   typeof syncDesignEnvironmentParameters,
   Awaited<ReturnType<typeof syncDesignEnvironment>>
@@ -1290,6 +1523,28 @@ export function createFileTools(input: {
     }
   };
 
+  const updateDesignDependencyTool: UpdateDesignDependencyTool = {
+    name: "update_design_dependency",
+    label: "Update Design Dependency",
+    description:
+      "Updates dependency declarations in knowledge-base/design-code/pyproject.toml without running pip or arbitrary uv commands. Follow this with sync_design_environment to install the declared environment.",
+    parameters: updateDesignDependencyParameters,
+    executionMode: "sequential",
+    execute: async (_toolCallId: string, args: UpdateDesignDependencyParameters) => {
+      const result = await updateDesignDependency({
+        workspaceDir: resolvedWorkspaceDir,
+        name: args.name,
+        specifier: args.specifier,
+        group: args.group ?? "main"
+      });
+
+      return {
+        content: [{ type: "text", text: JSON.stringify(result) }],
+        details: result
+      };
+    }
+  };
+
   const syncDesignEnvironmentTool: SyncDesignEnvironmentTool = {
     name: "sync_design_environment",
     label: "Sync Design Environment",
@@ -1350,6 +1605,7 @@ export function createFileTools(input: {
     ],
     artifactFullTools: [
       writeDesignArtifactTool,
+      updateDesignDependencyTool,
       syncDesignEnvironmentTool,
       runDesignScriptTool
     ],

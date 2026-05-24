@@ -601,6 +601,14 @@ function getSyncDesignEnvironmentTool(workspace: string): SyncDesignEnvironmentT
   return syncDesignEnvironmentTool as SyncDesignEnvironmentTool;
 }
 
+function getUpdateDesignDependencyTool(workspaceDir: string) {
+  const tool = createTools(workspaceDir, { toolProfile: "full" }).find(
+    (candidate) => candidate.name === "update_design_dependency",
+  );
+  assert.ok(tool);
+  return tool;
+}
+
 function getReplaceFileTextTool(workspace: string): ReplaceFileTextTool {
   const tools = createTools(workspace) as ReadonlyArray<{
     name: string;
@@ -1595,6 +1603,89 @@ test("sync_design_environment runs uv sync for knowledge-base design-code into t
   }
 });
 
+test("update_design_dependency adds a main dependency to design-code pyproject", async () => {
+  const workspace = await mkdtemp(path.join(tmpdir(), "pi-agent-tools-"));
+  const designCodeDir = path.join(workspace, "knowledge-base", "design-code");
+  const pyprojectPath = path.join(designCodeDir, "pyproject.toml");
+
+  try {
+    await mkdir(designCodeDir, { recursive: true });
+    await writeFile(
+      pyprojectPath,
+      [
+        "[project]",
+        "name = \"pi-chip-design\"",
+        "version = \"0.1.0\"",
+        "requires-python = \">=3.11\"",
+        "dependencies = [",
+        "  \"gdsfactory>=8\",",
+        "]",
+        "",
+      ].join("\n"),
+      "utf8",
+    );
+
+    const updateDesignDependencyTool = getUpdateDesignDependencyTool(workspace);
+    const result = await updateDesignDependencyTool.execute(
+      "call-update-design-dependency-main",
+      {
+        name: "klayout",
+        specifier: ">=0.29",
+        group: "main",
+      },
+      undefined,
+    );
+
+    assert.deepEqual(result.details, {
+      status: "updated",
+      path: "knowledge-base/design-code/pyproject.toml",
+      group: "main",
+      dependency: "klayout>=0.29",
+      changed: true,
+    });
+    assert.match(await readFile(pyprojectPath, "utf8"), /"klayout>=0\.29"/);
+  } finally {
+    await rm(workspace, { recursive: true, force: true });
+  }
+});
+
+test("update_design_dependency rejects invalid dependency names", async () => {
+  const workspace = await mkdtemp(path.join(tmpdir(), "pi-agent-tools-"));
+  const designCodeDir = path.join(workspace, "knowledge-base", "design-code");
+
+  try {
+    await mkdir(designCodeDir, { recursive: true });
+    await writeFile(
+      path.join(designCodeDir, "pyproject.toml"),
+      [
+        "[project]",
+        "name = \"pi-chip-design\"",
+        "version = \"0.1.0\"",
+        "requires-python = \">=3.11\"",
+        "dependencies = []",
+        "",
+      ].join("\n"),
+      "utf8",
+    );
+
+    const updateDesignDependencyTool = getUpdateDesignDependencyTool(workspace);
+    await assert.rejects(
+      updateDesignDependencyTool.execute(
+        "call-update-design-dependency-invalid-name",
+        {
+          name: "../bad",
+          specifier: ">=0.29",
+          group: "main",
+        },
+        undefined,
+      ),
+      /Invalid Python dependency name/,
+    );
+  } finally {
+    await rm(workspace, { recursive: true, force: true });
+  }
+});
+
 test("sync_design_environment rejects projects outside knowledge-base design-code", async () => {
   const workspace = await mkdtemp(path.join(tmpdir(), "pi-agent-tools-"));
 
@@ -1980,6 +2071,7 @@ const EXPECTED_FULL_ONLY_TOOL_NAMES = [
   "paper_wiki_relations",
   "search_paper_wiki",
   "write_design_artifact",
+  "update_design_dependency",
   "sync_design_environment",
   "run_design_script",
   "paper_orchestra_prepare_workspace",
