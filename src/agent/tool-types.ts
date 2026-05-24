@@ -26,6 +26,7 @@ export type ToolBoundaryRole =
   | "wiki-agent"
   | "paper-download-subagent"
   | "wiki-evidence-worker"
+  | "design-agent"
   | "design-subagent"
   | "paper-writing-worker";
 
@@ -78,6 +79,16 @@ type ToolName =
   | "write_file"
   | "write_paper_wiki_source";
 
+const DESIGN_AGENT_TOOL_NAMES = [
+  "answer_paper_wiki_question",
+  "search_paper_wiki",
+  "search_local_papers",
+  "list_local_papers",
+  "sync_design_environment",
+  "run_design_script",
+  "write_design_artifact"
+] as const satisfies readonly ToolName[];
+
 export const TOOL_BOUNDARY_NAMES: Record<ToolBoundaryRole, readonly ToolName[]> = {
   "wiki-agent": [
     "list_files",
@@ -127,15 +138,8 @@ export const TOOL_BOUNDARY_NAMES: Record<ToolBoundaryRole, readonly ToolName[]> 
     "generate_paper_wiki_summary",
     "paper_wiki_relations"
   ],
-  "design-subagent": [
-    "answer_paper_wiki_question",
-    "search_paper_wiki",
-    "search_local_papers",
-    "list_local_papers",
-    "sync_design_environment",
-    "run_design_script",
-    "write_design_artifact"
-  ],
+  "design-agent": DESIGN_AGENT_TOOL_NAMES,
+  "design-subagent": DESIGN_AGENT_TOOL_NAMES,
   "paper-writing-worker": [
     "load_paper_writing_skill",
     "list_files",

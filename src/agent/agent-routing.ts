@@ -6,7 +6,12 @@ import {
   WIKI_EVIDENCE_WORKER_SYSTEM_PROMPT
 } from "./agent-prompts.js";
 
-export type RoutedWorkerRole = "paper-writing-worker" | "paper-download-subagent" | "wiki-evidence-worker" | "design-subagent";
+export type RoutedWorkerRole =
+  | "paper-writing-worker"
+  | "paper-download-subagent"
+  | "wiki-evidence-worker"
+  | "design-agent"
+  | "design-subagent";
 
 export interface RoutedWorkerPrompt {
   role: RoutedWorkerRole;
@@ -27,7 +32,17 @@ export interface WorkerHandoff {
   toolsUsed: string[];
   failedTools: string[];
   finalResponse: string;
-  nextSuggestedOwner: "wiki-agent" | "paper-writing-worker" | "paper-download-subagent" | "wiki-evidence-worker" | "design-subagent";
+  nextSuggestedOwner:
+    | "wiki-agent"
+    | "paper-writing-worker"
+    | "paper-download-subagent"
+    | "wiki-evidence-worker"
+    | "design-agent"
+    | "design-subagent";
+}
+
+export function normalizeWorkerRole(role: RoutedWorkerRole): Exclude<RoutedWorkerRole, "design-subagent"> {
+  return role === "design-subagent" ? "design-agent" : role;
 }
 
 function isRecord(value: unknown): value is Record<string, unknown> {
@@ -85,9 +100,12 @@ export function routeChatPromptToWorker(text: string): RoutedWorkerPrompt | null
       /^\/?证据整理\s+([\s\S]+)$/i,
       /^\/?文献总结\s+([\s\S]+)$/i
     ]) ??
-    matchExplicitWorkerRoute(trimmed, "design-subagent", [
-      /^\/?design\s+([\s\S]+)$/i,
+    matchExplicitWorkerRoute(trimmed, "design-agent", [
+      /^\/?design-agent\s+([\s\S]+)$/i,
+      /^\/?design\s+agent\s+([\s\S]+)$/i,
       /^\/?design-subagent\s+([\s\S]+)$/i,
+      /^\/?design\s+subagent\s+([\s\S]+)$/i,
+      /^\/?design\s+([\s\S]+)$/i,
       /^\/?芯片设计\s+([\s\S]+)$/i,
       /^\/?设计任务\s+([\s\S]+)$/i
     ]);
@@ -118,24 +136,25 @@ export function routeChatPromptToWorker(text: string): RoutedWorkerPrompt | null
     return { role: "wiki-evidence-worker", instruction: trimmed, reason: "intent" };
   }
 
-  const designIntent =
-    /(芯片|量子|qubit|版图|layout|resonator|coupler|设计记录|design artifact)/i.test(trimmed) &&
-    /(设计|仿真|验证|失败|failure|record|artifact|benchmark|layout|simulate|verify)/i.test(trimmed);
-  if (designIntent) {
-    return { role: "design-subagent", instruction: trimmed, reason: "intent" };
+  const designExecutionIntent =
+    /(design[-\s]?agent|design[-\s]?subagent|design-code|gdsfactory|klayout|\bgds\b|版图|layout|chip|qubit|resonator|coupler|python\s*包|依赖|uv\s*环境|uv\s+sync|pyproject\.toml)/i.test(trimmed) &&
+    /(安装|同步|更新|添加|声明|运行|生成|检查|验证|仿真|失败|记录|install|sync|update|add|declare|run|generate|check|verify|simulate|failure|record|artifact|benchmark|layout)/i.test(trimmed);
+  if (designExecutionIntent) {
+    return { role: "design-agent", instruction: trimmed, reason: "intent" };
   }
 
   return null;
 }
 
 export function systemPromptForWorker(role: RoutedWorkerRole): string {
-  if (role === "paper-writing-worker") {
+  const normalizedRole = normalizeWorkerRole(role);
+  if (normalizedRole === "paper-writing-worker") {
     return PAPER_WRITING_WORKER_SYSTEM_PROMPT;
   }
-  if (role === "paper-download-subagent") {
+  if (normalizedRole === "paper-download-subagent") {
     return PAPER_DOWNLOAD_SUBAGENT_SYSTEM_PROMPT;
   }
-  if (role === "wiki-evidence-worker") {
+  if (normalizedRole === "wiki-evidence-worker") {
     return WIKI_EVIDENCE_WORKER_SYSTEM_PROMPT;
   }
   return DESIGN_SUBAGENT_SYSTEM_PROMPT;
@@ -206,10 +225,11 @@ export function extractWorkerHandoffPaths(
 }
 
 export function nextOwnerForWorker(role: RoutedWorkerRole): WorkerHandoff["nextSuggestedOwner"] {
-  if (role === "paper-writing-worker") {
+  const normalizedRole = normalizeWorkerRole(role);
+  if (normalizedRole === "paper-writing-worker") {
     return "wiki-agent";
   }
-  if (role === "design-subagent") {
+  if (normalizedRole === "design-agent") {
     return "wiki-agent";
   }
   return "wiki-agent";

@@ -1,6 +1,6 @@
 import test from "node:test";
 import assert from "node:assert/strict";
-import { mkdir, mkdtemp, readFile, rm, writeFile } from "node:fs/promises";
+import { access, mkdir, mkdtemp, readFile, rm, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import path from "node:path";
 import type { Api, AssistantMessage, Context, Model, ToolResultMessage, UserMessage } from "@mariozechner/pi-ai";
@@ -12,9 +12,25 @@ import {
   registerFauxProvider
 } from "@mariozechner/pi-ai";
 import type { AgentContext, AgentEvent } from "@mariozechner/pi-agent-core";
-import * as piAgent from "../../src/pi-agent.js";
-import { cleanupTools } from "../../src/agent/tools.js";
-import { DEFAULT_SYSTEM_PROMPT, runAgentTurn } from "../../src/pi-agent.js";
+import type { AgentChatSessionStats } from "../../src/pi-agent.js";
+
+async function resolveBuiltModuleUrl(relativePath: string): Promise<string> {
+  const rootUrl = new URL("../..", import.meta.url);
+  const primaryUrl = new URL(relativePath, rootUrl);
+  try {
+    await access(primaryUrl);
+    return primaryUrl.href;
+  } catch {
+    return new URL(`dist/${relativePath}`, rootUrl).href;
+  }
+}
+
+const piAgent: typeof import("../../src/pi-agent.js") = await import(await resolveBuiltModuleUrl("src/pi-agent.js"));
+const toolsModule: typeof import("../../src/agent/tools.js") = await import(
+  await resolveBuiltModuleUrl("src/agent/tools.js")
+);
+const { cleanupTools } = toolsModule;
+const { DEFAULT_SYSTEM_PROMPT, runAgentTurn } = piAgent;
 
 type AgentMessage = AgentContext["messages"][number];
 type ToolExecutionStartEvent = Extract<AgentEvent, { type: "tool_execution_start" }>;
@@ -896,7 +912,12 @@ test("runSessionPrompt routes paper write commands to the paper-writing worker b
   const routeChatPromptToWorker = (
     piAgent as {
       routeChatPromptToWorker?: (text: string) => {
-        role: "paper-writing-worker" | "paper-download-subagent" | "wiki-evidence-worker" | "design-subagent";
+        role:
+          | "paper-writing-worker"
+          | "paper-download-subagent"
+          | "wiki-evidence-worker"
+          | "design-agent"
+          | "design-subagent";
         instruction: string;
         reason: "explicit" | "intent";
       } | null;
@@ -928,9 +949,29 @@ test("runSessionPrompt routes paper write commands to the paper-writing worker b
     reason: "intent"
   });
   assert.deepEqual(routeChatPromptToWorker!("design 写一个芯片设计 failure record"), {
-    role: "design-subagent",
+    role: "design-agent",
     instruction: "写一个芯片设计 failure record",
     reason: "explicit"
+  });
+  assert.deepEqual(routeChatPromptToWorker!("design-agent 安装 gdsfactory"), {
+    role: "design-agent",
+    instruction: "安装 gdsfactory",
+    reason: "explicit"
+  });
+  assert.deepEqual(routeChatPromptToWorker!("design subagent 安装 gdsfactory"), {
+    role: "design-agent",
+    instruction: "安装 gdsfactory",
+    reason: "explicit"
+  });
+  assert.deepEqual(routeChatPromptToWorker!("请让design subagent安装gdsfactory这个python包"), {
+    role: "design-agent",
+    instruction: "请让design subagent安装gdsfactory这个python包",
+    reason: "intent"
+  });
+  assert.deepEqual(routeChatPromptToWorker!("请同步 knowledge-base/design-code 的 uv 环境"), {
+    role: "design-agent",
+    instruction: "请同步 knowledge-base/design-code 的 uv 环境",
+    reason: "intent"
   });
   assert.equal(routeChatPromptToWorker!("请解释一下router layer的设计"), null);
 
@@ -1193,22 +1234,22 @@ test("agent chat session stats summarize downloads, queues, and wiki page writes
   try {
     const createStats = (
       piAgent as {
-        createAgentChatSessionStats?: (workspaceDir: string) => Promise<piAgent.AgentChatSessionStats>;
+        createAgentChatSessionStats?: (workspaceDir: string) => Promise<AgentChatSessionStats>;
       }
     ).createAgentChatSessionStats;
     const recordStats = (
       piAgent as {
-        recordAgentChatSessionStats?: (stats: piAgent.AgentChatSessionStats, event: AgentEvent) => void;
+        recordAgentChatSessionStats?: (stats: AgentChatSessionStats, event: AgentEvent) => void;
       }
     ).recordAgentChatSessionStats;
     const formatStats = (
       piAgent as {
-        formatAgentChatSessionStats?: (stats: piAgent.AgentChatSessionStats) => string;
+        formatAgentChatSessionStats?: (stats: AgentChatSessionStats) => string;
       }
     ).formatAgentChatSessionStats;
     const refreshQueue = (
       piAgent as {
-        refreshAgentChatSessionDownloadQueue?: (stats: piAgent.AgentChatSessionStats) => Promise<void>;
+        refreshAgentChatSessionDownloadQueue?: (stats: AgentChatSessionStats) => Promise<void>;
       }
     ).refreshAgentChatSessionDownloadQueue;
     assert.equal(typeof createStats, "function");
