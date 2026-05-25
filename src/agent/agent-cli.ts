@@ -769,8 +769,9 @@ export async function main(options: {
 
   const cli = parseCliArgs(options.argv ?? process.argv.slice(2));
   if (cli.help) {
+    const helpEntrypoint = options.profile === "design-agent" ? "design-agent" : "wiki-agent";
     process.stdout.write(
-      "Usage: node dist/src/pi-agent.js [--mode chat|rpc] [--session-dir <dir>] [--no-session] [--provider <name>] [--model <id>] [--base-url <url>]\n"
+      `Usage: node dist/src/${helpEntrypoint}.js [--mode chat|rpc] [--session-dir <dir>] [--no-session] [--provider <name>] [--model <id>] [--base-url <url>]\n`
     );
     return;
   }

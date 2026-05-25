@@ -6,8 +6,8 @@ This repository is a practical agent harness for literature ingestion, local wik
 
 ## What It Does
 
-- runs a multi-turn terminal chat / REPL agent
-- runs the same agent as a JSONL RPC process for bridges
+- runs strict wiki-agent and design-agent terminal chat / REPL entrypoints
+- runs the wiki-agent as a JSONL RPC process for the Feishu bridge
 - exposes a Feishu long-connection bridge with streaming replies and per-chat memory
 - searches, downloads, parses, summarizes, and indexes papers into a local knowledge base
 - builds durable typed wiki pages from fixed evidence rather than one-off answers
@@ -24,10 +24,10 @@ This repository is a practical agent harness for literature ingestion, local wik
 The important boundary is:
 
 ```text
-Feishu bridge / CLI / RPC
+Feishu bridge / wiki-agent CLI/RPC / design-agent CLI
         |
         v
-main chat agent / wiki-agent coordinator
+strict agent entrypoint
         |
         +--> paper-download-subagent  -> acquisition files, PDFs, webpages, parses
         +--> wiki-evidence-worker     -> sources/*/summary.md and fixed-evidence page drafts
@@ -51,17 +51,30 @@ The Feishu bridge is the chat transport and workflow trigger. It lives under `sr
 
 The bridge should not contain domain reasoning. It should route messages, collect tool progress, and call bridge-side services.
 
+### Public CLI Boundary
+
+The public entrypoints are intentionally explicit:
+
+- `npm run wiki-agent`: wiki and paper workflows. This is the Feishu bridge target. It may update wiki pages and paper-backed knowledge records, and it may read design-agent outputs for durable curation.
+- `npm run wiki-agent:rpc`: JSONL RPC wiki-agent for Feishu or another compatible local bridge.
+- `npm run design-agent`: design, code, dependency, layout, and verification workflows. It manages `knowledge-base/design-code/` and the repository root `.venv`, may retrieve wiki and local paper evidence, and cannot write wiki pages.
+- `npm run design-agent:rpc`: JSONL RPC design-agent for local harnesses, not the Feishu bridge.
+
+`npm run agent` and `npm run agent:rpc` are intentionally not public scripts. Use the specific entrypoint that matches the work.
+
 ### Router Layer
 
-The local chat/RPC runtime has a lightweight router layer before the default main-agent turn. It detects high-confidence worker intents and runs the requested turn in a clean worker context with the corresponding boundary tools:
+The lower-level runtime still has a lightweight router layer for internal/routed-agent compatibility. Public users should not rely on a generic entrypoint to infer design work from natural language; start design/code/dependency/layout/verification work with `npm run design-agent`.
+
+Inside the wiki/paper flow, the runtime detects high-confidence worker intents and runs the requested turn in a clean worker context with the corresponding boundary tools:
 
 - manuscript editing, writing-quality review, or LaTeX requests -> `paper-writing-worker`
 - PaperOrchestra-style full manuscript generation, outline, draft refinement, or submission-package requests -> `paper-writing-worker`
 - paper search, paper download, acquisition fallback, and citation-metadata repair requests -> `paper-download-subagent`
 - evidence construction, paper summarization, and source-summary relation requests -> `wiki-evidence-worker`
-- chip-design/layout engineering requests, verification records, or design-failure cases -> `design-agent`
+- chip-design/layout engineering requests, verification records, or design-failure cases -> use the separate `design-agent` entrypoint
 
-Explicit prefixes are still supported when precision matters: `paper write ...`, `paper download ...`, `download paper ...`, `wiki evidence ...`, `evidence ...`, `design ...`, `design-agent ...`, `/design-agent ...`, `/paper-writing-worker ...`, `/paper-download-subagent ...`, and `/wiki-evidence-worker ...`. `design-subagent ...` and `/design-subagent ...` are accepted as compatibility aliases and report handoff as `design-agent`. If no worker route matches, the prompt goes to the main wiki-agent coordinator.
+Explicit prefixes are still supported when precision matters inside routed/internal contexts: `paper write ...`, `paper download ...`, `download paper ...`, `wiki evidence ...`, `evidence ...`, `/paper-writing-worker ...`, `/paper-download-subagent ...`, and `/wiki-evidence-worker ...`. If no wiki/paper worker route matches, the prompt goes to the wiki-agent coordinator.
 
 Worker turns do not share the main agent's full context. The router runs each worker in a clean context, streams the worker's normal reply to the user, then injects a compact structured handoff back into the main context. The handoff records the worker role, instruction, route reason, status, changed files, produced artifacts, source/page/design-record paths, tools used, failed tools, final worker response, and the next suggested owner. This keeps the main chat history continuous without copying the worker's full tool transcript into the prompt.
 
@@ -122,7 +135,7 @@ cp docs/feishu-bridge.env.example .env
 npm run feishu-bridge
 ```
 
-The bridge starts `node dist/src/pi-agent.js --mode rpc` by default. Set `PI_COMMAND` only when the bridge should target another compatible RPC agent.
+The bridge starts the repository wiki-agent RPC entrypoint by default (`node dist/src/wiki-agent.js --mode rpc`). Set `PI_COMMAND` only when the bridge should target another compatible wiki-agent RPC process. Design work should be run separately with `npm run design-agent`, outside the Feishu bridge.
 
 Common Feishu-side commands:
 
@@ -143,7 +156,7 @@ Use this for local interactive work:
 export OPENAI_API_KEY="your-key"
 export PI_PROVIDER="openai"
 export PI_MODEL="gpt-5.4"
-npm run agent
+npm run wiki-agent
 ```
 
 PowerShell equivalent:
@@ -152,13 +165,13 @@ PowerShell equivalent:
 $env:OPENAI_API_KEY="your-key"
 $env:PI_PROVIDER="openai"
 $env:PI_MODEL="gpt-5.4"
-npm run agent
+npm run wiki-agent
 ```
 
 You can also pass model settings as CLI arguments:
 
 ```sh
-npm run agent -- --provider openai --model gpt-5.4
+npm run wiki-agent -- --provider openai --model gpt-5.4
 ```
 
 The REPL prints the selected model and waits for one prompt per line:
@@ -172,7 +185,7 @@ assistant> I found several relevant papers...
 > exit
 ```
 
-The router automatically sends high-confidence worker requests to the matching isolated worker. For manuscript edits or writing-quality review, either ask naturally or prefix the request with `paper write` when you want an explicit route:
+The wiki-agent handles wiki and paper workflows. For manuscript edits or writing-quality review, either ask naturally in the wiki/paper flow or prefix the request with `paper write` when you want an explicit paper-writing worker route:
 
 ```text
 > 同意，请你修改论文
@@ -212,7 +225,7 @@ The agent accepts stdin input. Each non-empty line is one prompt:
 printf '%s\n' \
   "hello" \
   "read README.md and summarize it" \
-  "exit" | npm run agent -- --provider openai --model gpt-5.4
+  "exit" | npm run wiki-agent -- --provider openai --model gpt-5.4
 ```
 
 Blank lines are ignored. EOF ends the process cleanly.
@@ -222,7 +235,7 @@ Blank lines are ignored. EOF ends the process cleanly.
 Use this when another local bridge or harness wants to drive the same agent process:
 
 ```sh
-npm run agent:rpc -- --provider openai --model gpt-5.4 --session-dir .memory/pi-sessions/example
+npm run wiki-agent:rpc -- --provider openai --model gpt-5.4 --session-dir .memory/pi-sessions/example
 ```
 
 RPC mode reads one JSON command per stdin line and writes JSON events to stdout:
@@ -497,7 +510,7 @@ OpenAI-compatible proxy / relay:
 ```sh
 export OPENAI_API_KEY="your-proxy-key"
 export PI_BASE_URL="https://your-proxy.example.com/v1"
-npm run agent -- --provider openai --model gpt-5.4
+npm run wiki-agent -- --provider openai --model gpt-5.4
 ```
 
 You can also pass `--base-url` on the CLI.
@@ -564,8 +577,11 @@ If you run `npm install --ignore-scripts`, build/test still work, but browser to
 
 - `npm run build`: compile TypeScript to `dist/`
 - `npm test`: run the automated test suite, including compiled TypeScript tests and script-level `.mjs` tests
-- `npm run agent`: build and start the terminal chat / REPL agent
-- `npm run agent:rpc`: build and start the JSONL RPC agent
+- `npm run wiki-agent`: build and start the wiki/paper terminal chat / REPL agent
+- `npm run wiki-agent:rpc`: build and start the wiki-agent JSONL RPC process used by Feishu
+- `npm run design-agent`: build and start the design/code/dependency/layout/verification terminal chat / REPL agent
+- `npm run design-agent:rpc`: build and start the design-agent JSONL RPC process for local harnesses
+- `npm run agent` and `npm run agent:rpc`: intentionally absent; choose `wiki-agent` or `design-agent`
 - `npm run feishu-bridge`: build and start the Feishu bridge
 - `npm run wiki:web`: serve the local wiki and graph viewer
 

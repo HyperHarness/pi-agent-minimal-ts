@@ -116,14 +116,16 @@ Without UTF-8 console encoding, PowerShell can turn non-ASCII input into `?` bef
 
 ## 4. Start the agent
 
-Example:
+Start the wiki/paper agent:
 
 ```powershell
 $env:OPENAI_API_KEY="your-key"
 $env:PI_PROVIDER="openai"
 $env:PI_MODEL="gpt-5.4"
-npm run agent
+npm run wiki-agent
 ```
+
+Use `npm run design-agent` instead for design/code/dependency/layout/verification work. The removed generic scripts are not public entrypoints.
 
 <a id="paper-downloader-extension"></a>
 
@@ -301,6 +303,6 @@ Use this order on a fresh Windows machine:
 7. Verify the console is running in UTF-8 if needed.
 8. Run `npm install`.
 9. Run `npm run build`.
-10. Start the agent with your API key and model.
+10. Start the wiki-agent with your API key and model, or start design work with `npm run design-agent`.
 11. If you use publisher paper downloads, load the browser extension and register the native host.
 12. Optionally update Codex approval rules for routine Git commands.

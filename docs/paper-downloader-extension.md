@@ -61,7 +61,7 @@ Use the platform-specific quickstart for exact commands. At a high level:
 Start the agent from this repository after building:
 
 ```sh
-npm run agent
+npm run wiki-agent
 ```
 
 Then ask for a publisher paper:
@@ -82,7 +82,7 @@ If the extension can download and register the PDF, the tab closes after native-
 
 ## Troubleshooting
 
-If `download_paper` starts Playwright, you are probably running an old branch, old process, or explicit fallback path. Restart the agent from the repository that contains `createQueuedPaperExtensionBridge` in `src/pi-agent.ts`.
+If `download_paper` starts Playwright, you are probably running an old branch, old process, or explicit fallback path. Restart `npm run wiki-agent` from the repository that contains `createQueuedPaperExtensionBridge` in `src/agent/agent-cli.ts` and the paper extension bridge wiring.
 
 If the tool returns `extension_unavailable`, confirm you are running the current `main`, rebuilt with `npm run build`, registered the native host for the browser you are using, fully restarted the browser, and restarted the agent.
 

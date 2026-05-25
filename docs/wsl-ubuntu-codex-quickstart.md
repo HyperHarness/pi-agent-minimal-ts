@@ -154,16 +154,16 @@ npm run build
 npm test
 ```
 
-Start the agent:
+Start the wiki/paper agent:
 
 ```sh
-npm run agent
+npm run wiki-agent
 ```
 
 Example one-shot startup check that does not call the model:
 
 ```sh
-printf 'exit\n' | npm run agent
+printf 'exit\n' | npm run wiki-agent
 ```
 
 If no provider API key is configured, the agent should fail with:
@@ -220,10 +220,10 @@ WIN_WORKSPACE="$(wslpath -w "$PWD")"
 powershell.exe -ExecutionPolicy Bypass -File "$WIN_WORKSPACE\\scripts\\register-paper-extension-host.ps1" -WorkspaceDir "$WIN_WORKSPACE" -ExtensionId "<extension-id>"
 ```
 
-Fully restart Chrome or Edge, then restart the agent in WSL:
+Fully restart Chrome or Edge, then restart the wiki-agent in WSL:
 
 ```sh
-npm run agent
+npm run wiki-agent
 ```
 
 ### Verify native host registration
@@ -285,7 +285,7 @@ Use this order on a fresh WSL Ubuntu setup:
 4. Run `npm run build`.
 5. Run `npm test`.
 6. Export your provider API key and model variables.
-7. Start the agent with `npm run agent`.
+7. Start the wiki/paper agent with `npm run wiki-agent`, or use `npm run design-agent` for design/code/dependency/layout/verification work.
 8. If you use publisher paper downloads, load the browser extension in Windows Chrome or Edge.
 9. Register the native host through `powershell.exe` with the WSL workspace path.
-10. Restart the browser and agent.
+10. Restart the browser and wiki-agent.

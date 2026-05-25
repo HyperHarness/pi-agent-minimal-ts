@@ -7,10 +7,10 @@
 运行层很薄，真正的系统边界在 agent runtime、工具集合、论文/知识库/浏览器/Feishu 子系统之间：
 
 ```text
-CLI / RPC / Feishu bridge
+wiki-agent CLI/RPC / design-agent CLI/RPC / Feishu bridge
         |
         v
-agent runtime + worker router
+strict entrypoint profile + agent runtime
         |
         +--> tool registry and boundary profiles
         |
@@ -21,8 +21,8 @@ agent runtime + worker router
 
 核心原则：
 
-- `src/agent/agent-cli.ts` 负责本地 CLI/RPC 进程形态，`src/agent/agent-runtime.ts` 负责一次 agent turn 怎么运行。
-- `src/agent/agent-routing.ts` 在进入默认 main agent 前识别 worker 意图，选择 `paper-download-subagent`、`wiki-evidence-worker`、`design-subagent` 或 `paper-writing-worker`。
+- `src/wiki-agent.ts` 和 `src/design-agent.ts` 是公开 CLI/RPC 包装入口，分别固定 wiki/paper 和 design/code 工作边界；`src/agent/agent-cli.ts` 负责本地 CLI/RPC 进程形态，`src/agent/agent-runtime.ts` 负责一次 agent turn 怎么运行。
+- `src/agent/agent-routing.ts` 保留内部/routed-agent 兼容路由，并在 wiki/paper 流程中识别 `paper-download-subagent`、`wiki-evidence-worker` 或 `paper-writing-worker`。公开 design/code/dependency/layout/verification 工作应从 `design-agent` 入口进入，而不是依赖通用入口自动推断。
 - `src/agent/tools.ts` 是工具装配中心，按各领域工具 factory 的命名分组拼出默认/full 工具面；worker 可见工具面的白名单定义在 `src/agent/tool-types.ts`。
 - 论文能力分三层：检索/下载由 `paper-manager.ts` 和 `paper-download.ts` 承担，持久记录由 `paper-store.ts` 承担，解析和阅读由 `paper-reader/**` 承担。
 - 论文工具适配层位于 `src/agent/paper/tools.ts`，和 paper 领域服务放在同一目录树下。
@@ -38,15 +38,21 @@ agent runtime + worker router
 | --- | --- | --- |
 | `npm run build` | `tsc -p tsconfig.json` | 编译所有 `src/**` 和 `test/**` TypeScript。 |
 | `npm test` | `npm run build && node --test ...` | 先构建，再跑 `dist/test/**/*.test.js` 和 `test/scripts/**/*.test.mjs`。 |
-| `npm run agent` | `src/pi-agent.ts` -> `src/agent/agent-cli.ts` | 构建后启动本地 REPL/chat。 |
-| `npm run agent:rpc` | `src/pi-agent.ts --mode rpc` -> `src/agent/agent-cli.ts` | JSONL RPC agent，供 Feishu bridge 或其它桥接进程驱动。 |
+| `npm run wiki-agent` | `src/wiki-agent.ts` -> `src/agent/agent-cli.ts` | 构建后启动 wiki/paper REPL/chat；可更新 wiki 页面和 paper-backed knowledge records，可读取 design-agent 输出。 |
+| `npm run wiki-agent:rpc` | `src/wiki-agent.ts --mode rpc` -> `src/agent/agent-cli.ts` | JSONL RPC wiki-agent；Feishu bridge 默认连接这个入口。 |
+| `npm run design-agent` | `src/design-agent.ts` -> `src/agent/agent-cli.ts` | 构建后启动 design/code/dependency/layout/verification REPL/chat；管理 `knowledge-base/design-code/` 和根 `.venv`，可检索 wiki/local paper evidence，但不能写 wiki 页面。 |
+| `npm run design-agent:rpc` | `src/design-agent.ts --mode rpc` -> `src/agent/agent-cli.ts` | JSONL RPC design-agent，供本地 harness 或未来直接集成使用；不是 Feishu 默认目标。 |
 | `npm run feishu-bridge` | `src/feishu-bridge/index.ts` | 启动 Feishu 长连接桥，并按配置启动/复用 RPC agent。 |
 | `npm run wiki:web` | `scripts/wiki-web.mjs` | 本地 wiki 和 graph 浏览器，不在 `src/**` 内，但读取 `knowledge-base`；graph data 会优先使用 typed wiki relations。 |
 | `npm run paper-extension-host` | `src/paper-extension-host.ts` -> `src/agent/paper/extension/paper-extension-host.ts` | 浏览器 native messaging host 的 Node 入口。 |
 
+`npm run agent` 和 `npm run agent:rpc` 刻意不是公开 scripts。旧的 `src/pi-agent.ts` 只保留为兼容包装/导出面；用户文档应指向具体的 `wiki-agent` 或 `design-agent` 入口。
+
 顶层入口文件：
 
-- `src/pi-agent.ts`: CLI/RPC 直启包装，同时重新导出 prompt、routing、runtime、CLI helper，测试也会从这里验证路由和 REPL 行为。
+- `src/wiki-agent.ts`: 公开 wiki-agent CLI/RPC 包装，固定 wiki/paper prompt、工具边界和 Feishu 目标行为。
+- `src/design-agent.ts`: 公开 design-agent CLI/RPC 包装，固定 design prompt 和 design-agent 工具边界。
+- `src/pi-agent.ts`: 兼容直启包装和导出面，同时重新导出 prompt、routing、runtime、CLI helper；测试也会从这里验证路由和 REPL 行为。它不是公开 npm script。
 - `src/index.ts`: package 公共导出面，主要给测试、脚本或外部复用者使用；新增生产模块时先判断是否需要暴露在这里。
 - `src/paper-extension-host.ts`: native host 极薄入口，只调用 paper domain extension 子目录中的 `runPaperExtensionNativeHost`。
 
@@ -122,7 +128,9 @@ agent runtime + worker router
 
 | 文件 | 职责 | 上游调用者 | 下游依赖 | 重构注意点 |
 | --- | --- | --- | --- | --- |
-| `src/pi-agent.ts` | CLI/RPC 主入口和 agent runtime 相关导出。 | `npm run agent`、`npm run agent:rpc`、测试。 | `agent-cli.ts`、`agent-runtime.ts`、`agent-routing.ts`、`agent-prompts.ts`。 | 保持直启判断简单；REPL/RPC 逻辑不要放回顶层。 |
+| `src/wiki-agent.ts` | wiki-agent CLI/RPC 包装入口。 | `npm run wiki-agent`、`npm run wiki-agent:rpc`、Feishu bridge 默认 RPC 子进程。 | `agent-cli.ts`。 | 只固定 profile；REPL/RPC 逻辑不要放进顶层包装。 |
+| `src/design-agent.ts` | design-agent CLI/RPC 包装入口。 | `npm run design-agent`、`npm run design-agent:rpc`。 | `agent-cli.ts`。 | 只固定 profile；design 行为应来自 prompt 和 boundary，不要在入口层特判。 |
+| `src/pi-agent.ts` | 兼容入口和 agent runtime 相关导出。 | 内部/旧集成直启、测试。 | `agent-cli.ts`、`agent-runtime.ts`、`agent-routing.ts`、`agent-prompts.ts`。 | 保持兼容直启判断简单；公开文档不要把它当 public script。 |
 | `src/index.ts` | package 级公共导出面。 | 外部导入者、`test/index.test.ts`。 | 多个 `src/agent/**` 模块。 | 新增导出会扩大公共 API；删除导出前先查测试和脚本。 |
 | `src/paper-extension-host.ts` | native messaging host 的直启包装。 | `npm run paper-extension-host`、native host manifest。 | `agent/paper/extension/paper-extension-host.ts`。 | 只保留入口逻辑；协议、登记和 manifest 逻辑应留在 paper domain 模块。 |
 

@@ -103,9 +103,10 @@ test("default system prompt requires wiki evidence for scientific questions", ()
   assert.match(DEFAULT_SYSTEM_PROMPT, /wiki_structure_plan/);
   assert.match(DEFAULT_SYSTEM_PROMPT, /wiki_apply_structure_plan/);
   assert.match(DEFAULT_SYSTEM_PROMPT, /cite/i);
-  assert.match(DEFAULT_SYSTEM_PROMPT, /replace_file_text/);
-  assert.match(DEFAULT_SYSTEM_PROMPT, /delete_file/);
-  assert.match(DEFAULT_SYSTEM_PROMPT, /compile_latex/);
+  assert.match(DEFAULT_SYSTEM_PROMPT, /strict wiki-agent entrypoint/);
+  assert.match(DEFAULT_SYSTEM_PROMPT, /wiki and paper workflows/);
+  assert.match(DEFAULT_SYSTEM_PROMPT, /design-agent outputs/);
+  assert.doesNotMatch(DEFAULT_SYSTEM_PROMPT, /compile_latex/);
 });
 
 test("paper writing worker system prompt keeps manuscript edits in the worker boundary", () => {
