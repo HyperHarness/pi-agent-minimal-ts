@@ -386,6 +386,22 @@ function isWebpageFirstPublisher(source: string): source is SupportedPaperSource
   return source === "aps" || source === "nature" || source === "science";
 }
 
+function shouldPreferDownloadedPdfOverPublisherWebpage(input: {
+  source: string;
+  ready: DownloadPaperReadingClosure | undefined;
+}): boolean {
+  if (input.source !== "nature") {
+    return false;
+  }
+
+  if (input.ready !== undefined && !("quality" in input.ready)) {
+    return false;
+  }
+
+  return input.ready === undefined ||
+    (input.ready.strategy === "webpage" && input.ready.quality?.status !== "good");
+}
+
 function formatReadingError(error: unknown, fallback: string): string {
   return error instanceof Error && error.message ? error.message : fallback;
 }
@@ -763,11 +779,15 @@ export function createPaperTools(input: {
         workspaceDir: resolvedWorkspaceDir,
         recordPath: result.recordPath
       });
-      if (ready) {
+      if (ready && !shouldPreferDownloadedPdfOverPublisherWebpage({ source: result.source, ready })) {
         return ready;
       }
 
       if (result.source === "external") {
+        return parseDownloadedPdfForReading(result.recordPath);
+      }
+
+      if (shouldPreferDownloadedPdfOverPublisherWebpage({ source: result.source, ready })) {
         return parseDownloadedPdfForReading(result.recordPath);
       }
 
@@ -872,7 +892,7 @@ export function createPaperTools(input: {
     name: "download_paper",
     label: "Download Paper",
     description:
-      "Downloads a paper by id or URL through the unified paper manager and closes the reading loop by generating or queuing markdown artifacts. Before downloading, it checks the local paper blocklist and returns blocked for known irrelevant, license-denied, non-paper, duplicate, or repeatedly failed papers. APS, Nature, Science, and arXiv use webpage markdown first; arXiv refreshes webpage parsing when only PDF or TeX parsing exists, then falls back to TeX source and PDF parsing, while other PDFs are parsed after download. If a non-arXiv publisher download is blocked, incomplete, or unavailable, the manager tries an exact-title arXiv preprint fallback, deriving the title from publisher metadata when the caller did not pass one. For APS short DOIs, use the exact URL returned by search_papers or a DOI resolver URL such as https://link.aps.org/doi/<doi>; do not fabricate https://journals.aps.org/doi/<doi> URLs.",
+      "Downloads a paper by id or URL through the unified paper manager and closes the reading loop by generating or queuing markdown artifacts. Before downloading, it checks the local paper blocklist and returns blocked for known irrelevant, license-denied, non-paper, duplicate, or repeatedly failed papers. APS, Science, and arXiv use webpage markdown first; Nature reuses good webpage markdown but parses the downloaded PDF when webpage reading is missing, queued, or low quality, which handles online-first pages whose article body is incomplete. arXiv refreshes webpage parsing when only PDF or TeX parsing exists, then falls back to TeX source and PDF parsing, while other PDFs are parsed after download. If a non-arXiv publisher download is blocked, incomplete, or unavailable, the manager tries an exact-title arXiv preprint fallback, deriving the title from publisher metadata when the caller did not pass one. For APS short DOIs, use the exact URL returned by search_papers or a DOI resolver URL such as https://link.aps.org/doi/<doi>; do not fabricate https://journals.aps.org/doi/<doi> URLs.",
     parameters: downloadPaperParameters,
     executionMode: "sequential",
     execute: async (_toolCallId: string, args: DownloadPaperParameters) => {

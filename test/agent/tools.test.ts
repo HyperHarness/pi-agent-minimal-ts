@@ -3874,6 +3874,107 @@ test("download_paper reuses ready record manifests without re-fetching publisher
   }
 });
 
+test("download_paper parses downloaded Nature PDFs instead of queueing webpage capture when reading is not ready", async () => {
+  const workspace = await mkdtemp(path.join(tmpdir(), "pi-agent-tools-"));
+  const articleUrl = "https://www.nature.com/articles/s41586-026-10652-y";
+  const pdfPath = resolvePaperPdfPath({
+    workspaceDir: workspace,
+    source: "nature",
+    canonicalId: "s41586-026-10652-y"
+  });
+
+  try {
+    await mkdir(path.dirname(pdfPath), { recursive: true });
+    await writeFile(pdfPath, "%PDF-1.7\nnature accepted manuscript pdf\n", "utf8");
+    const recordPath = await writePaperRecord({
+      workspaceDir: workspace,
+      record: {
+        source: "nature",
+        articleUrl,
+        recordedAt: "2026-05-25T10:00:00.000Z",
+        handlingMethod: "browser_session",
+        status: "downloaded",
+        canonicalId: "s41586-026-10652-y",
+        pdfUrl: "https://www.nature.com/articles/s41586-026-10652-y.pdf",
+        downloadPath: pdfPath,
+        reading: {
+          status: "queued",
+          updatedAt: "2026-05-25T10:01:00.000Z",
+          preferredSource: "webpage",
+          reason: "Previous webpage capture was queued."
+        }
+      }
+    });
+    const calls: string[] = [];
+    const downloadPaperTool = getDownloadPaperTool(workspace, {
+      downloadPaper: async () => ({
+        status: "already_downloaded",
+        source: "nature",
+        canonicalId: "s41586-026-10652-y",
+        articleUrl,
+        finalPdfUrl: "https://www.nature.com/articles/s41586-026-10652-y.pdf",
+        path: pdfPath,
+        recordPath,
+        recordedAt: "2026-05-25T10:00:00.000Z"
+      }),
+      extensionBridge: {
+        async submitJob() {
+          calls.push("queue-webpage");
+          return {
+            status: "extension_job_queued" as const,
+            source: "nature" as const,
+            articleUrl,
+            jobId: "job-webpage",
+            message: "queued"
+          };
+        }
+      },
+      parsePaper: async (options) => {
+        calls.push(`parse:${options.engine ?? "auto"}`);
+        assert.equal(options.recordPath, recordPath);
+        return {
+          status: "parsed" as const,
+          paperKey: "nature-s41586-026-10652-y",
+          engine: "opendataloader-local" as const,
+          pdfSha256: "pdf-hash",
+          artifacts: {
+            sourcePath: path.join(workspace, "knowledge-base/sources/nature-s41586-026-10652-y/source.json"),
+            parsePath: path.join(workspace, "knowledge-base/sources/nature-s41586-026-10652-y/parses/opendataloader-local/parse.json"),
+            markdownPath: path.join(workspace, "knowledge-base/sources/nature-s41586-026-10652-y/parses/opendataloader-local/document.md"),
+            qualityPath: path.join(workspace, "knowledge-base/sources/nature-s41586-026-10652-y/parses/opendataloader-local/quality.json"),
+            chunksPath: path.join(workspace, "knowledge-base/sources/nature-s41586-026-10652-y/chunks/opendataloader-local.jsonl")
+          },
+          quality: {
+            status: "good" as const,
+            score: 1,
+            pages: 42,
+            totalTextLength: 92000,
+            emptyPageCount: 0,
+            headingCount: 12,
+            tableCount: 2,
+            figureOrCaptionCount: 8,
+            warnings: []
+          },
+          sections: []
+        };
+      }
+    });
+
+    const result = await downloadPaperTool.execute(
+      "call-nature-pdf-primary",
+      { url: articleUrl },
+      undefined
+    );
+
+    assert.deepEqual(calls, ["parse:auto"]);
+    assert.equal((result.details as { reading?: { status?: string } }).reading?.status, "parsed");
+    assert.equal((result.details as { reading?: { strategy?: string } }).reading?.strategy, "pdf");
+    assert.equal((result.details as { reading?: { engine?: string } }).reading?.engine, "opendataloader-local");
+  } finally {
+    await rm(workspace, { recursive: true, force: true });
+  }
+});
+
 test("download_paper delegates url inputs to the injected paper manager dependency and returns manager details", async () => {
   const workspace = await mkdtemp(path.join(tmpdir(), "pi-agent-tools-"));
   const recordPath = path.join(workspace, "papers", "science-10.1126-science.adz8659.json");
