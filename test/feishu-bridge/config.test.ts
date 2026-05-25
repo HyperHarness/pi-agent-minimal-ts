@@ -224,7 +224,7 @@ test('loadConfig reads the compiled paper PDF path', () => {
   );
 });
 
-test('loadConfig defaults the bridge to this repository agent RPC entrypoint', () => {
+test('loadConfig defaults the bridge to the wiki-agent RPC entrypoint', () => {
   const cwd = makeTempDir();
   withEnv(
     {
@@ -235,7 +235,7 @@ test('loadConfig defaults the bridge to this repository agent RPC entrypoint', (
       const config = loadConfig(cwd);
 
       assert.equal(config.pi.command, process.execPath);
-      assert.deepEqual(config.pi.commandArgs, [path.join(cwd, 'dist', 'src', 'pi-agent.js')]);
+      assert.deepEqual(config.pi.commandArgs, [path.join(cwd, 'dist', 'src', 'wiki-agent.js')]);
     },
   );
 });

@@ -18,8 +18,10 @@
   "scripts": {
     "build": "tsc -p tsconfig.json",
     "test": "npm run build && node --test --experimental-test-isolation=none dist/test/**/*.test.js test/scripts/**/*.test.mjs",
-    "agent": "npm run build && node dist/src/pi-agent.js",
-    "agent:rpc": "npm run build && node dist/src/pi-agent.js --mode rpc",
+    "wiki-agent": "npm run build && node dist/src/wiki-agent.js",
+    "wiki-agent:rpc": "npm run build && node dist/src/wiki-agent.js --mode rpc",
+    "design-agent": "npm run build && node dist/src/design-agent.js",
+    "design-agent:rpc": "npm run build && node dist/src/design-agent.js --mode rpc",
     "feishu-bridge": "npm run build && node dist/src/feishu-bridge/index.js",
     "wiki:web": "node scripts/wiki-web.mjs",
     "paper-extension-host": "node dist/src/paper-extension-host.js"

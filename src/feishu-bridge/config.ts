@@ -197,7 +197,7 @@ function getPiProvider(): string | undefined {
 }
 
 function getDefaultAgentEntry(cwd: string): string {
-  return process.env.PI_AGENT_ENTRY || path.join(cwd, 'dist', 'src', 'pi-agent.js');
+  return process.env.PI_AGENT_ENTRY || path.join(cwd, 'dist', 'src', 'wiki-agent.js');
 }
 
 function resolveOptionalPath(cwd: string, value: string | undefined): string | undefined {

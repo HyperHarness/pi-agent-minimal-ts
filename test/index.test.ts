@@ -1,5 +1,6 @@
 import test from "node:test";
 import assert from "node:assert/strict";
+import { readFileSync } from "node:fs";
 import { readFile } from "node:fs/promises";
 import * as publicApi from "../src/index.js";
 import {
@@ -83,4 +84,17 @@ test("package.json exposes the library root export for publishing", async () => 
     import: "./dist/src/index.js",
     types: "./dist/src/index.d.ts"
   });
+});
+
+test("package.json exposes strict wiki and design agent scripts", () => {
+  const packageJson = JSON.parse(readFileSync(new URL("../../package.json", import.meta.url), "utf8")) as {
+    scripts?: Record<string, string>;
+  };
+
+  assert.equal(packageJson.scripts?.agent, undefined);
+  assert.equal(packageJson.scripts?.["agent:rpc"], undefined);
+  assert.equal(packageJson.scripts?.["wiki-agent"], "npm run build && node dist/src/wiki-agent.js");
+  assert.equal(packageJson.scripts?.["wiki-agent:rpc"], "npm run build && node dist/src/wiki-agent.js --mode rpc");
+  assert.equal(packageJson.scripts?.["design-agent"], "npm run build && node dist/src/design-agent.js");
+  assert.equal(packageJson.scripts?.["design-agent:rpc"], "npm run build && node dist/src/design-agent.js --mode rpc");
 });
