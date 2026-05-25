@@ -60,10 +60,12 @@ strict entrypoint profile + agent runtime
 
 ### 普通聊天
 
-1. `src/pi-agent.ts` 调用 `agent-cli.ts` 的 `main()`。
-2. `agent-cli.ts` 解析 provider/model/session 参数，创建 `AgentContext`，并把用户输入交给 `runSessionPrompt()`。
+1. `src/wiki-agent.ts` 或 `src/design-agent.ts` 调用 `agent-cli.ts` 的 `main()`，并分别固定 wiki/paper 或 design/code 工具 profile。
+2. `agent-cli.ts` 解析 provider/model/session 参数，创建 `AgentContext`，并把用户输入交给 `runSessionPrompt()`；RPC 模式同样从这两个公开包装入口进入。
 3. `agent-runtime.ts` 若没有命中 worker route，则创建运行时工具 `createTools()`，执行 `agentLoop()`，把非失败 turn 写回上下文。
 4. REPL 通过 `createReplEventHandler()` 输出 message/tool 事件，并在结束时刷新 paper download queue 统计。
+
+`src/pi-agent.ts` 只保留旧集成直启和导出兼容，不是公开聊天/RPC 入口。
 
 ### Worker 路由
 
@@ -130,7 +132,7 @@ strict entrypoint profile + agent runtime
 | --- | --- | --- | --- | --- |
 | `src/wiki-agent.ts` | wiki-agent CLI/RPC 包装入口。 | `npm run wiki-agent`、`npm run wiki-agent:rpc`、Feishu bridge 默认 RPC 子进程。 | `agent-cli.ts`。 | 只固定 profile；REPL/RPC 逻辑不要放进顶层包装。 |
 | `src/design-agent.ts` | design-agent CLI/RPC 包装入口。 | `npm run design-agent`、`npm run design-agent:rpc`。 | `agent-cli.ts`。 | 只固定 profile；design 行为应来自 prompt 和 boundary，不要在入口层特判。 |
-| `src/pi-agent.ts` | 兼容入口和 agent runtime 相关导出。 | 内部/旧集成直启、测试。 | `agent-cli.ts`、`agent-runtime.ts`、`agent-routing.ts`、`agent-prompts.ts`。 | 保持兼容直启判断简单；公开文档不要把它当 public script。 |
+| `src/pi-agent.ts` | 旧集成直启兼容和 agent runtime 相关导出。 | 内部/旧集成直启、测试。 | runtime、routing、prompt 和 CLI helper 模块。 | 保持兼容直启判断简单；公开聊天/RPC 文档不要把它当 public script。 |
 | `src/index.ts` | package 级公共导出面。 | 外部导入者、`test/index.test.ts`。 | 多个 `src/agent/**` 模块。 | 新增导出会扩大公共 API；删除导出前先查测试和脚本。 |
 | `src/paper-extension-host.ts` | native messaging host 的直启包装。 | `npm run paper-extension-host`、native host manifest。 | `agent/paper/extension/paper-extension-host.ts`。 | 只保留入口逻辑；协议、登记和 manifest 逻辑应留在 paper domain 模块。 |
 
@@ -138,7 +140,7 @@ strict entrypoint profile + agent runtime
 
 | 文件 | 职责 | 上游调用者 | 下游依赖 | 重构注意点 |
 | --- | --- | --- | --- | --- |
-| `src/agent/agent-cli.ts` | CLI/RPC 进程、模型解析、REPL 事件格式、session 统计。 | `src/pi-agent.ts`。 | `agent-runtime.ts`、`model-resolver.ts`、`env-proxy.ts`、`paper-download-jobs.ts`、RPC helpers。 | 这是入口层大文件；拆分时优先按 CLI args、REPL formatting、RPC mode、session stats 分组，并保留现有事件文本测试。 |
+| `src/agent/agent-cli.ts` | CLI/RPC 进程、模型解析、REPL 事件格式、session 统计。 | 公开包装入口 `src/wiki-agent.ts`、`src/design-agent.ts`，以及旧兼容直启包装。 | `agent-runtime.ts`、`model-resolver.ts`、`env-proxy.ts`、`paper-download-jobs.ts`、RPC helpers。 | 这是入口层大文件；拆分时优先按 CLI args、REPL formatting、RPC mode、session stats 分组，并保留现有事件文本测试。 |
 | `src/agent/agent-runtime.ts` | 单 turn agentLoop、worker route 执行、工具生命周期、失败 turn 处理、瞬时模型错误重试。 | `agent-cli.ts`、顶层导出测试。 | `tools.ts`、`agent-routing.ts`、`paper-extension-bridge.ts`、`wiki/worker.ts`。 | 高耦合点是 routed worker 执行与 runtime tool 注入；改动要同时看 worker handoff、tool cleanup 和失败消息持久化。 |
 | `src/agent/agent-routing.ts` | 自然语言/显式前缀到 worker role 的路由，worker handoff 路径提取。 | `agent-runtime.ts`、`src/pi-agent.ts` 导出。 | `agent-prompts.ts`、Pi message type。 | 路由正则会影响用户请求归属；新增工具产物时同步 `extractWorkerHandoffPaths()`。 |
 | `src/agent/agent-prompts.ts` | main agent 与各 worker 的 system prompt 常量。 | `agent-routing.ts`、`agent-runtime.ts`、`pi-agent.ts`。 | 无运行时依赖。 | 修改 prompt 等同修改行为；同步 README 中 worker 边界说明和相关路由测试。 |

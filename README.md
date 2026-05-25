@@ -212,8 +212,9 @@ Other explicit worker routes:
 ```text
 > paper download latest superconducting qubit chip design papers
 > wiki evidence 总结 arxiv-2406.06015 并维护 related_papers
-> design 为 transmon frequency allocation 写一个 failure record
 ```
+
+Start design/code/dependency/layout/verification work with `npm run design-agent`; do not route those tasks through wiki-agent chat examples.
 
 Use `exit` or `quit` to stop. Conversation history is kept in memory for the current process only.
 
@@ -379,7 +380,7 @@ Design code, reusable Python packages, scripts, generated-layout setup, and desi
 
 | Surface | Purpose | Exposes | Does not expose |
 | --- | --- | --- | --- |
-| `default` | normal chat agent | compact file, web, paper, wiki, health tools | full diagnostics and raw source writers |
+| `default` | interactive agent surface | compact file, web, paper, wiki, health tools | full diagnostics and raw source writers |
 | `full` | development and diagnostics | all default tools plus raw paper/wiki/design utilities | no extra filesystem escape permissions |
 | `wiki-agent` | durable knowledge coordinator | local wiki search, page construction, aliases, wiki health/lint, local paper search | web search, paper download, source-summary generation |
 | `paper-download-subagent` | literature acquisition | search/download, browser/manual fallback, webpage capture, local-parse/arXiv/Crossref citation metadata refresh, parsing, health repair | wiki page writes, source-summary authoring |
