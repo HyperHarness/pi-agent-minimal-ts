@@ -855,11 +855,14 @@ export async function main(options: {
     }
   } finally {
     repl.close();
-    await refreshAgentChatSessionDownloadQueue(sessionStats);
-    process.stdout.write(formatAgentChatSessionStats(sessionStats));
-    await cleanupTools(context?.tools);
-    if (context) {
-      forgetAgentContextWorkspaceDir(context);
+    try {
+      await refreshAgentChatSessionDownloadQueue(sessionStats);
+      process.stdout.write(formatAgentChatSessionStats(sessionStats));
+    } finally {
+      await cleanupTools(context?.tools);
+      if (context) {
+        forgetAgentContextWorkspaceDir(context);
+      }
     }
   }
 }
