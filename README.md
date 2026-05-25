@@ -111,7 +111,7 @@ The current wiki core is schema-first:
 - `coordinator.ts` plans wiki-agent work with explicit owner assignments such as `paper-download-subagent`, `wiki-evidence-worker`, `wiki-synthesis-worker`, and `wiki-agent`.
 - `domain-bindings.ts` provides a metadata-only registry for validated executable helper bindings. Bindings are described in typed page metadata; arbitrary page content is not executed.
 
-The wiki agent should not directly download papers, run web search, or author raw source summaries in benchmark/boundary mode. Those are assigned to subagents/workers so page construction can be benchmarked under fixed evidence. Clean-context paper-summary and wiki-page-draft passes are treated as `wiki-evidence-worker` responsibilities, not separate durable worker roles.
+In fixed-evidence benchmark mode, the wiki agent should not directly download papers, run web search, or author raw source summaries. Those are assigned to subagents/workers so page construction can be benchmarked under fixed evidence. Clean-context paper-summary and wiki-page-draft passes are treated as `wiki-evidence-worker` responsibilities, not separate durable worker roles.
 
 ### Evidence Flow
 
@@ -382,7 +382,7 @@ Design code, reusable Python packages, scripts, generated-layout setup, and desi
 | --- | --- | --- | --- |
 | `default` | interactive agent surface | compact file, web, paper, wiki, health tools | full diagnostics and raw source writers |
 | `full` | development and diagnostics | all default tools plus raw paper/wiki/design utilities | no extra filesystem escape permissions |
-| `wiki-agent` | durable knowledge coordinator | local wiki search, page construction, aliases, wiki health/lint, local paper search | web search, paper download, source-summary generation |
+| `wiki-agent` | durable knowledge coordinator | local wiki search, page construction, aliases, wiki health/lint, paper search/download | web search, source-summary generation |
 | `paper-download-subagent` | literature acquisition | search/download, browser/manual fallback, webpage capture, local-parse/arXiv/Crossref citation metadata refresh, parsing, health repair | wiki page writes, source-summary authoring |
 | `wiki-evidence-worker` | evidence construction | source summaries, relation maintenance, fixed-evidence page draft output | paper download, external search, autonomous acquisition |
 | `design-agent` | chip-design/layout engineering | local wiki/paper retrieval, `sync_design_environment`, workspace-local `run_design_script`, `write_design_artifact` | web search, paper download, wiki page writes, arbitrary file writes |
