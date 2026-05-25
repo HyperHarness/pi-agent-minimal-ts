@@ -10,11 +10,13 @@ import {
   type Model
 } from "@mariozechner/pi-ai";
 import type { AgentContext, AgentEvent } from "@mariozechner/pi-agent-core";
-import { DEFAULT_SYSTEM_PROMPT } from "./agent-prompts.js";
+import { DEFAULT_SYSTEM_PROMPT, DESIGN_AGENT_SYSTEM_PROMPT } from "./agent-prompts.js";
 import { configureEnvProxy } from "./env-proxy.js";
 import { resolveInitialModel } from "./model-resolver.js";
-import { cleanupTools } from "./tools.js";
+import { cleanupTools, createTools, createToolsForBoundary, getToolBoundaryToolNames } from "./tools.js";
 import { readPaperDownloadJobEvents, summarizePaperDownloadJobs } from "./paper/extension/paper-download-jobs.js";
+import { createQueuedPaperExtensionBridge } from "./paper/extension/paper-extension-bridge.js";
+import { createWikiEvidenceWorker } from "./wiki/worker.js";
 import {
   compactOutputText,
   forgetAgentContextWorkspaceDir,
@@ -22,7 +24,8 @@ import {
   isRecord,
   runSessionPrompt,
   type AgentMessageEventHandler,
-  type SessionPromptResult
+  type SessionPromptResult,
+  type WorkerRoutingPolicy
 } from "./agent-runtime.js";
 
 export interface CliArgs {
@@ -45,6 +48,15 @@ export interface AgentChatSessionStats {
   modifiedWikiPages: Set<string>;
 }
 
+export type AgentEntrypointProfile = "wiki-agent" | "design-agent" | "routed-agent";
+
+export interface ResolvedAgentEntrypointProfile {
+  systemPrompt: string;
+  workerRouting: WorkerRoutingPolicy;
+  tools: ReturnType<typeof createTools>;
+  toolNames: string[];
+}
+
 function collectAvailableModels(): Model<Api>[] {
   const models: Model<Api>[] = [];
 
@@ -53,6 +65,56 @@ function collectAvailableModels(): Model<Api>[] {
   }
 
   return models;
+}
+
+function createRoutedAgentTools(workspaceDir: string, model: Model<Api>): ReturnType<typeof createTools> {
+  const wikiEvidenceWorker = createWikiEvidenceWorker(model, workspaceDir);
+  return createTools(workspaceDir, {
+    extensionBridge: createQueuedPaperExtensionBridge({ workspaceDir }),
+    paperSummaryWorker: wikiEvidenceWorker.paperSummaryWorker,
+    paperWikiPageWorker: wikiEvidenceWorker.paperWikiPageWorker
+  });
+}
+
+function createWikiAgentTools(workspaceDir: string, model: Model<Api>): ReturnType<typeof createTools> {
+  const wikiEvidenceWorker = createWikiEvidenceWorker(model, workspaceDir);
+  return createToolsForBoundary(workspaceDir, "wiki-agent", {
+    extensionBridge: createQueuedPaperExtensionBridge({ workspaceDir }),
+    paperSummaryWorker: wikiEvidenceWorker.paperSummaryWorker,
+    paperWikiPageWorker: wikiEvidenceWorker.paperWikiPageWorker
+  });
+}
+
+export function resolveAgentEntrypointProfile(
+  profile: AgentEntrypointProfile,
+  workspaceDir: string,
+  model: Model<Api>
+): ResolvedAgentEntrypointProfile {
+  if (profile === "wiki-agent") {
+    return {
+      systemPrompt: DEFAULT_SYSTEM_PROMPT,
+      workerRouting: "wiki-paper",
+      tools: createWikiAgentTools(workspaceDir, model),
+      toolNames: getToolBoundaryToolNames("wiki-agent")
+    };
+  }
+
+  if (profile === "design-agent") {
+    return {
+      systemPrompt: DESIGN_AGENT_SYSTEM_PROMPT,
+      workerRouting: "none",
+      tools: createToolsForBoundary(workspaceDir, "design-agent"),
+      toolNames: getToolBoundaryToolNames("design-agent")
+    };
+  }
+
+  const tools = createRoutedAgentTools(workspaceDir, model);
+  return {
+    systemPrompt: DEFAULT_SYSTEM_PROMPT,
+    workerRouting: "all",
+    tools,
+    toolNames: tools.map((tool) => tool.name)
+  };
 }
 
 function formatToolFieldValue(value: unknown, maxLength = 180): string | null {
@@ -395,6 +457,7 @@ function extractRpcPromptMessage(command: unknown): string | undefined {
 async function runRpcMode(options: {
   model: Model<Api>;
   workspaceDir: string;
+  entrypointProfile: ResolvedAgentEntrypointProfile;
   sessionDir?: string;
   useSession: boolean;
   input: NodeJS.ReadStream;
@@ -405,9 +468,9 @@ async function runRpcMode(options: {
   }
 
   const context: AgentContext = {
-    systemPrompt: DEFAULT_SYSTEM_PROMPT,
+    systemPrompt: options.entrypointProfile.systemPrompt,
     messages: [],
-    tools: []
+    tools: options.entrypointProfile.tools
   };
   const repl = createInterface({
     input: options.input
@@ -473,6 +536,7 @@ async function runRpcMode(options: {
           workspaceDir: options.workspaceDir,
           context,
           prompt: message,
+          workerRouting: options.entrypointProfile.workerRouting,
           onEvent: (event) => {
             if (event.type === "message_update") {
               writeRpcEvent(options.output, {
@@ -655,10 +719,13 @@ export async function consumePromptLines(options: {
   }
 }
 
-export async function main(argv = process.argv.slice(2)): Promise<void> {
+export async function main(options: {
+  argv?: string[];
+  profile?: AgentEntrypointProfile;
+} = {}): Promise<void> {
   configureEnvProxy();
 
-  const cli = parseCliArgs(argv);
+  const cli = parseCliArgs(options.argv ?? process.argv.slice(2));
   if (cli.help) {
     process.stdout.write(
       "Usage: node dist/src/pi-agent.js [--mode chat|rpc] [--session-dir <dir>] [--no-session] [--provider <name>] [--model <id>] [--base-url <url>]\n"
@@ -678,11 +745,14 @@ export async function main(argv = process.argv.slice(2)): Promise<void> {
     cliBaseUrl: cli.baseUrl,
     envBaseUrl: process.env.PI_BASE_URL
   });
+  const workspaceDir = process.cwd();
+  const entrypointProfile = resolveAgentEntrypointProfile(options.profile ?? "wiki-agent", workspaceDir, runtimeModel);
 
   if (cli.mode === "rpc") {
     await runRpcMode({
       model: runtimeModel,
-      workspaceDir: process.cwd(),
+      workspaceDir,
+      entrypointProfile,
       sessionDir: cli.sessionDir,
       useSession: cli.useSession,
       input: process.stdin,
@@ -692,11 +762,11 @@ export async function main(argv = process.argv.slice(2)): Promise<void> {
   }
 
   const context: AgentContext = {
-    systemPrompt: DEFAULT_SYSTEM_PROMPT,
+    systemPrompt: entrypointProfile.systemPrompt,
     messages: [],
-    tools: []
+    tools: entrypointProfile.tools
   };
-  const sessionStats = await createAgentChatSessionStats(process.cwd());
+  const sessionStats = await createAgentChatSessionStats(workspaceDir);
   const replEventHandler = createReplEventHandler(process.stdout);
   const repl = createInterface({
     input: process.stdin,
@@ -705,9 +775,10 @@ export async function main(argv = process.argv.slice(2)): Promise<void> {
   const handlePrompt = async (prompt: string): Promise<SessionPromptResult> => {
     return runSessionPrompt({
       model: runtimeModel,
-      workspaceDir: process.cwd(),
+      workspaceDir,
       context,
       prompt,
+      workerRouting: entrypointProfile.workerRouting,
       onEvent: async (event) => {
         recordAgentChatSessionStats(sessionStats, event);
         await replEventHandler(event);

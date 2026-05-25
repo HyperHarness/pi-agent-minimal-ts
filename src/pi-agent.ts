@@ -38,12 +38,15 @@ export {
   main,
   parseCliArgs,
   readInteractivePrompt,
+  resolveAgentEntrypointProfile,
   recordAgentChatSessionStats,
   refreshAgentChatSessionDownloadQueue
 } from "./agent/agent-cli.js";
 export type {
+  AgentEntrypointProfile,
   AgentChatSessionStats,
-  CliArgs
+  CliArgs,
+  ResolvedAgentEntrypointProfile
 } from "./agent/agent-cli.js";
 
 function isDirectExecution(metaUrl: string, entryPath: string | undefined): boolean {
@@ -51,7 +54,7 @@ function isDirectExecution(metaUrl: string, entryPath: string | undefined): bool
 }
 
 if (isDirectExecution(import.meta.url, process.argv[1])) {
-  void main().catch((error: unknown) => {
+  void main({ profile: "wiki-agent" }).catch((error: unknown) => {
     const message = error instanceof Error ? error.stack ?? error.message : String(error);
     console.error(message);
     process.exitCode = 1;

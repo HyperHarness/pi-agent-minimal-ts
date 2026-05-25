@@ -26,6 +26,9 @@ async function resolveBuiltModuleUrl(relativePath: string): Promise<string> {
 }
 
 const piAgent: typeof import("../../src/pi-agent.js") = await import(await resolveBuiltModuleUrl("src/pi-agent.js"));
+const agentCli: typeof import("../../src/agent/agent-cli.js") = await import(
+  await resolveBuiltModuleUrl("src/agent/agent-cli.js")
+);
 const toolsModule: typeof import("../../src/agent/tools.js") = await import(
   await resolveBuiltModuleUrl("src/agent/tools.js")
 );
@@ -138,6 +141,48 @@ test("router worker system prompts describe isolated responsibilities", () => {
   assert.match(designPrompt as string, /root \.venv/);
   assert.match(designPrompt as string, /Do not install packages ad hoc with pip/);
   assert.match(designPrompt as string, /design-projects\/.*deprecated/);
+});
+
+test("agent CLI profiles initialize strict prompts, routing, and tool boundaries", async () => {
+  const registration = registerFauxProvider();
+  const workspaceDir = process.cwd();
+
+  const wikiProfile = agentCli.resolveAgentEntrypointProfile(
+    "wiki-agent",
+    workspaceDir,
+    registration.getModel()
+  );
+  const designProfile = agentCli.resolveAgentEntrypointProfile(
+    "design-agent",
+    workspaceDir,
+    registration.getModel()
+  );
+  const routedProfile = agentCli.resolveAgentEntrypointProfile(
+    "routed-agent",
+    workspaceDir,
+    registration.getModel()
+  );
+
+  try {
+    assert.equal(wikiProfile.workerRouting, "wiki-paper");
+    assert.match(wikiProfile.systemPrompt, /research assistant/);
+    assert.match(wikiProfile.systemPrompt, /build_wiki_page/);
+    assert.ok(wikiProfile.toolNames.includes("build_wiki_page"));
+    assert.equal(wikiProfile.toolNames.includes("update_design_dependency"), false);
+
+    assert.equal(designProfile.workerRouting, "none");
+    assert.match(designProfile.systemPrompt, /design-agent/);
+    assert.match(designProfile.systemPrompt, /sync_design_environment/);
+    assert.ok(designProfile.toolNames.includes("sync_design_environment"));
+    assert.ok(designProfile.toolNames.includes("search_paper_wiki"));
+    assert.equal(designProfile.toolNames.includes("build_wiki_page"), false);
+
+    assert.equal(routedProfile.workerRouting, "all");
+  } finally {
+    await cleanupTools(wikiProfile.tools);
+    await cleanupTools(designProfile.tools);
+    await cleanupTools(routedProfile.tools);
+  }
 });
 
 test("runAgentTurn executes a tool call and appends the resulting messages", async () => {
