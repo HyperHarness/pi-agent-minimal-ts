@@ -354,6 +354,10 @@ function recordAuthorizationReason(record: PaperRecord | undefined): string | un
 }
 
 function recordIsQueued(record: PaperRecord | undefined): boolean {
+  if (record?.reading?.status === "ready") {
+    return false;
+  }
+
   return (
     record?.reading?.status === "queued" ||
     record?.download?.status === "queued" ||

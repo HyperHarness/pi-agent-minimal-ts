@@ -145,6 +145,83 @@ test("checkWikiHealth resolves WSL UNC artifact paths before reporting missing f
   }
 });
 
+test("checkWikiHealth ignores stale queued webpage work when PDF reading is ready", async () => {
+  const workspace = await createWorkspace();
+
+  try {
+    const paperKey = "nature-s41586-026-10644-y";
+    const pdfPath = path.join(workspace, "knowledge-base", "raw", "pdfs", `${paperKey}.pdf`);
+    const parseRoot = path.join(workspace, "knowledge-base", "sources", paperKey, "parses", "opendataloader-local");
+    const chunksPath = path.join(workspace, "knowledge-base", "sources", paperKey, "chunks", "opendataloader-local.jsonl");
+    await writeText(pdfPath, "%PDF-1.4\nexample\n%%EOF\n");
+    await writeText(path.join(parseRoot, "document.md"), "# Introduction\n\nA complete PDF parse.");
+    await writeJson(path.join(parseRoot, "parse.json"), {
+      paperKey,
+      engine: "opendataloader-local"
+    });
+    await writeJson(path.join(parseRoot, "quality.json"), {
+      status: "good",
+      score: 1,
+      pages: 55,
+      totalTextLength: 115795,
+      emptyPageCount: 0,
+      headingCount: 41,
+      tableCount: 0,
+      figureOrCaptionCount: 6,
+      warnings: []
+    });
+    await writeText(chunksPath, "{\"id\":\"chunk-1\"}\n");
+    await writeJson(path.join(workspace, "knowledge-base", "sources", paperKey, "source.json"), {
+      paperKey,
+      source: "nature",
+      canonicalId: "s41586-026-10644-y",
+      articleUrl: "https://www.nature.com/articles/s41586-026-10644-y",
+      title: "Accelerating scientific discovery with Co-Scientist",
+      pdfPath,
+      pdfSha256: "sha-test",
+      recordPath: `knowledge-base/sources/${paperKey}/acquisition.json`
+    });
+    await writeJson(path.join(workspace, "knowledge-base", "sources", paperKey, "acquisition.json"), {
+      source: "nature",
+      articleUrl: "https://www.nature.com/articles/s41586-026-10644-y",
+      recordedAt: "2026-05-25T02:53:07.163Z",
+      handlingMethod: "browser_session",
+      status: "downloaded",
+      canonicalId: "s41586-026-10644-y",
+      pdfUrl: "https://www.nature.com/articles/s41586-026-10644-y_reference.pdf",
+      downloadPath: pdfPath,
+      reading: {
+        status: "ready",
+        preferredSource: "pdf_parse",
+        paperKey,
+        markdownPath: `knowledge-base/sources/${paperKey}/parses/opendataloader-local/document.md`,
+        parsePath: `knowledge-base/sources/${paperKey}/parses/opendataloader-local/parse.json`,
+        qualityPath: `knowledge-base/sources/${paperKey}/parses/opendataloader-local/quality.json`,
+        chunksPath: `knowledge-base/sources/${paperKey}/chunks/opendataloader-local.jsonl`,
+        quality: {
+          status: "good",
+          score: 1,
+          pages: 55,
+          totalTextLength: 115795,
+          warnings: []
+        }
+      },
+      webpage: {
+        status: "queued",
+        jobId: "paper-nature-stale-webpage",
+        message: "Publisher PDF is downloaded. Browser extension webpage capture was queued."
+      }
+    });
+
+    const result = await checkWikiHealth({ workspaceDir: workspace });
+
+    assert.equal(result.summary.queued, 0);
+    assert.ok(!result.issues.some((issue) => issue.kind === "queued" && issue.paperKey === paperKey));
+  } finally {
+    await rm(workspace, { recursive: true, force: true });
+  }
+});
+
 test("checkWikiHealth reports incomplete source citation metadata", async () => {
   const workspace = await createWorkspace();
 
