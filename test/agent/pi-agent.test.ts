@@ -1110,6 +1110,105 @@ test("runSessionPrompt routes design package requests to design-agent boundary",
   }
 });
 
+test("runSessionPrompt can disable worker routing for fixed design-agent sessions", async () => {
+  const registration = registerFauxProvider();
+  registration.setResponses([
+    fauxAssistantMessage([fauxText("Handled inside the fixed design-agent session.")])
+  ]);
+
+  const context: AgentContext = {
+    systemPrompt: DEFAULT_SYSTEM_PROMPT,
+    messages: [],
+    tools: []
+  };
+
+  try {
+    const result = await piAgent.runSessionPrompt({
+      model: registration.getModel(),
+      workspaceDir: process.cwd(),
+      context,
+      prompt: "请让design subagent安装gdsfactory这个python包",
+      workerRouting: "none"
+    });
+
+    const assistantMessages = result.newMessages.filter(isAssistantMessage);
+    assert.ok(
+      assistantMessages.some((message) => messageHasText(message, "Handled inside the fixed design-agent session."))
+    );
+    assert.equal(
+      assistantMessages.some((message) => JSON.stringify(message.content).includes("worker_handoff")),
+      false
+    );
+    assert.equal(
+      assistantMessages.some((message) => JSON.stringify(message.content).includes('"role":"design-agent"')),
+      false
+    );
+  } finally {
+    registration.unregister();
+  }
+});
+
+test("runSessionPrompt wiki routing policy refuses design worker handoff while keeping paper routing", async () => {
+  const registration = registerFauxProvider();
+  registration.setResponses([
+    fauxAssistantMessage([fauxText("Handled without design handoff.")]),
+    fauxAssistantMessage([fauxText("Paper worker finished under wiki policy.")])
+  ]);
+
+  const context: AgentContext = {
+    systemPrompt: DEFAULT_SYSTEM_PROMPT,
+    messages: [],
+    tools: []
+  };
+
+  try {
+    const designResult = await piAgent.runSessionPrompt({
+      model: registration.getModel(),
+      workspaceDir: process.cwd(),
+      context,
+      prompt: "请让design subagent安装gdsfactory这个python包",
+      workerRouting: "wiki-paper"
+    });
+
+    const designAssistantMessages = designResult.newMessages.filter(isAssistantMessage);
+    assert.ok(
+      designAssistantMessages.some((message) => messageHasText(message, "Handled without design handoff."))
+    );
+    assert.equal(
+      designAssistantMessages.some((message) => JSON.stringify(message.content).includes("worker_handoff")),
+      false
+    );
+    assert.equal(
+      designAssistantMessages.some((message) => JSON.stringify(message.content).includes('"role":"design-agent"')),
+      false
+    );
+
+    const paperResult = await piAgent.runSessionPrompt({
+      model: registration.getModel(),
+      workspaceDir: process.cwd(),
+      context,
+      prompt: "paper write revise the abstract",
+      workerRouting: "wiki-paper"
+    });
+
+    const handoff = paperResult.newMessages
+      .filter(isAssistantMessage)
+      .map((message) => {
+        try {
+          return parseWorkerHandoff(message) as { role?: string; finalResponse?: string };
+        } catch {
+          return undefined;
+        }
+      })
+      .find((candidate) => candidate?.role === "paper-writing-worker");
+
+    assert.ok(handoff);
+    assert.equal(handoff.finalResponse, "Paper worker finished under wiki policy.");
+  } finally {
+    registration.unregister();
+  }
+});
+
 test("runSessionPrompt paper download worker queues browser extension jobs", async () => {
   const runSessionPrompt = (
     piAgent as {

@@ -26,6 +26,7 @@ import {
 
 type LlmMessage = UserMessage | AssistantMessage | ToolResultMessage;
 type AgentMessageEventHandler = (event: AgentEvent) => Promise<void> | void;
+export type WorkerRoutingPolicy = "all" | "wiki-paper" | "none";
 const contextWorkspaceDirs = new WeakMap<AgentContext, string>();
 const TRANSIENT_MODEL_RETRY_ATTEMPTS = 5;
 const MAX_AGENT_TOOL_LOOPS_PER_TURN = 90;
@@ -49,6 +50,7 @@ export interface RunAgentTurnOptions {
   context: AgentContext;
   prompt: string;
   onEvent?: AgentMessageEventHandler;
+  workerRouting?: WorkerRoutingPolicy;
 }
 
 export interface RunAgentTurnResult {
@@ -479,6 +481,22 @@ function createRuntimeTools(workspaceDir: string, model: Model<Api>) {
   });
 }
 
+function canRouteWorker(policy: WorkerRoutingPolicy, role: RoutedWorkerRole): boolean {
+  if (policy === "none") {
+    return false;
+  }
+
+  if (policy === "all") {
+    return true;
+  }
+
+  return (
+    role === "paper-writing-worker" ||
+    role === "paper-download-subagent" ||
+    role === "wiki-evidence-worker"
+  );
+}
+
 export async function runSessionPrompt(
   options: RunAgentTurnOptions
 ): Promise<SessionPromptResult> {
@@ -492,8 +510,9 @@ export async function runSessionPrompt(
     return { action: "stop", newMessages: [] };
   }
 
-  const routedWorker = routeChatPromptToWorker(trimmedPrompt);
-  if (routedWorker !== null) {
+  const workerRouting = options.workerRouting ?? "all";
+  const routedWorker = workerRouting === "none" ? null : routeChatPromptToWorker(trimmedPrompt);
+  if (routedWorker !== null && canRouteWorker(workerRouting, routedWorker.role)) {
     const workerResult = await runRoutedWorkerPrompt({
       model: options.model,
       workspaceDir: options.workspaceDir,
