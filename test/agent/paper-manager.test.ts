@@ -85,11 +85,11 @@ test("searchPapers merges duplicate titles and keeps publisher sources primary",
     searchWebImpl: async (options) => {
       webCalls.push({ query: options.query, maxResults: options.maxResults });
       return [
-        createWebResult({
-          title: " Unified  Paper Search ",
-          url: "https://www.science.org/doi/epdf/10.1126/science.adz8659",
-          snippet: "science summary"
-        }),
+      createWebResult({
+        title: " Unified  Paper Search ",
+        url: "https://www.science.org/doi/epdf/10.1126/science.adz8659",
+        snippet: "science summary. Research Article."
+      }),
         createWebResult({
           title: "unified paper search",
           url: "https://example.org/blog/post",
@@ -105,7 +105,7 @@ test("searchPapers merges duplicate titles and keeps publisher sources primary",
   assert.deepEqual(results[0], {
     title: "Unified Paper Search",
     authors: ["Ada Lovelace"],
-    summary: "science summary",
+    summary: "science summary. Research Article.",
     primarySource: "science",
     primaryAction: "authorized_download",
     sources: [
@@ -219,6 +219,61 @@ test("searchPapers maps unsupported hosts to external open_url_only results", as
       ]
     } satisfies PaperSearchResult
   ]);
+});
+
+test("searchPapers filters Nature and Science news pages from downloadable paper results", async () => {
+  const results = await searchPapers({
+    query: "ai scientific discovery",
+    maxResults: 10,
+    searchArxivImpl: async () => [],
+    searchApsPapersImpl: async () => [],
+    searchWebImpl: async () => [
+      createWebResult({
+        title: "Learning the language of life with AI",
+        url: "https://www.science.org/doi/10.1126/science.adv4414",
+        snippet: "Editorial coverage from Science, not a research article."
+      }),
+      createWebResult({
+        title: "Accelerating science with AI",
+        url: "https://www.science.org/doi/10.1126/science.aee0605",
+        snippet: "News and editorial analysis."
+      }),
+      createWebResult({
+        title: "AI scientist 'team' joins the search for extraterrestrial life",
+        url: "https://www.nature.com/articles/d41586-025-01364-w",
+        snippet: "Nature News."
+      }),
+      createWebResult({
+        title: "Progression without progress",
+        url: "https://www.science.org/doi/10.1126/science.aeh8945",
+        snippet: "Perspective article."
+      }),
+      createWebResult({
+        title: "AI has supercharged scientists-but may have shrunk science",
+        url: "https://www.science.org/content/article/ai-has-supercharged-scientists-may-have-shrunk-science",
+        snippet: "Science news story."
+      }),
+      createWebResult({
+        title: "Accelerating scientific discovery with Co-Scientist",
+        url: "https://www.nature.com/articles/s41586-026-10644-y",
+        snippet: "Nature research article."
+      }),
+      createWebResult({
+        title: "A Science Advances research paper",
+        url: "https://www.science.org/doi/10.1126/sciadv.adp6388",
+        snippet: "Research Article."
+      })
+    ]
+  });
+
+  assert.deepEqual(
+    results.map((result) => result.sources[0]?.articleUrl),
+    [
+      "https://www.nature.com/articles/s41586-026-10644-y",
+      "https://www.science.org/doi/10.1126/sciadv.adp6388"
+    ]
+  );
+  assert.equal(results.every((result) => result.primaryAction === "authorized_download"), true);
 });
 
 test("searchPapers includes latest APS metadata results as downloadable paper sources", async () => {
@@ -340,7 +395,7 @@ test("searchPapers still returns available paper results when optional search pr
   assert.equal(results[0]?.primarySource, "aps");
 });
 
-test("searchPapers keeps supported hosts classified by hostname even when the path shape is unknown", async () => {
+test("searchPapers filters supported hosts when the path is not a journal article", async () => {
   const results = await searchPapers({
     query: "hostname classified paper",
     searchArxivImpl: async () => [],
@@ -354,22 +409,7 @@ test("searchPapers keeps supported hosts classified by hostname even when the pa
     ]
   });
 
-  assert.deepEqual(results, [
-    {
-      title: "Hostname Classified Paper",
-      authors: [],
-      summary: "nature summary",
-      primarySource: "nature",
-      primaryAction: "authorized_download",
-      sources: [
-        {
-          source: "nature",
-          articleUrl: "https://www.nature.com/content/preview",
-          action: "authorized_download"
-        }
-      ]
-    } satisfies PaperSearchResult
-  ]);
+  assert.deepEqual(results, []);
 });
 
 test("searchPapers treats unsupported www.aps.org hosts as external results", async () => {
@@ -489,12 +529,12 @@ test("searchPapers reorders merged candidates when a higher-priority source appe
       createWebResult({
         title: "Paper B",
         url: "https://www.science.org/doi/10.1126/science.paper-b",
-        snippet: "science summary B"
+        snippet: "science summary B. Research Article."
       }),
       createWebResult({
         title: "Paper A",
         url: "https://www.science.org/doi/10.1126/science.paper-a",
-        snippet: "science summary A"
+        snippet: "science summary A. Research Article."
       })
     ]
   });

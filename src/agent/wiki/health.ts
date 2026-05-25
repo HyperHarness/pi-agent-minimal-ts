@@ -548,6 +548,37 @@ function entryHasOnlyWebpageReading(entry: LocalPaperEntry): boolean {
   return entry.hasParsedArtifacts && entry.parses.every((parse) => parse.engine === "webpage");
 }
 
+function entryLooksLikePublisherNonJournalArticle(entry: LocalPaperEntry): boolean {
+  const canonicalId = entry.canonicalId?.toLowerCase();
+  if (entry.source === "nature") {
+    return Boolean(canonicalId?.match(/^d\d{5}-/));
+  }
+
+  if (entry.source !== "science") {
+    return false;
+  }
+
+  let pathname = "";
+  if (entry.articleUrl) {
+    try {
+      pathname = new URL(entry.articleUrl).pathname;
+    } catch {
+      pathname = "";
+    }
+  }
+  if (/^\/content\/article\//i.test(pathname)) {
+    return true;
+  }
+
+  return Boolean(
+    canonicalId?.startsWith("10.1126/science.") &&
+    !entry.recordPath &&
+    !entry.pdfPath &&
+    entryHasOnlyWebpageReading(entry) &&
+    !entry.parses.some((parse) => parse.status === "good")
+  );
+}
+
 function parseIsLowQuality(parse: LocalPaperParseSummary, threshold: number): boolean {
   return (
     parse.status === "poor" ||
@@ -798,7 +829,10 @@ export async function checkWikiHealth(options: WikiHealthOptions): Promise<WikiH
   });
   const paperEntries: LocalPaperEntry[] = [];
   for (const entry of localPapers.results) {
-    if (!(await entryHasNonPaperSourceManifest(workspaceDir, entry))) {
+    if (
+      !(await entryHasNonPaperSourceManifest(workspaceDir, entry)) &&
+      !entryLooksLikePublisherNonJournalArticle(entry)
+    ) {
       paperEntries.push(entry);
     }
   }

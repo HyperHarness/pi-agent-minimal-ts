@@ -117,6 +117,59 @@ test("checkWikiHealth reports records that need download, authorization, parsing
   }
 });
 
+test("checkWikiHealth excludes publisher news pages from paper parse health", async () => {
+  const workspace = await createWorkspace();
+
+  try {
+    const newsSources = [
+      {
+        paperKey: "science-10.1126-science.adv4414",
+        source: "science",
+        canonicalId: "10.1126/science.adv4414",
+        articleUrl: "https://www.science.org/doi/10.1126/science.adv4414",
+        title: "Learning the language of life with AI"
+      },
+      {
+        paperKey: "nature-d41586-025-01364-w",
+        source: "nature",
+        canonicalId: "d41586-025-01364-w",
+        articleUrl: "https://www.nature.com/articles/d41586-025-01364-w",
+        title: "AI scientist 'team' joins the search for extraterrestrial life"
+      }
+    ];
+
+    for (const source of newsSources) {
+      const sourceDir = path.join(workspace, "knowledge-base", "sources", source.paperKey);
+      const parsedDir = path.join(sourceDir, "parses", "webpage");
+      await writeJson(path.join(sourceDir, "source.json"), source);
+      await writeText(path.join(parsedDir, "document.md"), `${source.title}\n\nShort news page.`);
+      await writeJson(path.join(parsedDir, "parse.json"), {
+        paperKey: source.paperKey,
+        engine: "webpage"
+      });
+      await writeJson(path.join(parsedDir, "quality.json"), {
+        status: "needs_hybrid",
+        score: 0.45,
+        pages: 1,
+        totalTextLength: 1200,
+        warnings: ["No main body sections were detected."]
+      });
+      await writeText(
+        path.join(sourceDir, "chunks", "webpage.jsonl"),
+        "{\"id\":\"chunk-1\"}\n"
+      );
+    }
+
+    const result = await checkWikiHealth({ workspaceDir: workspace });
+
+    assert.equal(result.totalPapers, 0);
+    assert.equal(result.summary.low_quality, 0);
+    assert.deepEqual(result.issues, []);
+  } finally {
+    await rm(workspace, { recursive: true, force: true });
+  }
+});
+
 test("checkWikiHealth resolves WSL UNC artifact paths before reporting missing files", async () => {
   const workspace = await createWorkspace();
 

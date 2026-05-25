@@ -448,6 +448,93 @@ function normalizeApsArticleUrl(url: URL): string {
   return normalizedUrl.toString();
 }
 
+const SCIENCE_MAIN_JOURNAL_DOI_PREFIX = "10.1126/science.";
+const PUBLISHER_NON_RESEARCH_TEXT_PATTERNS = [
+  /\bnews\b/i,
+  /\beditorial\b/i,
+  /\bperspective\b/i,
+  /\bpolicy forum\b/i,
+  /\bcareers?\b/i,
+  /\bscientific community\b/i,
+  /\bcommentary\b/i,
+  /\bopinion\b/i,
+  /\bbook review\b/i
+];
+const PUBLISHER_RESEARCH_TEXT_PATTERNS = [
+  /\bresearch article\b/i,
+  /\bresearch paper\b/i,
+  /\breport\b/i,
+  /\bresearch\b/i
+];
+
+function getSearchResultText(result: WebSearchResult): string {
+  return `${result.title}\n${result.snippet}`;
+}
+
+function hasNonResearchPublisherSignal(text: string): boolean {
+  return PUBLISHER_NON_RESEARCH_TEXT_PATTERNS.some((pattern) => pattern.test(text));
+}
+
+function hasResearchPublisherSignal(text: string): boolean {
+  return PUBLISHER_RESEARCH_TEXT_PATTERNS.some((pattern) => pattern.test(text));
+}
+
+function isNatureJournalArticleSource(url: URL, canonicalId?: string): boolean {
+  if (!canonicalId || !/^\/articles\//i.test(url.pathname)) {
+    return false;
+  }
+
+  return !/^d\d{5}-/i.test(canonicalId);
+}
+
+function isScienceJournalArticleSource(input: {
+  url: URL;
+  canonicalId?: string;
+  searchText: string;
+}): boolean {
+  if (/^\/content\/article\//i.test(input.url.pathname)) {
+    return false;
+  }
+  if (!input.canonicalId) {
+    return false;
+  }
+
+  const canonicalId = input.canonicalId.toLowerCase();
+  if (!canonicalId.startsWith("10.1126/")) {
+    return false;
+  }
+
+  if (!canonicalId.startsWith(SCIENCE_MAIN_JOURNAL_DOI_PREFIX)) {
+    return true;
+  }
+
+  if (hasNonResearchPublisherSignal(input.searchText)) {
+    return false;
+  }
+
+  return hasResearchPublisherSignal(input.searchText);
+}
+
+function isDownloadablePublisherSearchResult(input: {
+  result: WebSearchResult;
+  classification: Extract<ClassifiedPaperUrl, { source: SupportedPaperSource }>;
+}): boolean {
+  const url = new URL(input.classification.articleUrl);
+  if (input.classification.source === "nature") {
+    return isNatureJournalArticleSource(url, input.classification.canonicalId);
+  }
+
+  if (input.classification.source === "science") {
+    return isScienceJournalArticleSource({
+      url,
+      canonicalId: input.classification.canonicalId,
+      searchText: getSearchResultText(input.result)
+    });
+  }
+
+  return true;
+}
+
 function isApsAcceptedPaperUrl(articleUrl: string): boolean {
   try {
     const url = new URL(articleUrl);
@@ -531,7 +618,7 @@ async function resolveApsAcceptedPaperTitle(options: {
 function classifyWebSearchResult(
   result: WebSearchResult,
   order: number
-): RankedArxivSearchSource | RankedSupportedSearchSource | RankedExternalSearchSource {
+): RankedArxivSearchSource | RankedSupportedSearchSource | RankedExternalSearchSource | null {
   const classification = classifyPaperUrl(result.url);
   if (classification.source === "external") {
     return {
@@ -553,6 +640,10 @@ function classifyWebSearchResult(
       rank: PAPER_SOURCE_PRIORITY.arxiv,
       order
     };
+  }
+
+  if (!isDownloadablePublisherSearchResult({ result, classification })) {
+    return null;
   }
 
   return {
@@ -2102,12 +2193,18 @@ export async function searchPapers(options: SearchPapersOptions): Promise<PaperS
   }
 
   for (const result of webResults) {
+    const source = classifyWebSearchResult(result, order);
+    if (!source) {
+      order += 1;
+      continue;
+    }
+
     addCandidate(candidates, {
       title: result.title,
       authors: [],
       summary: result.snippet,
       order,
-      source: classifyWebSearchResult(result, order)
+      source
     });
     order += 1;
   }
