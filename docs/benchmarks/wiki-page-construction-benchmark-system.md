@@ -209,7 +209,7 @@ This tests the full harness around `build_wiki_page`.
 - Create a temporary workspace.
 - Install fixture source summaries into `knowledge-base/sources/`.
 - Inject or mock retrieval so every model receives the same evidence.
-- Use `createToolsForBoundary(workspaceDir, "wiki-agent")` so the benchmarked agent cannot call paper download, web search, or source-summary generation tools.
+- Strict `wiki-agent` includes paper acquisition tools. For fixed-evidence benchmarks, either run Worker-Isolated Mode or inject deterministic search/download dependencies and disable acquisition in the harness instead of relying on the wiki-agent boundary alone.
 - Run `build_wiki_page` in `draft` or `write` mode.
 - Run `wiki_lint` after write mode.
 
@@ -486,7 +486,7 @@ Current repo primitives already cover most of this benchmark:
 
 - `PaperWikiPageWorkerInput` and `PaperWikiPageWorkerOutput` are the natural worker-isolated API.
 - `build_wiki_page` already passes fixed evidence to a clean-context page worker.
-- `createToolsForBoundary(workspaceDir, "wiki-agent")` exposes the wiki-agent tool surface while disabling external evidence acquisition inside `build_wiki_page`.
+- `createToolsForBoundary(workspaceDir, "wiki-agent")` exposes the production wiki/paper surface. It disables external evidence acquisition only inside `build_wiki_page` through options, not globally across all paper tools.
 - `createToolsForBoundary(workspaceDir, "paper-download-subagent")` provides the raw paper acquisition surface for non-benchmark ingestion workflows.
 - `createToolsForBoundary(workspaceDir, "wiki-evidence-worker")` provides the wiki-side evidence surface for source-summary generation and source relation maintenance.
 - `createToolsForBoundary(workspaceDir, "paper-writing-worker")` provides a paper-writing surface that can read and write manuscript files, compile LaTeX, and retrieve citeable wiki evidence without exposing download, web search, source-summary generation, or wiki page writes.
