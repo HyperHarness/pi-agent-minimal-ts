@@ -591,6 +591,34 @@ function parseIsAcceptable(parse: LocalPaperParseSummary, threshold: number): bo
   return parse.status === "good" && (parse.score === undefined || parse.score >= threshold);
 }
 
+function entryHasUsableParsedReading(entry: LocalPaperEntry | undefined, threshold: number): boolean {
+  return Boolean(entry?.hasParsedArtifacts && entry.parses.some((parse) => parseIsAcceptable(parse, threshold)));
+}
+
+function paperKeyFromAcquisitionRecordPath(recordPath: string | undefined): string | undefined {
+  if (!recordPath) {
+    return undefined;
+  }
+  const normalized = recordPath.split(/[\\/]+/);
+  const fileName = normalized.at(-1);
+  const parentName = normalized.at(-2);
+  return fileName === "acquisition.json" && parentName ? parentName : undefined;
+}
+
+function preprintFallbackEntry(
+  record: PaperRecord | undefined,
+  entriesByPaperKey: Map<string, LocalPaperEntry>
+): LocalPaperEntry | undefined {
+  if (record?.status !== "preprint_fallback") {
+    return undefined;
+  }
+  const paperKey = paperKeyFromAcquisitionRecordPath(record.preprint.recordPath) ??
+    (record.preprint.source && record.preprint.canonicalId
+      ? `${record.preprint.source}-${record.preprint.canonicalId}`
+      : undefined);
+  return paperKey ? entriesByPaperKey.get(paperKey) : undefined;
+}
+
 async function missingArtifactPaths(workspaceDir: string, entry: LocalPaperEntry): Promise<string[]> {
   const paths = [
     entry.pdfPath,
@@ -836,6 +864,7 @@ export async function checkWikiHealth(options: WikiHealthOptions): Promise<WikiH
       paperEntries.push(entry);
     }
   }
+  const entriesByPaperKey = new Map(paperEntries.map((entry) => [entry.paperKey, entry]));
   const jobEvents = await readPaperDownloadJobEvents({ workspaceDir });
   const issues: WikiHealthIssue[] = [];
 
@@ -847,12 +876,17 @@ export async function checkWikiHealth(options: WikiHealthOptions): Promise<WikiH
     const pdfExists = await pathExists(toWorkspacePath(workspaceDir, entry.pdfPath));
     const usesPreprintFallback = recordUsesPreprintFallback(record);
     const isPublisherPending = recordIsPublisherPending(record);
-    const hasAcceptableParse = entry.parses.some((parse) => parseIsAcceptable(parse, threshold));
-    const hasUsableParsedReading = entry.hasParsedArtifacts && hasAcceptableParse;
+    const hasUsableParsedReading = entryHasUsableParsedReading(entry, threshold);
+    const hasUsablePreprintFallback = entryHasUsableParsedReading(
+      preprintFallbackEntry(record, entriesByPaperKey),
+      threshold
+    );
     const recordAccessReason = recordAuthorizationReason(record);
     const authorizationReason =
-      (recordAccessReason && !hasUsableParsedReading ? recordAccessReason : undefined) ??
-      (!pdfExists ? jobAuthorizationReason(findAccessProblemJobForEntry(entry, jobEvents)) : undefined);
+      hasUsablePreprintFallback
+        ? undefined
+        : (recordAccessReason && !hasUsableParsedReading ? recordAccessReason : undefined) ??
+          (!pdfExists ? jobAuthorizationReason(findAccessProblemJobForEntry(entry, jobEvents)) : undefined);
     const needsAuthorization = Boolean(authorizationReason);
     const authorizationSeverity: WikiHealthSeverity = hasUsableParsedReading ? "medium" : "high";
 
@@ -905,7 +939,7 @@ export async function checkWikiHealth(options: WikiHealthOptions): Promise<WikiH
     }
 
     if (!usesPreprintFallback && !isPublisherPending && !needsAuthorization) {
-      for (const parse of entry.parses.filter((candidate) => !hasAcceptableParse && parseIsLowQuality(candidate, threshold))) {
+      for (const parse of entry.parses.filter((candidate) => !hasUsableParsedReading && parseIsLowQuality(candidate, threshold))) {
         entryIssues.push({
           ...baseIssue(entry, "low_quality", "medium", `Parse quality is ${parse.status ?? "unknown"}${typeof parse.score === "number" ? ` with score ${parse.score}` : ""}.`),
           quality: {

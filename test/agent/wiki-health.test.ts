@@ -1313,6 +1313,121 @@ test("checkWikiHealth treats publisher accepted-paper arXiv fallback records as 
   }
 });
 
+test("checkWikiHealth ignores stale APS authorization jobs when arXiv fallback is parsed", async () => {
+  const workspace = await createWorkspace();
+
+  try {
+    const articleUrl = "https://journals.aps.org/prapplied/accepted/10.1103/k3d5-v43c";
+    const arxivPdfPath = path.join(workspace, "knowledge-base", "raw", "pdfs", "arxiv-2406.06015.pdf");
+    const arxivRecordPath = path.join(workspace, "knowledge-base", "sources", "arxiv-2406.06015", "acquisition.json");
+    await writeText(arxivPdfPath, "%PDF-1.4\nexample\n%%EOF\n");
+    await writeJson(arxivRecordPath, {
+      source: "arxiv",
+      articleUrl: "https://arxiv.org/abs/2406.06015",
+      recordedAt: "2026-05-25T06:40:00.000Z",
+      handlingMethod: "direct_http",
+      status: "downloaded",
+      canonicalId: "2406.06015",
+      pdfUrl: "https://arxiv.org/pdf/2406.06015",
+      downloadPath: arxivPdfPath
+    });
+    await writeJson(path.join(workspace, "knowledge-base", "sources", "arxiv-2406.06015", "source.json"), {
+      paperKey: "arxiv-2406.06015",
+      source: "arxiv",
+      canonicalId: "2406.06015",
+      articleUrl: "https://arxiv.org/abs/2406.06015",
+      title: "Superconducting qubits in the millions: the potential and limitations of modularity",
+      pdfPath: arxivPdfPath
+    });
+    await writeText(
+      path.join(workspace, "knowledge-base", "sources", "arxiv-2406.06015", "parses", "opendataloader-local", "document.md"),
+      "Full parsed arXiv fallback text."
+    );
+    await writeJson(
+      path.join(workspace, "knowledge-base", "sources", "arxiv-2406.06015", "parses", "opendataloader-local", "quality.json"),
+      {
+        status: "good",
+        score: 0.99,
+        pages: 34,
+        totalTextLength: 127158,
+        emptyPageCount: 0,
+        headingCount: 20,
+        tableCount: 3,
+        figureOrCaptionCount: 18,
+        warnings: []
+      }
+    );
+    await writeJson(path.join(workspace, "knowledge-base", "sources", "aps-10.1103-k3d5-v43c", "acquisition.json"), {
+      source: "aps",
+      articleUrl,
+      recordedAt: "2026-05-25T06:43:00.304Z",
+      handlingMethod: "arxiv_preprint_fallback",
+      status: "preprint_fallback",
+      canonicalId: "10.1103/k3d5-v43c",
+      title: "Superconducting qubits in the millions: The potential and limitations of modularity",
+      preprint: {
+        source: "arxiv",
+        canonicalId: "2406.06015",
+        articleUrl: "https://arxiv.org/abs/2406.06015",
+        pdfUrl: "https://arxiv.org/pdf/2406.06015",
+        recordPath: arxivRecordPath,
+        downloadPath: arxivPdfPath,
+        status: "already_downloaded"
+      },
+      failure: {
+        code: "publisher_version_not_available",
+        message: "Publisher PDF was not downloaded automatically; using matching arXiv preprint 2406.06015."
+      },
+      reading: {
+        status: "not_ready",
+        reason: "Publisher version is not available yet; using arXiv preprint 2406.06015."
+      }
+    });
+    await writeJson(path.join(workspace, "knowledge-base", "sources", "aps-10.1103-k3d5-v43c", "source.json"), {
+      paperKey: "aps-10.1103-k3d5-v43c",
+      source: "aps",
+      canonicalId: "10.1103/k3d5-v43c",
+      articleUrl,
+      title: "Superconducting qubits in the millions: The potential and limitations of modularity",
+      citationStatus: "complete"
+    });
+    await writeText(
+      path.join(workspace, "knowledge-base", "sources", "aps-10.1103-k3d5-v43c", "parses", "webpage", "document.md"),
+      "Accepted paper abstract."
+    );
+    await writeJson(
+      path.join(workspace, "knowledge-base", "sources", "aps-10.1103-k3d5-v43c", "parses", "webpage", "quality.json"),
+      {
+        status: "poor",
+        score: 0.2,
+        pages: 1,
+        totalTextLength: 202,
+        warnings: ["No main body sections were detected; prefer PDF parsing."]
+      }
+    );
+    await appendPaperDownloadJobEvent({
+      workspaceDir: workspace,
+      event: {
+        jobId: "paper-aps-k3d5",
+        recordedAt: "2026-05-25T06:41:00.000Z",
+        status: "webpage_snapshot_ready",
+        articleUrl,
+        source: "aps",
+        purpose: "download_and_webpage",
+        paperKey: "aps-10.1103-k3d5-v43c",
+        message: "The webpage snapshot was captured but does not look complete enough to start PDF download. Log in or verify article access, refresh the page, then retry. Quality: needs_hybrid (score 0.55)."
+      }
+    });
+
+    const result = await checkWikiHealth({ workspaceDir: workspace });
+
+    assert.equal(result.summary.needs_authorization, 0);
+    assert.ok(!result.issues.some((issue) => issue.kind === "needs_authorization" && issue.paperKey === "aps-10.1103-k3d5-v43c"));
+  } finally {
+    await rm(workspace, { recursive: true, force: true });
+  }
+});
+
 test("checkWikiHealth treats accepted publisher-pending records as non-actionable", async () => {
   const workspace = await createWorkspace();
 
