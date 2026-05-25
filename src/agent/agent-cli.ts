@@ -507,14 +507,16 @@ async function runRpcMode(options: {
   const repl = createInterface({
     input: options.input
   });
-  const tools = options.entrypointProfile.createTools();
-  const context: AgentContext = {
-    systemPrompt: options.entrypointProfile.systemPrompt,
-    messages: [],
-    tools
-  };
+  let context: AgentContext | undefined;
 
   try {
+    const tools = options.entrypointProfile.createTools();
+    context = {
+      systemPrompt: options.entrypointProfile.systemPrompt,
+      messages: [],
+      tools
+    };
+
     for await (const line of repl) {
       const trimmedLine = line.trim();
       if (!trimmedLine) {
@@ -633,8 +635,10 @@ async function runRpcMode(options: {
     }
   } finally {
     repl.close();
-    await cleanupTools(context.tools);
-    forgetAgentContextWorkspaceDir(context);
+    await cleanupTools(context?.tools);
+    if (context) {
+      forgetAgentContextWorkspaceDir(context);
+    }
   }
 }
 
@@ -805,29 +809,32 @@ export async function main(options: {
     input: process.stdin,
     output: process.stdout
   });
-  const tools = entrypointProfile.createTools();
-  const context: AgentContext = {
-    systemPrompt: entrypointProfile.systemPrompt,
-    messages: [],
-    tools
-  };
-  const handlePrompt = async (prompt: string): Promise<SessionPromptResult> => {
-    return runSessionPrompt({
-      model: runtimeModel,
-      workspaceDir,
-      context,
-      prompt,
-      workerRouting: entrypointProfile.workerRouting,
-      onEvent: async (event) => {
-        recordAgentChatSessionStats(sessionStats, event);
-        await replEventHandler(event);
-      }
-    });
-  };
-
-  process.stdout.write(`model> ${selection.provider}/${runtimeModel.id}\n`);
+  let context: AgentContext | undefined;
 
   try {
+    const tools = entrypointProfile.createTools();
+    context = {
+      systemPrompt: entrypointProfile.systemPrompt,
+      messages: [],
+      tools
+    };
+    const activeContext = context;
+    const handlePrompt = async (prompt: string): Promise<SessionPromptResult> => {
+      return runSessionPrompt({
+        model: runtimeModel,
+        workspaceDir,
+        context: activeContext,
+        prompt,
+        workerRouting: entrypointProfile.workerRouting,
+        onEvent: async (event) => {
+          recordAgentChatSessionStats(sessionStats, event);
+          await replEventHandler(event);
+        }
+      });
+    };
+
+    process.stdout.write(`model> ${selection.provider}/${runtimeModel.id}\n`);
+
     if (process.stdin.isTTY) {
       while (true) {
         const prompt = await readInteractivePrompt(repl);
@@ -850,7 +857,9 @@ export async function main(options: {
     repl.close();
     await refreshAgentChatSessionDownloadQueue(sessionStats);
     process.stdout.write(formatAgentChatSessionStats(sessionStats));
-    await cleanupTools(context.tools);
-    forgetAgentContextWorkspaceDir(context);
+    await cleanupTools(context?.tools);
+    if (context) {
+      forgetAgentContextWorkspaceDir(context);
+    }
   }
 }
