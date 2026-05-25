@@ -33,7 +33,7 @@ const toolsModule: typeof import("../../src/agent/tools.js") = await import(
   await resolveBuiltModuleUrl("src/agent/tools.js")
 );
 const { cleanupTools } = toolsModule;
-const { DEFAULT_SYSTEM_PROMPT, runAgentTurn } = piAgent;
+const { DEFAULT_SYSTEM_PROMPT, DESIGN_AGENT_SYSTEM_PROMPT, runAgentTurn } = piAgent;
 
 type AgentMessage = AgentContext["messages"][number];
 type ToolExecutionStartEvent = Extract<AgentEvent, { type: "tool_execution_start" }>;
@@ -163,25 +163,49 @@ test("agent CLI profiles initialize strict prompts, routing, and tool boundaries
     registration.getModel()
   );
 
+  assert.equal(wikiProfile.systemPrompt, DEFAULT_SYSTEM_PROMPT);
+  assert.equal(wikiProfile.workerRouting, "wiki-paper");
+  assert.deepEqual(wikiProfile.toolNames, toolsModule.getToolBoundaryToolNames("wiki-agent"));
+
+  assert.equal(designProfile.systemPrompt, DESIGN_AGENT_SYSTEM_PROMPT);
+  assert.equal(designProfile.workerRouting, "none");
+  assert.deepEqual(designProfile.toolNames, toolsModule.getToolBoundaryToolNames("design-agent"));
+
+  assert.equal(routedProfile.systemPrompt, DEFAULT_SYSTEM_PROMPT);
+  assert.equal(routedProfile.workerRouting, "all");
+
+  const wikiTools = wikiProfile.createTools();
   try {
-    assert.equal(wikiProfile.workerRouting, "wiki-paper");
-    assert.match(wikiProfile.systemPrompt, /research assistant/);
-    assert.match(wikiProfile.systemPrompt, /build_wiki_page/);
-    assert.ok(wikiProfile.toolNames.includes("build_wiki_page"));
-    assert.equal(wikiProfile.toolNames.includes("update_design_dependency"), false);
-
-    assert.equal(designProfile.workerRouting, "none");
-    assert.match(designProfile.systemPrompt, /design-agent/);
-    assert.match(designProfile.systemPrompt, /sync_design_environment/);
-    assert.ok(designProfile.toolNames.includes("sync_design_environment"));
-    assert.ok(designProfile.toolNames.includes("search_paper_wiki"));
-    assert.equal(designProfile.toolNames.includes("build_wiki_page"), false);
-
-    assert.equal(routedProfile.workerRouting, "all");
+    assert.deepEqual(wikiTools.map((tool) => tool.name), wikiProfile.toolNames);
+    assert.deepEqual(wikiTools.map((tool) => tool.name), toolsModule.getToolBoundaryToolNames("wiki-agent"));
   } finally {
-    await cleanupTools(wikiProfile.tools);
-    await cleanupTools(designProfile.tools);
-    await cleanupTools(routedProfile.tools);
+    await cleanupTools(wikiTools);
+  }
+
+  const designTools = designProfile.createTools();
+  try {
+    assert.deepEqual(designTools.map((tool) => tool.name), designProfile.toolNames);
+    assert.deepEqual(designTools.map((tool) => tool.name), toolsModule.getToolBoundaryToolNames("design-agent"));
+  } finally {
+    await cleanupTools(designTools);
+  }
+
+  const routedTools = routedProfile.createTools();
+  try {
+    const routedToolNames = routedTools.map((tool) => tool.name);
+    const defaultTools = toolsModule.createTools(workspaceDir);
+    try {
+      assert.deepEqual(routedToolNames, routedProfile.toolNames);
+      assert.deepEqual(routedToolNames, defaultTools.map((tool) => tool.name));
+      assert.ok(routedToolNames.includes("download_paper"));
+      assert.ok(routedToolNames.includes("build_wiki_page"));
+      assert.equal(routedToolNames.includes("sync_design_environment"), false);
+      assert.equal(routedToolNames.includes("update_design_dependency"), false);
+    } finally {
+      await cleanupTools(defaultTools);
+    }
+  } finally {
+    await cleanupTools(routedTools);
   }
 });
 

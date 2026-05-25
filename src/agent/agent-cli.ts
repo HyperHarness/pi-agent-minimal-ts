@@ -13,7 +13,13 @@ import type { AgentContext, AgentEvent } from "@mariozechner/pi-agent-core";
 import { DEFAULT_SYSTEM_PROMPT, DESIGN_AGENT_SYSTEM_PROMPT } from "./agent-prompts.js";
 import { configureEnvProxy } from "./env-proxy.js";
 import { resolveInitialModel } from "./model-resolver.js";
-import { cleanupTools, createTools, createToolsForBoundary, getToolBoundaryToolNames } from "./tools.js";
+import {
+  cleanupTools,
+  createTools,
+  createToolsForBoundary,
+  getToolBoundaryToolNames,
+  type AgentTools
+} from "./tools.js";
 import { readPaperDownloadJobEvents, summarizePaperDownloadJobs } from "./paper/extension/paper-download-jobs.js";
 import { createQueuedPaperExtensionBridge } from "./paper/extension/paper-extension-bridge.js";
 import { createWikiEvidenceWorker } from "./wiki/worker.js";
@@ -53,9 +59,41 @@ export type AgentEntrypointProfile = "wiki-agent" | "design-agent" | "routed-age
 export interface ResolvedAgentEntrypointProfile {
   systemPrompt: string;
   workerRouting: WorkerRoutingPolicy;
-  tools: ReturnType<typeof createTools>;
+  createTools: () => AgentTools;
   toolNames: string[];
 }
+
+const ROUTED_AGENT_TOOL_NAMES = [
+  "list_files",
+  "read_file",
+  "write_file",
+  "replace_file_text",
+  "delete_file",
+  "compile_latex",
+  "web_search",
+  "fetch_url",
+  "search_papers",
+  "download_paper",
+  "block_paper_download",
+  "inspect_paper",
+  "read_paper_section",
+  "search_paper_text",
+  "answer_paper_wiki_question",
+  "answer_research_question",
+  "bootstrap_wiki_page_evidence",
+  "build_wiki_page",
+  "merge_wiki_aliases",
+  "clarify_research_topic",
+  "research_topic_bootstrap",
+  "expand_research_topic",
+  "wiki_review_page",
+  "search_local_papers",
+  "wiki_health",
+  "wiki_lint",
+  "wiki_structure_plan",
+  "wiki_apply_structure_plan",
+  "wiki_health_fix"
+] as const;
 
 function collectAvailableModels(): Model<Api>[] {
   const models: Model<Api>[] = [];
@@ -67,7 +105,7 @@ function collectAvailableModels(): Model<Api>[] {
   return models;
 }
 
-function createRoutedAgentTools(workspaceDir: string, model: Model<Api>): ReturnType<typeof createTools> {
+function createRoutedAgentTools(workspaceDir: string, model: Model<Api>): AgentTools {
   const wikiEvidenceWorker = createWikiEvidenceWorker(model, workspaceDir);
   return createTools(workspaceDir, {
     extensionBridge: createQueuedPaperExtensionBridge({ workspaceDir }),
@@ -76,7 +114,7 @@ function createRoutedAgentTools(workspaceDir: string, model: Model<Api>): Return
   });
 }
 
-function createWikiAgentTools(workspaceDir: string, model: Model<Api>): ReturnType<typeof createTools> {
+function createWikiAgentTools(workspaceDir: string, model: Model<Api>): AgentTools {
   const wikiEvidenceWorker = createWikiEvidenceWorker(model, workspaceDir);
   return createToolsForBoundary(workspaceDir, "wiki-agent", {
     extensionBridge: createQueuedPaperExtensionBridge({ workspaceDir }),
@@ -94,7 +132,7 @@ export function resolveAgentEntrypointProfile(
     return {
       systemPrompt: DEFAULT_SYSTEM_PROMPT,
       workerRouting: "wiki-paper",
-      tools: createWikiAgentTools(workspaceDir, model),
+      createTools: () => createWikiAgentTools(workspaceDir, model),
       toolNames: getToolBoundaryToolNames("wiki-agent")
     };
   }
@@ -103,17 +141,16 @@ export function resolveAgentEntrypointProfile(
     return {
       systemPrompt: DESIGN_AGENT_SYSTEM_PROMPT,
       workerRouting: "none",
-      tools: createToolsForBoundary(workspaceDir, "design-agent"),
+      createTools: () => createToolsForBoundary(workspaceDir, "design-agent"),
       toolNames: getToolBoundaryToolNames("design-agent")
     };
   }
 
-  const tools = createRoutedAgentTools(workspaceDir, model);
   return {
     systemPrompt: DEFAULT_SYSTEM_PROMPT,
     workerRouting: "all",
-    tools,
-    toolNames: tools.map((tool) => tool.name)
+    createTools: () => createRoutedAgentTools(workspaceDir, model),
+    toolNames: [...ROUTED_AGENT_TOOL_NAMES]
   };
 }
 
@@ -467,14 +504,15 @@ async function runRpcMode(options: {
     await mkdir(options.sessionDir, { recursive: true });
   }
 
-  const context: AgentContext = {
-    systemPrompt: options.entrypointProfile.systemPrompt,
-    messages: [],
-    tools: options.entrypointProfile.tools
-  };
   const repl = createInterface({
     input: options.input
   });
+  const tools = options.entrypointProfile.createTools();
+  const context: AgentContext = {
+    systemPrompt: options.entrypointProfile.systemPrompt,
+    messages: [],
+    tools
+  };
 
   try {
     for await (const line of repl) {
@@ -761,17 +799,18 @@ export async function main(options: {
     return;
   }
 
-  const context: AgentContext = {
-    systemPrompt: entrypointProfile.systemPrompt,
-    messages: [],
-    tools: entrypointProfile.tools
-  };
   const sessionStats = await createAgentChatSessionStats(workspaceDir);
   const replEventHandler = createReplEventHandler(process.stdout);
   const repl = createInterface({
     input: process.stdin,
     output: process.stdout
   });
+  const tools = entrypointProfile.createTools();
+  const context: AgentContext = {
+    systemPrompt: entrypointProfile.systemPrompt,
+    messages: [],
+    tools
+  };
   const handlePrompt = async (prompt: string): Promise<SessionPromptResult> => {
     return runSessionPrompt({
       model: runtimeModel,
