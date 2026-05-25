@@ -41,7 +41,8 @@ paginate: true
 - CLI / JSONL RPC / Feishu bridge 三种运行入口。
 - paper acquisition：检索、下载、浏览器扩展、解析、阅读、source metadata。
 - wiki agent：source summary、typed synthesis page、claim provenance、typed relation、lint、health。
-- worker router：按意图隔离 `paper-download-subagent`、`wiki-evidence-worker`、`design-subagent`、`paper-writing-worker`。
+- worker router：按意图隔离 `paper-download-subagent`、`wiki-evidence-worker`、`paper-writing-worker`。
+- public design/code/layout work：走独立 `design-agent`，不进入 wiki-agent/router。
 - repo manager：桥接侧管理 paper/design/wiki 工作区的 status、diff、commit、push。
 
 ---
@@ -57,11 +58,15 @@ main chat agent / wiki-agent coordinator
         +--> paper-download-subagent  -> acquisition, PDFs, webpages, parses
         +--> wiki-evidence-worker     -> source summaries, fixed-evidence drafts
         +--> wiki-agent               -> durable typed wiki pages
-        +--> design-subagent          -> design records, verification reports
         +--> paper-writing-worker     -> manuscript files, LaTeX compile
+
+design-agent                    -> public design/code/layout artifacts
+        |
+        v
+wiki-agent curates records/artifacts into durable wiki updates
 ```
 
-设计原则：领域工作交给边界清晰的 worker；主 agent 保留协调、审计和最终上下文连续性。
+设计原则：paper/wiki/writing 工作交给边界清晰的 worker；public design/code/layout work 由独立 `design-agent` 入口处理，wiki-agent 只在后续做记录整理和知识库更新。
 
 ---
 
@@ -212,7 +217,7 @@ LLM-as-judge 适合：
 
 - benchmark runner 还未完全产品化。
 - cost/trace/failure taxonomy 需要进一步规范。
-- design-subagent 当前主要记录结构化 artifact，直接设计代码能力还很小。
+- design-agent 当前主要记录结构化 artifact，直接设计代码能力还很小。
 
 ---
 
@@ -232,13 +237,15 @@ LLM-as-judge 适合：
 # 领域任务拆解草案
 
 ```text
-design request
-  -> retrieve wiki evidence and source summaries
+npm run design-agent / design-agent
+  -> receive public design/code/layout task
+  -> retrieve evidence and source summaries as needed
   -> produce assumptions and parameter schema
   -> call deterministic design / analysis tools
   -> write design record or verification report
   -> run lint / checks / expert review
-  -> update wiki, failure records, and benchmark cases
+  -> hand design records/artifacts to wiki-agent
+  -> wiki-agent curates wiki updates, failure records, and benchmark cases
 ```
 
 首批任务建议：
