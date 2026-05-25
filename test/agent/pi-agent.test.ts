@@ -105,6 +105,8 @@ test("default system prompt requires wiki evidence for scientific questions", ()
   assert.match(DEFAULT_SYSTEM_PROMPT, /cite/i);
   assert.match(DEFAULT_SYSTEM_PROMPT, /strict wiki-agent entrypoint/);
   assert.match(DEFAULT_SYSTEM_PROMPT, /wiki and paper workflows/);
+  assert.match(DEFAULT_SYSTEM_PROMPT, /wiki_health_fix/);
+  assert.match(DEFAULT_SYSTEM_PROMPT, /source summaries/);
   assert.match(DEFAULT_SYSTEM_PROMPT, /design-agent outputs/);
   assert.doesNotMatch(DEFAULT_SYSTEM_PROMPT, /compile_latex/);
 });
@@ -1011,6 +1013,13 @@ test("runSessionPrompt routes paper write commands to the paper-writing worker b
     instruction: "summarize local papers",
     reason: "explicit"
   });
+  for (const prompt of ["补summaries", "补 summary", "补 source summaries", "补 source summary"]) {
+    const routed = routeChatPromptToWorker!(prompt);
+    assert.equal(routed?.role, "wiki-evidence-worker");
+    assert.equal(routed?.reason, "intent");
+    assert.match(routed?.instruction ?? "", /generate_paper_wiki_summary/);
+    assert.match(routed?.instruction ?? "", /mode=write/);
+  }
   assert.deepEqual(routeChatPromptToWorker!("paper download latest superconducting qubit chip design papers"), {
     role: "paper-download-subagent",
     instruction: "latest superconducting qubit chip design papers",

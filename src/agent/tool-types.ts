@@ -119,6 +119,7 @@ export const TOOL_BOUNDARY_NAMES: Record<ToolBoundaryRole, readonly ToolName[]> 
     "search_local_papers",
     "search_paper_wiki",
     "wiki_health",
+    "wiki_health_fix",
     "wiki_lint",
     "wiki_review_page",
     "wiki_structure_plan",

@@ -70,6 +70,17 @@ function matchExplicitWorkerRoute(
   return null;
 }
 
+function sourceSummaryBackfillInstruction(text: string): string {
+  return [
+    text,
+    "",
+    "Backfill missing wiki source summaries in a clean wiki-evidence-worker context.",
+    "Use list_local_papers to identify parsed local papers that do not have source summaries.",
+    "For each confirmed missing summary, call generate_paper_wiki_summary with mode=write.",
+    "Do not call build_wiki_page; synthesis page construction is owned by the main wiki-agent."
+  ].join("\n");
+}
+
 export function routeChatPromptToWorker(text: string): RoutedWorkerPrompt | null {
   const trimmed = text.trim();
   if (!trimmed) {
@@ -127,6 +138,18 @@ export function routeChatPromptToWorker(text: string): RoutedWorkerPrompt | null
     /(下载|获取|检索|搜索|查找|找|最新|download|search|find|fetch|acquire|latest|recent|newest)/i.test(trimmed);
   if (paperDownloadIntent) {
     return { role: "paper-download-subagent", instruction: trimmed, reason: "intent" };
+  }
+
+  const genericSourceSummaryBackfill =
+    /(补|补齐|修复|缺失|缺少|backfill|repair|fix|missing)/i.test(trimmed) &&
+    /(summar(?:y|ies)|source summar(?:y|ies)|source[-\s]?summar(?:y|ies)|来源摘要)/i.test(trimmed) &&
+    !/(arxiv-\d|aps-|nature-|science-|doi|10\.\d{4,9}\/)/i.test(trimmed);
+  if (genericSourceSummaryBackfill) {
+    return {
+      role: "wiki-evidence-worker",
+      instruction: sourceSummaryBackfillInstruction(trimmed),
+      reason: "intent"
+    };
   }
 
   const wikiEvidenceIntent =

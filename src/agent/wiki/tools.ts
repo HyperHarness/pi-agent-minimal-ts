@@ -377,7 +377,10 @@ const buildWikiPageParameters = Type.Object({
     Type.Boolean({ description: "Whether to download external candidates when local evidence is insufficient. Defaults to true." })
   ),
   autoSummarize: Type.Optional(
-    Type.Boolean({ description: "Whether to write missing source summaries before building the page. Defaults to true." })
+    Type.Boolean({
+      description:
+        "Whether page-building may generate missing source summaries as a prerequisite. Defaults to true. For standalone source-summary backfill or summary_missing health repair, use wiki_health_fix or generate_paper_wiki_summary instead."
+    })
   ),
   evidenceContract: Type.Optional(Type.Union([
     Type.Literal("paper-backed"),
@@ -2094,7 +2097,7 @@ export function createWikiTools(input: {
     name: "build_wiki_page",
     label: "Build Wiki Page",
     description:
-      "Builds a higher-level synthesis page under knowledge-base/pages/ from evidence-first research results. Use this when the user wants the agent to organize accumulated paper evidence into a durable topic wiki page.",
+      "Builds a higher-level synthesis page under knowledge-base/pages/ from evidence-first research results. Use this when the user wants the agent to organize accumulated paper evidence into a durable topic wiki page. Do not use this for standalone source-summary backfill or summary_missing health repair.",
     parameters: buildWikiPageParameters,
     executionMode: "sequential",
     execute: async (
