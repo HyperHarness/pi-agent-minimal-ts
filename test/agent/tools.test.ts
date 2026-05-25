@@ -2719,11 +2719,30 @@ test("createToolsForBoundary exposes isolated wiki and worker tool surfaces", as
     assert.deepEqual(wikiAgentTools.map((tool) => tool.name), getToolBoundaryToolNames("wiki-agent"));
     assert.ok(wikiAgentTools.some((tool) => tool.name === "build_wiki_page"));
     assert.ok(wikiAgentTools.some((tool) => tool.name === "search_paper_wiki"));
+    assert.ok(wikiAgentTools.some((tool) => tool.name === "search_papers"));
+    assert.ok(wikiAgentTools.some((tool) => tool.name === "download_paper"));
+    assert.ok(wikiAgentTools.some((tool) => tool.name === "list_local_papers"));
+    assert.ok(wikiAgentTools.some((tool) => tool.name === "inspect_paper"));
+    assert.ok(wikiAgentTools.some((tool) => tool.name === "read_paper_section"));
+    assert.ok(wikiAgentTools.some((tool) => tool.name === "search_paper_text"));
     assert.ok(wikiAgentTools.some((tool) => tool.name === "wiki_structure_plan"));
     assert.ok(wikiAgentTools.some((tool) => tool.name === "wiki_apply_structure_plan"));
-    assert.ok(!wikiAgentTools.some((tool) => tool.name === "download_paper"));
     assert.ok(!wikiAgentTools.some((tool) => tool.name === "generate_paper_wiki_summary"));
     assert.ok(!wikiAgentTools.some((tool) => tool.name === "web_search"));
+    for (const forbiddenToolName of [
+      "write_file",
+      "replace_file_text",
+      "delete_file",
+      "compile_latex",
+      "update_design_dependency",
+      "sync_design_environment",
+      "verify_design_python_import",
+      "run_design_script",
+      "write_design_code_file",
+      "replace_design_code_file_text",
+    ]) {
+      assert.ok(!wikiAgentTools.some((tool) => tool.name === forbiddenToolName), forbiddenToolName);
+    }
 
     const downloadTools = createToolsForBoundary(workspace, "paper-download-subagent");
     assert.deepEqual(downloadTools.map((tool) => tool.name), getToolBoundaryToolNames("paper-download-subagent"));
@@ -2753,6 +2772,9 @@ test("createToolsForBoundary exposes isolated wiki and worker tool surfaces", as
     );
     assert.ok(designTools.some((tool) => tool.name === "answer_paper_wiki_question"));
     assert.ok(designTools.some((tool) => tool.name === "search_paper_wiki"));
+    assert.ok(designTools.some((tool) => tool.name === "search_local_papers"));
+    assert.ok(designTools.some((tool) => tool.name === "list_local_papers"));
+    assert.ok(designTools.some((tool) => tool.name === "update_design_dependency"));
     assert.ok(designTools.some((tool) => tool.name === "write_design_artifact"));
     assert.ok(designTools.some((tool) => tool.name === "write_design_code_file"));
     assert.ok(designTools.some((tool) => tool.name === "replace_design_code_file_text"));
@@ -2762,9 +2784,12 @@ test("createToolsForBoundary exposes isolated wiki and worker tool surfaces", as
     assert.ok(!designTools.some((tool) => tool.name === "download_paper"));
     assert.ok(!designTools.some((tool) => tool.name === "web_search"));
     assert.ok(!designTools.some((tool) => tool.name === "build_wiki_page"));
+    assert.ok(!designTools.some((tool) => tool.name === "merge_wiki_aliases"));
     assert.ok(!designTools.some((tool) => tool.name === "wiki_structure_plan"));
     assert.ok(!designTools.some((tool) => tool.name === "wiki_apply_structure_plan"));
     assert.ok(!designTools.some((tool) => tool.name === "write_paper_wiki_source"));
+    assert.ok(!designTools.some((tool) => tool.name === "generate_paper_wiki_summary"));
+    assert.ok(!designTools.some((tool) => tool.name === "write_file"));
 
     const writingTools = createToolsForBoundary(workspace, "paper-writing-worker");
     assert.deepEqual(writingTools.map((tool) => tool.name), getToolBoundaryToolNames("paper-writing-worker"));
