@@ -1,5 +1,6 @@
 import { execFile } from "node:child_process";
-import { lstat, mkdir, open, readFile, readdir, realpath, stat, unlink, writeFile } from "node:fs/promises";
+import { cp, lstat, mkdir, mkdtemp, open, readFile, readdir, realpath, rm, stat, unlink, writeFile } from "node:fs/promises";
+import { tmpdir } from "node:os";
 import path from "node:path";
 import { promisify } from "node:util";
 import { Type, type Static } from "@mariozechner/pi-ai";
@@ -259,6 +260,12 @@ type SyncDesignEnvironmentParameters = Static<typeof syncDesignEnvironmentParame
 type VerifyDesignPythonImportParameters = Static<typeof verifyDesignPythonImportParameters>;
 type UpdateDesignDependencyParameters = Static<typeof updateDesignDependencyParameters>;
 type ResolvedDesignScriptRunner = "python" | "klayout";
+type ProtectedPathSnapshot = {
+  rootDir: string;
+  rootExisted: boolean;
+  files: Map<string, Buffer>;
+  dirs: Set<string>;
+};
 
 const DESIGN_ARTIFACT_DIRECTORIES: Record<WriteDesignArtifactParameters["artifactType"], string> = {
   design_record: "design-records",
@@ -654,6 +661,18 @@ async function resolveDesignCodeWritableFilePath(workspaceDir: string, requested
   return resolvedPath;
 }
 
+async function resolveDesignCodeExistingFilePath(workspaceDir: string, requestedPath: string): Promise<string> {
+  const designCodeDir = await resolveDesignCodeProjectPath(workspaceDir, "knowledge-base/design-code");
+  const realDesignCodeDir = await realpath(designCodeDir);
+  const projectRelativePath = designCodeRelativeRequestedPath(requestedPath);
+  const resolvedPath = path.resolve(realDesignCodeDir, projectRelativePath);
+  assertPathInsideDesignCodeProject(realDesignCodeDir, resolvedPath);
+
+  const realResolvedPath = await realpath(resolvedPath);
+  assertPathInsideDesignCodeProject(realDesignCodeDir, realResolvedPath);
+  return realResolvedPath;
+}
+
 function formatCommandLine(input: {
   command: string;
   args: readonly string[];
@@ -705,25 +724,182 @@ async function designScriptCommandForRunner(input: {
   };
 }
 
-async function collectDesignScriptOutputs(input: {
-  workspaceDir: string;
+async function createIsolatedDesignScriptWorkspace(workspaceDir: string): Promise<{
+  tempRootDir: string;
+  tempWorkspaceDir: string;
+  tempDesignCodeDir: string;
+}> {
+  const sourceDesignCodeDir = await resolveDesignCodeProjectPath(workspaceDir, "knowledge-base/design-code");
+  const tempRootDir = await mkdtemp(path.join(tmpdir(), "pi-agent-design-script-"));
+  const tempWorkspaceDir = path.join(tempRootDir, "workspace");
+  const tempDesignCodeDir = designCodeProjectDir(tempWorkspaceDir);
+
+  await mkdir(path.dirname(tempDesignCodeDir), { recursive: true });
+  await cp(sourceDesignCodeDir, tempDesignCodeDir, {
+    recursive: true,
+    filter: (source) => path.basename(source) !== ".git"
+  });
+
+  return { tempRootDir, tempWorkspaceDir, tempDesignCodeDir };
+}
+
+async function collectAndCopyDesignScriptOutputs(input: {
+  sourceWorkspaceDir: string;
+  destinationWorkspaceDir: string;
   outputPaths: readonly string[] | undefined;
 }): Promise<Array<{ path: string; bytes: number }>> {
   const outputs: Array<{ path: string; bytes: number }> = [];
 
   for (const outputPath of input.outputPaths ?? []) {
-    const resolvedOutputPath = await resolveWorkspacePath(input.workspaceDir, outputPath);
-    const outputStats = await stat(resolvedOutputPath);
-    if (!outputStats.isFile()) {
+    const sourceOutputPath = await resolveDesignCodeExistingFilePath(input.sourceWorkspaceDir, outputPath);
+    const destinationOutputPath = await resolveDesignCodeWritableFilePath(input.destinationWorkspaceDir, outputPath);
+    const sourceOutputStats = await stat(sourceOutputPath);
+    if (!sourceOutputStats.isFile()) {
       throw new Error(`Expected design script output is not a file: ${outputPath}`);
     }
+
+    await mkdir(path.dirname(destinationOutputPath), { recursive: true });
+    await cp(sourceOutputPath, destinationOutputPath, { force: true });
+    const destinationOutputStats = await stat(destinationOutputPath);
     outputs.push({
-      path: relativeWorkspacePath(input.workspaceDir, resolvedOutputPath),
-      bytes: outputStats.size
+      path: relativeWorkspacePath(input.destinationWorkspaceDir, destinationOutputPath),
+      bytes: destinationOutputStats.size
     });
   }
 
   return outputs;
+}
+
+async function snapshotProtectedPath(rootDir: string): Promise<ProtectedPathSnapshot> {
+  const rootExisted = await pathExists(rootDir);
+  const files = new Map<string, Buffer>();
+  const dirs = new Set<string>();
+
+  async function visit(currentPath: string): Promise<void> {
+    const currentStats = await lstat(currentPath).catch(() => undefined);
+    if (!currentStats) {
+      return;
+    }
+
+    const relativePath = path.relative(rootDir, currentPath);
+    if (relativePath.length > 0) {
+      if (currentStats.isDirectory()) {
+        dirs.add(relativePath);
+      } else if (currentStats.isFile()) {
+        files.set(relativePath, await readFile(currentPath));
+      }
+    }
+
+    if (!currentStats.isDirectory()) {
+      return;
+    }
+
+    const entries = await readdir(currentPath);
+    for (const entry of entries) {
+      await visit(path.join(currentPath, entry));
+    }
+  }
+
+  await visit(rootDir);
+  return { rootDir, rootExisted, files, dirs };
+}
+
+async function snapshotDesignScriptProtectedPaths(workspaceDir: string): Promise<ProtectedPathSnapshot[]> {
+  return Promise.all([
+    snapshotProtectedPath(path.join(workspaceDir, "knowledge-base", "pages")),
+    snapshotProtectedPath(path.join(workspaceDir, "knowledge-base", "sources"))
+  ]);
+}
+
+async function listCurrentProtectedPaths(rootDir: string): Promise<{
+  files: Set<string>;
+  dirs: Set<string>;
+}> {
+  const files = new Set<string>();
+  const dirs = new Set<string>();
+
+  async function visit(currentPath: string): Promise<void> {
+    const currentStats = await lstat(currentPath).catch(() => undefined);
+    if (!currentStats) {
+      return;
+    }
+
+    const relativePath = path.relative(rootDir, currentPath);
+    if (relativePath.length > 0) {
+      if (currentStats.isDirectory()) {
+        dirs.add(relativePath);
+      } else if (currentStats.isFile()) {
+        files.add(relativePath);
+      }
+    }
+
+    if (!currentStats.isDirectory()) {
+      return;
+    }
+
+    const entries = await readdir(currentPath);
+    for (const entry of entries) {
+      await visit(path.join(currentPath, entry));
+    }
+  }
+
+  await visit(rootDir);
+  return { files, dirs };
+}
+
+async function restoreDesignScriptProtectedPaths(snapshots: readonly ProtectedPathSnapshot[]): Promise<string[]> {
+  const changedPaths: string[] = [];
+
+  for (const snapshot of snapshots) {
+    const current = await listCurrentProtectedPaths(snapshot.rootDir);
+    const rootRelativePath = normalizeWorkspaceRelativePath(path.dirname(path.dirname(snapshot.rootDir)), snapshot.rootDir);
+    const rootExists = await pathExists(snapshot.rootDir);
+    if (snapshot.rootExisted && !rootExists) {
+      changedPaths.push(rootRelativePath);
+      await mkdir(snapshot.rootDir, { recursive: true });
+    }
+
+    for (const relativePath of current.files) {
+      const currentPath = path.join(snapshot.rootDir, relativePath);
+      const original = snapshot.files.get(relativePath);
+      if (original === undefined) {
+        changedPaths.push(`${rootRelativePath}/${relativePath.split(path.sep).join("/")}`);
+        await rm(currentPath, { force: true });
+        continue;
+      }
+
+      const currentContent = await readFile(currentPath);
+      if (!currentContent.equals(original)) {
+        changedPaths.push(`${rootRelativePath}/${relativePath.split(path.sep).join("/")}`);
+        await writeFile(currentPath, original);
+      }
+    }
+
+    for (const [relativePath, original] of snapshot.files) {
+      if (current.files.has(relativePath)) {
+        continue;
+      }
+      changedPaths.push(`${rootRelativePath}/${relativePath.split(path.sep).join("/")}`);
+      const restoredPath = path.join(snapshot.rootDir, relativePath);
+      await mkdir(path.dirname(restoredPath), { recursive: true });
+      await writeFile(restoredPath, original);
+    }
+
+    const currentDirsByDepth = [...current.dirs].sort((left, right) => right.length - left.length);
+    for (const relativePath of currentDirsByDepth) {
+      if (snapshot.dirs.has(relativePath)) {
+        continue;
+      }
+      await rm(path.join(snapshot.rootDir, relativePath), { recursive: true, force: true });
+    }
+
+    if (!snapshot.rootExisted && await pathExists(snapshot.rootDir)) {
+      changedPaths.push(rootRelativePath);
+      await rm(snapshot.rootDir, { recursive: true, force: true });
+    }
+  }
+
+  return [...new Set(changedPaths)].sort();
 }
 
 async function syncDesignEnvironment(input: {
@@ -1185,7 +1361,9 @@ async function runDesignScript(input: {
   stderr: string;
   outputs: Array<{ path: string; bytes: number }>;
 }> {
-  const resolvedScriptPath = await resolveWorkspacePath(input.workspaceDir, input.scriptPath);
+  const designCodeDir = await resolveDesignCodeProjectPath(input.workspaceDir, "knowledge-base/design-code");
+  const realDesignCodeDir = await realpath(designCodeDir);
+  const resolvedScriptPath = await resolveDesignCodeExistingFilePath(input.workspaceDir, input.scriptPath);
   const scriptStats = await stat(resolvedScriptPath);
   if (!scriptStats.isFile()) {
     throw new Error(`run_design_script path is not a file: ${input.scriptPath}`);
@@ -1197,6 +1375,7 @@ async function runDesignScript(input: {
   const runner = resolveDesignScriptRunner(input.runner, resolvedScriptPath);
   const workingDir = path.dirname(resolvedScriptPath);
   const scriptFile = path.basename(resolvedScriptPath);
+  const scriptProjectRelativePath = path.relative(realDesignCodeDir, resolvedScriptPath);
   const commandSpec = await designScriptCommandForRunner({
     runner,
     scriptFile,
@@ -1204,17 +1383,35 @@ async function runDesignScript(input: {
     workspaceDir: input.workspaceDir
   });
   const commandLine = commandSpec.commandLine;
+  const isolatedWorkspace = await createIsolatedDesignScriptWorkspace(input.workspaceDir);
+  const protectedSnapshots = await snapshotDesignScriptProtectedPaths(input.workspaceDir);
 
   try {
+    const isolatedScriptPath = path.join(isolatedWorkspace.tempDesignCodeDir, scriptProjectRelativePath);
+    const isolatedWorkingDir = path.dirname(isolatedScriptPath);
     const { stdout, stderr } = await execFileAsync(commandSpec.command, commandSpec.args, {
-      cwd: workingDir,
+      cwd: isolatedWorkingDir,
+      env: {
+        ...process.env,
+        PYTHONPATH: [
+          path.join(isolatedWorkspace.tempDesignCodeDir, "src"),
+          process.env.PYTHONPATH
+        ].filter((entry): entry is string => typeof entry === "string" && entry.length > 0).join(path.delimiter)
+      },
       timeout: 120000,
       maxBuffer: Math.max(input.maxOutputChars * 2, 1024 * 1024)
     }) as { stdout: string | Buffer; stderr: string | Buffer };
     const stdoutText = truncateOutput(stdout.toString(), input.maxOutputChars);
     const stderrText = truncateOutput(stderr.toString(), input.maxOutputChars);
-    const outputs = await collectDesignScriptOutputs({
-      workspaceDir: input.workspaceDir,
+    const protectedMutations = await restoreDesignScriptProtectedPaths(protectedSnapshots);
+    if (protectedMutations.length > 0) {
+      throw new Error(
+        `run_design_script attempted to modify protected wiki/source paths: ${protectedMutations.join(", ")}`
+      );
+    }
+    const outputs = await collectAndCopyDesignScriptOutputs({
+      sourceWorkspaceDir: isolatedWorkspace.tempWorkspaceDir,
+      destinationWorkspaceDir: input.workspaceDir,
       outputPaths: input.outputPaths
     });
 
@@ -1229,14 +1426,20 @@ async function runDesignScript(input: {
       outputs
     };
   } catch (error) {
+    const protectedMutations = await restoreDesignScriptProtectedPaths(protectedSnapshots);
     const failed = error as { stdout?: string | Buffer; stderr?: string | Buffer; message?: string };
     const output = [
       `$ ${commandLine}`,
       failed.stdout?.toString() ?? "",
       failed.stderr?.toString() ?? "",
+      protectedMutations.length > 0
+        ? `run_design_script attempted to modify protected wiki/source paths: ${protectedMutations.join(", ")}`
+        : "",
       failed.message ?? String(error)
     ].filter((part) => part.trim().length > 0).join("\n");
     throw new Error(truncateOutput(output, input.maxOutputChars));
+  } finally {
+    await rm(isolatedWorkspace.tempRootDir, { recursive: true, force: true });
   }
 }
 

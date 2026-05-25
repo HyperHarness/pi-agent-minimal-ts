@@ -84,6 +84,8 @@ type ToolName =
   | "write_paper_wiki_source";
 
 export const DESIGN_AGENT_TOOL_NAMES = [
+  "list_files",
+  "read_file",
   "answer_paper_wiki_question",
   "search_paper_wiki",
   "search_local_papers",

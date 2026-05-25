@@ -2,6 +2,8 @@
 
 **Date:** 2026-04-22
 
+> Historical note: this document predates the strict CLI split. Current public entrypoints are `npm run wiki-agent`, `npm run wiki-agent:rpc`, `npm run design-agent`, and `npm run design-agent:rpc`; `npm run agent` is intentionally absent.
+
 ## Goal
 
 Add real-time retrieval capabilities to the standalone terminal agent without coupling the feature to the REPL shell.

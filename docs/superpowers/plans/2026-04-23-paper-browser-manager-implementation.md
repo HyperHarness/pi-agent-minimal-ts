@@ -1,5 +1,7 @@
 # Paper Browser Manager Implementation Plan
 
+> Historical note: this plan predates the strict CLI split. Current public entrypoints are `npm run wiki-agent`, `npm run wiki-agent:rpc`, `npm run design-agent`, and `npm run design-agent:rpc`; `npm run agent` is intentionally absent.
+
 > **For agentic workers:** REQUIRED SUB-SKILL: Use superpowers:subagent-driven-development (recommended) or superpowers:executing-plans to implement this plan task-by-task. Steps use checkbox (`- [ ]`) syntax for tracking.
 
 **Goal:** Add a single-instance paper browser manager that owns `.browser-profile/paper-access/` and lets the existing paper tools reuse one browser session for both manual review and automatic download.

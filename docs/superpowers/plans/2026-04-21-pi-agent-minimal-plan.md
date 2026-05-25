@@ -1,5 +1,7 @@
 # Minimal Pi Agent Implementation Plan
 
+> Historical note: this initial implementation plan predates the strict CLI split. Current public entrypoints are `npm run wiki-agent`, `npm run wiki-agent:rpc`, `npm run design-agent`, and `npm run design-agent:rpc`; `npm run agent` is intentionally absent.
+
 > **For agentic workers:** REQUIRED SUB-SKILL: Use superpowers:subagent-driven-development (recommended) or superpowers:executing-plans to implement this plan task-by-task. Steps use checkbox (`- [ ]`) syntax for tracking.
 
 **Goal:** Build a minimal runnable TypeScript agent script based on `@mariozechner/pi-ai` and `@mariozechner/pi-agent-core`, with multi-turn conversation, real tool calling, and sandbox-safe automated tests.

@@ -1,5 +1,7 @@
 # Agent Code Structure Refactor Design
 
+> Historical note: this document predates the strict CLI split. Current public entrypoints are `npm run wiki-agent`, `npm run wiki-agent:rpc`, `npm run design-agent`, and `npm run design-agent:rpc`; `npm run agent` and `npm run agent:rpc` are intentionally absent.
+
 ## Purpose
 
 Refactor the local agent runtime code with behavior-preserving structural changes. The current implementation has two large coordination files:

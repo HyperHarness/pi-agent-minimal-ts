@@ -2,6 +2,8 @@
 
 **Date:** 2026-04-22
 
+> Historical note: this document predates the strict CLI split. Current public entrypoints are `npm run wiki-agent`, `npm run wiki-agent:rpc`, `npm run design-agent`, and `npm run design-agent:rpc`; `npm run agent` is intentionally absent.
+
 ## Goal
 
 Make the current terminal REPL easier to develop, automate, and test without turning it into a Codex-dependent tool.

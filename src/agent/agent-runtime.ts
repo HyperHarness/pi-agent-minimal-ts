@@ -472,8 +472,25 @@ async function runRoutedWorkerPrompt(options: {
   }
 }
 
-function createRuntimeTools(workspaceDir: string, model: Model<Api>) {
+function createRuntimeTools(
+  workspaceDir: string,
+  model: Model<Api>,
+  workerRouting: WorkerRoutingPolicy
+) {
+  if (workerRouting === "none") {
+    return createToolsForBoundary(workspaceDir, "design-agent");
+  }
+
   const wikiEvidenceWorker = createWikiEvidenceWorker(model, workspaceDir);
+
+  if (workerRouting === "wiki-paper") {
+    return createToolsForBoundary(workspaceDir, "wiki-agent", {
+      extensionBridge: createQueuedPaperExtensionBridge({ workspaceDir }),
+      paperSummaryWorker: wikiEvidenceWorker.paperSummaryWorker,
+      paperWikiPageWorker: wikiEvidenceWorker.paperWikiPageWorker
+    });
+  }
+
   return createTools(workspaceDir, {
     extensionBridge: createQueuedPaperExtensionBridge({ workspaceDir }),
     paperSummaryWorker: wikiEvidenceWorker.paperSummaryWorker,
@@ -557,10 +574,10 @@ export async function runAgentTurn(options: RunAgentTurnOptions): Promise<RunAge
   let tools = existingTools;
 
   if (existingTools.length === 0) {
-    tools = createRuntimeTools(workspaceDir, options.model);
+    tools = createRuntimeTools(workspaceDir, options.model, options.workerRouting ?? "all");
   } else if (previousWorkspaceDir !== undefined && previousWorkspaceDir !== workspaceDir) {
     await cleanupTools(existingTools);
-    tools = createRuntimeTools(workspaceDir, options.model);
+    tools = createRuntimeTools(workspaceDir, options.model, options.workerRouting ?? "all");
   }
 
   const originalMessages = options.context.messages;

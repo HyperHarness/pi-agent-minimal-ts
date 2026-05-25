@@ -1677,13 +1677,17 @@ test("replace_design_code_file_text replaces all occurrences when replaceAll is 
 
 test("run_design_script rejects Python scripts when the root venv Python is missing", async () => {
   const workspace = await mkdtemp(path.join(tmpdir(), "pi-agent-tools-"));
+  const projectDir = path.join(workspace, "knowledge-base", "design-code");
+  const scriptDir = path.join(projectDir, "scripts");
 
   try {
+    await mkdir(scriptDir, { recursive: true });
+    await writeFile(path.join(projectDir, "pyproject.toml"), "[project]\nname = \"pi-chip-design\"\n", "utf8");
     await writeFile(
-      path.join(workspace, "single_xmon_concept_klayout.py"),
+      path.join(scriptDir, "single_xmon_concept_klayout.py"),
       [
         "from pathlib import Path",
-        "Path('single_xmon_concept.gds').write_bytes(b'GDSII placeholder')",
+        "Path('../outputs/single_xmon_concept.gds').write_bytes(b'GDSII placeholder')",
         "print('wrote single_xmon_concept.gds')",
         ""
       ].join("\n"),
@@ -1695,9 +1699,9 @@ test("run_design_script rejects Python scripts when the root venv Python is miss
       runDesignScriptTool.execute(
         "call-run-design-script-missing-root-venv",
         {
-          scriptPath: "single_xmon_concept_klayout.py",
+          scriptPath: "knowledge-base/design-code/scripts/single_xmon_concept_klayout.py",
           runner: "python",
-          outputPaths: ["single_xmon_concept.gds"],
+          outputPaths: ["knowledge-base/design-code/outputs/single_xmon_concept.gds"],
         },
         undefined,
       ),
@@ -1719,6 +1723,7 @@ test("run_design_script uses the parent root venv Python and ignores nested desi
     await mkdir(scriptDir, { recursive: true });
     await mkdir(path.dirname(rootVenvPython), { recursive: true });
     await mkdir(path.dirname(nestedVenvPython), { recursive: true });
+    await writeFile(path.join(projectDir, "pyproject.toml"), "[project]\nname = \"pi-chip-design\"\n", "utf8");
 
     await writeFakePythonExecutable(rootVenvPython, [
       "#!/bin/sh",
@@ -1770,6 +1775,129 @@ test("run_design_script uses the parent root venv Python and ignores nested desi
         },
       ],
     });
+  } finally {
+    await rm(workspace, { recursive: true, force: true });
+  }
+});
+
+test("run_design_script copies back only declared design-code outputs from an isolated run", { skip: process.platform === "win32" ? "fake python.exe shell-script shims are not executable on Windows" : false }, async () => {
+  const workspace = await mkdtemp(path.join(tmpdir(), "pi-agent-tools-"));
+  const projectDir = path.join(workspace, "knowledge-base", "design-code");
+  const scriptDir = path.join(projectDir, "scripts");
+  const rootVenvPython = rootVenvPythonPath(workspace);
+  const leakedWikiPath = path.join(workspace, "knowledge-base", "pages", "leaked-design-script.md");
+
+  try {
+    await mkdir(scriptDir, { recursive: true });
+    await mkdir(path.dirname(rootVenvPython), { recursive: true });
+
+    await writeFakePythonExecutable(rootVenvPython, [
+      "#!/bin/sh",
+      "exec python3 \"$@\"",
+    ]);
+
+    await writeFile(path.join(projectDir, "pyproject.toml"), "[project]\nname = \"pi-chip-design\"\n", "utf8");
+    await writeFile(
+      path.join(scriptDir, "generate_isolated_gds.py"),
+      [
+        "from pathlib import Path",
+        "Path('../outputs').mkdir(exist_ok=True)",
+        "Path('../outputs/isolated.gds').write_bytes(b'isolated gds')",
+        "Path('../../pages').mkdir(exist_ok=True)",
+        "Path('../../pages/leaked-design-script.md').write_text('# leaked\\n')",
+        "print('script complete')",
+        ""
+      ].join("\n"),
+      "utf8",
+    );
+
+    const runDesignScriptTool = getRunDesignScriptTool(workspace);
+    const result = await runDesignScriptTool.execute(
+      "call-run-design-script-isolated",
+      {
+        scriptPath: "knowledge-base/design-code/scripts/generate_isolated_gds.py",
+        runner: "python",
+        outputPaths: ["knowledge-base/design-code/outputs/isolated.gds"],
+      },
+      undefined,
+    );
+
+    assert.deepEqual(result.details, {
+      status: "completed",
+      runner: "python",
+      scriptPath: "knowledge-base/design-code/scripts/generate_isolated_gds.py",
+      command: `${rootVenvPythonCommandPathFromDesignScriptDir()} generate_isolated_gds.py`,
+      exitCode: 0,
+      stdout: "script complete\n",
+      stderr: "",
+      outputs: [
+        {
+          path: "knowledge-base/design-code/outputs/isolated.gds",
+          bytes: Buffer.byteLength("isolated gds"),
+        },
+      ],
+    });
+    assert.equal(
+      await readFile(path.join(projectDir, "outputs", "isolated.gds"), "utf8"),
+      "isolated gds",
+    );
+    await assert.rejects(() => readFile(leakedWikiPath, "utf8"), /ENOENT/);
+  } finally {
+    await rm(workspace, { recursive: true, force: true });
+  }
+});
+
+test("run_design_script restores protected wiki paths when a script writes outside design-code", { skip: process.platform === "win32" ? "fake python.exe shell-script shims are not executable on Windows" : false }, async () => {
+  const workspace = await mkdtemp(path.join(tmpdir(), "pi-agent-tools-"));
+  const projectDir = path.join(workspace, "knowledge-base", "design-code");
+  const scriptDir = path.join(projectDir, "scripts");
+  const rootVenvPython = rootVenvPythonPath(workspace);
+  const leakedWikiPath = path.join(workspace, "knowledge-base", "pages", "absolute-leak.md");
+
+  try {
+    await mkdir(scriptDir, { recursive: true });
+    await mkdir(path.dirname(rootVenvPython), { recursive: true });
+
+    await writeFakePythonExecutable(rootVenvPython, [
+      "#!/bin/sh",
+      "exec python3 \"$@\"",
+    ]);
+
+    await writeFile(path.join(projectDir, "pyproject.toml"), "[project]\nname = \"pi-chip-design\"\n", "utf8");
+    await writeFile(
+      path.join(scriptDir, "absolute_leak.py"),
+      [
+        "from pathlib import Path",
+        `workspace = Path(${JSON.stringify(workspace)})`,
+        "Path('../outputs').mkdir(exist_ok=True)",
+        "Path('../outputs/absolute-leak.gds').write_bytes(b'should not copy')",
+        "(workspace / 'knowledge-base/pages').mkdir(exist_ok=True)",
+        "(workspace / 'knowledge-base/pages/absolute-leak.md').write_text('# leaked\\n')",
+        "print('script complete')",
+        ""
+      ].join("\n"),
+      "utf8",
+    );
+
+    const runDesignScriptTool = getRunDesignScriptTool(workspace);
+    await assert.rejects(
+      () => runDesignScriptTool.execute(
+        "call-run-design-script-absolute-leak",
+        {
+          scriptPath: "knowledge-base/design-code/scripts/absolute_leak.py",
+          runner: "python",
+          outputPaths: ["knowledge-base/design-code/outputs/absolute-leak.gds"],
+        },
+        undefined,
+      ),
+      /run_design_script attempted to modify protected wiki\/source paths/,
+    );
+
+    await assert.rejects(() => readFile(leakedWikiPath, "utf8"), /ENOENT/);
+    await assert.rejects(
+      () => readFile(path.join(projectDir, "outputs", "absolute-leak.gds"), "utf8"),
+      /ENOENT/,
+    );
   } finally {
     await rm(workspace, { recursive: true, force: true });
   }
@@ -2771,6 +2899,8 @@ test("createToolsForBoundary exposes isolated wiki and worker tool surfaces", as
       designTools.map((tool) => tool.name)
     );
     assert.ok(designTools.some((tool) => tool.name === "answer_paper_wiki_question"));
+    assert.ok(designTools.some((tool) => tool.name === "list_files"));
+    assert.ok(designTools.some((tool) => tool.name === "read_file"));
     assert.ok(designTools.some((tool) => tool.name === "search_paper_wiki"));
     assert.ok(designTools.some((tool) => tool.name === "search_local_papers"));
     assert.ok(designTools.some((tool) => tool.name === "list_local_papers"));

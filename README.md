@@ -363,7 +363,7 @@ This is deterministic schema, retrieval, review, and lint support. It does not r
 
 - `write_design_artifact`: full-mode / design-agent tool that writes structured design records, verification reports, failure records, and benchmark cases under `knowledge-base/design-records/`
 - `sync_design_environment`: full-mode / design-agent tool that runs `uv sync` for `knowledge-base/design-code/` while forcing the shared repository root `.venv` as the Python project environment. This is not a general shell and cannot sync arbitrary projects.
-- `run_design_script`: full-mode / design-agent tool that runs workspace-local `.py` layout or verification scripts. For Python scripts it requires the repository root `.venv/bin/python`; if it is missing, run `sync_design_environment` first. KLayout scripts still run through `klayout -b -r`.
+- `run_design_script`: full-mode / design-agent tool that runs `.py` layout or verification scripts from `knowledge-base/design-code/` in an isolated temporary copy and copies back only declared design-code outputs. For Python scripts it requires the repository root `.venv/bin/python`; if it is missing, run `sync_design_environment` first. KLayout scripts still run through `klayout -b -r`.
 - `load_paper_writing_skill`: full-mode / paper-writing-worker tool that loads worker-scoped writing prompt modules such as `skills/paper-writing-worker/sciwrite/prompt.md`
 - `paper_orchestra_prepare_workspace`: full-mode / paper-writing-worker tool that creates and validates the controlled PaperOrchestra writing workspace layout
 - `paper_orchestra_check_draft`: full-mode / paper-writing-worker tool that runs orphan-citation, LaTeX sanity, and anonymous anti-leakage draft gates
@@ -372,7 +372,7 @@ This is deterministic schema, retrieval, review, and lint support. It does not r
 - paper-writing-worker tools: project-local writing skill loading, manuscript file reading/writing, PaperOrchestra writing gates, LaTeX compilation, local wiki retrieval, and wiki-grounded Q&A
 - `get_time`: full-mode diagnostic tool for checking the current local time
 
-The design-agent is the engineering owner for executable layout code, dependency declarations, bounded verification scripts, and design records. It works in the nested `knowledge-base/design-code/` repository, declares Python dependencies there, uses `sync_design_environment` to run `uv sync` into the root `.venv`, executes only bounded workspace-local scripts through `run_design_script`, and returns artifacts or records to the wiki-agent for durable curation. `design-subagent` remains an accepted compatibility alias.
+The design-agent is the engineering owner for executable layout code, dependency declarations, bounded verification scripts, and design records. It works in the nested `knowledge-base/design-code/` repository, declares Python dependencies there, uses `sync_design_environment` to run `uv sync` into the root `.venv`, executes only bounded design-code scripts through `run_design_script`, and returns artifacts or records to the wiki-agent for durable curation. `design-subagent` remains an accepted compatibility alias.
 
 Design code, reusable Python packages, scripts, generated-layout setup, and design notes should live under `knowledge-base/design-code/`. This directory is a separate Git repository inside the knowledge base. Keep one Python environment at the repository root `.venv` so `run_design_script` uses the same interpreter regardless of whether the agent was started from WSL, Feishu bridge, or another entrypoint.
 
@@ -385,7 +385,7 @@ Design code, reusable Python packages, scripts, generated-layout setup, and desi
 | `wiki-agent` | durable knowledge coordinator | local wiki search, page construction, aliases, wiki health/lint, paper search/download | web search, source-summary generation |
 | `paper-download-subagent` | literature acquisition | search/download, browser/manual fallback, webpage capture, local-parse/arXiv/Crossref citation metadata refresh, parsing, health repair | wiki page writes, source-summary authoring |
 | `wiki-evidence-worker` | evidence construction | source summaries, relation maintenance, fixed-evidence page draft output | paper download, external search, autonomous acquisition |
-| `design-agent` | chip-design/layout engineering | local wiki/paper retrieval; bounded dependency management via `update_design_dependency`; root `.venv` sync via `sync_design_environment`; import verification via `verify_design_python_import`; design-code write/replace under `knowledge-base/design-code/` via `write_design_code_file` and `replace_design_code_file_text`; workspace-local `run_design_script`; `write_design_artifact` | web search, paper download, wiki page writes, arbitrary file writes |
+| `design-agent` | chip-design/layout engineering | `list_files`/`read_file` for inspection; local wiki/paper retrieval; bounded dependency management via `update_design_dependency`; root `.venv` sync via `sync_design_environment`; import verification via `verify_design_python_import`; design-code write/replace under `knowledge-base/design-code/` via `write_design_code_file` and `replace_design_code_file_text`; isolated design-code `run_design_script`; `write_design_artifact` | web search, paper download, wiki page writes, arbitrary file writes |
 | `paper-writing-worker` | manuscript writing | project-local writing skills, manuscript read/write, PaperOrchestra workspace/gate/provenance tools, LaTeX compile, wiki retrieval/Q&A | paper download, source-summary generation, wiki page construction, web search |
 
 Use the boundary APIs in benchmarks so each model is evaluated under the same tool surface.
@@ -472,7 +472,7 @@ The initial design workspace is the `pi_chip_design` Python package under `knowl
 UV_PROJECT_ENVIRONMENT="$PWD/.venv" uv sync --project "$PWD/knowledge-base/design-code" --extra dev
 ```
 
-The design-agent normally performs this through `sync_design_environment`; it does not require the parent agent process to activate this environment. `run_design_script` requires the repository root `.venv/bin/python` and reports that `sync_design_environment` should be run first if it is missing.
+The design-agent normally performs this through `sync_design_environment`; it does not require the parent agent process to activate this environment. `run_design_script` requires the repository root `.venv/bin/python`, runs scripts from an isolated copy of `knowledge-base/design-code/`, copies back only declared design-code outputs, and reports that `sync_design_environment` should be run first if the root interpreter is missing.
 
 Recommended paper-to-wiki path:
 

@@ -1213,7 +1213,12 @@ test("runSessionPrompt can disable worker routing for fixed design-agent session
       assistantMessages.some((message) => JSON.stringify(message.content).includes('"role":"design-agent"')),
       false
     );
+    assert.deepEqual(
+      (context.tools ?? []).map((tool) => tool.name),
+      toolsModule.getToolBoundaryToolNames("design-agent")
+    );
   } finally {
+    await cleanupTools(context.tools);
     registration.unregister();
   }
 });
@@ -1252,6 +1257,10 @@ test("runSessionPrompt wiki routing policy refuses design worker handoff while k
       designAssistantMessages.some((message) => JSON.stringify(message.content).includes('"role":"design-agent"')),
       false
     );
+    assert.deepEqual(
+      (context.tools ?? []).map((tool) => tool.name),
+      toolsModule.getToolBoundaryToolNames("wiki-agent")
+    );
 
     const paperResult = await piAgent.runSessionPrompt({
       model: registration.getModel(),
@@ -1275,6 +1284,7 @@ test("runSessionPrompt wiki routing policy refuses design worker handoff while k
     assert.ok(handoff);
     assert.equal(handoff.finalResponse, "Paper worker finished under wiki policy.");
   } finally {
+    await cleanupTools(context.tools);
     registration.unregister();
   }
 });
