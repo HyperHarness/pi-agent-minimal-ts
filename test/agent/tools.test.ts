@@ -1890,7 +1890,7 @@ test("run_design_script restores protected wiki paths when a script writes outsi
         },
         undefined,
       ),
-      /run_design_script attempted to modify protected wiki\/source paths/,
+      /run_design_script attempted to modify protected wiki\/source paths|Read-only file system|Permission denied/,
     );
 
     await assert.rejects(() => readFile(leakedWikiPath, "utf8"), /ENOENT/);
@@ -1898,6 +1898,55 @@ test("run_design_script restores protected wiki paths when a script writes outsi
       () => readFile(path.join(projectDir, "outputs", "absolute-leak.gds"), "utf8"),
       /ENOENT/,
     );
+  } finally {
+    await rm(workspace, { recursive: true, force: true });
+  }
+});
+
+test("run_design_script cannot mutate absolute parent workspace paths", { skip: process.platform === "win32" ? "fake python.exe shell-script shims are not executable on Windows" : false }, async () => {
+  const workspace = await mkdtemp(path.join(tmpdir(), "pi-agent-tools-"));
+  const projectDir = path.join(workspace, "knowledge-base", "design-code");
+  const scriptDir = path.join(projectDir, "scripts");
+  const rootVenvPython = rootVenvPythonPath(workspace);
+  const packageJsonPath = path.join(workspace, "package.json");
+  const originalPackageJson = "{\"name\":\"protected\"}\n";
+
+  try {
+    await mkdir(scriptDir, { recursive: true });
+    await mkdir(path.dirname(rootVenvPython), { recursive: true });
+
+    await writeFakePythonExecutable(rootVenvPython, [
+      "#!/bin/sh",
+      "exec python3 \"$@\"",
+    ]);
+
+    await writeFile(packageJsonPath, originalPackageJson, "utf8");
+    await writeFile(path.join(projectDir, "pyproject.toml"), "[project]\nname = \"pi-chip-design\"\n", "utf8");
+    await writeFile(
+      path.join(scriptDir, "absolute_parent_write.py"),
+      [
+        "from pathlib import Path",
+        `workspace = Path(${JSON.stringify(workspace)})`,
+        "(workspace / 'package.json').write_text('{\"name\":\"mutated\"}\\n')",
+        ""
+      ].join("\n"),
+      "utf8",
+    );
+
+    const runDesignScriptTool = getRunDesignScriptTool(workspace);
+    await assert.rejects(
+      () => runDesignScriptTool.execute(
+        "call-run-design-script-parent-write",
+        {
+          scriptPath: "knowledge-base/design-code/scripts/absolute_parent_write.py",
+          runner: "python",
+        },
+        undefined,
+      ),
+      /Read-only file system|Permission denied|bwrap|run_design_script/,
+    );
+
+    assert.equal(await readFile(packageJsonPath, "utf8"), originalPackageJson);
   } finally {
     await rm(workspace, { recursive: true, force: true });
   }

@@ -1,5 +1,5 @@
 import { execFile } from "node:child_process";
-import { cp, lstat, mkdir, mkdtemp, open, readFile, readdir, realpath, rm, stat, unlink, writeFile } from "node:fs/promises";
+import { cp, lstat, mkdir, mkdtemp, open, readFile, readdir, readlink, realpath, rm, stat, symlink, unlink, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import path from "node:path";
 import { promisify } from "node:util";
@@ -264,6 +264,7 @@ type ProtectedPathSnapshot = {
   rootDir: string;
   rootExisted: boolean;
   files: Map<string, Buffer>;
+  symlinks: Map<string, string>;
   dirs: Set<string>;
 };
 
@@ -559,6 +560,24 @@ async function findRootVenvPython(workspaceDir: string): Promise<string | undefi
   return undefined;
 }
 
+async function findBubblewrapCommand(): Promise<string | undefined> {
+  if (process.platform === "win32") {
+    return undefined;
+  }
+
+  for (const candidateDir of (process.env.PATH ?? "").split(path.delimiter)) {
+    if (!candidateDir) {
+      continue;
+    }
+    const candidatePath = path.join(candidateDir, "bwrap");
+    if (await fileExists(candidatePath)) {
+      return candidatePath;
+    }
+  }
+
+  return undefined;
+}
+
 function designCodeProjectDir(workspaceDir: string): string {
   return path.join(workspaceDir, "knowledge-base", "design-code");
 }
@@ -743,6 +762,35 @@ async function createIsolatedDesignScriptWorkspace(workspaceDir: string): Promis
   return { tempRootDir, tempWorkspaceDir, tempDesignCodeDir };
 }
 
+async function sandboxDesignScriptCommand(input: {
+  command: string;
+  args: readonly string[];
+  cwd: string;
+  tempRootDir: string;
+}): Promise<{
+  command: string;
+  args: string[];
+}> {
+  const bubblewrap = await findBubblewrapCommand();
+  if (!bubblewrap) {
+    throw new Error("run_design_script requires the bwrap sandbox command to execute design scripts.");
+  }
+
+  return {
+    command: bubblewrap,
+    args: [
+      "--ro-bind", "/", "/",
+      "--dev", "/dev",
+      "--proc", "/proc",
+      "--bind", input.tempRootDir, input.tempRootDir,
+      "--die-with-parent",
+      "--chdir", input.cwd,
+      input.command,
+      ...input.args
+    ]
+  };
+}
+
 async function collectAndCopyDesignScriptOutputs(input: {
   sourceWorkspaceDir: string;
   destinationWorkspaceDir: string;
@@ -773,6 +821,7 @@ async function collectAndCopyDesignScriptOutputs(input: {
 async function snapshotProtectedPath(rootDir: string): Promise<ProtectedPathSnapshot> {
   const rootExisted = await pathExists(rootDir);
   const files = new Map<string, Buffer>();
+  const symlinks = new Map<string, string>();
   const dirs = new Set<string>();
 
   async function visit(currentPath: string): Promise<void> {
@@ -783,14 +832,16 @@ async function snapshotProtectedPath(rootDir: string): Promise<ProtectedPathSnap
 
     const relativePath = path.relative(rootDir, currentPath);
     if (relativePath.length > 0) {
-      if (currentStats.isDirectory()) {
+      if (currentStats.isSymbolicLink()) {
+        symlinks.set(relativePath, await readlink(currentPath));
+      } else if (currentStats.isDirectory()) {
         dirs.add(relativePath);
       } else if (currentStats.isFile()) {
         files.set(relativePath, await readFile(currentPath));
       }
     }
 
-    if (!currentStats.isDirectory()) {
+    if (!currentStats.isDirectory() || currentStats.isSymbolicLink()) {
       return;
     }
 
@@ -801,7 +852,7 @@ async function snapshotProtectedPath(rootDir: string): Promise<ProtectedPathSnap
   }
 
   await visit(rootDir);
-  return { rootDir, rootExisted, files, dirs };
+  return { rootDir, rootExisted, files, symlinks, dirs };
 }
 
 async function snapshotDesignScriptProtectedPaths(workspaceDir: string): Promise<ProtectedPathSnapshot[]> {
@@ -813,9 +864,11 @@ async function snapshotDesignScriptProtectedPaths(workspaceDir: string): Promise
 
 async function listCurrentProtectedPaths(rootDir: string): Promise<{
   files: Set<string>;
+  symlinks: Map<string, string>;
   dirs: Set<string>;
 }> {
   const files = new Set<string>();
+  const symlinks = new Map<string, string>();
   const dirs = new Set<string>();
 
   async function visit(currentPath: string): Promise<void> {
@@ -826,14 +879,16 @@ async function listCurrentProtectedPaths(rootDir: string): Promise<{
 
     const relativePath = path.relative(rootDir, currentPath);
     if (relativePath.length > 0) {
-      if (currentStats.isDirectory()) {
+      if (currentStats.isSymbolicLink()) {
+        symlinks.set(relativePath, await readlink(currentPath));
+      } else if (currentStats.isDirectory()) {
         dirs.add(relativePath);
       } else if (currentStats.isFile()) {
         files.add(relativePath);
       }
     }
 
-    if (!currentStats.isDirectory()) {
+    if (!currentStats.isDirectory() || currentStats.isSymbolicLink()) {
       return;
     }
 
@@ -844,7 +899,7 @@ async function listCurrentProtectedPaths(rootDir: string): Promise<{
   }
 
   await visit(rootDir);
-  return { files, dirs };
+  return { files, symlinks, dirs };
 }
 
 async function restoreDesignScriptProtectedPaths(snapshots: readonly ProtectedPathSnapshot[]): Promise<string[]> {
@@ -857,6 +912,15 @@ async function restoreDesignScriptProtectedPaths(snapshots: readonly ProtectedPa
     if (snapshot.rootExisted && !rootExists) {
       changedPaths.push(rootRelativePath);
       await mkdir(snapshot.rootDir, { recursive: true });
+    }
+
+    for (const [relativePath, target] of current.symlinks) {
+      const originalTarget = snapshot.symlinks.get(relativePath);
+      if (originalTarget === target) {
+        continue;
+      }
+      changedPaths.push(`${rootRelativePath}/${relativePath.split(path.sep).join("/")}`);
+      await rm(path.join(snapshot.rootDir, relativePath), { force: true });
     }
 
     for (const relativePath of current.files) {
@@ -881,8 +945,20 @@ async function restoreDesignScriptProtectedPaths(snapshots: readonly ProtectedPa
       }
       changedPaths.push(`${rootRelativePath}/${relativePath.split(path.sep).join("/")}`);
       const restoredPath = path.join(snapshot.rootDir, relativePath);
+      await rm(restoredPath, { force: true });
       await mkdir(path.dirname(restoredPath), { recursive: true });
       await writeFile(restoredPath, original);
+    }
+
+    for (const [relativePath, originalTarget] of snapshot.symlinks) {
+      if (current.symlinks.get(relativePath) === originalTarget) {
+        continue;
+      }
+      changedPaths.push(`${rootRelativePath}/${relativePath.split(path.sep).join("/")}`);
+      const restoredPath = path.join(snapshot.rootDir, relativePath);
+      await rm(restoredPath, { force: true });
+      await mkdir(path.dirname(restoredPath), { recursive: true });
+      await symlink(originalTarget, restoredPath);
     }
 
     const currentDirsByDepth = [...current.dirs].sort((left, right) => right.length - left.length);
@@ -1389,7 +1465,13 @@ async function runDesignScript(input: {
   try {
     const isolatedScriptPath = path.join(isolatedWorkspace.tempDesignCodeDir, scriptProjectRelativePath);
     const isolatedWorkingDir = path.dirname(isolatedScriptPath);
-    const { stdout, stderr } = await execFileAsync(commandSpec.command, commandSpec.args, {
+    const sandboxCommandSpec = await sandboxDesignScriptCommand({
+      command: commandSpec.command,
+      args: commandSpec.args,
+      cwd: isolatedWorkingDir,
+      tempRootDir: isolatedWorkspace.tempRootDir
+    });
+    const { stdout, stderr } = await execFileAsync(sandboxCommandSpec.command, sandboxCommandSpec.args, {
       cwd: isolatedWorkingDir,
       env: {
         ...process.env,

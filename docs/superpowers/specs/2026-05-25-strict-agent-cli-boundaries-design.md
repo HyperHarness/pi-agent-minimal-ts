@@ -82,7 +82,7 @@ Feishu users interact with the durable knowledge workflow. If a Feishu user asks
 - read-only local wiki and paper retrieval tools such as `answer_paper_wiki_question`, `search_paper_wiki`, `search_local_papers`, and `list_local_papers`.
 - design dependency and environment tools.
 - scoped design-code file write/replace tools.
-- bounded design script execution tools that run only `knowledge-base/design-code/` scripts in an isolated temporary copy and copy back declared design-code outputs.
+- bounded design script execution tools that run only `knowledge-base/design-code/` scripts in a `bwrap` sandbox with an isolated temporary design-code copy and copy back declared design-code outputs.
 - design artifact and design record writing tools.
 
 `design-agent` must not expose:

@@ -363,7 +363,7 @@ This is deterministic schema, retrieval, review, and lint support. It does not r
 
 - `write_design_artifact`: full-mode / design-agent tool that writes structured design records, verification reports, failure records, and benchmark cases under `knowledge-base/design-records/`
 - `sync_design_environment`: full-mode / design-agent tool that runs `uv sync` for `knowledge-base/design-code/` while forcing the shared repository root `.venv` as the Python project environment. This is not a general shell and cannot sync arbitrary projects.
-- `run_design_script`: full-mode / design-agent tool that runs `.py` layout or verification scripts from `knowledge-base/design-code/` in an isolated temporary copy and copies back only declared design-code outputs. For Python scripts it requires the repository root `.venv/bin/python`; if it is missing, run `sync_design_environment` first. KLayout scripts still run through `klayout -b -r`.
+- `run_design_script`: full-mode / design-agent tool that runs `.py` layout or verification scripts from `knowledge-base/design-code/` in a `bwrap` sandbox with a writable temporary design-code copy, then copies back only declared design-code outputs. For Python scripts it requires the repository root `.venv/bin/python`; if it is missing, run `sync_design_environment` first. KLayout scripts still run through `klayout -b -r`.
 - `load_paper_writing_skill`: full-mode / paper-writing-worker tool that loads worker-scoped writing prompt modules such as `skills/paper-writing-worker/sciwrite/prompt.md`
 - `paper_orchestra_prepare_workspace`: full-mode / paper-writing-worker tool that creates and validates the controlled PaperOrchestra writing workspace layout
 - `paper_orchestra_check_draft`: full-mode / paper-writing-worker tool that runs orphan-citation, LaTeX sanity, and anonymous anti-leakage draft gates
@@ -472,7 +472,7 @@ The initial design workspace is the `pi_chip_design` Python package under `knowl
 UV_PROJECT_ENVIRONMENT="$PWD/.venv" uv sync --project "$PWD/knowledge-base/design-code" --extra dev
 ```
 
-The design-agent normally performs this through `sync_design_environment`; it does not require the parent agent process to activate this environment. `run_design_script` requires the repository root `.venv/bin/python`, runs scripts from an isolated copy of `knowledge-base/design-code/`, copies back only declared design-code outputs, and reports that `sync_design_environment` should be run first if the root interpreter is missing.
+The design-agent normally performs this through `sync_design_environment`; it does not require the parent agent process to activate this environment. `run_design_script` requires the repository root `.venv/bin/python` and the local `bwrap` sandbox command, runs scripts from an isolated copy of `knowledge-base/design-code/`, copies back only declared design-code outputs, and reports that `sync_design_environment` should be run first if the root interpreter is missing.
 
 Recommended paper-to-wiki path:
 
