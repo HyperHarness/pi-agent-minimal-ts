@@ -392,8 +392,17 @@ async function runRoutedWorkerPrompt(options: {
   onEvent?: AgentMessageEventHandler;
 }): Promise<{ messages: AgentMessage[]; handoff: WorkerHandoff }> {
   const normalizedRole = normalizeWorkerRole(options.role);
+  const wikiEvidenceWorker = options.role === "wiki-evidence-worker"
+    ? createWikiEvidenceWorker(options.model, options.workspaceDir)
+    : undefined;
   const workerTools = createToolsForBoundary(options.workspaceDir, options.role, {
-    extensionBridge: createQueuedPaperExtensionBridge({ workspaceDir: options.workspaceDir })
+    extensionBridge: createQueuedPaperExtensionBridge({ workspaceDir: options.workspaceDir }),
+    ...(wikiEvidenceWorker
+      ? {
+          paperSummaryWorker: wikiEvidenceWorker.paperSummaryWorker,
+          paperWikiPageWorker: wikiEvidenceWorker.paperWikiPageWorker
+        }
+      : {})
   });
   const workerContext: AgentContext = {
     systemPrompt: systemPromptForWorker(options.role),

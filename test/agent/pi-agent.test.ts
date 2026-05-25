@@ -76,6 +76,16 @@ function userMessageHasPrompt(message: UserMessage, prompt: string): boolean {
       );
 }
 
+async function writeJson(filePath: string, value: unknown): Promise<void> {
+  await mkdir(path.dirname(filePath), { recursive: true });
+  await writeFile(filePath, `${JSON.stringify(value, null, 2)}\n`);
+}
+
+async function writeText(filePath: string, value: string): Promise<void> {
+  await mkdir(path.dirname(filePath), { recursive: true });
+  await writeFile(filePath, value);
+}
+
 function parseWorkerHandoff(message: AssistantMessage): unknown {
   const text = message.content
     .filter((content) => content.type === "text")
@@ -1365,6 +1375,146 @@ test("runSessionPrompt paper download worker queues browser extension jobs", asy
     };
     assert.equal(handoff.role, "paper-download-subagent");
     assert.deepEqual(handoff.toolsUsed, ["download_paper"]);
+  } finally {
+    registration.unregister();
+    await rm(workspace, { recursive: true, force: true });
+  }
+});
+
+test("runSessionPrompt routes summary backfill through a configured wiki evidence summary worker", async () => {
+  const runSessionPrompt = (
+    piAgent as {
+      runSessionPrompt?: (options: {
+        model: Model<Api>;
+        workspaceDir: string;
+        context: AgentContext;
+        prompt: string;
+        onEvent?: (event: AgentEvent) => void;
+      }) => Promise<{ action: "stop" | "continue"; newMessages: AgentMessage[] }>;
+    }
+  ).runSessionPrompt;
+  assert.equal(typeof runSessionPrompt, "function");
+
+  const registration = registerFauxProvider();
+  const workspace = await mkdtemp(path.join(tmpdir(), "pi-agent-summary-worker-"));
+  const paperKey = "nature-s41586-026-10658-6";
+  const parseDir = path.join(
+    workspace,
+    "knowledge-base",
+    "sources",
+    paperKey,
+    "parses",
+    "opendataloader-local"
+  );
+  registration.setResponses([
+    fauxAssistantMessage([
+      fauxToolCall("generate_paper_wiki_summary", { paperKey, mode: "write" })
+    ], { stopReason: "toolUse" }),
+    fauxAssistantMessage([
+      fauxText(JSON.stringify({
+        title: "An AI system to help scientists write expert-level empirical software",
+        summaryMarkdown: "Grounded source summary from the clean wiki-evidence-worker summary pass.",
+        tags: ["ai-scientist"],
+        keyFindings: ["The system supports empirical scientific software work."],
+        evidenceAnchors: [
+          {
+            summary: "The paper studies AI support for empirical software.",
+            quote: "empirical scientific software",
+            paperKey,
+            sectionId: "abstract",
+            page: 1
+          }
+        ],
+        limitations: [],
+        openQuestions: [],
+        relatedPaperKeys: [],
+        confidence: "high",
+        groundingWarnings: []
+      }))
+    ]),
+    fauxAssistantMessage([fauxText("Summaries backfilled.")])
+  ]);
+
+  const context: AgentContext = {
+    systemPrompt: DEFAULT_SYSTEM_PROMPT,
+    messages: [],
+    tools: []
+  };
+  const observedEvents: AgentEvent[] = [];
+
+  try {
+    await writeJson(path.join(workspace, "knowledge-base", "sources", paperKey, "source.json"), {
+      paperKey,
+      source: "nature",
+      canonicalId: "s41586-026-10658-6",
+      articleUrl: "https://www.nature.com/articles/s41586-026-10658-6",
+      title: "An AI system to help scientists write expert-level empirical software"
+    });
+    await writeText(path.join(parseDir, "document.md"), [
+      "# Abstract",
+      "",
+      "This paper studies empirical scientific software.",
+      "",
+      "# Main",
+      "",
+      "The AI system helps scientists write expert-level empirical scientific software."
+    ].join("\n"));
+    await writeJson(path.join(parseDir, "parse.json"), {
+      paperKey,
+      engine: "opendataloader-local",
+      pdfSha256: "sha-summary-worker",
+      createdAt: "2026-05-25T00:00:00.000Z",
+      pages: 1,
+      elements: [],
+      sections: [
+        {
+          id: "abstract",
+          title: "Abstract",
+          level: 1,
+          pageFrom: 1,
+          pageTo: 1
+        }
+      ]
+    });
+    await writeJson(path.join(parseDir, "quality.json"), {
+      status: "good",
+      score: 0.95,
+      pages: 1,
+      totalTextLength: 1200,
+      emptyPageCount: 0,
+      headingCount: 2,
+      tableCount: 0,
+      figureOrCaptionCount: 0,
+      warnings: []
+    });
+    await writeText(
+      path.join(workspace, "knowledge-base", "sources", paperKey, "chunks", "opendataloader-local.jsonl"),
+      "{\"id\":\"chunk-1\"}\n"
+    );
+
+    const result = await runSessionPrompt!({
+      model: registration.getModel(),
+      workspaceDir: workspace,
+      context,
+      prompt: "补summaries",
+      onEvent: (event) => {
+        observedEvents.push(event);
+      }
+    });
+
+    assert.equal(result.action, "continue");
+    const summaryToolEnd = observedEvents.find(
+      (event): event is ToolExecutionEndEvent =>
+        event.type === "tool_execution_end" &&
+        event.toolName === "generate_paper_wiki_summary" &&
+        !event.isError
+    );
+    assert.ok(summaryToolEnd);
+    assert.equal((summaryToolEnd.result.details as { status?: string }).status, "written");
+    assert.match(
+      await readFile(path.join(workspace, "knowledge-base", "sources", paperKey, "summary.md"), "utf8"),
+      /Grounded source summary from the clean wiki-evidence-worker summary pass/
+    );
   } finally {
     registration.unregister();
     await rm(workspace, { recursive: true, force: true });
