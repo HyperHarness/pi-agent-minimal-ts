@@ -384,7 +384,7 @@ export async function backfillKnowledgeSourceMetadataFromSummary(input: {
   const markdown = await readFile(summaryAbsolutePath, "utf8");
   const frontmatter = extractFrontmatter(markdown);
   const now = new Date().toISOString();
-  const sourceKey = readFrontmatterString(frontmatter, "paper_key") ?? input.sourceKey;
+  const sourceKey = input.sourceKey;
   const title =
     readFrontmatterString(frontmatter, "title") ??
     markdown.match(/^#\s+(.+)$/m)?.[1]?.trim() ??

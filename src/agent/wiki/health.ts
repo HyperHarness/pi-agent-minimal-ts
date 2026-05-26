@@ -816,6 +816,7 @@ async function sourceMetadataIssues(workspaceDir: string): Promise<WikiHealthIss
     const candidatePaths = [
       { name: "summaryPath", value: metadata.summaryPath },
       { name: "provenance.acquisitionPath", value: readNestedValue(metadata, ["provenance", "acquisitionPath"]), optional: true },
+      { name: "provenance.recordPath", value: metadata.provenance.recordPath, optional: true },
       { name: "provenance.rawPath", value: metadata.provenance.rawPath, optional: true },
       ...metadataArtifactPathCandidates(metadata)
     ].filter((candidate) => !candidate.optional || candidate.value !== undefined);

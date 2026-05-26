@@ -864,6 +864,51 @@ test("checkWikiHealth reports source_metadata_artifact_missing for metadata arti
   }
 });
 
+test("checkWikiHealth reports source_metadata_artifact_missing for missing metadata recordPath", async () => {
+  const workspace = await createWorkspace();
+
+  try {
+    const sourceKey = "arxiv-2601-record-missing";
+    await writeText(
+      path.join(workspace, "knowledge-base", "sources", sourceKey, "summary.md"),
+      "# Missing record path\n\nMetadata points at a missing acquisition record."
+    );
+    await writeJson(path.join(workspace, "knowledge-base", "sources", sourceKey, "metadata.json"), {
+      schemaVersion: 1,
+      sourceKind: "paper",
+      sourceKey,
+      title: "Missing record path",
+      status: "ready",
+      createdAt: "2026-05-14T00:00:00.000Z",
+      updatedAt: "2026-05-14T00:00:00.000Z",
+      summaryPath: `knowledge-base/sources/${sourceKey}/summary.md`,
+      citation: {
+        citationStatus: "complete",
+        missingFields: []
+      },
+      provenance: {
+        recordPath: `knowledge-base/sources/${sourceKey}/acquisition.json`
+      },
+      artifacts: [],
+      tags: [],
+      relatedSourceKeys: [],
+      synthesisPageKeys: []
+    });
+
+    const result = await checkWikiHealth({ workspaceDir: workspace });
+
+    assert.equal(result.summary.source_metadata_artifact_missing, 1);
+    const issue = result.issues.find((candidate) =>
+      candidate.kind === "source_metadata_artifact_missing" &&
+      candidate.paperKey === sourceKey
+    );
+    assert.ok(issue);
+    assert.match(issue.reason, /acquisition\.json/);
+  } finally {
+    await rm(workspace, { recursive: true, force: true });
+  }
+});
+
 test("checkWikiHealth reports source_metadata_artifact_missing for unsafe metadata paths", async () => {
   const workspace = await createWorkspace();
   const outside = await createWorkspace();
@@ -920,6 +965,79 @@ test("checkWikiHealth reports source_metadata_artifact_missing for unsafe metada
     assert.ok(result.issues.some((issue) =>
       issue.kind === "source_metadata_artifact_missing" &&
       issue.paperKey === traversalPaperKey &&
+      issue.reason.includes("workspace-relative")
+    ));
+  } finally {
+    await rm(workspace, { recursive: true, force: true });
+    await rm(outside, { recursive: true, force: true });
+  }
+});
+
+test("checkWikiHealth reports source_metadata_artifact_missing for unsafe metadata recordPath", async () => {
+  const workspace = await createWorkspace();
+  const outside = await createWorkspace();
+
+  try {
+    const absoluteSourceKey = "arxiv-2601-record-absolute";
+    const traversalSourceKey = "arxiv-2601-record-traversal";
+    const outsideRecordPath = path.join(outside, "acquisition.json");
+    await writeText(outsideRecordPath, "{\"status\":\"outside\"}\n");
+    await writeText(
+      path.join(workspace, "knowledge-base", "sources", absoluteSourceKey, "summary.md"),
+      "# Absolute record path\n"
+    );
+    await writeText(
+      path.join(workspace, "knowledge-base", "sources", traversalSourceKey, "summary.md"),
+      "# Traversal record path\n"
+    );
+    await writeJson(path.join(workspace, "knowledge-base", "sources", absoluteSourceKey, "metadata.json"), {
+      schemaVersion: 1,
+      sourceKind: "paper",
+      sourceKey: absoluteSourceKey,
+      title: "Absolute record path",
+      status: "ready",
+      createdAt: "2026-05-14T00:00:00.000Z",
+      updatedAt: "2026-05-14T00:00:00.000Z",
+      summaryPath: `knowledge-base/sources/${absoluteSourceKey}/summary.md`,
+      citation: { citationStatus: "complete", missingFields: [] },
+      provenance: {
+        recordPath: outsideRecordPath
+      },
+      artifacts: [],
+      tags: [],
+      relatedSourceKeys: [],
+      synthesisPageKeys: []
+    });
+    await writeJson(path.join(workspace, "knowledge-base", "sources", traversalSourceKey, "metadata.json"), {
+      schemaVersion: 1,
+      sourceKind: "paper",
+      sourceKey: traversalSourceKey,
+      title: "Traversal record path",
+      status: "ready",
+      createdAt: "2026-05-14T00:00:00.000Z",
+      updatedAt: "2026-05-14T00:00:00.000Z",
+      summaryPath: `knowledge-base/sources/${traversalSourceKey}/summary.md`,
+      citation: { citationStatus: "complete", missingFields: [] },
+      provenance: {
+        recordPath: "../outside-acquisition.json"
+      },
+      artifacts: [],
+      tags: [],
+      relatedSourceKeys: [],
+      synthesisPageKeys: []
+    });
+
+    const result = await checkWikiHealth({ workspaceDir: workspace });
+
+    assert.ok(result.summary.source_metadata_artifact_missing >= 2);
+    assert.ok(result.issues.some((issue) =>
+      issue.kind === "source_metadata_artifact_missing" &&
+      issue.paperKey === absoluteSourceKey &&
+      issue.reason.includes("workspace-relative")
+    ));
+    assert.ok(result.issues.some((issue) =>
+      issue.kind === "source_metadata_artifact_missing" &&
+      issue.paperKey === traversalSourceKey &&
       issue.reason.includes("workspace-relative")
     ));
   } finally {
@@ -997,6 +1115,41 @@ test("fixWikiHealth backfills source metadata from existing summaries", async ()
     assert.equal(metadata.provenance.rawSha256, "sha-backfill");
     assert.equal(metadata.artifacts[0].engine, "plain-text-baseline");
     assert.deepEqual(metadata.tags, ["manifest"]);
+  } finally {
+    await rm(workspace, { recursive: true, force: true });
+  }
+});
+
+test("fixWikiHealth backfills source metadata using requested source key over summary paper_key", async () => {
+  const workspace = await createWorkspace();
+
+  try {
+    await writeText(path.join(workspace, "knowledge-base", "sources", "source-a", "summary.md"), [
+      "---",
+      "type: \"paper-source-summary\"",
+      "paper_key: \"source-b\"",
+      "title: \"Mismatched summary key\"",
+      "---",
+      "",
+      "# Mismatched summary key",
+      ""
+    ].join("\n"));
+
+    const result = await fixWikiHealth({
+      workspaceDir: workspace,
+      issueKinds: ["source_metadata_missing"]
+    });
+
+    assert.equal(result.fixed, 1);
+    const metadata = JSON.parse(await readFile(
+      path.join(workspace, "knowledge-base", "sources", "source-a", "metadata.json"),
+      "utf8"
+    ));
+    assert.equal(metadata.sourceKey, "source-a");
+    await assert.rejects(readFile(
+      path.join(workspace, "knowledge-base", "sources", "source-b", "metadata.json"),
+      "utf8"
+    ));
   } finally {
     await rm(workspace, { recursive: true, force: true });
   }
