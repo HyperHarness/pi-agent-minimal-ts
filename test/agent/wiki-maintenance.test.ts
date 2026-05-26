@@ -42,12 +42,18 @@ async function writePage(workspaceDir: string, pageKey: string, content: string)
   await writeMarkdown(path.join(workspaceDir, "knowledge-base", "pages", `${pageKey}.md`), content);
 }
 
-async function writeReadySourceMetadata(workspaceDir: string, paperKey: string, tags: string[] = []): Promise<void> {
+async function writeReadySourceMetadata(
+  workspaceDir: string,
+  paperKey: string,
+  tags: string[] = [],
+  relatedSourceKeys: string[] = [],
+  title = `${paperKey} Evidence`
+): Promise<void> {
   await writeJson(path.join(workspaceDir, "knowledge-base", "sources", paperKey, "metadata.json"), {
     schemaVersion: 1,
     sourceKind: "paper",
     sourceKey: paperKey,
-    title: `${paperKey} Evidence`,
+    title,
     status: "ready",
     createdAt: "2026-05-10T00:00:00.000Z",
     updatedAt: "2026-05-10T00:00:00.000Z",
@@ -68,7 +74,7 @@ async function writeReadySourceMetadata(workspaceDir: string, paperKey: string, 
       qualityPath: `knowledge-base/sources/${paperKey}/parses/plain-text-baseline/quality.json`
     }],
     tags,
-    relatedSourceKeys: [],
+    relatedSourceKeys,
     synthesisPageKeys: []
   });
 }
@@ -95,6 +101,13 @@ related_papers:
 Tunable coupler frequency planning for superconducting chip design.
 `
   );
+  await writeReadySourceMetadata(
+    workspace,
+    "paper-a",
+    ["tunable coupler", "fixed frequency transmons", "superconducting chip design", "frequency planning"],
+    ["paper-c"],
+    "Frequency Planning for Tunable Coupler Processors"
+  );
 
   await writeSource(
     workspace,
@@ -113,6 +126,13 @@ tags:
 This source is intentionally not cited by a page.
 `
   );
+  await writeReadySourceMetadata(
+    workspace,
+    "paper-b",
+    ["tunable coupler", "fixed frequency transmons", "superconducting chip design", "frequency planning"],
+    [],
+    "Uncovered Tunable Coupler Layout Constraints"
+  );
 
   await writeSource(
     workspace,
@@ -129,6 +149,13 @@ tags:
 Calibration procedures for qubit tuneup workflows.
 `
   );
+  await writeReadySourceMetadata(
+    workspace,
+    "paper-c",
+    ["qubit calibration", "tuneup workflow"],
+    [],
+    "Qubit Calibration Drift Study"
+  );
 
   await writeSource(
     workspace,
@@ -144,6 +171,13 @@ tags:
 
 Autonomous agents for quantum EDA planning.
 `
+  );
+  await writeReadySourceMetadata(
+    workspace,
+    "paper-d",
+    ["agentic chip design", "quantum EDA"],
+    [],
+    "Autonomous Quantum EDA Agents"
   );
 
   await writePage(

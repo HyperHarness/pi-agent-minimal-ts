@@ -110,64 +110,6 @@ function bodyWithoutFrontmatter(markdown: string): string {
   return markdown.replace(/^---\n[\s\S]*?\n---\n/, "").trim();
 }
 
-function extractTitle(markdown: string, fallback: string): string {
-  const frontmatter = extractFrontmatter(markdown);
-  const titleLine = frontmatter.split("\n").find((line) => line.startsWith("title:"));
-  const rawTitle = titleLine?.slice("title:".length).trim();
-  if (rawTitle) {
-    try {
-      const parsed = JSON.parse(rawTitle);
-      if (typeof parsed === "string" && parsed.trim()) {
-        return parsed.trim();
-      }
-    } catch {
-      return rawTitle.replace(/^"|"$/g, "").trim();
-    }
-  }
-  return markdown.match(/^#\s+(.+)$/m)?.[1]?.trim() || fallback;
-}
-
-function extractYamlStringValues(frontmatter: string, key: string): string[] {
-  const lines = frontmatter.split("\n");
-  const start = lines.findIndex((line) => line.trim() === `${key}:`);
-  if (start < 0) {
-    const inline = lines.find((line) => line.startsWith(`${key}:`))?.slice(key.length + 1).trim();
-    if (!inline || inline === "[]") {
-      return [];
-    }
-    try {
-      const parsed = JSON.parse(inline);
-      return Array.isArray(parsed)
-        ? parsed.filter((item): item is string => typeof item === "string")
-        : typeof parsed === "string"
-          ? [parsed]
-          : [];
-    } catch {
-      return [inline.replace(/^"|"$/g, "")];
-    }
-  }
-
-  const values: string[] = [];
-  for (const line of lines.slice(start + 1)) {
-    if (/^\S/.test(line)) {
-      break;
-    }
-    const value = line.match(/^\s*-\s+(.+)$/)?.[1]?.trim();
-    if (!value) {
-      continue;
-    }
-    try {
-      const parsed = JSON.parse(value);
-      if (typeof parsed === "string") {
-        values.push(parsed);
-      }
-    } catch {
-      values.push(value.replace(/^"|"$/g, ""));
-    }
-  }
-  return values;
-}
-
 function createSnippet(markdown: string): string {
   return bodyWithoutFrontmatter(markdown).replace(/\s+/g, " ").trim().slice(0, 320);
 }
@@ -186,14 +128,13 @@ async function readSourceSummaryDocuments(workspaceDir: string): Promise<Map<str
       sourceKey: paperKey,
       summaryPath: relativeToWorkspace(workspaceDir, filePath)
     });
-    const frontmatter = extractFrontmatter(markdown);
     documents.set(paperKey, {
       paperKey,
-      title: metadata.metadata?.title ?? extractTitle(markdown, paperKey),
+      title: metadata.metadata?.title ?? paperKey,
       path: relativeToWorkspace(workspaceDir, filePath),
       body: bodyWithoutFrontmatter(markdown),
-      tags: metadata.metadata?.tags ?? extractYamlStringValues(frontmatter, "tags"),
-      relatedPaperKeys: metadata.metadata?.relatedSourceKeys ?? extractYamlStringValues(frontmatter, "related_papers"),
+      tags: metadata.metadata?.tags ?? [],
+      relatedPaperKeys: metadata.metadata?.relatedSourceKeys ?? [],
       ...(metadata.metadata?.sourceKind ? { sourceKind: metadata.metadata.sourceKind } : {})
     });
   }

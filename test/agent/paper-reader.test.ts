@@ -437,8 +437,9 @@ test("writePaperWikiSource saves an LLM source summary and searchPaperWiki finds
     assert.equal(source.operationJournalPath, "knowledge-base/state/wiki-operations.jsonl");
     assert.equal(source.indexPath, "knowledge-base/index.md");
     const markdown = await readFile(path.join(workspace, source.sourcePath), "utf8");
-    assert.match(markdown, /type: "paper-source-summary"/);
-    assert.match(markdown, /parse_markdown: "knowledge-base\/sources\/arxiv-2601\.00003\/parses\/plain-text-baseline\/document\.md"/);
+    assert.ok(markdown.startsWith("# "));
+    assert.doesNotMatch(markdown, /^---\n/);
+    assert.doesNotMatch(markdown, /paper-source-summary|parse_markdown|paper_key:/);
     const metadata = JSON.parse(await readFile(path.join(workspace, sourceDetails.metadataPath), "utf8"));
     assert.equal(metadata.schemaVersion, 1);
     assert.equal(metadata.sourceKind, "paper");
@@ -1179,33 +1180,23 @@ test("applyWikiStructurePlan dry-runs and applies low-risk duplicate section cle
 test("bootstrapPaperWikiPageEvidence searches sources, expands related papers, and reports missing summaries", async () => {
   const workspace = await createWorkspace();
   try {
-    await writeSourceSummary(workspace, "arxiv-seed", `---
-type: "paper-source-summary"
-paper_key: "arxiv-seed"
-title: "Seed qLDPC Paper"
-tags:
-  - "qldpc"
-  - "superconducting-qubits"
-related_papers:
-  - "arxiv-related"
----
-
-# Seed qLDPC Paper
+    await writeSourceSummary(workspace, "arxiv-seed", `# Seed qLDPC Paper
 
 This source summary discusses qLDPC implementation on superconducting chips.
 `);
-    await writeSourceSummary(workspace, "arxiv-related", `---
-type: "paper-source-summary"
-paper_key: "arxiv-related"
-title: "Auxiliary Constraints"
-tags:
-  - "ancilla"
----
-
-# Auxiliary Constraints
+    await writeSourceMetadata(workspace, "arxiv-seed", {
+      title: "Seed qLDPC Paper",
+      tags: ["qldpc", "superconducting-qubits"],
+      relatedSourceKeys: ["arxiv-related"]
+    });
+    await writeSourceSummary(workspace, "arxiv-related", `# Auxiliary Constraints
 
 This source summary discusses auxiliary constraints.
 `);
+    await writeSourceMetadata(workspace, "arxiv-related", {
+      title: "Auxiliary Constraints",
+      tags: ["ancilla"]
+    });
 
     const result = await bootstrapPaperWikiPageEvidence({
       workspaceDir: workspace,

@@ -1,4 +1,4 @@
-import { readFile, writeFile } from "node:fs/promises";
+import { readFile } from "node:fs/promises";
 import path from "node:path";
 import { listLocalPapers, type LocalPaperEntry } from "../paper/storage/local-paper-library.js";
 import {
@@ -6,6 +6,10 @@ import {
   getPaperWikiSourcePath,
   relativeToWorkspace
 } from "./store.js";
+import {
+  readKnowledgeSourceMetadata,
+  writeKnowledgeSourceMetadata
+} from "./source-metadata-store.js";
 
 const DEFAULT_MAX_CANDIDATES = 8;
 const DEFAULT_MAX_TEXT_CHARS = 30000;
@@ -345,84 +349,6 @@ export async function findPaperWikiRelations(
   };
 }
 
-function parseExistingRelatedPaperKeys(markdown: string): string[] {
-  const frontmatter = markdown.match(/^---\n([\s\S]*?)\n---\n/);
-  if (!frontmatter?.[1]) {
-    return [];
-  }
-  const lines = frontmatter[1].split("\n");
-  const start = lines.findIndex((line) => line.trim() === "related_papers: []" || line.startsWith("related_papers:"));
-  if (start < 0) {
-    return [];
-  }
-  const inline = lines[start].match(/^related_papers:\s*\[(.*)\]\s*$/);
-  if (inline) {
-    return inline[1]
-      .split(",")
-      .map((value) => value.trim().replace(/^["']|["']$/g, ""))
-      .filter(Boolean);
-  }
-
-  const values: string[] = [];
-  for (const line of lines.slice(start + 1)) {
-    if (!line.startsWith("  - ")) {
-      break;
-    }
-    values.push(line.slice(4).trim().replace(/^["']|["']$/g, ""));
-  }
-  return values.filter(Boolean);
-}
-
-function formatRelatedPaperKeys(keys: string[]): string {
-  if (keys.length === 0) {
-    return "related_papers: []";
-  }
-  return `related_papers: \n${keys.map((key) => `  - ${JSON.stringify(key)}`).join("\n")}`;
-}
-
-function replaceRelatedPaperKeys(markdown: string, keys: string[], updatedAt: string): string {
-  const frontmatter = markdown.match(/^---\n([\s\S]*?)\n---\n/);
-  if (!frontmatter?.[1]) {
-    throw new Error("Wiki source summary is missing YAML frontmatter.");
-  }
-  const lines = frontmatter[1].split("\n");
-  const start = lines.findIndex((line) => line.trim() === "related_papers: []" || line.startsWith("related_papers:"));
-  const updatedAtIndex = lines.findIndex((line) => line.startsWith("updated_at:"));
-  let relationStart = start;
-  let linesWithUpdatedAt: string[];
-  if (updatedAtIndex >= 0) {
-    linesWithUpdatedAt = [
-      ...lines.slice(0, updatedAtIndex),
-      `updated_at: ${JSON.stringify(updatedAt)}`,
-      ...lines.slice(updatedAtIndex + 1)
-    ];
-  } else if (start >= 0) {
-    linesWithUpdatedAt = [
-      ...lines.slice(0, start),
-      `updated_at: ${JSON.stringify(updatedAt)}`,
-      ...lines.slice(start)
-    ];
-    relationStart = start + 1;
-  } else {
-    linesWithUpdatedAt = [
-      ...lines,
-      `updated_at: ${JSON.stringify(updatedAt)}`
-    ];
-  }
-  const replacement = formatRelatedPaperKeys(keys).split("\n");
-  let nextLines: string[];
-  if (relationStart < 0) {
-    nextLines = [...linesWithUpdatedAt, ...replacement];
-  } else {
-    let end = relationStart + 1;
-    while (end < linesWithUpdatedAt.length && linesWithUpdatedAt[end].startsWith("  - ")) {
-      end += 1;
-    }
-    nextLines = [...linesWithUpdatedAt.slice(0, relationStart), ...replacement, ...linesWithUpdatedAt.slice(end)];
-  }
-  return markdown.replace(/^---\n[\s\S]*?\n---\n/, `---\n${nextLines.join("\n")}\n---\n`);
-}
-
 function uniqueKeys(keys: string[], ownPaperKey: string): string[] {
   return [...new Set(keys.map((key) => key.trim()).filter((key) => key && key !== ownPaperKey))];
 }
@@ -434,16 +360,32 @@ export async function updatePaperWikiRelations(
   const mode = options.mode ?? "append";
   await ensurePaperWikiScaffold(workspaceDir);
   const sourcePath = getPaperWikiSourcePath(workspaceDir, options.paperKey);
-  const markdown = await readFile(sourcePath, "utf8");
-  const previousRelatedPaperKeys = parseExistingRelatedPaperKeys(markdown);
+  await readFile(sourcePath, "utf8");
+  const summaryPath = relativeToWorkspace(workspaceDir, sourcePath);
+  const metadataResult = await readKnowledgeSourceMetadata({
+    workspaceDir,
+    sourceKey: options.paperKey,
+    summaryPath
+  });
+  if (metadataResult.status !== "ready") {
+    throw new Error(`Wiki source metadata is missing or malformed for ${options.paperKey}.`);
+  }
+  const previousRelatedPaperKeys = metadataResult.metadata.relatedSourceKeys;
   const relatedPaperKeys = mode === "replace"
     ? uniqueKeys(options.relatedPaperKeys, options.paperKey)
     : uniqueKeys([...previousRelatedPaperKeys, ...options.relatedPaperKeys], options.paperKey);
   const now = new Date().toISOString();
-  await writeFile(sourcePath, replaceRelatedPaperKeys(markdown, relatedPaperKeys, now), "utf8");
+  await writeKnowledgeSourceMetadata({
+    workspaceDir,
+    metadata: {
+      ...metadataResult.metadata,
+      updatedAt: now,
+      relatedSourceKeys: relatedPaperKeys
+    }
+  });
   return {
     paperKey: options.paperKey,
-    sourcePath: relativeToWorkspace(workspaceDir, sourcePath),
+    sourcePath: summaryPath,
     previousRelatedPaperKeys,
     relatedPaperKeys,
     mode

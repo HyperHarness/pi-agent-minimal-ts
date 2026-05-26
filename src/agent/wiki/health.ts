@@ -15,7 +15,6 @@ import {
   relativeToWorkspace
 } from "./store.js";
 import {
-  backfillKnowledgeSourceMetadataFromSummary,
   getKnowledgeSourceMetadataPath,
   readKnowledgeSourceMetadata
 } from "./source-metadata-store.js";
@@ -887,7 +886,7 @@ function summarizeActions(issues: WikiHealthIssue[]): string[] {
     ["parse_missing", "Parse downloaded papers that do not yet have reading artifacts."],
     ["summary_missing", "Write wiki source summaries for parsed papers without a summary page."],
     ["non_paper_source", "Quarantine non-paper publisher pages that were accidentally registered as paper sources."],
-    ["source_metadata_missing", "Backfill source metadata.json for existing wiki source summaries."],
+    ["source_metadata_missing", "Report source summaries that need metadata.json regenerated from acquisition or source metadata."],
     ["source_metadata_artifact_missing", "Repair source metadata.json or regenerate the missing parse/source artifacts it references."],
     ["source_metadata_malformed", "Repair malformed per-source metadata.json files."],
     ["missing_artifact", "Repair or regenerate acquisition files that point at missing files."],
@@ -1553,34 +1552,15 @@ async function fixBySourceMetadataBackfill(input: {
   issue: WikiHealthIssue;
   dryRun: boolean;
 }): Promise<WikiHealthFixItem> {
-  if (input.dryRun) {
-    return {
-      issue: input.issue,
-      status: "skipped",
-      action: "source_metadata_backfill",
-      message: `Dry run: would backfill source metadata.json for ${input.issue.paperKey}.`
-    };
-  }
-  try {
-    const metadataPath = await backfillKnowledgeSourceMetadataFromSummary({
-      workspaceDir: input.workspaceDir,
-      sourceKey: input.issue.paperKey
-    });
-    return {
-      issue: input.issue,
-      status: "fixed",
-      action: "source_metadata_backfill",
-      message: `Backfilled source metadata.json for ${input.issue.paperKey}.`,
-      details: { metadataPath }
-    };
-  } catch (error) {
-    return {
-      issue: input.issue,
-      status: "failed",
-      action: "source_metadata_backfill",
-      message: error instanceof Error ? error.message : "Source metadata backfill failed."
-    };
-  }
+  void input.workspaceDir;
+  return {
+    issue: input.issue,
+    status: "skipped",
+    action: "source_metadata_missing",
+    message: input.dryRun
+      ? `Dry run: source metadata.json for ${input.issue.paperKey} must be regenerated from acquisition or source metadata; summary.md is not used as a metadata source.`
+      : `Source metadata.json for ${input.issue.paperKey} must be regenerated from acquisition or source metadata; summary.md is not used as a metadata source.`
+  };
 }
 
 async function uniquePath(filePath: string): Promise<string> {

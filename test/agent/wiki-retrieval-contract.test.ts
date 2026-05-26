@@ -369,12 +369,7 @@ test("retrieval contract reads source evidence by key from summary and metadata"
   await withWorkspace("wiki-retrieval-source-", async (workspaceDir) => {
     const paperKey = "arxiv-2601.00003";
     await writeWorkspaceFile(workspaceDir, `knowledge-base/sources/${paperKey}/summary.md`, [
-      "---",
-      'type: "paper-source-summary"',
-      `paper_key: "${paperKey}"`,
-      "---",
-      "",
-      "# Legacy source summary",
+      "# Source summary",
       "",
       "This summary body is durable evidence text."
     ].join("\n"));

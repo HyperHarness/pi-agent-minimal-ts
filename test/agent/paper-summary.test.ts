@@ -111,7 +111,9 @@ test("generatePaperWikiSummary writes a wiki source through an injected summary 
     assert.match(receivedEvidence[0], /stabilizer measurements/);
     assert.equal(result.source?.sourcePath, "knowledge-base/sources/arxiv-2601.01002/summary.md");
     const markdown = await readFile(path.join(workspace, result.source!.sourcePath), "utf8");
-    assert.match(markdown, /paper-source-summary/);
+    assert.ok(markdown.startsWith("# "));
+    assert.doesNotMatch(markdown, /^---\n/);
+    assert.doesNotMatch(markdown, /paper-source-summary/);
     assert.match(markdown, /Repeated stabilizer measurements/);
     assert.match(markdown, /## Evidence Anchors/);
     assert.match(markdown, /chunk-0001/);

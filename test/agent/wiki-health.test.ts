@@ -1046,7 +1046,7 @@ test("checkWikiHealth reports source_metadata_artifact_missing for unsafe metada
   }
 });
 
-test("fixWikiHealth backfills source metadata from existing summaries", async () => {
+test("fixWikiHealth skips source metadata repair instead of backfilling from summaries", async () => {
   const workspace = await createWorkspace();
 
   try {
@@ -1076,76 +1076,49 @@ test("fixWikiHealth backfills source metadata from existing summaries", async ()
       figureOrCaptionCount: 0,
       warnings: []
     });
-    await writeText(path.join(workspace, "knowledge-base", "sources", "arxiv-2401.01000", "summary.md"), [
-      "---",
-      "type: \"paper-source-summary\"",
-      "paper_key: \"arxiv-2401.01000\"",
-      "title: \"Manifest backfill\"",
-      "created_at: \"2026-05-10T00:00:00.000Z\"",
-      "updated_at: \"2026-05-10T00:00:00.000Z\"",
-      "pdf_sha256: \"sha-backfill\"",
-      "raw_pdf: \"knowledge-base/raw/pdfs/arxiv-2401.01000.pdf\"",
-      "record: \"knowledge-base/sources/arxiv-2401.01000/acquisition.json\"",
-      "article_url: \"https://arxiv.org/abs/2401.01000\"",
-      "parse_engine: \"plain-text-baseline\"",
-      "parse_markdown: \"knowledge-base/sources/arxiv-2401.01000/parses/plain-text-baseline/document.md\"",
-      "parse_json: \"knowledge-base/sources/arxiv-2401.01000/parses/plain-text-baseline/parse.json\"",
-      "quality_json: \"knowledge-base/sources/arxiv-2401.01000/parses/plain-text-baseline/quality.json\"",
-      "tags:",
-      "  - \"manifest\"",
-      "related_papers: []",
-      "---",
-      "",
-      "# Metadata backfill",
-      ""
-    ].join("\n"));
+    await writeText(
+      path.join(workspace, "knowledge-base", "sources", "arxiv-2401.01000", "summary.md"),
+      "# Metadata backfill\n\nSummary body only.\n"
+    );
 
     const result = await fixWikiHealth({
       workspaceDir: workspace,
       issueKinds: ["source_metadata_missing"]
     });
 
-    assert.equal(result.fixed, 1);
-    const metadata = JSON.parse(await readFile(
+    assert.equal(result.fixed, 0);
+    assert.equal(result.skipped, 1);
+    assert.equal(result.results[0]?.status, "skipped");
+    assert.match(result.results[0]?.message ?? "", /metadata\.json .* must be regenerated from acquisition or source metadata/i);
+    await assert.rejects(readFile(
       path.join(workspace, "knowledge-base", "sources", "arxiv-2401.01000", "metadata.json"),
       "utf8"
     ));
-    assert.equal(metadata.sourceKey, "arxiv-2401.01000");
-    assert.equal(metadata.title, "Manifest backfill");
-    assert.equal(metadata.provenance.rawSha256, "sha-backfill");
-    assert.equal(metadata.artifacts[0].engine, "plain-text-baseline");
-    assert.deepEqual(metadata.tags, ["manifest"]);
   } finally {
     await rm(workspace, { recursive: true, force: true });
   }
 });
 
-test("fixWikiHealth backfills source metadata using requested source key over summary paper_key", async () => {
+test("fixWikiHealth does not create source metadata from summary-only source directories", async () => {
   const workspace = await createWorkspace();
 
   try {
-    await writeText(path.join(workspace, "knowledge-base", "sources", "source-a", "summary.md"), [
-      "---",
-      "type: \"paper-source-summary\"",
-      "paper_key: \"source-b\"",
-      "title: \"Mismatched summary key\"",
-      "---",
-      "",
-      "# Mismatched summary key",
-      ""
-    ].join("\n"));
+    await writeText(
+      path.join(workspace, "knowledge-base", "sources", "source-a", "summary.md"),
+      "# Mismatched summary key\n\nSummary body only.\n"
+    );
 
     const result = await fixWikiHealth({
       workspaceDir: workspace,
       issueKinds: ["source_metadata_missing"]
     });
 
-    assert.equal(result.fixed, 1);
-    const metadata = JSON.parse(await readFile(
+    assert.equal(result.fixed, 0);
+    assert.equal(result.skipped, 1);
+    await assert.rejects(readFile(
       path.join(workspace, "knowledge-base", "sources", "source-a", "metadata.json"),
       "utf8"
     ));
-    assert.equal(metadata.sourceKey, "source-a");
     await assert.rejects(readFile(
       path.join(workspace, "knowledge-base", "sources", "source-b", "metadata.json"),
       "utf8"

@@ -533,38 +533,13 @@ export async function writePaperWikiSource(input: PaperWikiSourceInput): Promise
   });
   await ensurePaperWikiScaffold(input.workspaceDir);
 
-  const markdown = `---
-type: "paper-source-summary"
-paper_key: ${quoteYaml(input.paperKey)}
-title: ${quoteYaml(title)}
-created_at: ${quoteYaml(now)}
-updated_at: ${quoteYaml(now)}
-pdf_sha256: ${quoteYaml(document.pdfSha256)}
-raw_pdf: ${quoteYaml(source?.pdfPath ? relativeToWorkspace(input.workspaceDir, source.pdfPath) : "")}
-record: ${quoteYaml(source?.recordPath ? relativeToWorkspace(input.workspaceDir, source.recordPath) : "")}
-article_url: ${quoteYaml(source?.articleUrl ?? "")}
-parse_engine: ${quoteYaml(engine)}
-parse_markdown: ${quoteYaml(relativeToWorkspace(input.workspaceDir, artifacts.markdownPath))}
-parse_json: ${quoteYaml(relativeToWorkspace(input.workspaceDir, artifacts.parsePath))}
-quality_json: ${quoteYaml(relativeToWorkspace(input.workspaceDir, artifacts.qualityPath))}
-tags: ${yamlList(input.tags)}
-related_papers: ${yamlList(input.relatedPaperKeys)}
----
-
-# ${title}
+  const markdown = `# ${title}
 
 ${summaryMarkdown}
 ${sectionList("Key Findings", input.keyFindings)}
 ${evidenceAnchorList(input.evidenceAnchors)}
 ${sectionList("Limitations", input.limitations)}
-${sectionList("Open Questions", input.openQuestions)}
-## Provenance
-
-- Paper key: \`${input.paperKey}\`
-- Parser: \`${engine}\`
-- PDF SHA-256: \`${document.pdfSha256}\`
-- Parsed markdown: \`${relativeToWorkspace(input.workspaceDir, artifacts.markdownPath)}\`
-`;
+${sectionList("Open Questions", input.openQuestions)}`;
 
   const previousMetadataResult = await readKnowledgeSourceMetadata({
     workspaceDir: input.workspaceDir,

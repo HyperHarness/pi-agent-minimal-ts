@@ -40,6 +40,7 @@ async function writeParsedPaper(workspace: string, input: {
     status: "ready",
     createdAt: "2026-05-26T00:00:00.000Z",
     updatedAt: "2026-05-26T00:00:00.000Z",
+    summaryPath: `knowledge-base/sources/${input.paperKey}/summary.md`,
     citation: {
       authors: ["Example Author"],
       year: 2026,
@@ -112,17 +113,26 @@ test("updatePaperWikiRelations writes related_papers into an existing summary", 
 
   try {
     const summaryPath = path.join(workspace, "knowledge-base", "sources", "aps-target", "summary.md");
-    await writeText(summaryPath, `---
-type: "paper-source-summary"
-paper_key: "aps-target"
-title: "Target"
-related_papers: []
----
-
-# Target
-
-Summary.
-`);
+    await writeText(summaryPath, "# Target\n\nSummary.\n");
+    await writeJson(path.join(workspace, "knowledge-base", "sources", "aps-target", "metadata.json"), {
+      schemaVersion: 1,
+      sourceKind: "paper",
+      sourceKey: "aps-target",
+      title: "Target",
+      status: "ready",
+      createdAt: "2026-05-26T00:00:00.000Z",
+      updatedAt: "2026-05-26T00:00:00.000Z",
+      summaryPath: "knowledge-base/sources/aps-target/summary.md",
+      citation: {
+        citationStatus: "complete",
+        missingFields: []
+      },
+      provenance: {},
+      artifacts: [],
+      tags: [],
+      relatedSourceKeys: [],
+      synthesisPageKeys: []
+    });
 
     const result = await updatePaperWikiRelations({
       workspaceDir: workspace,
@@ -134,8 +144,13 @@ Summary.
     assert.deepEqual(result.previousRelatedPaperKeys, []);
     assert.deepEqual(result.relatedPaperKeys, ["aps-related", "aps-second"]);
     const markdown = await readFile(summaryPath, "utf8");
-    assert.match(markdown, /updated_at: ".+?"/);
-    assert.match(markdown, /related_papers:\s*\n  - "aps-related"\n  - "aps-second"/);
+    assert.equal(markdown, "# Target\n\nSummary.\n");
+    const metadata = JSON.parse(await readFile(
+      path.join(workspace, "knowledge-base", "sources", "aps-target", "metadata.json"),
+      "utf8"
+    ));
+    assert.deepEqual(metadata.relatedSourceKeys, ["aps-related", "aps-second"]);
+    assert.notEqual(metadata.updatedAt, "2026-05-26T00:00:00.000Z");
     const log = await readFile(path.join(workspace, "knowledge-base", "log.md"), "utf8");
     assert.doesNotMatch(log, /relations \| aps-target/);
     assert.doesNotMatch(log, /aps-related/);

@@ -506,18 +506,14 @@ function auditScopeDriftFromDocuments(
 async function readSourceDocument(workspaceDir: string, filePath: string): Promise<WikiMaintenanceSourceDocument> {
   const parsed = parseMarkdown(await readFile(filePath, "utf8"));
   const fallbackKey = paperKeyFromPaperWikiSourcePath(filePath);
-  const paperKey = stringValue(parsed.frontmatter.paper_key) ?? stringValue(parsed.frontmatter.paperKey) ?? fallbackKey;
-  const title = stringValue(parsed.frontmatter.title) ?? paperKey;
   return {
-    paperKey,
-    title,
+    paperKey: fallbackKey,
+    title: headingTitle(parsed.body) ?? fallbackKey,
     path: relativeToWorkspace(workspaceDir, filePath),
-    tags: normalizeTags(listValue(parsed.frontmatter.tags)),
-    relatedPaperKeys: listValue(
-      parsed.frontmatter.related_papers ?? parsed.frontmatter.related_paper_keys ?? parsed.frontmatter.relatedPaperKeys
-    ).map((value) => sanitizeWikiFilename(value.toLowerCase())),
+    tags: [],
+    relatedPaperKeys: [],
     body: parsed.body,
-    frontmatter: parsed.frontmatter
+    frontmatter: {}
   };
 }
 
@@ -630,14 +626,9 @@ function mergeSourceDocuments(
       continue;
     }
     byPaperKey.set(source.paperKey, {
-      ...source,
-      title: source.title || metadata.title,
-      tags: normalizeTags([...source.tags, ...metadata.tags]),
-      relatedPaperKeys: normalizeTags([...source.relatedPaperKeys, ...metadata.relatedPaperKeys]),
-      frontmatter: {
-        ...metadata.frontmatter,
-        ...source.frontmatter
-      }
+      ...metadata,
+      path: source.path,
+      body: source.body
     });
   }
   return [...byPaperKey.values()].sort((left, right) => left.paperKey.localeCompare(right.paperKey));
