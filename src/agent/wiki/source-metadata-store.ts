@@ -1,6 +1,7 @@
 import { mkdir, readFile, writeFile } from "node:fs/promises";
 import path from "node:path";
 import {
+  getPaperWikiSourcePath,
   getPaperWikiSourcesDir,
   relativeToWorkspace,
   sanitizeWikiFilename
@@ -66,9 +67,12 @@ export interface KnowledgeSourceMetadata {
   summaryPath: string;
   citation: KnowledgeSourceCitation;
   provenance: {
+    acquisitionPath?: string;
     url?: string;
     doi?: string;
     arxivId?: string;
+    source?: string;
+    canonicalId?: string;
     recordPath?: string;
     rawPath?: string;
     rawSha256?: string;
@@ -153,9 +157,12 @@ const KNOWLEDGE_SOURCE_ARTIFACT_OPTIONAL_STRING_FIELDS = [
 ] as const;
 
 const KNOWLEDGE_SOURCE_PROVENANCE_OPTIONAL_STRING_FIELDS = [
+  "acquisitionPath",
   "url",
   "doi",
   "arxivId",
+  "source",
+  "canonicalId",
   "recordPath",
   "rawPath",
   "rawSha256",
@@ -309,4 +316,120 @@ function isKnowledgeSourceMetadata(value: unknown): value is KnowledgeSourceMeta
     isStringArray(value.relatedSourceKeys) &&
     isStringArray(value.synthesisPageKeys)
   );
+}
+
+function extractFrontmatter(markdown: string): string {
+  return markdown.match(/^---\n([\s\S]*?)\n---(?:\n|$)/)?.[1] ?? "";
+}
+
+function parseYamlString(raw: string | undefined): string | undefined {
+  const value = raw?.trim();
+  if (!value || value === "[]") {
+    return undefined;
+  }
+  try {
+    const parsed = JSON.parse(value);
+    return typeof parsed === "string" ? parsed : undefined;
+  } catch {
+    return value.replace(/^"|"$/g, "");
+  }
+}
+
+function readFrontmatterString(frontmatter: string, key: string): string | undefined {
+  const raw = frontmatter
+    .split("\n")
+    .find((line) => line.startsWith(`${key}:`))
+    ?.slice(key.length + 1);
+  return parseYamlString(raw);
+}
+
+function readFrontmatterList(frontmatter: string, key: string): string[] {
+  const lines = frontmatter.split("\n");
+  const start = lines.findIndex((line) => line.trim() === `${key}:`);
+  if (start < 0) {
+    const inline = lines.find((line) => line.startsWith(`${key}:`))?.slice(key.length + 1).trim();
+    if (!inline || inline === "[]") {
+      return [];
+    }
+    if (inline.startsWith("[") && inline.endsWith("]")) {
+      try {
+        const parsed = JSON.parse(inline);
+        return Array.isArray(parsed) ? parsed.filter((value): value is string => typeof value === "string") : [];
+      } catch {
+        return [];
+      }
+    }
+    const value = parseYamlString(inline);
+    return value ? [value] : [];
+  }
+
+  const values: string[] = [];
+  for (const line of lines.slice(start + 1)) {
+    if (/^\S/.test(line)) {
+      break;
+    }
+    const value = parseYamlString(line.match(/^\s*-\s+(.+)$/)?.[1]);
+    if (value) {
+      values.push(value);
+    }
+  }
+  return values;
+}
+
+export async function backfillKnowledgeSourceMetadataFromSummary(input: {
+  workspaceDir: string;
+  sourceKey: string;
+}): Promise<string> {
+  const sourceSummaryPath = getPaperWikiSourcePath(input.workspaceDir, input.sourceKey);
+  const markdown = await readFile(sourceSummaryPath, "utf8");
+  const frontmatter = extractFrontmatter(markdown);
+  const now = new Date().toISOString();
+  const sourceKey = readFrontmatterString(frontmatter, "paper_key") ?? input.sourceKey;
+  const title =
+    readFrontmatterString(frontmatter, "title") ??
+    markdown.match(/^#\s+(.+)$/m)?.[1]?.trim() ??
+    sourceKey;
+  const parseEngine = readFrontmatterString(frontmatter, "parse_engine");
+  const parseMarkdown = readFrontmatterString(frontmatter, "parse_markdown");
+  const parseJson = readFrontmatterString(frontmatter, "parse_json");
+  const qualityJson = readFrontmatterString(frontmatter, "quality_json");
+  const parsePath = parseMarkdown ?? parseJson ?? qualityJson;
+  const artifacts: KnowledgeSourceArtifact[] = parsePath
+    ? [{
+        kind: "parse",
+        path: parsePath,
+        ...(parseEngine ? { engine: parseEngine } : {}),
+        ...(parseMarkdown ? { markdownPath: parseMarkdown } : {}),
+        ...(parseJson ? { jsonPath: parseJson } : {}),
+        ...(qualityJson ? { qualityPath: qualityJson } : {})
+      }]
+    : [];
+
+  return writeKnowledgeSourceMetadata({
+    workspaceDir: input.workspaceDir,
+    metadata: {
+      schemaVersion: 1,
+      sourceKind: "paper",
+      sourceKey,
+      title,
+      status: (readFrontmatterString(frontmatter, "status") as KnowledgeSourceStatus | undefined) ?? "ready",
+      createdAt: readFrontmatterString(frontmatter, "created_at") ?? now,
+      updatedAt: readFrontmatterString(frontmatter, "updated_at") ?? now,
+      summaryPath: relativeToWorkspace(input.workspaceDir, sourceSummaryPath),
+      citation: {
+        citationStatus: "complete",
+        missingFields: []
+      },
+      provenance: {
+        ...(readFrontmatterString(frontmatter, "record") ? { acquisitionPath: readFrontmatterString(frontmatter, "record") } : {}),
+        ...(readFrontmatterString(frontmatter, "article_url") ? { url: readFrontmatterString(frontmatter, "article_url") } : {}),
+        ...(readFrontmatterString(frontmatter, "raw_pdf") ? { rawPath: readFrontmatterString(frontmatter, "raw_pdf") } : {}),
+        ...(readFrontmatterString(frontmatter, "pdf_sha256") ? { rawSha256: readFrontmatterString(frontmatter, "pdf_sha256") } : {})
+      },
+      artifacts,
+      tags: readFrontmatterList(frontmatter, "tags"),
+      relatedSourceKeys: readFrontmatterList(frontmatter, "related_papers"),
+      synthesisPageKeys: []
+    }
+  });
 }

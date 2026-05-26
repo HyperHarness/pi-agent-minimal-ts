@@ -191,6 +191,7 @@ test("checkWikiHealth excludes publisher news pages from paper parse health", as
       const sourceDir = path.join(workspace, "knowledge-base", "sources", source.paperKey);
       const parsedDir = path.join(sourceDir, "parses", "webpage");
       await writePaperMetadata(path.join(sourceDir, "metadata.json"), source);
+      await writeText(path.join(sourceDir, "summary.md"), `---\ntitle: "${source.title}"\n---\n\n# ${source.title}\n`);
       await writeText(path.join(parsedDir, "document.md"), `${source.title}\n\nShort news page.`);
       await writeJson(path.join(parsedDir, "parse.json"), {
         paperKey: source.paperKey,
@@ -227,7 +228,6 @@ test("wiki_health_fix quarantines APS institution site license non-paper sources
     const articleUrl = "https://journals.aps.org/aps-institution-site-license";
     const sourceDir = path.join(workspace, "knowledge-base", "sources", paperKey);
     const parseDir = path.join(sourceDir, "parses", "webpage");
-    const manifestPath = path.join(workspace, "knowledge-base", "manifests", `${paperKey}.json`);
     await writePaperMetadata(path.join(sourceDir, "metadata.json"), {
       paperKey,
       articleUrl,
@@ -253,26 +253,6 @@ test("wiki_health_fix quarantines APS institution site license non-paper sources
     });
     await writeText(path.join(sourceDir, "chunks", "webpage.jsonl"), "{\"id\":\"chunk-1\"}\n");
     await writeText(path.join(sourceDir, "summary.md"), "---\ntype: \"paper-source-summary\"\n---\n\nPolicy summary.\n");
-    await writeJson(manifestPath, {
-      schemaVersion: 1,
-      kind: "paper-source",
-      paperKey,
-      title: "APS Institution Site License",
-      status: "ready",
-      createdAt: "2026-05-26T08:50:53.895Z",
-      updatedAt: "2026-05-26T08:50:53.895Z",
-      sourceSummaryPath: `knowledge-base/sources/${paperKey}/summary.md`,
-      provenance: { articleUrl },
-      parse: {
-        engine: "webpage",
-        markdownPath: `knowledge-base/sources/${paperKey}/parses/webpage/document.md`,
-        jsonPath: `knowledge-base/sources/${paperKey}/parses/webpage/parse.json`,
-        qualityPath: `knowledge-base/sources/${paperKey}/parses/webpage/quality.json`
-      },
-      tags: ["license", "publisher-policy", "institutional-access", "aps"],
-      relatedPaperKeys: [],
-      synthesisPageKeys: []
-    });
 
     const checked = await checkWikiHealth({ workspaceDir: workspace });
 
@@ -288,7 +268,6 @@ test("wiki_health_fix quarantines APS institution site license non-paper sources
 
     assert.equal(fixed.fixed, 1);
     await assert.rejects(readFile(path.join(sourceDir, "metadata.json"), "utf8"));
-    await assert.rejects(readFile(manifestPath, "utf8"));
     const quarantinedSource = await readFile(
       path.join(workspace, "knowledge-base", "quarantine", "non-paper-sources", paperKey, "source", "metadata.json"),
       "utf8"
@@ -480,7 +459,7 @@ test("checkWikiHealth ignores source json without metadata json", async () => {
   }
 });
 
-test("checkWikiHealth excludes non-paper source manifests from paper repair issues", async () => {
+test("checkWikiHealth excludes non-paper source metadata from paper repair issues", async () => {
   const workspace = await createWorkspace();
 
   try {
@@ -497,8 +476,8 @@ test("checkWikiHealth excludes non-paper source manifests from paper repair issu
       path.join(workspace, "design-repo", "design-artifacts", "single-xmon-concept", "code", "layout.py"),
       "print('layout')\n"
     );
-    await writeJson(path.join(workspace, "knowledge-base", "manifests", `${sourceKey}.json`), {
-      schemaVersion: 2,
+    await writeJson(path.join(workspace, "knowledge-base", "sources", sourceKey, "metadata.json"), {
+      schemaVersion: 1,
       sourceKind: "code-output",
       sourceKey,
       title: "Single Xmon Concept Layout",
@@ -508,6 +487,10 @@ test("checkWikiHealth excludes non-paper source manifests from paper repair issu
       summaryPath: `knowledge-base/sources/${sourceKey}/summary.md`,
       provenance: {
         recordPath: "design-repo/design-artifacts/single-xmon-concept/README.md"
+      },
+      citation: {
+        citationStatus: "complete",
+        missingFields: []
       },
       artifacts: [{
         kind: "script",
@@ -523,7 +506,7 @@ test("checkWikiHealth excludes non-paper source manifests from paper repair issu
     assert.equal(result.totalPapers, 0);
     assert.equal(result.summary.needs_download, 0);
     assert.equal(result.summary.citation_incomplete, 0);
-    assert.equal(result.summary.source_manifest_artifact_missing, 0);
+    assert.equal(result.summary.source_metadata_artifact_missing, 0);
     assert.ok(!result.issues.some((issue) => issue.paperKey === sourceKey));
   } finally {
     await rm(workspace, { recursive: true, force: true });
@@ -535,7 +518,7 @@ test("checkWikiHealth initializes typed wiki page summary counts", async () => {
   try {
     const result = await checkWikiHealth({ workspaceDir: workspace });
 
-    assert.equal(result.summary.source_manifest_artifact_missing, 0);
+    assert.equal(result.summary.source_metadata_artifact_missing, 0);
     assert.equal(result.summary.wiki_page_malformed, 0);
     assert.equal(result.summary.wiki_page_evidence_weak, 0);
     assert.equal(result.summary.wiki_operation_interrupted, 0);
@@ -705,7 +688,7 @@ test("checkWikiHealth reports mixed typed diagnostics as malformed", async () =>
   }
 });
 
-test("checkWikiHealth reports source summaries without manifests", async () => {
+test("checkWikiHealth reports source summaries without metadata", async () => {
   const workspace = await createWorkspace();
 
   try {
@@ -721,15 +704,8 @@ test("checkWikiHealth reports source summaries without manifests", async () => {
       pdfUrl: "https://arxiv.org/pdf/2401.00999.pdf",
       downloadPath: pdfPath
     });
-    await writePaperMetadata(path.join(workspace, "knowledge-base", "sources", "arxiv-2401.00999", "metadata.json"), {
-      paperKey: "arxiv-2401.00999",
-      source: "arxiv",
-      canonicalId: "2401.00999",
-      articleUrl: "https://arxiv.org/abs/2401.00999",
-      pdfPath
-    });
     const parsedDir = path.join(workspace, "knowledge-base", "sources", "arxiv-2401.00999", "parses", "plain-text-baseline");
-    await writeText(path.join(parsedDir, "document.md"), "A complete parse about wiki manifests.");
+    await writeText(path.join(parsedDir, "document.md"), "A complete parse about wiki metadata.");
     await writeJson(path.join(parsedDir, "parse.json"), { paperKey: "arxiv-2401.00999", engine: "plain-text-baseline" });
     await writeJson(path.join(parsedDir, "quality.json"), {
       status: "good",
@@ -746,59 +722,87 @@ test("checkWikiHealth reports source summaries without manifests", async () => {
       "---",
       "type: \"paper-source-summary\"",
       "paper_key: \"arxiv-2401.00999\"",
-      "title: \"Manifest gap\"",
+      "title: \"Metadata gap\"",
       "---",
       "",
-      "# Manifest gap",
+      "# Metadata gap",
       ""
     ].join("\n"));
 
     const result = await checkWikiHealth({ workspaceDir: workspace });
 
-    assert.equal(result.summary.source_manifest_missing, 1);
-    assert.ok(result.issues.some((issue) =>
-      issue.kind === "source_manifest_missing" &&
-      issue.paperKey === "arxiv-2401.00999"
-    ));
+    assert.equal(result.summary.source_metadata_missing, 1);
+    const issue = result.issues.find((candidate) =>
+      candidate.kind === "source_metadata_missing" &&
+      candidate.paperKey === "arxiv-2401.00999"
+    );
+    assert.ok(issue);
+    assert.equal(issue.path, "knowledge-base/sources/arxiv-2401.00999/metadata.json");
   } finally {
     await rm(workspace, { recursive: true, force: true });
   }
 });
 
-test("checkWikiHealth reports source_manifest_artifact_missing for manifest paths", async () => {
+test("checkWikiHealth reports source_metadata_malformed for invalid metadata json", async () => {
+  const workspace = await createWorkspace();
+
+  try {
+    const sourceKey = "arxiv-2601.malformed";
+    await writeText(path.join(workspace, "knowledge-base", "sources", sourceKey, "metadata.json"), "{not json");
+
+    const result = await checkWikiHealth({ workspaceDir: workspace });
+
+    assert.equal(result.summary.source_metadata_malformed, 1);
+    const issue = result.issues.find((candidate) =>
+      candidate.kind === "source_metadata_malformed" &&
+      candidate.paperKey === sourceKey
+    );
+    assert.ok(issue);
+    assert.equal(issue.path, `knowledge-base/sources/${sourceKey}/metadata.json`);
+  } finally {
+    await rm(workspace, { recursive: true, force: true });
+  }
+});
+
+test("checkWikiHealth reports source_metadata_artifact_missing for metadata paths", async () => {
   const workspace = await createWorkspace();
 
   try {
     const paperKey = "arxiv-2601.00042";
-    await writeJson(path.join(workspace, "knowledge-base", "manifests", `${paperKey}.json`), {
+    await writeJson(path.join(workspace, "knowledge-base", "sources", paperKey, "metadata.json"), {
       schemaVersion: 1,
-      kind: "paper-source",
-      paperKey,
+      sourceKind: "paper",
+      sourceKey: paperKey,
       title: "Missing manifest artifacts",
       status: "ready",
       createdAt: "2026-05-10T00:00:00.000Z",
       updatedAt: "2026-05-10T00:00:00.000Z",
-      sourceSummaryPath: `knowledge-base/sources/${paperKey}/summary.md`,
-      provenance: {
-        rawPdfPath: `knowledge-base/raw/pdfs/${paperKey}.pdf`
+      summaryPath: `knowledge-base/sources/${paperKey}/summary.md`,
+      citation: {
+        citationStatus: "complete",
+        missingFields: []
       },
-      parse: {
-        engine: "plain-text-baseline",
+      provenance: {
+        acquisitionPath: `knowledge-base/sources/${paperKey}/acquisition.json`,
+        rawPath: `knowledge-base/raw/pdfs/${paperKey}.pdf`
+      },
+      artifacts: [{
+        kind: "parse",
+        path: `knowledge-base/sources/${paperKey}/parses/plain-text-baseline/document.md`,
         markdownPath: `knowledge-base/sources/${paperKey}/parses/plain-text-baseline/document.md`,
         jsonPath: `knowledge-base/sources/${paperKey}/parses/plain-text-baseline/parse.json`,
         qualityPath: `knowledge-base/sources/${paperKey}/parses/plain-text-baseline/quality.json`
-      },
+      }],
       tags: ["manifest-health"],
-      relatedPaperKeys: [],
+      relatedSourceKeys: [],
       synthesisPageKeys: []
     });
-    await writeText(path.join(workspace, "knowledge-base", "manifests", "malformed.json"), "{not json");
 
     const result = await checkWikiHealth({ workspaceDir: workspace });
 
-    assert.equal(result.summary.source_manifest_artifact_missing, 1);
+    assert.equal(result.summary.source_metadata_artifact_missing, 1);
     assert.ok(result.issues.some((issue) =>
-      issue.kind === "source_manifest_artifact_missing" &&
+      issue.kind === "source_metadata_artifact_missing" &&
       issue.paperKey === paperKey
     ));
   } finally {
@@ -806,7 +810,7 @@ test("checkWikiHealth reports source_manifest_artifact_missing for manifest path
   }
 });
 
-test("checkWikiHealth reports source_manifest_artifact_missing for V2 manifest paths", async () => {
+test("checkWikiHealth reports source_metadata_artifact_missing for metadata artifact paths", async () => {
   const workspace = await createWorkspace();
 
   try {
@@ -815,8 +819,8 @@ test("checkWikiHealth reports source_manifest_artifact_missing for V2 manifest p
       path.join(workspace, "knowledge-base", "sources", sourceKey, "summary.md"),
       "# Sapphire permittivity\n\nMaterial parameter evidence."
     );
-    await writeJson(path.join(workspace, "knowledge-base", "manifests", `${sourceKey}.json`), {
-      schemaVersion: 2,
+    await writeJson(path.join(workspace, "knowledge-base", "sources", sourceKey, "metadata.json"), {
+      schemaVersion: 1,
       sourceKind: "material-database",
       sourceKey,
       title: "Sapphire permittivity values",
@@ -825,8 +829,12 @@ test("checkWikiHealth reports source_manifest_artifact_missing for V2 manifest p
       updatedAt: "2026-05-14T00:00:00.000Z",
       summaryPath: `knowledge-base/sources/${sourceKey}/summary.md`,
       provenance: {
-        recordPath: `knowledge-base/records/${sourceKey}.json`,
+        acquisitionPath: `knowledge-base/records/${sourceKey}.json`,
         rawPath: `knowledge-base/sources/${sourceKey}/raw/snapshot.html`
+      },
+      citation: {
+        citationStatus: "complete",
+        missingFields: []
       },
       artifacts: [
         {
@@ -842,9 +850,9 @@ test("checkWikiHealth reports source_manifest_artifact_missing for V2 manifest p
 
     const result = await checkWikiHealth({ workspaceDir: workspace });
 
-    assert.equal(result.summary.source_manifest_artifact_missing, 1);
+    assert.equal(result.summary.source_metadata_artifact_missing, 1);
     const issue = result.issues.find((candidate) =>
-      candidate.kind === "source_manifest_artifact_missing" &&
+      candidate.kind === "source_metadata_artifact_missing" &&
       candidate.paperKey === sourceKey
     );
     assert.ok(issue);
@@ -856,7 +864,7 @@ test("checkWikiHealth reports source_manifest_artifact_missing for V2 manifest p
   }
 });
 
-test("checkWikiHealth reports source_manifest_artifact_missing for unsafe manifest paths", async () => {
+test("checkWikiHealth reports source_metadata_artifact_missing for unsafe metadata paths", async () => {
   const workspace = await createWorkspace();
   const outside = await createWorkspace();
 
@@ -868,57 +876,49 @@ test("checkWikiHealth reports source_manifest_artifact_missing for unsafe manife
     await writeText(outsideAbsolutePath, "outside absolute file exists");
     await writeText(outsideTraversalPath, "outside traversal file exists");
 
-    await writeJson(path.join(workspace, "knowledge-base", "manifests", `${absolutePaperKey}.json`), {
+    await writeJson(path.join(workspace, "knowledge-base", "sources", absolutePaperKey, "metadata.json"), {
       schemaVersion: 1,
-      kind: "paper-source",
-      paperKey: absolutePaperKey,
+      sourceKind: "paper",
+      sourceKey: absolutePaperKey,
       title: "Absolute manifest path",
       status: "ready",
       createdAt: "2026-05-10T00:00:00.000Z",
       updatedAt: "2026-05-10T00:00:00.000Z",
-      sourceSummaryPath: outsideAbsolutePath,
+      summaryPath: outsideAbsolutePath,
+      citation: { citationStatus: "complete", missingFields: [] },
       provenance: {},
-      parse: {
-        engine: "plain-text-baseline",
-        markdownPath: "knowledge-base/sources/arxiv-2601.absolute/parses/plain-text-baseline/document.md",
-        jsonPath: "knowledge-base/sources/arxiv-2601.absolute/parses/plain-text-baseline/parse.json",
-        qualityPath: "knowledge-base/sources/arxiv-2601.absolute/parses/plain-text-baseline/quality.json"
-      },
+      artifacts: [],
       tags: [],
-      relatedPaperKeys: [],
+      relatedSourceKeys: [],
       synthesisPageKeys: []
     });
-    await writeJson(path.join(workspace, "knowledge-base", "manifests", `${traversalPaperKey}.json`), {
+    await writeJson(path.join(workspace, "knowledge-base", "sources", traversalPaperKey, "metadata.json"), {
       schemaVersion: 1,
-      kind: "paper-source",
-      paperKey: traversalPaperKey,
+      sourceKind: "paper",
+      sourceKey: traversalPaperKey,
       title: "Traversal manifest path",
       status: "ready",
       createdAt: "2026-05-10T00:00:00.000Z",
       updatedAt: "2026-05-10T00:00:00.000Z",
-      sourceSummaryPath: "../outside-summary.md",
+      summaryPath: "../outside-summary.md",
+      citation: { citationStatus: "complete", missingFields: [] },
       provenance: {},
-      parse: {
-        engine: "plain-text-baseline",
-        markdownPath: "knowledge-base/sources/arxiv-2601-traversal/parses/plain-text-baseline/document.md",
-        jsonPath: "knowledge-base/sources/arxiv-2601-traversal/parses/plain-text-baseline/parse.json",
-        qualityPath: "knowledge-base/sources/arxiv-2601-traversal/parses/plain-text-baseline/quality.json"
-      },
+      artifacts: [],
       tags: [],
-      relatedPaperKeys: [],
+      relatedSourceKeys: [],
       synthesisPageKeys: []
     });
 
     const result = await checkWikiHealth({ workspaceDir: workspace });
 
-    assert.ok(result.summary.source_manifest_artifact_missing >= 2);
+    assert.ok(result.summary.source_metadata_artifact_missing >= 2);
     assert.ok(result.issues.some((issue) =>
-      issue.kind === "source_manifest_artifact_missing" &&
+      issue.kind === "source_metadata_artifact_missing" &&
       issue.paperKey === absolutePaperKey &&
       issue.reason.includes("workspace-relative")
     ));
     assert.ok(result.issues.some((issue) =>
-      issue.kind === "source_manifest_artifact_missing" &&
+      issue.kind === "source_metadata_artifact_missing" &&
       issue.paperKey === traversalPaperKey &&
       issue.reason.includes("workspace-relative")
     ));
@@ -928,7 +928,7 @@ test("checkWikiHealth reports source_manifest_artifact_missing for unsafe manife
   }
 });
 
-test("fixWikiHealth backfills source manifests from existing summaries", async () => {
+test("fixWikiHealth backfills source metadata from existing summaries", async () => {
   const workspace = await createWorkspace();
 
   try {
@@ -944,15 +944,8 @@ test("fixWikiHealth backfills source manifests from existing summaries", async (
       pdfUrl: "https://arxiv.org/pdf/2401.01000.pdf",
       downloadPath: pdfPath
     });
-    await writePaperMetadata(path.join(workspace, "knowledge-base", "sources", "arxiv-2401.01000", "metadata.json"), {
-      paperKey: "arxiv-2401.01000",
-      source: "arxiv",
-      canonicalId: "2401.01000",
-      articleUrl: "https://arxiv.org/abs/2401.01000",
-      pdfPath
-    });
     const parsedDir = path.join(workspace, "knowledge-base", "sources", "arxiv-2401.01000", "parses", "plain-text-baseline");
-    await writeText(path.join(parsedDir, "document.md"), "A complete parse about manifest backfill.");
+    await writeText(path.join(parsedDir, "document.md"), "A complete parse about metadata backfill.");
     await writeJson(path.join(parsedDir, "parse.json"), { paperKey: "arxiv-2401.01000", engine: "plain-text-baseline" });
     await writeJson(path.join(parsedDir, "quality.json"), {
       status: "good",
@@ -985,25 +978,25 @@ test("fixWikiHealth backfills source manifests from existing summaries", async (
       "related_papers: []",
       "---",
       "",
-      "# Manifest backfill",
+      "# Metadata backfill",
       ""
     ].join("\n"));
 
     const result = await fixWikiHealth({
       workspaceDir: workspace,
-      issueKinds: ["source_manifest_missing"]
+      issueKinds: ["source_metadata_missing"]
     });
 
     assert.equal(result.fixed, 1);
-    const manifest = JSON.parse(await readFile(
-      path.join(workspace, "knowledge-base", "manifests", "arxiv-2401.01000.json"),
+    const metadata = JSON.parse(await readFile(
+      path.join(workspace, "knowledge-base", "sources", "arxiv-2401.01000", "metadata.json"),
       "utf8"
     ));
-    assert.equal(manifest.paperKey, "arxiv-2401.01000");
-    assert.equal(manifest.title, "Manifest backfill");
-    assert.equal(manifest.provenance.pdfSha256, "sha-backfill");
-    assert.equal(manifest.parse.engine, "plain-text-baseline");
-    assert.deepEqual(manifest.tags, ["manifest"]);
+    assert.equal(metadata.sourceKey, "arxiv-2401.01000");
+    assert.equal(metadata.title, "Manifest backfill");
+    assert.equal(metadata.provenance.rawSha256, "sha-backfill");
+    assert.equal(metadata.artifacts[0].engine, "plain-text-baseline");
+    assert.deepEqual(metadata.tags, ["manifest"]);
   } finally {
     await rm(workspace, { recursive: true, force: true });
   }
@@ -1490,6 +1483,27 @@ test("checkWikiHealth treats publisher accepted-paper arXiv fallback records as 
       source: "aps",
       canonicalId: "10.1103/k3d5-v43c"
     });
+    await writeJson(path.join(legacyPaperDir, "acquisition.json"), {
+      source: "aps",
+      articleUrl: "https://journals.aps.org/prapplied/accepted/10.1103/k3d5-v43c",
+      recordedAt: "2026-04-28T04:01:30.000Z",
+      handlingMethod: "arxiv_preprint_fallback",
+      status: "preprint_fallback",
+      canonicalId: "10.1103/k3d5-v43c",
+      title: "Superconducting qubits in the millions: The potential and limitations of modularity",
+      preprint: {
+        source: "arxiv",
+        canonicalId: "2601.01234",
+        articleUrl: "https://arxiv.org/abs/2601.01234",
+        recordPath: arxivRecordPath,
+        downloadPath: arxivPdfPath,
+        status: "downloaded"
+      }
+    });
+    await writeText(
+      path.join(legacyPaperDir, "summary.md"),
+      "---\ntitle: \"Superconducting qubits in the millions: The potential and limitations of modularity\"\n---\n\n# Superconducting qubits in the millions\n"
+    );
     await writeText(path.join(legacyPaperDir, "parses", "webpage", "document.md"), "Accepted paper abstract.");
     await writeJson(path.join(legacyPaperDir, "parses", "webpage", "quality.json"), {
       status: "poor",
@@ -1670,6 +1684,19 @@ test("checkWikiHealth treats accepted publisher-pending records as non-actionabl
       source: "aps",
       canonicalId: "10.1103/rp4w-3n7l"
     });
+    await writeJson(path.join(legacyPaperDir, "acquisition.json"), {
+      source: "aps",
+      articleUrl: "https://journals.aps.org/prapplied/accepted/10.1103/rp4w-3n7l",
+      recordedAt: "2026-04-28T04:01:30.000Z",
+      handlingMethod: "accepted_paper",
+      status: "publisher_pending",
+      canonicalId: "10.1103/rp4w-3n7l",
+      title: "Design and application of N[3]CZ: A controlled-Z gate between next-nearest-neighbor superconducting qubits"
+    });
+    await writeText(
+      path.join(legacyPaperDir, "summary.md"),
+      "---\ntitle: \"Design and application of N[3]CZ: A controlled-Z gate between next-nearest-neighbor superconducting qubits\"\n---\n\n# Design and application of N3CZ\n"
+    );
     await writeText(path.join(legacyPaperDir, "parses", "webpage", "document.md"), "Accepted paper abstract.");
     await writeJson(path.join(legacyPaperDir, "parses", "webpage", "quality.json"), {
       status: "needs_hybrid",

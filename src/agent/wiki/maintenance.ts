@@ -1,7 +1,7 @@
 import { access, readdir, readFile } from "node:fs/promises";
 import path from "node:path";
 import {
-  getPaperWikiManifestsDir,
+  getPaperWikiSourcesDir,
   getPaperWikiSourcePath,
   listPaperWikiPageFiles,
   listPaperWikiSourceFiles,
@@ -9,6 +9,10 @@ import {
   relativeToWorkspace,
   sanitizeWikiFilename
 } from "./store.js";
+import {
+  getKnowledgeSourceMetadataPath,
+  readKnowledgeSourceMetadata
+} from "./source-metadata-store.js";
 
 export interface WikiMaintenanceSourceCitation {
   paperKey: string;
@@ -168,29 +172,29 @@ type ParsedMarkdown = {
   body: string;
 };
 
-interface SourceManifestReadiness {
+interface SourceMetadataReadiness {
   sourceKey: string;
   ready: boolean;
 }
 
 export async function readWikiMaintenanceDocuments(workspaceDir: string): Promise<WikiMaintenanceDocuments> {
-  const [sourceFiles, manifestFiles, pageFiles] = await Promise.all([
+  const [sourceFiles, metadataFiles, pageFiles] = await Promise.all([
     listPaperWikiSourceFiles(workspaceDir),
-    listSourceManifestFiles(workspaceDir),
+    listSourceMetadataFiles(workspaceDir),
     listPaperWikiPageFiles(workspaceDir)
   ]);
 
-  const [summarySources, manifestSources, manifestReadiness] = await Promise.all([
+  const [summarySources, metadataSources, metadataReadiness] = await Promise.all([
     Promise.all(sourceFiles.map((filePath) => readSourceDocument(workspaceDir, filePath))),
-    Promise.all(manifestFiles.map((filePath) => readSourceManifestDocument(workspaceDir, filePath))),
-    Promise.all(manifestFiles.map((filePath) => readSourceManifestReadiness(filePath)))
+    Promise.all(metadataFiles.map((filePath) => readSourceMetadataDocument(workspaceDir, filePath))),
+    Promise.all(metadataFiles.map((filePath) => readSourceMetadataReadiness(workspaceDir, filePath)))
   ]);
-  const nonReadyManifestKeys = new Set(manifestReadiness
-    .filter((source): source is SourceManifestReadiness => source !== undefined)
+  const nonReadyMetadataKeys = new Set(metadataReadiness
+    .filter((source): source is SourceMetadataReadiness => source !== undefined)
     .filter((source) => !source.ready)
     .map((source) => source.sourceKey));
-  const sources = mergeSourceDocuments(summarySources, manifestSources.filter((source): source is WikiMaintenanceSourceDocument => Boolean(source)))
-    .filter((source) => !nonReadyManifestKeys.has(source.paperKey));
+  const sources = mergeSourceDocuments(summarySources, metadataSources.filter((source): source is WikiMaintenanceSourceDocument => Boolean(source)))
+    .filter((source) => !nonReadyMetadataKeys.has(source.paperKey));
   const pages = (await Promise.all(pageFiles.map((filePath) => readPageDocument(workspaceDir, filePath))))
     .map((page) => addInlineSourceCitations(page, sources));
   return { workspaceDir, sources, pages };
@@ -517,13 +521,13 @@ async function readSourceDocument(workspaceDir: string, filePath: string): Promi
   };
 }
 
-async function listSourceManifestFiles(workspaceDir: string): Promise<string[]> {
+async function listSourceMetadataFiles(workspaceDir: string): Promise<string[]> {
   try {
-    const manifestsDir = getPaperWikiManifestsDir(workspaceDir);
-    const entries = await readdir(manifestsDir, { withFileTypes: true });
+    const sourcesDir = getPaperWikiSourcesDir(workspaceDir);
+    const entries = await readdir(sourcesDir, { withFileTypes: true });
     return entries
-      .filter((entry) => entry.isFile() && entry.name.endsWith(".json"))
-      .map((entry) => path.join(manifestsDir, entry.name))
+      .filter((entry) => entry.isDirectory())
+      .map((entry) => getKnowledgeSourceMetadataPath(workspaceDir, entry.name))
       .sort((left, right) => left.localeCompare(right));
   } catch {
     return [];
@@ -539,7 +543,7 @@ async function pathExists(filePath: string): Promise<boolean> {
   }
 }
 
-function safeManifestWorkspaceRelativePath(workspaceDir: string, value: unknown): string | undefined {
+function safeMetadataWorkspaceRelativePath(workspaceDir: string, value: unknown): string | undefined {
   if (typeof value !== "string" || value.trim().length === 0) {
     return undefined;
   }
@@ -555,88 +559,83 @@ function safeManifestWorkspaceRelativePath(workspaceDir: string, value: unknown)
   return relativeToWorkspace(workspaceDir, absolutePath);
 }
 
-async function readSourceManifestDocument(
+async function readSourceMetadataDocument(
   workspaceDir: string,
   filePath: string
 ): Promise<WikiMaintenanceSourceDocument | undefined> {
-  let manifest: unknown;
-  try {
-    manifest = JSON.parse(await readFile(filePath, "utf8"));
-  } catch {
+  const sourceKey = path.basename(path.dirname(filePath));
+  const summaryPath = getPaperWikiSourcePath(workspaceDir, sourceKey);
+  const summaryRelativePath = await pathExists(summaryPath)
+    ? relativeToWorkspace(workspaceDir, summaryPath)
+    : undefined;
+  const result = await readKnowledgeSourceMetadata({
+    workspaceDir,
+    sourceKey,
+    ...(summaryRelativePath ? { summaryPath: summaryRelativePath } : {})
+  });
+  if (result.status !== "ready" || result.metadata.status !== "ready") {
     return undefined;
   }
-  if (!manifest || typeof manifest !== "object") {
-    return undefined;
-  }
-  const record = manifest as Record<string, unknown>;
-  if (stringValue(record.status) !== "ready") {
-    return undefined;
-  }
-  const paperKey = stringValue(record.paperKey) ?? stringValue(record.paper_key) ?? path.basename(filePath, ".json");
-  const fallbackSourceSummaryPath = getPaperWikiSourcePath(workspaceDir, paperKey);
+  const metadata = result.metadata;
+  const fallbackSourceSummaryPath = getPaperWikiSourcePath(workspaceDir, metadata.sourceKey);
   const sourceSummaryPath =
-    safeManifestWorkspaceRelativePath(workspaceDir, record.sourceSummaryPath) ??
+    safeMetadataWorkspaceRelativePath(workspaceDir, metadata.summaryPath) ??
     (await pathExists(fallbackSourceSummaryPath) ? relativeToWorkspace(workspaceDir, fallbackSourceSummaryPath) : undefined);
   if (!sourceSummaryPath) {
     return undefined;
   }
   return {
-    paperKey,
-    title: stringValue(record.title) ?? paperKey,
+    paperKey: metadata.sourceKey,
+    title: metadata.title,
     path: sourceSummaryPath,
-    tags: normalizeTags(listValue(record.tags)),
-    relatedPaperKeys: listValue(record.relatedPaperKeys ?? record.related_papers).map((value) =>
+    tags: normalizeTags(metadata.tags),
+    relatedPaperKeys: metadata.relatedSourceKeys.map((value) =>
       sanitizeWikiFilename(value.toLowerCase())
     ),
     body: "",
-    frontmatter: record
+    frontmatter: metadata as unknown as Record<string, unknown>
   };
 }
 
-async function readSourceManifestReadiness(filePath: string): Promise<SourceManifestReadiness | undefined> {
-  let manifest: unknown;
-  try {
-    manifest = JSON.parse(await readFile(filePath, "utf8"));
-  } catch {
+async function readSourceMetadataReadiness(
+  workspaceDir: string,
+  filePath: string
+): Promise<SourceMetadataReadiness | undefined> {
+  const sourceKey = path.basename(path.dirname(filePath));
+  const result = await readKnowledgeSourceMetadata({
+    workspaceDir,
+    sourceKey
+  });
+  if (result.status !== "ready") {
     return undefined;
   }
-  if (!manifest || typeof manifest !== "object") {
-    return undefined;
-  }
-  const record = manifest as Record<string, unknown>;
-  const sourceKey =
-    stringValue(record.sourceKey) ??
-    stringValue(record.paperKey) ??
-    stringValue(record.paper_key) ??
-    path.basename(filePath, ".json");
-  const status = stringValue(record.status);
   return {
-    sourceKey,
-    ready: status === "ready"
+    sourceKey: result.metadata.sourceKey,
+    ready: result.metadata.status === "ready"
   };
 }
 
 function mergeSourceDocuments(
   summarySources: WikiMaintenanceSourceDocument[],
-  manifestSources: WikiMaintenanceSourceDocument[]
+  metadataSources: WikiMaintenanceSourceDocument[]
 ): WikiMaintenanceSourceDocument[] {
   const byPaperKey = new Map<string, WikiMaintenanceSourceDocument>();
-  for (const source of manifestSources) {
+  for (const source of metadataSources) {
     byPaperKey.set(source.paperKey, source);
   }
   for (const source of summarySources) {
-    const manifest = byPaperKey.get(source.paperKey);
-    if (!manifest) {
+    const metadata = byPaperKey.get(source.paperKey);
+    if (!metadata) {
       byPaperKey.set(source.paperKey, source);
       continue;
     }
     byPaperKey.set(source.paperKey, {
       ...source,
-      title: source.title || manifest.title,
-      tags: normalizeTags([...source.tags, ...manifest.tags]),
-      relatedPaperKeys: normalizeTags([...source.relatedPaperKeys, ...manifest.relatedPaperKeys]),
+      title: source.title || metadata.title,
+      tags: normalizeTags([...source.tags, ...metadata.tags]),
+      relatedPaperKeys: normalizeTags([...source.relatedPaperKeys, ...metadata.relatedPaperKeys]),
       frontmatter: {
-        ...manifest.frontmatter,
+        ...metadata.frontmatter,
         ...source.frontmatter
       }
     });

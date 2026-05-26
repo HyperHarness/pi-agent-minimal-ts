@@ -26,16 +26,8 @@ export function getPaperWikiAssetsDir(workspaceDir: string): string {
   return resolveWikiWorkspaceContract(workspaceDir).roots.assets.absolutePath;
 }
 
-export function getPaperWikiManifestsDir(workspaceDir: string): string {
-  return path.join(getPaperWikiDir(workspaceDir), "manifests");
-}
-
 export function getPaperWikiStateDir(workspaceDir: string): string {
   return resolveWikiWorkspaceContract(workspaceDir).roots.runtimeState.absolutePath;
-}
-
-export function getPaperWikiSourceManifestPath(workspaceDir: string, paperKey: string): string {
-  return path.join(getPaperWikiManifestsDir(workspaceDir), `${sanitizeWikiFilename(paperKey)}.json`);
 }
 
 export function getKnowledgeSourceMetadataPath(workspaceDir: string, sourceKey: string): string {
@@ -160,7 +152,6 @@ export async function ensurePaperWikiScaffold(workspaceDir: string): Promise<voi
     mkdir(getPaperWikiSourcesDir(workspaceDir), { recursive: true }),
     mkdir(getPaperWikiPagesDir(workspaceDir), { recursive: true }),
     mkdir(getPaperWikiAssetsDir(workspaceDir), { recursive: true }),
-    mkdir(getPaperWikiManifestsDir(workspaceDir), { recursive: true }),
     mkdir(getPaperWikiStateDir(workspaceDir), { recursive: true })
   ]);
 

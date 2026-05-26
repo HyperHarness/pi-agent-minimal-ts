@@ -10,12 +10,15 @@ import {
   type PaperSummaryProgress,
   type PaperSummaryWorker
 } from "./summary.js";
-import { backfillWikiSourceManifestFromSummary } from "./manifest-store.js";
 import {
-  getPaperWikiManifestsDir,
-  getPaperWikiSourceManifestPath,
+  getPaperWikiSourcesDir,
   relativeToWorkspace
 } from "./store.js";
+import {
+  backfillKnowledgeSourceMetadataFromSummary,
+  getKnowledgeSourceMetadataPath,
+  readKnowledgeSourceMetadata
+} from "./source-metadata-store.js";
 import { readWikiOperationEvents } from "./journal.js";
 import { listTypedWikiPages, type WikiPageDiagnostic } from "./typed-store.js";
 import {
@@ -46,8 +49,9 @@ export type WikiHealthIssueKind =
   | "low_quality"
   | "summary_missing"
   | "non_paper_source"
-  | "source_manifest_missing"
-  | "source_manifest_artifact_missing"
+  | "source_metadata_missing"
+  | "source_metadata_artifact_missing"
+  | "source_metadata_malformed"
   | "missing_artifact"
   | "download_blocked"
   | "citation_incomplete"
@@ -182,8 +186,9 @@ const ISSUE_KINDS: WikiHealthIssueKind[] = [
   "low_quality",
   "summary_missing",
   "non_paper_source",
-  "source_manifest_missing",
-  "source_manifest_artifact_missing",
+  "source_metadata_missing",
+  "source_metadata_artifact_missing",
+  "source_metadata_malformed",
   "missing_artifact",
   "download_blocked",
   "citation_incomplete",
@@ -254,21 +259,12 @@ async function readRecord(workspaceDir: string, entry: LocalPaperEntry): Promise
   }
 }
 
-async function entryHasNonPaperSourceManifest(workspaceDir: string, entry: LocalPaperEntry): Promise<boolean> {
-  const manifestPath = getPaperWikiSourceManifestPath(workspaceDir, entry.paperKey);
-  let manifest: unknown;
-  try {
-    manifest = JSON.parse(await readFile(manifestPath, "utf8"));
-  } catch {
-    return false;
-  }
-  if (!manifest || typeof manifest !== "object") {
-    return false;
-  }
-  const record = manifest as Record<string, unknown>;
-  return record.schemaVersion === 2 &&
-    typeof record.sourceKind === "string" &&
-    record.sourceKind !== "paper";
+async function entryHasNonPaperSourceMetadata(workspaceDir: string, entry: LocalPaperEntry): Promise<boolean> {
+  const result = await readKnowledgeSourceMetadata({
+    workspaceDir,
+    sourceKey: entry.paperKey
+  });
+  return result.status === "ready" && result.metadata.sourceKind !== "paper";
 }
 
 function baseIssue(
@@ -715,11 +711,6 @@ async function missingArtifactPaths(workspaceDir: string, entry: LocalPaperEntry
   return missing;
 }
 
-function readNestedString(value: unknown, pathParts: string[]): string | undefined {
-  const current = readNestedValue(value, pathParts);
-  return typeof current === "string" && current.trim() ? current.trim() : undefined;
-}
-
 function readNestedValue(value: unknown, pathParts: string[]): unknown {
   let current = value;
   for (const pathPart of pathParts) {
@@ -731,16 +722,16 @@ function readNestedValue(value: unknown, pathParts: string[]): unknown {
   return current;
 }
 
-type WorkspaceRelativeManifestPath =
+type WorkspaceRelativeMetadataPath =
   | { ok: true; rawPath: string; relativePath: string; absolutePath: string }
   | { ok: false; rawPath: string; reason: string };
 
-function validateWorkspaceRelativeManifestPath(workspaceDir: string, value: unknown): WorkspaceRelativeManifestPath {
+function validateWorkspaceRelativeMetadataPath(workspaceDir: string, value: unknown): WorkspaceRelativeMetadataPath {
   if (typeof value !== "string" || value.trim().length === 0) {
     return {
       ok: false,
       rawPath: typeof value === "string" ? value : "",
-      reason: "path is empty; manifest artifact paths must be non-empty workspace-relative paths"
+      reason: "path is empty; source metadata artifact paths must be non-empty workspace-relative paths"
     };
   }
   const rawPath = value.trim();
@@ -758,7 +749,7 @@ function validateWorkspaceRelativeManifestPath(workspaceDir: string, value: unkn
     return {
       ok: false,
       rawPath,
-      reason: "path escapes the workspace; manifest artifact paths must be workspace-relative"
+      reason: "path escapes the workspace; source metadata artifact paths must be workspace-relative"
     };
   }
   return {
@@ -769,48 +760,69 @@ function validateWorkspaceRelativeManifestPath(workspaceDir: string, value: unkn
   };
 }
 
-async function sourceManifestArtifactIssues(workspaceDir: string): Promise<WikiHealthIssue[]> {
-  const manifestsDir = getPaperWikiManifestsDir(workspaceDir);
+async function sourceMetadataIssues(workspaceDir: string): Promise<WikiHealthIssue[]> {
+  const sourcesDir = getPaperWikiSourcesDir(workspaceDir);
   let entries: Dirent[];
   try {
-    entries = await readdir(manifestsDir, { withFileTypes: true });
+    entries = await readdir(sourcesDir, { withFileTypes: true });
   } catch {
     return [];
   }
 
   const issues: WikiHealthIssue[] = [];
-  for (const entry of entries.filter((candidate) => candidate.isFile() && candidate.name.endsWith(".json"))) {
-    const manifestPath = path.join(manifestsDir, entry.name);
-    let manifest: unknown;
-    try {
-      manifest = JSON.parse(await readFile(manifestPath, "utf8"));
-    } catch {
+  for (const entry of entries.filter((candidate) => candidate.isDirectory())) {
+    const sourceKey = entry.name;
+    const sourceDir = path.join(sourcesDir, sourceKey);
+    const metadataPath = getKnowledgeSourceMetadataPath(workspaceDir, sourceKey);
+    const relativeMetadataPath = relativeToWorkspace(workspaceDir, metadataPath);
+    const summaryPath = path.join(sourceDir, "summary.md");
+    const relativeSummaryPath = relativeToWorkspace(workspaceDir, summaryPath);
+    const hasSummary = await pathExists(summaryPath);
+    const metadataResult = await readKnowledgeSourceMetadata({
+      workspaceDir,
+      sourceKey,
+      ...(hasSummary ? { summaryPath: relativeSummaryPath } : {})
+    });
+
+    if (metadataResult.status === "missing") {
+      if (!hasSummary) {
+        continue;
+      }
+      issues.push({
+        kind: "source_metadata_missing",
+        severity: "low",
+        paperKey: sourceKey,
+        path: relativeMetadataPath,
+        paths: [relativeMetadataPath],
+        reason: "Wiki source summary has no durable source metadata.json."
+      });
       continue;
     }
-    const paperKey =
-      readNestedString(manifest, ["sourceKey"]) ??
-      readNestedString(manifest, ["paperKey"]) ??
-      entry.name.replace(/\.json$/i, "");
-    const title = readNestedString(manifest, ["title"]);
-    const schemaVersion = readNestedValue(manifest, ["schemaVersion"]);
-    const candidatePaths = schemaVersion === 2
-      ? [
-          { name: "summaryPath", value: readNestedValue(manifest, ["summaryPath"]) },
-          { name: "provenance.recordPath", value: readNestedValue(manifest, ["provenance", "recordPath"]), optional: true },
-          { name: "provenance.rawPath", value: readNestedValue(manifest, ["provenance", "rawPath"]), optional: true },
-          ...manifestArtifactPathCandidates(manifest)
-        ].filter((candidate) => !candidate.optional || candidate.value !== undefined)
-      : [
-          { name: "sourceSummaryPath", value: readNestedValue(manifest, ["sourceSummaryPath"]) },
-          { name: "parse.markdownPath", value: readNestedValue(manifest, ["parse", "markdownPath"]) },
-          { name: "parse.jsonPath", value: readNestedValue(manifest, ["parse", "jsonPath"]) },
-          { name: "parse.qualityPath", value: readNestedValue(manifest, ["parse", "qualityPath"]) },
-          { name: "provenance.rawPdfPath", value: readNestedValue(manifest, ["provenance", "rawPdfPath"]), optional: true }
-        ].filter((candidate) => !candidate.optional || candidate.value !== undefined);
+    if (metadataResult.status === "malformed") {
+      issues.push({
+        kind: "source_metadata_malformed",
+        severity: "medium",
+        paperKey: sourceKey,
+        path: relativeMetadataPath,
+        paths: [relativeMetadataPath],
+        reason: metadataResult.diagnostics.length > 0
+          ? `Source metadata.json is malformed: ${metadataResult.diagnostics.join(" ")}`
+          : "Source metadata.json is malformed."
+      });
+      continue;
+    }
+
+    const metadata = metadataResult.metadata;
+    const candidatePaths = [
+      { name: "summaryPath", value: metadata.summaryPath },
+      { name: "provenance.acquisitionPath", value: readNestedValue(metadata, ["provenance", "acquisitionPath"]), optional: true },
+      { name: "provenance.rawPath", value: metadata.provenance.rawPath, optional: true },
+      ...metadataArtifactPathCandidates(metadata)
+    ].filter((candidate) => !candidate.optional || candidate.value !== undefined);
     const invalidPaths: string[] = [];
     const missingPaths: string[] = [];
     for (const candidatePath of candidatePaths) {
-      const validation = validateWorkspaceRelativeManifestPath(workspaceDir, candidatePath.value);
+      const validation = validateWorkspaceRelativeMetadataPath(workspaceDir, candidatePath.value);
       if (!validation.ok) {
         invalidPaths.push(`${candidatePath.name}: ${validation.rawPath || "<empty>"} (${validation.reason})`);
         continue;
@@ -824,18 +836,18 @@ async function sourceManifestArtifactIssues(workspaceDir: string): Promise<WikiH
     }
     const reasons = [
       ...(invalidPaths.length > 0
-        ? [`Source manifest contains invalid workspace-relative artifact path${invalidPaths.length === 1 ? "" : "s"}: ${invalidPaths.join(", ")}.`]
+        ? [`Source metadata contains invalid workspace-relative artifact path${invalidPaths.length === 1 ? "" : "s"}: ${invalidPaths.join(", ")}.`]
         : []),
       ...(missingPaths.length > 0
-        ? [`Source manifest points to missing artifact path${missingPaths.length === 1 ? "" : "s"}: ${missingPaths.join(", ")}.`]
+        ? [`Source metadata points to missing artifact path${missingPaths.length === 1 ? "" : "s"}: ${missingPaths.join(", ")}.`]
         : [])
     ];
     issues.push({
-      kind: "source_manifest_artifact_missing",
+      kind: "source_metadata_artifact_missing",
       severity: "medium",
-      paperKey,
-      ...(title ? { title } : {}),
-      path: relativeToWorkspace(workspaceDir, manifestPath),
+      paperKey: metadata.sourceKey,
+      title: metadata.title,
+      path: relativeMetadataPath,
       paths: [...invalidPaths, ...missingPaths],
       reason: reasons.join(" ")
     });
@@ -843,12 +855,12 @@ async function sourceManifestArtifactIssues(workspaceDir: string): Promise<WikiH
   return issues;
 }
 
-function manifestArtifactPathCandidates(manifest: unknown): Array<{
+function metadataArtifactPathCandidates(metadata: unknown): Array<{
   name: string;
   value: unknown;
   optional?: boolean;
 }> {
-  const artifacts = readNestedValue(manifest, ["artifacts"]);
+  const artifacts = readNestedValue(metadata, ["artifacts"]);
   if (!Array.isArray(artifacts)) {
     return [];
   }
@@ -874,8 +886,9 @@ function summarizeActions(issues: WikiHealthIssue[]): string[] {
     ["parse_missing", "Parse downloaded papers that do not yet have reading artifacts."],
     ["summary_missing", "Write wiki source summaries for parsed papers without a summary page."],
     ["non_paper_source", "Quarantine non-paper publisher pages that were accidentally registered as paper sources."],
-    ["source_manifest_missing", "Backfill source manifests for existing wiki source summaries."],
-    ["source_manifest_artifact_missing", "Repair source manifests or regenerate the missing parse/source artifacts they reference."],
+    ["source_metadata_missing", "Backfill source metadata.json for existing wiki source summaries."],
+    ["source_metadata_artifact_missing", "Repair source metadata.json or regenerate the missing parse/source artifacts it references."],
+    ["source_metadata_malformed", "Repair malformed per-source metadata.json files."],
     ["missing_artifact", "Repair or regenerate acquisition files that point at missing files."],
     ["download_blocked", "No repair needed for download-blocklisted papers unless the paper is removed from the local download blocklist."],
     ["citation_incomplete", "Refresh source citation metadata through the paper-download-subagent metadata pass."],
@@ -940,14 +953,13 @@ export async function checkWikiHealth(options: WikiHealthOptions): Promise<WikiH
       issues.push({
         ...baseIssue(entry, "non_paper_source", "medium", nonPaperReason),
         paths: [
-          ...(entry.sourcePath ? [entry.sourcePath] : []),
-          relativeToWorkspace(workspaceDir, getPaperWikiSourceManifestPath(workspaceDir, entry.paperKey))
+          ...(entry.sourcePath ? [entry.sourcePath] : [])
         ]
       });
       continue;
     }
     if (
-      !(await entryHasNonPaperSourceManifest(workspaceDir, entry)) &&
+      !(await entryHasNonPaperSourceMetadata(workspaceDir, entry)) &&
       !entryLooksLikePublisherNonJournalArticle(entry)
     ) {
       paperEntries.push(entry);
@@ -1065,13 +1077,6 @@ export async function checkWikiHealth(options: WikiHealthOptions): Promise<WikiH
       entryIssues.push(baseIssue(entry, "summary_missing", "low", "Parsed paper has no wiki source summary."));
     }
 
-    if (entry.hasWikiSummary && !(await pathExists(getPaperWikiSourceManifestPath(workspaceDir, entry.paperKey)))) {
-      entryIssues.push({
-        ...baseIssue(entry, "source_manifest_missing", "low", "Wiki source summary has no durable source manifest."),
-        paths: [relativeToWorkspace(workspaceDir, getPaperWikiSourceManifestPath(workspaceDir, entry.paperKey))]
-      });
-    }
-
     if (!usesPreprintFallback && !isPublisherPending && !needsAuthorization) {
       const missingPaths = await missingArtifactPaths(workspaceDir, entry);
       if (missingPaths.length > 0) {
@@ -1120,7 +1125,7 @@ export async function checkWikiHealth(options: WikiHealthOptions): Promise<WikiH
   }
 
   issues.push(...await interruptedWikiOperationIssues(workspaceDir));
-  issues.push(...await sourceManifestArtifactIssues(workspaceDir));
+  issues.push(...await sourceMetadataIssues(workspaceDir));
 
   const summary = Object.fromEntries(ISSUE_KINDS.map((kind) => [kind, 0])) as Record<string, number>;
   for (const issue of issues) {
@@ -1542,7 +1547,7 @@ function skippedFix(issue: WikiHealthIssue, message: string): WikiHealthFixItem 
   };
 }
 
-async function fixBySourceManifestBackfill(input: {
+async function fixBySourceMetadataBackfill(input: {
   workspaceDir: string;
   issue: WikiHealthIssue;
   dryRun: boolean;
@@ -1551,28 +1556,28 @@ async function fixBySourceManifestBackfill(input: {
     return {
       issue: input.issue,
       status: "skipped",
-      action: "source_manifest_backfill",
-      message: `Dry run: would backfill source manifest for ${input.issue.paperKey}.`
+      action: "source_metadata_backfill",
+      message: `Dry run: would backfill source metadata.json for ${input.issue.paperKey}.`
     };
   }
   try {
-    const manifestPath = await backfillWikiSourceManifestFromSummary({
+    const metadataPath = await backfillKnowledgeSourceMetadataFromSummary({
       workspaceDir: input.workspaceDir,
-      paperKey: input.issue.paperKey
+      sourceKey: input.issue.paperKey
     });
     return {
       issue: input.issue,
       status: "fixed",
-      action: "source_manifest_backfill",
-      message: `Backfilled source manifest for ${input.issue.paperKey}.`,
-      details: { manifestPath }
+      action: "source_metadata_backfill",
+      message: `Backfilled source metadata.json for ${input.issue.paperKey}.`,
+      details: { metadataPath }
     };
   } catch (error) {
     return {
       issue: input.issue,
       status: "failed",
-      action: "source_manifest_backfill",
-      message: error instanceof Error ? error.message : "Source manifest backfill failed."
+      action: "source_metadata_backfill",
+      message: error instanceof Error ? error.message : "Source metadata backfill failed."
     };
   }
 }
@@ -1605,7 +1610,6 @@ async function fixByNonPaperSourceQuarantine(input: {
   dryRun: boolean;
 }): Promise<WikiHealthFixItem> {
   const sourceDir = path.join(input.workspaceDir, "knowledge-base", "sources", input.issue.paperKey);
-  const manifestPath = getPaperWikiSourceManifestPath(input.workspaceDir, input.issue.paperKey);
   const quarantineRoot = await uniquePath(path.join(
     input.workspaceDir,
     "knowledge-base",
@@ -1632,8 +1636,7 @@ async function fixByNonPaperSourceQuarantine(input: {
 
   try {
     const movedPaths = [
-      await renameIfExists(sourceDir, path.join(quarantineRoot, "source"), input.workspaceDir),
-      await renameIfExists(manifestPath, path.join(quarantineRoot, "manifest.json"), input.workspaceDir)
+      await renameIfExists(sourceDir, path.join(quarantineRoot, "source"), input.workspaceDir)
     ].filter((value): value is string => Boolean(value));
     await mkdir(quarantineRoot, { recursive: true });
     await writeFile(
@@ -1914,8 +1917,8 @@ export async function fixWikiHealth(options: WikiHealthFixOptions): Promise<Wiki
       }));
       continue;
     }
-    if (issue.kind === "source_manifest_missing") {
-      results.push(await fixBySourceManifestBackfill({
+    if (issue.kind === "source_metadata_missing") {
+      results.push(await fixBySourceMetadataBackfill({
         workspaceDir,
         issue,
         dryRun: options.dryRun === true
@@ -1932,6 +1935,9 @@ export async function fixWikiHealth(options: WikiHealthFixOptions): Promise<Wiki
     }
     if (issue.kind === "wiki_page_malformed" || issue.kind === "wiki_page_evidence_weak") {
       results.push(skippedFix(issue, "Typed wiki page issues must be fixed by editing the page metadata."));
+    }
+    if (issue.kind === "source_metadata_artifact_missing" || issue.kind === "source_metadata_malformed") {
+      results.push(skippedFix(issue, "Source metadata issues must be fixed by repairing metadata.json or regenerating the referenced artifacts."));
     }
   }
 
