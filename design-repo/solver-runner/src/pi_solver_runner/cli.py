@@ -11,7 +11,7 @@ def main() -> None:
     parser = argparse.ArgumentParser()
     parser.add_argument("--host", default="127.0.0.1")
     parser.add_argument("--port", type=int, default=17890)
-    parser.add_argument("--work-dir", default="design-repo/solver-runner/jobs")
+    parser.add_argument("--work-dir", default="jobs")
     args = parser.parse_args()
 
     server = SolverRunnerServer(work_dir=args.work_dir, host=args.host, port=args.port)

@@ -19,9 +19,15 @@ Ansys/PyAEDT or server-side solver integrations should implement the same backen
 - `status(job_id) -> {"job_id": "...", "status": "...", "solver": "...", "backend": "..."}`
 - `result(job_id) -> normalized result JSON`
 
-```sh
-PYTHONPATH=design-repo/solver-runner/src .venv/bin/python -m pi_solver_runner.cli \
-  --host 127.0.0.1 \
-  --port 17890 \
-  --work-dir design-repo/solver-runner/jobs
+```powershell
+cd C:\path\to\solver-runner
+py -3.11 -m venv .venv
+.\.venv\Scripts\python.exe -m pip install -e .
+.\.venv\Scripts\pi-solver-runner.exe --host 127.0.0.1 --port 17890 --work-dir .\jobs
 ```
+
+After installation, Windows users can also start the service with:
+
+- `run_solver_runner_visible.bat` for a foreground console.
+- `run_solver_runner_background.bat` for a background process with logs under `logs\`.
+- `stop_solver_runner_background.bat` to stop a process listening on the default `17890` port.

@@ -1,10 +1,13 @@
 # Windows Deployment Guide for PI Solver Runner
 
-This guide is written for a Codex agent running on Windows. Follow it from the repository root.
+This guide is written for a Codex agent running on Windows. Follow it from the
+`design-repo\solver-runner` directory. The folder can be deployed by itself.
 
 `pi-solver-runner` is the server-side process for remote simulation jobs. It can run on a
-Windows workstation with Ansys AEDT installed, or on a shared simulation server. The WSL-side
-or Linux-side `pi-chip-design` package submits simulation manifests to this service over HTTP.
+Windows workstation with Ansys AEDT installed, or on a shared simulation server. The runner
+is self-contained: deployment only needs the files under `design-repo\solver-runner`.
+Client packages such as `pi-chip-design` submit simulation manifests to this service over HTTP,
+but they do not need to be installed on the solver machine.
 
 The current backend is a deterministic fake backend. It validates the deployment, protocol,
 job storage, and client/server wiring before a real Ansys/PyAEDT backend is enabled.
@@ -24,37 +27,31 @@ Recommended:
 - Ansys AEDT installed only if you are preparing to add a real Ansys backend. The fake backend
   does not require Ansys.
 
-## 2. Enter the Repository
+## 2. Enter the Runner Directory
 
-Open PowerShell and move to the Windows checkout:
+Open PowerShell and move to the solver-runner directory:
 
 ```powershell
-cd C:\path\to\pi-agent-minimal-ts
+cd C:\path\to\solver-runner
 ```
 
 Confirm the expected files exist:
 
 ```powershell
-Test-Path .\design-repo\solver-runner\pyproject.toml
-Test-Path .\design-repo\design-code\pyproject.toml
+Test-Path .\pyproject.toml
+Test-Path .\src\pi_solver_runner\server.py
 ```
 
 Both commands should print `True`.
 
 ## 3. Create the Python Environment
 
-Use a repository-root virtual environment so the runner and design client can be tested together.
+Use a repository-root virtual environment for the runner.
 
 ```powershell
 py -3.11 -m venv .venv
 .\.venv\Scripts\python.exe -m pip install --upgrade pip
-.\.venv\Scripts\python.exe -m pip install -e .\design-repo\solver-runner
-```
-
-For full integration tests with the existing WSL/client package, also install `pi-chip-design`:
-
-```powershell
-.\.venv\Scripts\python.exe -m pip install -e .\design-repo\design-code
+.\.venv\Scripts\python.exe -m pip install -e .
 .\.venv\Scripts\python.exe -m pip install pytest ruff
 ```
 
@@ -66,7 +63,7 @@ network permission and rerun the same commands.
 Run the runner tests:
 
 ```powershell
-.\.venv\Scripts\python.exe -m pytest .\design-repo\solver-runner\tests -q
+.\.venv\Scripts\python.exe -m pytest .\tests -q
 ```
 
 Expected result:
@@ -78,7 +75,7 @@ Expected result:
 Run lint:
 
 ```powershell
-.\.venv\Scripts\python.exe -m ruff check .\design-repo\solver-runner\src .\design-repo\solver-runner\tests
+.\.venv\Scripts\python.exe -m ruff check .\src .\tests
 ```
 
 Expected result:
@@ -89,13 +86,26 @@ All checks passed!
 
 ## 5. Start the Solver Runner
 
+After installation, the simplest Windows path is to double-click one of these files:
+
+```text
+run_solver_runner_visible.bat
+run_solver_runner_background.bat
+stop_solver_runner_background.bat
+```
+
+The start scripts prefer the local `solver-runner\.venv` environment. They also keep a
+compatibility fallback for a parent repository `.venv` when the runner is used inside the full
+source checkout. The stop script looks for a process listening on the default TCP port `17890`
+and terminates it.
+
 For local-only validation on Windows:
 
 ```powershell
 .\.venv\Scripts\pi-solver-runner.exe `
   --host 127.0.0.1 `
   --port 17890 `
-  --work-dir .\design-repo\solver-runner\jobs
+  --work-dir .\jobs
 ```
 
 For access from WSL or another machine on the LAN, bind to all interfaces:
@@ -104,7 +114,7 @@ For access from WSL or another machine on the LAN, bind to all interfaces:
 .\.venv\Scripts\pi-solver-runner.exe `
   --host 0.0.0.0 `
   --port 17890 `
-  --work-dir .\design-repo\solver-runner\jobs
+  --work-dir .\jobs
 ```
 
 The server should print:
@@ -114,6 +124,15 @@ pi-solver-runner listening on http://0.0.0.0:17890
 ```
 
 Keep this PowerShell window open while testing.
+
+To stop a background runner started on the default port, double-click:
+
+```text
+stop_solver_runner_background.bat
+```
+
+The stop script is intentionally port-based. If you started the runner with a non-default port,
+stop that process manually or update the `PORT` value inside the script.
 
 ## 6. Allow Windows Firewall Access
 
@@ -133,27 +152,49 @@ private interface address instead of `0.0.0.0`.
 
 ## 7. Test from the Windows Side
 
-With the server running, open a second PowerShell in the repository root and run:
+With the server running, open a second PowerShell and submit a minimal smoke-test request:
 
 ```powershell
-$env:PYTHONPATH = "$PWD\design-repo\design-code\src"
-.\.venv\Scripts\python.exe -m pi_chip_design.layouts.submit_ten_qubit_q3d_remote `
-  --solver-url http://127.0.0.1:17890
+$body = @{
+  spec = @{
+    name = "windows-smoke-q3d-capacitance"
+    solver = "q3d_capacitance"
+    backend = "ansys_q3d"
+    layout = @{
+      name = "windows_smoke"
+      shape_count = 1
+      layers = @(10)
+      rectangles = 1
+      paths = 0
+      labels = 0
+    }
+    materials = @(@{ name = "silicon"; role = "substrate"; relative_permittivity = 11.45 })
+    ports = @(@{ name = "readout"; kind = "terminal"; target = "readout_trace" })
+  }
+  artifacts = @(@{ name = "windows-smoke.json"; text = "{}" })
+} | ConvertTo-Json -Depth 8
+
+$submitted = Invoke-RestMethod -Method Post -Uri http://127.0.0.1:17890/jobs -ContentType "application/json" -Body $body
+$submitted
+Invoke-RestMethod -Method Get -Uri "http://127.0.0.1:17890/jobs/$($submitted.job_id)"
+Invoke-RestMethod -Method Get -Uri "http://127.0.0.1:17890/jobs/$($submitted.job_id)/result"
 ```
 
-Expected output:
+Expected output includes:
 
 ```text
-Wrote ...\design-repo\design-records\simulations\ten_qubit_chip-q3d-capacitance.remote.json
-Wrote ...\design-repo\design-records\simulations\job-000001.results.json
+job_id : job-000001
+status : solved
+solver : q3d_capacitance
+backend: ansys_q3d
 ```
 
 The runner should also create:
 
 ```text
-design-repo\solver-runner\jobs\job-000001\request.json
-design-repo\solver-runner\jobs\job-000001\result.json
-design-repo\solver-runner\jobs\job-000001\artifacts\
+jobs\job-000001\request.json
+jobs\job-000001\result.json
+jobs\job-000001\artifacts\
 ```
 
 ## 8. Test from WSL
@@ -182,7 +223,7 @@ the corresponding `jobs/job-00000*/` request and result files.
 Use a persistent work directory:
 
 ```text
-design-repo\solver-runner\jobs
+jobs
 ```
 
 This directory is intentionally ignored by Git. It stores submitted requests, artifacts, and
@@ -228,12 +269,6 @@ If WSL cannot connect:
 - Confirm Windows Firewall allows TCP port `17890`.
 - Confirm WSL is using the Windows host IP from `ip route`.
 - Test from Windows first with `http://127.0.0.1:17890`.
-
-If tests fail with missing `pi_chip_design`:
-
-```powershell
-.\.venv\Scripts\python.exe -m pip install -e .\design-repo\design-code
-```
 
 If tests fail with missing `pytest` or `ruff`:
 
