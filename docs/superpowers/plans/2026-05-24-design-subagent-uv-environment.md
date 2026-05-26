@@ -2,11 +2,11 @@
 
 > **For agentic workers:** REQUIRED SUB-SKILL: Use superpowers:subagent-driven-development (recommended) or superpowers:executing-plans to implement this plan task-by-task. Steps use checkbox (`- [ ]`) syntax for tracking.
 
-**Goal:** Give `design-subagent` a bounded `uv sync` workflow for a separate `knowledge-base/design-code` Python repository while using `/home/ququan2/pi-agent-minimal-ts/.venv` as the only design Python environment.
+**Goal:** Give `design-subagent` a bounded `uv sync` workflow for a separate `design-repo/design-code` Python repository while using `/home/ququan2/pi-agent-minimal-ts/.venv` as the only design Python environment.
 
-**Architecture:** Keep the existing restricted script runner model and add one new restricted tool, `sync_design_environment`, in `src/agent/file-tools.ts`. The design-code repository owns `pyproject.toml` and `uv.lock`, while the parent TypeScript repository only owns tool wiring, prompt policy, tests, and ignore rules that keep the nested repository out of the parent commit.
+**Architecture:** Keep the existing restricted script runner model and add one new restricted tool, `sync_design_environment`, in `src/agent/file-tools.ts`. The design-code repository owns `pyproject.toml` and `uv.lock`, while the parent TypeScript repository only owns tool wiring, prompt policy, tests, and ignore rules that keep the parent-managed package out of the parent commit.
 
-**Tech Stack:** TypeScript, Node `execFile`, `node:test`, `uv`, Python packaging with `pyproject.toml`, nested Git repository under `knowledge-base/design-code`.
+**Tech Stack:** TypeScript, Node `execFile`, `node:test`, `uv`, Python packaging with `pyproject.toml`, parent-managed Python package under `design-repo/design-code`.
 
 ---
 
@@ -14,11 +14,11 @@
 
 - Modify `src/agent/file-tools.ts`: add `sync_design_environment`, root `.venv` interpreter resolution, and stop looking for nested `.venv` directories.
 - Modify `src/agent/tool-types.ts`: add `"sync_design_environment"` to `ToolName` and the `design-subagent` boundary.
-- Modify `src/agent/agent-prompts.ts`: teach `design-subagent` the `knowledge-base/design-code` and root `.venv` policy.
+- Modify `src/agent/agent-prompts.ts`: teach `design-subagent` the `design-repo/design-code` and root `.venv` policy.
 - Modify `test/agent/tools.test.ts`: add failing tests first, then update expected tool lists and prompt assertions.
-- Modify `.gitignore`: ignore `design-projects/` and the nested `knowledge-base/design-code/` repository from the parent repository.
-- Create `knowledge-base/design-code/` as a separate Git repository: initial Python package managed by `uv`, with `gdsfactory` as a dependency.
-- Remove `/home/ququan2/pi-agent-minimal-ts/design-projects/` after migrating any useful seed package content into `knowledge-base/design-code/`.
+- Modify `.gitignore`: ignore `design-projects/` and the nested `design-repo/design-code/` repository from the parent repository.
+- Create `design-repo/design-code/` as a parent-managed Python package: initial Python package managed by `uv`, with `gdstk` as a dependency.
+- Remove `/home/ququan2/pi-agent-minimal-ts/design-projects/` after migrating any useful seed package content into `design-repo/design-code/`.
 
 ## Task 1: Tool Tests for Root Venv and Environment Sync
 
@@ -107,9 +107,9 @@ test("run_design_script uses the parent root venv Python and ignores nested desi
     const result = await runDesignScriptTool.execute(
       "call-run-design-script-root-venv",
       {
-        scriptPath: "knowledge-base/design-code/scripts/generate_gds.py",
+        scriptPath: "design-repo/design-code/scripts/generate_gds.py",
         runner: "python",
-        outputPaths: ["knowledge-base/design-code/outputs/from-root-venv.gds"],
+        outputPaths: ["design-repo/design-code/outputs/from-root-venv.gds"],
       },
       undefined,
     );
@@ -117,14 +117,14 @@ test("run_design_script uses the parent root venv Python and ignores nested desi
     assert.deepEqual(result.details, {
       status: "completed",
       runner: "python",
-      scriptPath: "knowledge-base/design-code/scripts/generate_gds.py",
+      scriptPath: "design-repo/design-code/scripts/generate_gds.py",
       command: "../../../.venv/bin/python generate_gds.py",
       exitCode: 0,
       stdout: "script complete\n",
       stderr: "root-venv-python-used\n",
       outputs: [
         {
-          path: "knowledge-base/design-code/outputs/from-root-venv.gds",
+          path: "design-repo/design-code/outputs/from-root-venv.gds",
           bytes: Buffer.byteLength("root venv gds"),
         },
       ],
@@ -157,7 +157,7 @@ test("sync_design_environment runs uv sync for knowledge-base design-code into t
         "name = \"pi-chip-design\"",
         "version = \"0.1.0\"",
         "requires-python = \">=3.11\"",
-        "dependencies = [\"gdsfactory>=8\"]",
+        "dependencies = [\"gdstk>=8\"]",
         ""
       ].join("\n"),
       "utf8",
@@ -192,17 +192,17 @@ test("sync_design_environment runs uv sync for knowledge-base design-code into t
     const result = await syncDesignEnvironmentTool.execute(
       "call-sync-design-environment",
       {
-        projectPath: "knowledge-base/design-code",
+        projectPath: "design-repo/design-code",
       },
       undefined,
     );
 
     assert.deepEqual(result.details, {
       status: "synced",
-      projectPath: "knowledge-base/design-code",
+      projectPath: "design-repo/design-code",
       environmentPath: ".venv",
       pythonPath: ".venv/bin/python",
-      command: "uv sync --project knowledge-base/design-code",
+      command: "uv sync --project design-repo/design-code",
       exitCode: 0,
       stdout: "uv sync complete\n",
       stderr: "",
@@ -278,7 +278,7 @@ const syncDesignEnvironmentParameters = Type.Object({
   projectPath: Type.Optional(
     Type.String({
       description:
-        "Design-code project path. Defaults to knowledge-base/design-code and must resolve exactly to that directory."
+        "Design-code project path. Defaults to design-repo/design-code and must resolve exactly to that directory."
     })
   ),
   maxOutputChars: Type.Optional(
@@ -367,16 +367,16 @@ function normalizeWorkspaceRelativePath(workspaceDir: string, resolvedPath: stri
 
 async function resolveDesignCodeProjectPath(workspaceDir: string, requestedPath: string | undefined): Promise<string> {
   const expectedProjectDir = designCodeProjectDir(workspaceDir);
-  const resolvedProjectDir = await resolveWorkspacePath(workspaceDir, requestedPath ?? "knowledge-base/design-code");
+  const resolvedProjectDir = await resolveWorkspacePath(workspaceDir, requestedPath ?? "design-repo/design-code");
   assertPathInsideDirectory(workspaceDir, resolvedProjectDir);
 
   if (path.resolve(resolvedProjectDir) !== path.resolve(expectedProjectDir)) {
-    throw new Error("sync_design_environment only runs for knowledge-base/design-code.");
+    throw new Error("sync_design_environment only runs for design-repo/design-code.");
   }
 
   const pyprojectPath = path.join(resolvedProjectDir, "pyproject.toml");
   if (!(await fileExists(pyprojectPath))) {
-    throw new Error("sync_design_environment requires knowledge-base/design-code/pyproject.toml.");
+    throw new Error("sync_design_environment requires design-repo/design-code/pyproject.toml.");
   }
 
   return resolvedProjectDir;
@@ -455,7 +455,7 @@ const syncDesignEnvironmentTool: SyncDesignEnvironmentTool = {
   name: "sync_design_environment",
   label: "Sync Design Environment",
   description:
-    "Runs uv sync for knowledge-base/design-code while forcing the shared root .venv as the project environment. This is not a general shell and cannot sync arbitrary projects.",
+    "Runs uv sync for design-repo/design-code while forcing the shared root .venv as the project environment. This is not a general shell and cannot sync arbitrary projects.",
   parameters: syncDesignEnvironmentParameters,
   executionMode: "sequential",
   execute: async (_toolCallId: string, args: SyncDesignEnvironmentParameters) => {
@@ -565,9 +565,9 @@ Replace `DESIGN_SUBAGENT_SYSTEM_PROMPT` with:
 export const DESIGN_SUBAGENT_SYSTEM_PROMPT = [
   "You are the design-subagent for this project. You operate in a clean context with a restricted chip-design reasoning and layout-code tool surface.",
   "Use local wiki and paper evidence before writing design artifacts. Keep design outputs as structured design records, verification reports, failure records, or benchmark cases.",
-  "All self-developed layout code belongs under knowledge-base/design-code/. Treat it as a separate design-code Git repository that is part of the knowledge base, not as ordinary parent-repo TypeScript source.",
-  "Do not create or use design-projects/ for new work. That path is deprecated; migrate useful legacy design code into knowledge-base/design-code/ when implementation work requires it.",
-  "Manage Python dependencies through knowledge-base/design-code/pyproject.toml and uv.lock. The only managed Python runtime environment is the parent repository root .venv.",
+  "All self-developed layout code belongs under design-repo/design-code/. Treat it as a separate design-code Git repository that is part of the knowledge base, not as ordinary parent-repo TypeScript source.",
+  "Do not create or use design-projects/ for new work. That path is deprecated; migrate useful legacy design code into design-repo/design-code/ when implementation work requires it.",
+  "Manage Python dependencies through design-repo/design-code/pyproject.toml and uv.lock. The only managed Python runtime environment is the parent repository root .venv.",
   "When Python dependencies may be missing, call sync_design_environment before running layout or verification scripts. Do not install packages ad hoc with pip or use uv as a general shell.",
   "Run workspace-local layout or verification scripts with run_design_script when the user asks for concrete design artifacts such as GDS files. Use the klayout runner for KLayout Python scripts and report generated output paths or the exact execution failure.",
   "Write design artifacts with write_design_artifact. Do not edit arbitrary source files, write wiki pages, download papers, run external web search, or use run_design_script as a general shell.",
@@ -600,12 +600,12 @@ Expected: pass.
 
 **Files:**
 - Modify: `.gitignore`
-- Create in nested repo: `knowledge-base/design-code/.gitignore`
-- Create in nested repo: `knowledge-base/design-code/README.md`
-- Create in nested repo: `knowledge-base/design-code/pyproject.toml`
-- Create in nested repo: `knowledge-base/design-code/src/pi_chip_design/__init__.py`
-- Create in nested repo: `knowledge-base/design-code/src/pi_chip_design/layouts/__init__.py`
-- Create in nested repo: `knowledge-base/design-code/tests/test_import.py`
+- Create in parent-managed package: `design-repo/design-code/.gitignore`
+- Create in parent-managed package: `design-repo/design-code/README.md`
+- Create in parent-managed package: `design-repo/design-code/pyproject.toml`
+- Create in parent-managed package: `design-repo/design-code/src/pi_chip_design/__init__.py`
+- Create in parent-managed package: `design-repo/design-code/src/pi_chip_design/layouts/__init__.py`
+- Create in parent-managed package: `design-repo/design-code/tests/test_import.py`
 - Delete local tree: `design-projects/`
 
 - [x] **Step 1: Update parent `.gitignore`**
@@ -620,7 +620,7 @@ with:
 
 ```gitignore
 design-projects/
-knowledge-base/design-code/
+design-repo/design-code/
 ```
 
 Keep the existing top-level `.venv/` ignore entry.
@@ -630,14 +630,14 @@ Keep the existing top-level `.venv/` ignore entry.
 Run:
 
 ```bash
-mkdir -p knowledge-base/design-code/src/pi_chip_design/layouts knowledge-base/design-code/tests
+mkdir -p design-repo/design-code/src/pi_chip_design/layouts design-repo/design-code/tests
 ```
 
-Expected: directories exist under `/home/ququan2/pi-agent-minimal-ts/knowledge-base/design-code`.
+Expected: directories exist under `/home/ququan2/pi-agent-minimal-ts/design-repo/design-code`.
 
-- [x] **Step 3: Write the nested repo files**
+- [x] **Step 3: Write the parent-managed package files**
 
-Create `knowledge-base/design-code/.gitignore`:
+Create `design-repo/design-code/.gitignore`:
 
 ```gitignore
 .venv/
@@ -654,21 +654,21 @@ build/
 *.egg-info/
 ```
 
-Create `knowledge-base/design-code/README.md`:
+Create `design-repo/design-code/README.md`:
 
 ```md
 # PI Chip Design
 
 This repository contains the design-subagent Python codebase for superconducting-chip layout generation and verification.
 
-It is intentionally stored under `knowledge-base/design-code/` because design code, verification scripts, and reusable layout lessons are part of the local wiki data flywheel. This repository has its own Git history separate from the parent `pi-agent-minimal-ts` repository.
+It is intentionally stored under `design-repo/design-code/` because design code, verification scripts, and reusable layout lessons are part of the local wiki data flywheel. This repository has its own Git history separate from the parent `pi-agent-minimal-ts` repository.
 
 ## Environment
 
 The source package owns `pyproject.toml` and `uv.lock`, but the Python environment is shared at the parent repository root:
 
 ```sh
-UV_PROJECT_ENVIRONMENT=/home/ququan2/pi-agent-minimal-ts/.venv uv sync --project /home/ququan2/pi-agent-minimal-ts/knowledge-base/design-code
+UV_PROJECT_ENVIRONMENT=/home/ququan2/pi-agent-minimal-ts/.venv uv sync --project /home/ququan2/pi-agent-minimal-ts/design-repo/design-code
 ```
 
 The design-subagent normally performs this through `sync_design_environment`.
@@ -686,7 +686,7 @@ outputs/
 Generated layout outputs should stay under `outputs/` and remain out of Git unless a small fixture is intentionally added for a test.
 ```
 
-Create `knowledge-base/design-code/pyproject.toml`:
+Create `design-repo/design-code/pyproject.toml`:
 
 ```toml
 [build-system]
@@ -700,7 +700,7 @@ description = "Python package for superconducting-chip layout generation and ver
 readme = "README.md"
 requires-python = ">=3.11"
 dependencies = [
-  "gdsfactory>=8"
+  "gdstk>=8"
 ]
 
 [project.optional-dependencies]
@@ -720,7 +720,7 @@ target-version = "py311"
 testpaths = ["tests"]
 ```
 
-Create `knowledge-base/design-code/src/pi_chip_design/__init__.py`:
+Create `design-repo/design-code/src/pi_chip_design/__init__.py`:
 
 ```py
 """Reusable Python package for PI chip layout design workflows."""
@@ -728,7 +728,7 @@ Create `knowledge-base/design-code/src/pi_chip_design/__init__.py`:
 __all__: list[str] = []
 ```
 
-Create `knowledge-base/design-code/src/pi_chip_design/layouts/__init__.py`:
+Create `design-repo/design-code/src/pi_chip_design/layouts/__init__.py`:
 
 ```py
 """Layout family modules for PI chip design workflows."""
@@ -736,7 +736,7 @@ Create `knowledge-base/design-code/src/pi_chip_design/layouts/__init__.py`:
 __all__: list[str] = []
 ```
 
-Create `knowledge-base/design-code/tests/test_import.py`:
+Create `design-repo/design-code/tests/test_import.py`:
 
 ```py
 import pi_chip_design
@@ -746,22 +746,22 @@ def test_package_imports() -> None:
     assert pi_chip_design.__all__ == []
 ```
 
-- [x] **Step 4: Initialize and commit the nested Git repository**
+- [x] **Step 4: Initialize and commit the parent-managed Python package**
 
 Run:
 
 ```bash
-git -C knowledge-base/design-code init
-git -C knowledge-base/design-code add .gitignore README.md pyproject.toml src/pi_chip_design/__init__.py src/pi_chip_design/layouts/__init__.py tests/test_import.py
-git -C knowledge-base/design-code commit -m "Initialize design code package"
+git -C design-repo/design-code init
+git -C design-repo/design-code add .gitignore README.md pyproject.toml src/pi_chip_design/__init__.py src/pi_chip_design/layouts/__init__.py tests/test_import.py
+git -C design-repo/design-code commit -m "Initialize design code package"
 ```
 
-Expected: nested repository has one initial commit. If Git identity is missing, set local identity only inside `knowledge-base/design-code` and rerun the commit:
+Expected: parent-managed package has one initial commit. If Git identity is missing, set local identity only inside `design-repo/design-code` and rerun the commit:
 
 ```bash
-git -C knowledge-base/design-code config user.name "PI Design Agent"
-git -C knowledge-base/design-code config user.email "pi-design-agent@example.local"
-git -C knowledge-base/design-code commit -m "Initialize design code package"
+git -C design-repo/design-code config user.name "PI Design Agent"
+git -C design-repo/design-code config user.email "pi-design-agent@example.local"
+git -C design-repo/design-code commit -m "Initialize design code package"
 ```
 
 - [x] **Step 5: Remove the deprecated design-projects tree**
@@ -772,7 +772,7 @@ Run:
 rm -rf design-projects
 ```
 
-Expected: `/home/ququan2/pi-agent-minimal-ts/design-projects/` no longer exists. The useful seed package structure now exists in `knowledge-base/design-code/`.
+Expected: `/home/ququan2/pi-agent-minimal-ts/design-projects/` no longer exists. The useful seed package structure now exists in `design-repo/design-code/`.
 
 - [x] **Step 6: Check parent Git status**
 
@@ -782,13 +782,13 @@ Run:
 git status --short --untracked-files=all
 ```
 
-Expected: parent repo shows changes to `.gitignore`, TypeScript/test files from prior tasks, and no untracked files under `knowledge-base/design-code/` because that nested repo is ignored by the parent.
+Expected: parent repo shows changes to `.gitignore`, TypeScript/test files from prior tasks, and no untracked files under `design-repo/design-code/` because that parent-managed package is ignored by the parent.
 
 ## Task 5: Lock, Verify, and Commit
 
 **Files:**
-- Modify: `knowledge-base/design-code/uv.lock`
-- Commit in nested repo: `knowledge-base/design-code`
+- Modify: `design-repo/design-code/uv.lock`
+- Commit in parent-managed package: `design-repo/design-code`
 - Commit in parent repo: `pi-agent-minimal-ts`
 
 - [x] **Step 1: Sync the design environment with the new tool path**
@@ -796,39 +796,39 @@ Expected: parent repo shows changes to `.gitignore`, TypeScript/test files from 
 Run:
 
 ```bash
-UV_PROJECT_ENVIRONMENT=/home/ququan2/pi-agent-minimal-ts/.venv uv sync --project /home/ququan2/pi-agent-minimal-ts/knowledge-base/design-code
+UV_PROJECT_ENVIRONMENT=/home/ququan2/pi-agent-minimal-ts/.venv uv sync --project /home/ququan2/pi-agent-minimal-ts/design-repo/design-code
 ```
 
-Expected: `knowledge-base/design-code/uv.lock` is created or updated, and `/home/ququan2/pi-agent-minimal-ts/.venv/bin/python` exists.
+Expected: `design-repo/design-code/uv.lock` is created or updated, and `/home/ququan2/pi-agent-minimal-ts/.venv/bin/python` exists.
 
 - [x] **Step 2: Run design-code package checks**
 
 Run:
 
 ```bash
-/home/ququan2/pi-agent-minimal-ts/.venv/bin/python -m pytest /home/ququan2/pi-agent-minimal-ts/knowledge-base/design-code/tests
-/home/ququan2/pi-agent-minimal-ts/.venv/bin/python -m ruff check /home/ququan2/pi-agent-minimal-ts/knowledge-base/design-code/src /home/ququan2/pi-agent-minimal-ts/knowledge-base/design-code/tests
+/home/ququan2/pi-agent-minimal-ts/.venv/bin/python -m pytest /home/ququan2/pi-agent-minimal-ts/design-repo/design-code/tests
+/home/ququan2/pi-agent-minimal-ts/.venv/bin/python -m ruff check /home/ququan2/pi-agent-minimal-ts/design-repo/design-code/src /home/ququan2/pi-agent-minimal-ts/design-repo/design-code/tests
 ```
 
 Expected: both commands pass. If `ruff` is not installed, run the sync command with dev extras:
 
 ```bash
-UV_PROJECT_ENVIRONMENT=/home/ququan2/pi-agent-minimal-ts/.venv uv sync --project /home/ququan2/pi-agent-minimal-ts/knowledge-base/design-code --extra dev
+UV_PROJECT_ENVIRONMENT=/home/ququan2/pi-agent-minimal-ts/.venv uv sync --project /home/ququan2/pi-agent-minimal-ts/design-repo/design-code --extra dev
 ```
 
 Then rerun the checks.
 
-- [x] **Step 3: Commit the nested repo lockfile**
+- [x] **Step 3: Commit the parent-managed package lockfile**
 
 Run:
 
 ```bash
-git -C knowledge-base/design-code status --short
-git -C knowledge-base/design-code add uv.lock
-git -C knowledge-base/design-code commit -m "Lock design environment dependencies"
+git -C design-repo/design-code status --short
+git -C design-repo/design-code add uv.lock
+git -C design-repo/design-code commit -m "Lock design environment dependencies"
 ```
 
-Expected: nested repo has a second commit containing `uv.lock`.
+Expected: parent-managed package has a second commit containing `uv.lock`.
 
 - [x] **Step 4: Run targeted parent tests**
 
@@ -857,7 +857,7 @@ Run:
 ```bash
 git diff --check
 git status --short --untracked-files=all
-git -C knowledge-base/design-code status --short
+git -C design-repo/design-code status --short
 ```
 
 Expected: no whitespace errors. Parent status should include only intended parent repo changes. Nested repo status should be clean after the lockfile commit.
@@ -871,10 +871,10 @@ rtk git add .gitignore src/agent/file-tools.ts src/agent/tool-types.ts src/agent
 rtk git commit -m "Add design subagent uv environment tooling"
 ```
 
-Expected: parent repository commit succeeds and does not include `knowledge-base/design-code/` contents.
+Expected: parent repository commit succeeds and does not include `design-repo/design-code/` contents.
 
 ## Self-Review Notes
 
-- Spec coverage: the plan covers the root `.venv`, `knowledge-base/design-code` nested Git repo, `gdsfactory` dependency declaration, restricted `uv sync` tool, script runner interpreter change, prompt policy, deprecated `design-projects/` cleanup, and tests.
+- Spec coverage: the plan covers the root `.venv`, `design-repo/design-code` nested Git repo, `gdstk` dependency declaration, restricted `uv sync` tool, script runner interpreter change, prompt policy, deprecated `design-projects/` cleanup, and tests.
 - Placeholder scan: no deferred implementation sections are intentionally left for later.
 - Type consistency: the new tool name is consistently `sync_design_environment`; the tool parameter type is `SyncDesignEnvironmentParameters`; the helper is `getSyncDesignEnvironmentTool`.

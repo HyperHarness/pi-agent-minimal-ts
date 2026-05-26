@@ -2,7 +2,7 @@
 
 ## Purpose
 
-The design-subagent needs to generate superconducting-chip layout artifacts with a reusable Python codebase and dependencies such as `gdsfactory`. It should be able to prepare its own Python environment through `uv`, but it must not receive a general shell or install packages ad hoc with `pip`.
+The design-subagent needs to generate superconducting-chip layout artifacts with a reusable Python codebase and dependencies such as `gdstk`. It should be able to prepare its own Python environment through `uv`, but it must not receive a general shell or install packages ad hoc with `pip`.
 
 This design separates three concerns:
 
@@ -16,7 +16,7 @@ This design separates three concerns:
 /home/ququan2/pi-agent-minimal-ts/
   .venv/                         # one shared Python environment, uv-managed, not committed
   knowledge-base/
-    design-code/                 # design-subagent Python codebase, separate Git repository
+    design-code/                 # design-subagent Python codebase, parent-managed Python package
       .git/
       pyproject.toml
       uv.lock
@@ -31,7 +31,7 @@ This design separates three concerns:
 
 ## Repository Boundary
 
-`knowledge-base/design-code/` is a separate Git repository from `pi-agent-minimal-ts`.
+`design-repo/design-code/` is a parent-managed Python package from `pi-agent-minimal-ts`.
 
 The parent repository should treat this directory as knowledge-base content with its own lifecycle, not as ordinary TypeScript source. The design-code repository owns:
 
@@ -46,7 +46,7 @@ The parent repository owns only the agent tools and prompts that know how to ope
 
 ## Dependency Management
 
-`gdsfactory` is a normal dependency of the design-code Python package, declared in `knowledge-base/design-code/pyproject.toml`. Future Python dependencies should be added to the same dependency declaration instead of being installed imperatively.
+`gdstk` is a normal dependency of the design-code Python package, declared in `design-repo/design-code/pyproject.toml`. Future Python dependencies should be added to the same dependency declaration instead of being installed imperatively.
 
 The design-subagent dependency workflow is:
 
@@ -62,11 +62,11 @@ Add a restricted tool such as `sync_design_environment` to the design-subagent b
 
 The tool should:
 
-- Run only for `knowledge-base/design-code/`.
+- Run only for `design-repo/design-code/`.
 - Execute `uv sync` with the design-code project as the uv project.
 - Force `UV_PROJECT_ENVIRONMENT=/home/ququan2/pi-agent-minimal-ts/.venv`.
 - Return the command, exit status, truncated stdout/stderr, and the resolved Python path.
-- Fail clearly when `uv` is missing, `pyproject.toml` is missing, or the requested project path is outside `knowledge-base/design-code/`.
+- Fail clearly when `uv` is missing, `pyproject.toml` is missing, or the requested project path is outside `design-repo/design-code/`.
 
 The tool must not expose a generic shell. It must not accept arbitrary commands. It should not run `uv add`; dependency edits remain normal file edits to `pyproject.toml`, followed by `uv sync`.
 
@@ -78,7 +78,7 @@ For Python scripts, the interpreter resolution should change to:
 
 1. Prefer `/home/ququan2/pi-agent-minimal-ts/.venv/bin/python` or the Windows equivalent.
 2. Fall back to `python3` only if the root `.venv` does not exist.
-3. Do not search for nested `.venv` directories under `knowledge-base/design-code/` or old design project directories.
+3. Do not search for nested `.venv` directories under `design-repo/design-code/` or old design project directories.
 
 This keeps all design projects on the same dependency environment while still allowing the design-code repository to own the source package and lockfile.
 
@@ -86,7 +86,7 @@ This keeps all design projects on the same dependency environment while still al
 
 Update `DESIGN_SUBAGENT_SYSTEM_PROMPT` so the worker understands:
 
-- All self-developed layout code belongs under `knowledge-base/design-code/`.
+- All self-developed layout code belongs under `design-repo/design-code/`.
 - `design-projects/` is deprecated and should not be used for new work.
 - Python dependencies are managed with `uv` through `pyproject.toml` and `uv.lock`.
 - The only managed Python environment is the parent repository root `.venv`.
@@ -95,7 +95,7 @@ Update `DESIGN_SUBAGENT_SYSTEM_PROMPT` so the worker understands:
 
 ## Cleanup and Migration
 
-Implementation should migrate any still-useful code from `design-projects/superconducting-qubit-chip/` into `knowledge-base/design-code/`, then remove `design-projects/`.
+Implementation should migrate any still-useful code from `design-projects/superconducting-qubit-chip/` into `design-repo/design-code/`, then remove `design-projects/`.
 
 Generated caches and environments should remain ignored:
 
@@ -109,10 +109,10 @@ Generated caches and environments should remain ignored:
 
 Add focused tests for:
 
-- `sync_design_environment` rejects paths outside `knowledge-base/design-code/`.
+- `sync_design_environment` rejects paths outside `design-repo/design-code/`.
 - `sync_design_environment` invokes `uv sync` with `UV_PROJECT_ENVIRONMENT` pointing to the parent root `.venv`.
 - `run_design_script` uses the parent root `.venv` and ignores nested project `.venv` directories.
 - `createToolsForBoundary(..., "design-subagent")` exposes the sync tool in the expected order.
-- The design-subagent prompt mentions `knowledge-base/design-code`, root `.venv`, `uv`, and the deprecated `design-projects/` path.
+- The design-subagent prompt mentions `design-repo/design-code`, root `.venv`, `uv`, and the deprecated `design-projects/` path.
 
 Full validation should include the relevant targeted tests first, then the repository's normal full `npm test` before release.

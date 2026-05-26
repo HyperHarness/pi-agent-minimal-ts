@@ -1,10 +1,10 @@
-# 代码架构说明
+# Code Architecture
 
-这份文档面向准备参与重构的维护者。范围以 `src/**` 生产代码为主，补充入口命令、测试映射，以及浏览器扩展、脚本、知识库目录如何接入。`dist/**`、`node_modules/**`、下载产物、历史报告和论文项目资料不逐项解释。
+This document is for maintainers preparing refactors. It focuses on production code under `src/**`, and adds entrypoint, test-map, browser-extension, script, and knowledge-base integration notes. It does not explain `dist/**`, `node_modules/**`, downloaded artifacts, historical reports, or paper-project content file by file.
 
-## 整体架构
+## System Architecture
 
-运行层很薄，真正的系统边界在两个公开 agent 入口、agent runtime、工具集合、论文/知识库/设计代码/浏览器/Feishu 子系统之间：
+The runtime layer is intentionally thin. The real boundaries are between the two public agent entrypoints, the agent runtime, tool assembly, paper, wiki, design-code, browser, and Feishu subsystems:
 
 ```text
 Feishu bridge
@@ -24,326 +24,326 @@ Local CLI / local harness
         +--> bridge repo manager     -> configured Git workspaces only
 ```
 
-核心原则：
+Core principles:
 
-- `src/wiki-agent.ts` 和 `src/design-agent.ts` 是公开 CLI/RPC 包装入口，分别固定 wiki/paper 和 design/code 工作边界；`src/agent/agent-cli.ts` 负责本地 CLI/RPC 进程形态，`src/agent/agent-runtime.ts` 负责一次 agent turn 怎么运行。
-- `src/agent/agent-routing.ts` 保留内部/routed-agent 兼容路由，并在 wiki/paper 流程中识别 `paper-download-subagent`、`wiki-evidence-worker` 或 `paper-writing-worker`。公开 design/code/dependency/layout/verification 工作应从 `design-agent` 入口进入，而不是依赖通用入口自动推断，也不是从 Feishu 默认 wiki-agent 入口绕行。
-- `src/agent/tools.ts` 是工具装配中心，按各领域工具 factory 的命名分组拼出默认/full 工具面；worker 可见工具面的白名单定义在 `src/agent/tool-types.ts`。
-- `wiki-agent` 可以更新 wiki pages、aliases、paper-backed knowledge records，并读取 design-agent 产出的 design records、design-artifact manifests 和布局结果；它不编辑 `design-repo/design-code/`，不安装 Python 包，不运行 layout 脚本。Design artifacts 不进入 `knowledge-base/sources/`；进入 wiki 时应被浓缩成 `knowledge-base/pages/` 知识条目并引用 `design-repo/` 资产。
-- `design-agent` 可以编辑 `design-repo/design-code/`、声明依赖、用 `uv sync` 同步根 `.venv`、验证 Python import、运行 sandboxed layout/verification 脚本、写 design records；它只能读取 wiki/paper evidence，不能调用 wiki page 写入、paper download 或 web search 工具。
-- 论文能力分三层：检索/下载由 `paper-manager.ts` 和 `paper-download.ts` 承担，持久记录由 `paper-store.ts` 承担，解析和阅读由 `paper-reader/**` 承担。
-- 论文工具适配层位于 `src/agent/paper/tools.ts`，和 paper 领域服务放在同一目录树下。
-- Wiki 能力集中在 `src/agent/wiki/**`：`workspace-contract.ts`、`page-schema.ts`、`typed-store.ts`、`manifest-store.ts`、`retrieval-contract.ts`、`retrieval-search.ts`、`page-templates.ts`、`journal.ts`、`coordinator.ts` 是 schema-first 核心层；`content.ts`、`bootstrap.ts`、`lint.ts`、`review.ts`、`summary.ts`、`relations.ts`、`health.ts` 是领域服务；`wiki/tools.ts` 是 agent 工具适配层；`wiki/worker.ts` 承载 clean-context evidence worker。Knowledge state、last-reviewed freshness、claim-level provenance、typed relations、experiment refs 和 reviewer critique 都属于 `page-schema.ts` 的 typed page contract，不是单独的新 agent。
-- 浏览器扩展不是 agent runtime 的一部分。agent 通过 `paper-extension-bridge.ts` 写 job；native host `paper-extension-host.ts` 被浏览器调用，再把下载或网页快照登记回本地库。
-- Feishu bridge 在 `src/feishu-bridge/**`，它是传输、队列、记忆、PDF 回传和仓库命令边界，不应该承载科学推理逻辑。
+- `src/wiki-agent.ts` and `src/design-agent.ts` are the public CLI/RPC wrappers. They fix the wiki/paper and design/code work boundaries respectively. `src/agent/agent-cli.ts` owns the local CLI/RPC process shape, and `src/agent/agent-runtime.ts` owns a single agent turn.
+- `src/agent/agent-routing.ts` keeps internal routed-agent compatibility and detects `paper-download-subagent`, `wiki-evidence-worker`, or `paper-writing-worker` inside the wiki/paper flow. Public design/code/dependency/layout/verification work should enter through `design-agent`, not through generic entrypoint inference and not through the Feishu default wiki-agent.
+- `src/agent/tools.ts` is the tool assembly center. It groups domain tool factories into default/full tool profiles. Worker-visible allowlists live in `src/agent/tool-types.ts`.
+- `wiki-agent` can update wiki pages, aliases, paper-backed knowledge records, and read design records, design-artifact manifests, and layout results produced by design-agent. It does not edit `design-repo/design-code/`, install Python packages, or run layout scripts. Design artifacts do not enter `knowledge-base/sources/`; when promoted into the wiki they should be condensed into `knowledge-base/pages/` knowledge entries with citations to `design-repo/` assets.
+- `design-agent` can edit `design-repo/design-code/`, declare dependencies, run `uv sync` into the root `.venv`, verify Python imports, run sandboxed layout/verification scripts, and write design records. It can only read wiki/paper evidence; it cannot write wiki pages, download papers, or use web search tools.
+- Paper capability has three layers: search/download in `paper-manager.ts` and `paper-download.ts`, durable records in `paper-store.ts`, and parsing/reading in `paper-reader/**`.
+- The paper tool adapter layer is `src/agent/paper/tools.ts`, colocated with paper-domain services.
+- Wiki capability is concentrated in `src/agent/wiki/**`. `workspace-contract.ts`, `page-schema.ts`, `typed-store.ts`, `manifest-store.ts`, `retrieval-contract.ts`, `retrieval-search.ts`, `page-templates.ts`, `journal.ts`, and `coordinator.ts` are the schema-first core. `content.ts`, `bootstrap.ts`, `lint.ts`, `review.ts`, `summary.ts`, `relations.ts`, and `health.ts` are domain services. `wiki/tools.ts` is the agent tool adapter. `wiki/worker.ts` hosts the clean-context evidence worker. Knowledge state, last-reviewed freshness, claim-level provenance, typed relations, experiment refs, and reviewer critique belong to the typed page contract in `page-schema.ts`; they are not a separate agent.
+- The browser extension is not part of the agent runtime. The agent writes jobs through `paper-extension-bridge.ts`. The browser calls the native host in `paper-extension-host.ts`, which registers downloads or webpage snapshots back into the local library.
+- The Feishu bridge under `src/feishu-bridge/**` owns transport, queues, memory, PDF delivery, and repo commands. It should not contain scientific reasoning.
 
-## 运行入口
+## Runtime Entrypoints
 
-`package.json` scripts 到生产入口的对应关系：
+`package.json` scripts map to production entrypoints as follows:
 
-| 命令 | 入口 | 说明 |
+| Command | Entrypoint | Notes |
 | --- | --- | --- |
-| `npm run build` | `tsc -p tsconfig.json` | 编译所有 `src/**` 和 `test/**` TypeScript。 |
-| `npm test` | `npm run build && node --test ...` | 先构建，再跑 `dist/test/**/*.test.js` 和 `test/scripts/**/*.test.mjs`。 |
-| `npm run wiki-agent` | `src/wiki-agent.ts` -> `src/agent/agent-cli.ts` | 构建后启动 wiki/paper REPL/chat；可更新 wiki 页面和 paper-backed knowledge records，可读取 design-agent 输出。 |
-| `npm run wiki-agent:rpc` | `src/wiki-agent.ts --mode rpc` -> `src/agent/agent-cli.ts` | JSONL RPC wiki-agent；Feishu bridge 默认连接这个入口。 |
-| `npm run design-agent` | `src/design-agent.ts` -> `src/agent/agent-cli.ts` | 构建后启动 design/code/dependency/layout/verification REPL/chat；管理 `design-repo/design-code/` 和根 `.venv`，可检索 wiki/local paper evidence，但不能写 wiki 页面。 |
-| `npm run design-agent:rpc` | `src/design-agent.ts --mode rpc` -> `src/agent/agent-cli.ts` | JSONL RPC design-agent，供本地 harness 或未来直接集成使用；不是 Feishu 默认目标。 |
-| `npm run feishu-bridge` | `src/feishu-bridge/index.ts` | 启动 Feishu 长连接桥，并按配置启动/复用 RPC agent。 |
-| `npm run wiki:web` | `scripts/wiki-web.mjs` | 本地 wiki 和 graph 浏览器，不在 `src/**` 内，但读取 `knowledge-base`；graph data 会优先使用 typed wiki relations。 |
-| `npm run paper-extension-host` | `src/paper-extension-host.ts` -> `src/agent/paper/extension/paper-extension-host.ts` | 浏览器 native messaging host 的 Node 入口。 |
+| `npm run build` | `tsc -p tsconfig.json` | Compiles all `src/**` and `test/**` TypeScript. |
+| `npm test` | `npm run build && node --test ...` | Builds first, then runs `dist/test/**/*.test.js` and `test/scripts/**/*.test.mjs`. |
+| `npm run wiki-agent` | `src/wiki-agent.ts` -> `src/agent/agent-cli.ts` | Starts wiki/paper REPL/chat after build; can update wiki pages and paper-backed knowledge records and can read design-agent outputs. |
+| `npm run wiki-agent:rpc` | `src/wiki-agent.ts --mode rpc` -> `src/agent/agent-cli.ts` | JSONL RPC wiki-agent; the Feishu bridge connects here by default. |
+| `npm run design-agent` | `src/design-agent.ts` -> `src/agent/agent-cli.ts` | Starts design/code/dependency/layout/verification REPL/chat after build; manages `design-repo/design-code/` and the root `.venv`, can retrieve wiki/local paper evidence, and cannot write wiki pages. |
+| `npm run design-agent:rpc` | `src/design-agent.ts --mode rpc` -> `src/agent/agent-cli.ts` | JSONL RPC design-agent for local harnesses or future direct integrations; not the Feishu default target. |
+| `npm run feishu-bridge` | `src/feishu-bridge/index.ts` | Starts the Feishu long-connection bridge and starts or reuses the configured RPC agent. |
+| `npm run wiki:web` | `scripts/wiki-web.mjs` | Local wiki and graph browser. It is outside `src/**`, reads `knowledge-base`, and prefers typed wiki relations for graph data. |
+| `npm run paper-extension-host` | `src/paper-extension-host.ts` -> `src/agent/paper/extension/paper-extension-host.ts` | Node entrypoint for the browser native messaging host. |
 
-`npm run agent` 和 `npm run agent:rpc` 刻意不是公开 scripts。旧的 `src/pi-agent.ts` 只保留为兼容包装/导出面；用户文档应指向具体的 `wiki-agent` 或 `design-agent` 入口。
+`npm run agent` and `npm run agent:rpc` are intentionally not public scripts. The old `src/pi-agent.ts` remains only as a compatibility wrapper/export surface. User docs should point to `wiki-agent` or `design-agent`.
 
-入口能力边界：
+Entrypoint capability boundaries:
 
-| 边界 | 主要 owner | 可写入 | 只读输入 | 明确禁止 |
+| Boundary | Main owner | May write | Read-only inputs | Explicitly forbidden |
 | --- | --- | --- | --- | --- |
-| `wiki-agent` | durable wiki / paper knowledge coordinator | `knowledge-base/pages/`、aliases、paper source/page indexes、wiki operation journal、paper-writing worker 的 manuscript files | local paper library、source summaries、typed pages、design records/artifact summaries/manifests | design-code edits、Python dependency sync、layout script execution |
-| `design-agent` | executable design-code and layout engineering owner | `design-repo/design-code/`、`design-repo/design-records/`、declared design-code outputs | local wiki retrieval、local paper retrieval、root `.venv` interpreter state | wiki page writes、paper downloads、web search、arbitrary workspace file writes |
-| Feishu bridge | chat transport and repo command host | `.memory/`、bridge logs/cards、configured repo Git operations | Feishu events、agent RPC events、configured workspace state | domain reasoning、direct design-agent connection by default |
+| `wiki-agent` | durable wiki / paper knowledge coordinator | `knowledge-base/pages/`, aliases, paper source/page indexes, wiki operation journal, manuscript files through paper-writing worker | local paper library, source summaries, typed pages, design records/artifact summaries/manifests | design-code edits, Python dependency sync, layout script execution |
+| `design-agent` | executable design-code and layout engineering owner | `design-repo/design-code/`, `design-repo/design-records/`, declared design-code outputs | local wiki retrieval, local paper retrieval, root `.venv` interpreter state | wiki page writes, paper downloads, web search, arbitrary workspace file writes |
+| Feishu bridge | chat transport and repo command host | `.memory/`, bridge logs/cards, configured repo Git operations | Feishu events, agent RPC events, configured workspace state | domain reasoning, direct design-agent connection by default |
 
-`design-subagent` 只是在 `src/agent/tool-types.ts` 中保留的兼容别名；公开文档和 handoff record 应使用 `design-agent`。
+`design-subagent` is only a compatibility alias retained in `src/agent/tool-types.ts`. Public docs and handoff records should use `design-agent`.
 
-顶层入口文件：
+Top-level entrypoint files:
 
-- `src/wiki-agent.ts`: 公开 wiki-agent CLI/RPC 包装，固定 wiki/paper prompt、工具边界和 Feishu 目标行为。
-- `src/design-agent.ts`: 公开 design-agent CLI/RPC 包装，固定 design prompt 和 design-agent 工具边界。它是 package install、layout code、GDS generation、verification script 的入口，不是 Feishu 默认目标。
-- `src/pi-agent.ts`: 兼容直启包装和导出面，同时重新导出 prompt、routing、runtime、CLI helper；测试也会从这里验证路由和 REPL 行为。它不是公开 npm script。
-- `src/index.ts`: package 公共导出面，主要给测试、脚本或外部复用者使用；新增生产模块时先判断是否需要暴露在这里。
-- `src/paper-extension-host.ts`: native host 极薄入口，只调用 paper domain extension 子目录中的 `runPaperExtensionNativeHost`。
+- `src/wiki-agent.ts`: public wiki-agent CLI/RPC wrapper that fixes the wiki/paper prompt, tool boundary, and Feishu target behavior.
+- `src/design-agent.ts`: public design-agent CLI/RPC wrapper that fixes the design prompt and design-agent tool boundary. It is the entrypoint for package install, layout code, GDS generation, and verification scripts, not the Feishu default target.
+- `src/pi-agent.ts`: compatibility direct-run wrapper and export surface. It re-exports prompts, routing, runtime, and CLI helpers, and tests use it for routing and REPL behavior. It is not a public npm script.
+- `src/index.ts`: package public export surface for tests, scripts, or external reuse. Decide whether a production module belongs here before exporting it.
+- `src/paper-extension-host.ts`: very thin native-host entrypoint that only calls `runPaperExtensionNativeHost` from the paper-domain extension subtree.
 
-## 核心数据流
+## Core Data Flows
 
-### 普通聊天
+### Normal Chat
 
-1. `src/wiki-agent.ts` 或 `src/design-agent.ts` 调用 `agent-cli.ts` 的 `main()`，并分别固定 wiki/paper 或 design/code 工具 profile。
-2. `agent-cli.ts` 解析 provider/model/session 参数，创建 `AgentContext`，并把用户输入交给 `runSessionPrompt()`；RPC 模式同样从这两个公开包装入口进入。
-3. `agent-runtime.ts` 若没有命中 worker route，则创建运行时工具 `createTools()`，执行 `agentLoop()`，把非失败 turn 写回上下文。
-4. REPL 通过 `createReplEventHandler()` 输出 message/tool 事件，并在结束时刷新 paper download queue 统计。
+1. `src/wiki-agent.ts` or `src/design-agent.ts` calls `main()` from `agent-cli.ts`, fixing the wiki/paper or design/code tool profile.
+2. `agent-cli.ts` parses provider/model/session options, creates `AgentContext`, and passes user input to `runSessionPrompt()`. RPC mode also enters through those public wrappers.
+3. If `agent-runtime.ts` does not hit a worker route, it creates runtime tools with `createTools()`, runs `agentLoop()`, and persists non-failed turns back into context.
+4. The REPL emits message/tool events through `createReplEventHandler()` and refreshes paper-download queue stats at the end.
 
-`src/pi-agent.ts` 只保留旧集成直启和导出兼容，不是公开聊天/RPC 入口。
+`src/pi-agent.ts` only remains for legacy direct-run integrations and exports. It is not a public chat/RPC entrypoint.
 
-### Worker 路由
+### Worker Routing
 
-1. `agent-runtime.ts` 调用 `routeChatPromptToWorker()`。
-2. 若命中，`runRoutedWorkerPrompt()` 用 `createToolsForBoundary()` 创建隔离工具面和干净上下文。
-3. worker 正常回包直接流给用户；随后 `createWorkerHandoffMessage()` 把变更路径、产物、工具状态压缩写回 main context。
-4. 失败 worker turn 不写入 main context，避免污染后续推理。
+1. `agent-runtime.ts` calls `routeChatPromptToWorker()`.
+2. If a route matches, `runRoutedWorkerPrompt()` creates an isolated tool surface and clean context with `createToolsForBoundary()`.
+3. The worker's normal response streams directly to the user. Then `createWorkerHandoffMessage()` compresses changed paths, artifacts, and tool status back into main context.
+4. Failed worker turns are not written into main context, avoiding later reasoning contamination.
 
-### 论文下载
+### Paper Download
 
-1. `search_papers` 工具进 `paper/tools.ts`，默认调用 `paper-manager.ts` 的 `searchPapers()`，组合 arXiv、APS、通用 web 检索。
-2. `download_paper` 调用 `paper-manager.ts` 的 `downloadPaper()`。它先查 blocklist 和本地记录，再按 source 选择 arXiv 直下、supported publisher、extension job 或 manual login。
-3. 低层 publisher 下载逻辑在 `paper-download.ts`；Science/Nature/APS 识别在 `publisher-adapters/**`。
-4. 下载结果由 `paper-store.ts` 写入 `knowledge-base/raw/pdfs` 和 `knowledge-base/sources/<paper-key>/` 下的 acquisition/source metadata。
-5. 若需要浏览器扩展，`paper-extension-bridge.ts` 写 queue，`paper-extension-host.ts` 之后登记 PDF bytes、下载路径或网页快照。
+1. The `search_papers` tool enters `paper/tools.ts` and normally calls `searchPapers()` in `paper-manager.ts`, combining arXiv, APS, and generic web search.
+2. The `download_paper` tool calls `downloadPaper()` in `paper-manager.ts`. It checks blocklist and local records first, then selects arXiv direct download, supported publisher download, extension job, or manual login by source.
+3. Low-level publisher download logic lives in `paper-download.ts`; Science/Nature/APS recognition lives in `publisher-adapters/**`.
+4. `paper-store.ts` writes download results into `knowledge-base/raw/pdfs` and acquisition/source metadata under `knowledge-base/sources/<paper-key>/`.
+5. When the browser extension is needed, `paper-extension-bridge.ts` writes queue events. Later, `paper-extension-host.ts` registers PDF bytes, download paths, or webpage snapshots.
 
-### 论文解析
+### Paper Parsing
 
-1. `parse_paper` 工具进 `paper/tools.ts`，默认调用 `paper-reader/paper-reader.ts`。
-2. `paper-reader-store.ts` 定位 PDF、缓存目录和 parse artifact。
-3. `paper-reader.ts` 选择引擎：OpenDataLoader、Docling、TeX source、webpage 或 plain text baseline。
-4. `quality.ts` 评估 parse 质量，`chunks.ts` 生成检索块。
-5. `paper-store.ts` 把 parse manifest、reading failure 或 queued reading 状态回写到 paper record。
+1. The `parse_paper` tool enters `paper/tools.ts` and normally calls `paper-reader/paper-reader.ts`.
+2. `paper-reader-store.ts` locates PDFs, cache directories, and parse artifacts.
+3. `paper-reader.ts` selects the engine: OpenDataLoader, Docling, TeX source, webpage, or plain-text baseline.
+4. `quality.ts` scores parse quality, and `chunks.ts` generates retrieval chunks.
+5. `paper-store.ts` writes the parse manifest, reading failure, or queued reading status back into the paper record.
 
-### Wiki 构建
+### Wiki Construction
 
-1. `search_paper_wiki`、`write_paper_wiki_source`、`build_wiki_page`、`answer_research_question` 等工具在 `src/agent/wiki/tools.ts`。
-2. `wiki/workspace-contract.ts` 给出 `knowledge-base/` 的 authoritative lifecycle roots；`wiki/store.ts` 保留兼容路径 helper，并逐步委托到 workspace contract。
-3. `wiki/page-schema.ts` 和 `wiki/typed-store.ts` 解析、验证、列出、写入 typed Markdown pages；坏 frontmatter 不会让整库读取失败，而是转成 diagnostics。Evidence-audit metadata 也在这一层校验：`knowledge_state`、`last_reviewed_at`、`freshness_audit`、`claims`、`typed_relations`、`experiment_refs`、`reviewer_critique`。Knowledge state 的稳定枚举是 `established`、`promising_unverified`、`speculative`、`disputed`。
-4. `wiki/manifest-store.ts` 为 source summary 写入/回填 source manifest；V2 manifest 用 `sourceKind`/`sourceKey` 覆盖论文、材料数据库、软件文档、标准、vendor note、lab note、code output、webpage、manual 等非论文证据，并在读取时校验 manifest 文件 key 与内部 `sourceKey` 一致。Design artifacts 的 source/manifest 属于 `design-repo/`，不是 wiki source kind。
-5. `wiki/retrieval-contract.ts` 提供 read-only evidence API，把 source summaries、manifests、typed pages、knowledge state、review date、claim provenance、typed relations、experiment refs 和 reviewer critique 统一成下游可消费的 evidence item；坏 manifest 或身份不一致的 manifest 只能返回 diagnostics，不能把内部 key 当可信引用传播。
-6. `wiki/retrieval-search.ts` 做结构化 evidence search，按 title/alias/tag/source_ref/body 以及 typed claims/relations 打分并返回 match reasons、freshness/knowledge-state warnings 和 insufficient-evidence status；`content.ts` 的 `searchPaperWiki()` 优先使用它，再按需回退到旧正文搜索。公开工具 `search_paper_wiki` 会把 `sourceKinds`、`pageTypes`、`claimKinds`、`knowledgeStates`、`evidenceContracts` 和 `maxEvidenceAgeDays` 传到这一层。
-7. `wiki/page-templates.ts` 根据 query 和 `sourceKind` 推断 concept/method/finding/dataset/capability-boundary/design-record 模板，给 page worker 生成必需章节指导；`build_wiki_page` 在 write 模式落盘前校验必需章节，缺失时返回 `needs_worker`。Page synthesis 通过 `wiki/evidence-pack.ts` 把候选 source summaries、选中的 raw chunks、claim provenance 和 contradiction notes 作为固定证据包交给 clean-context worker。
-8. `wiki/summary.ts` 读取解析文本并调用 `wiki-evidence-worker` 生成 grounded source summary；source summary 的关键 finding 可以通过 Evidence Anchors 绑定短 quote 与 page/section/chunk/element locator；`content.ts` 写 source summary 时同步 manifest、index 和 operation journal。
-9. `wiki/bootstrap.ts` 从 retrieval contract、source summary 和 parsed fallback 组装页面证据。
-10. `wiki/coordinator.ts` 给 research answer、topic page build、maintenance session 生成 deterministic coordination plan，标出 `paper-download-subagent`、`wiki-evidence-worker`、逻辑 `wiki-synthesis-worker` 和 `wiki-agent` 的 owner 边界。
-11. `wiki/journal.ts` 为 source/page/alias/structure-plan 这类多文件写入记录 begin/complete 事件；`wiki/health.ts` 扫描下载、解析、summary、V1/V2 manifest artifact、typed page 和 interrupted operation 状态并按需触发修复。
-12. `wiki/review.ts` 是单页 adversarial review 层：不调用 LLM，不改文件，只读取 typed page 或可恢复 frontmatter，并报告 unsupported claim、weak quantitative provenance、stale/speculative/disputed 状态、missing caveats、low-confidence claims 等 findings。`wiki_review_page` 是它的工具入口。
-13. `wiki/lint.ts`、`wiki/structure-plan.ts`、`wiki/structure-apply.ts` 组成 governance 层：先报告结构/证据问题，再生成可审阅计划，最后只执行低风险 deterministic 修复。Evidence-audit 和 evidence-backed design checks 的确定性检查也在 `lint.ts`：缺少 knowledge state、缺少 last-reviewed date、disputed 页面没有 contradiction evidence、缺少定量 provenance、未确认 contradiction candidate、legacy `related_pages` 未升级、experiment path 缺失、code-backed 页面缺 experiment ref、材料参数缺单位/条件、模板章节缺失、design record 缺 uses relation、软件文档缺 version metadata。
-14. `wiki/worker.ts` 创建 clean-context summary/page worker，`agent-runtime.ts` 只负责注入它们；page worker 的 `templateGuidance` 是独立输入，不应拼进用户原始 question。
+1. `search_paper_wiki`, `write_paper_wiki_source`, `build_wiki_page`, `answer_research_question`, and related tools live in `src/agent/wiki/tools.ts`.
+2. `wiki/workspace-contract.ts` defines authoritative `knowledge-base/` lifecycle roots. `wiki/store.ts` keeps compatibility path helpers and delegates gradually to the workspace contract.
+3. `wiki/page-schema.ts` and `wiki/typed-store.ts` parse, validate, list, and write typed Markdown pages. Bad frontmatter should produce diagnostics rather than breaking the whole library. Evidence-audit metadata is also validated here: `knowledge_state`, `last_reviewed_at`, `freshness_audit`, `claims`, `typed_relations`, `experiment_refs`, and `reviewer_critique`. Stable knowledge-state values are `established`, `promising_unverified`, `speculative`, and `disputed`.
+4. `wiki/manifest-store.ts` writes/backfills source manifests for source summaries. V2 manifests use `sourceKind` and `sourceKey` for papers plus non-paper evidence such as material databases, software docs, standards, vendor notes, lab notes, code output, webpages, and manual sources. Reads must verify that the manifest filename key matches the internal `sourceKey`. Design artifact source/manifest records belong under `design-repo/`, not as a wiki source kind.
+5. `wiki/retrieval-contract.ts` provides the read-only evidence API, merging source summaries, manifests, typed pages, knowledge state, review date, claim provenance, typed relations, experiment refs, and reviewer critique into downstream evidence items. Bad manifests or identity mismatches can only return diagnostics; they must not propagate internal keys as trusted references.
+6. `wiki/retrieval-search.ts` performs structured evidence search, scoring title/alias/tag/source_ref/body plus typed claims and relations. It returns match reasons, freshness/knowledge-state warnings, and insufficient-evidence status. `content.ts` uses it first in `searchPaperWiki()` and falls back to old body search when needed. The public `search_paper_wiki` tool passes `sourceKinds`, `pageTypes`, `claimKinds`, `knowledgeStates`, `evidenceContracts`, and `maxEvidenceAgeDays` into this layer.
+7. `wiki/page-templates.ts` infers concept/method/finding/dataset/capability-boundary/design-record templates from query and `sourceKind`, then gives required-section guidance to the page worker. `build_wiki_page` validates required sections before writing in write mode and returns `needs_worker` if sections are missing. Page synthesis uses `wiki/evidence-pack.ts` to pass candidate source summaries, selected raw chunks, claim provenance, and contradiction notes as a fixed evidence pack to the clean-context worker.
+8. `wiki/summary.ts` reads parsed text and calls `wiki-evidence-worker` to generate grounded source summaries. Key findings in a source summary can bind short quotes to page/section/chunk/element locators through Evidence Anchors. When `content.ts` writes a source summary, it also synchronizes manifest, index, and operation journal.
+9. `wiki/bootstrap.ts` assembles page evidence from the retrieval contract, source summaries, and parsed fallback.
+10. `wiki/coordinator.ts` creates deterministic coordination plans for research answers, topic page builds, and maintenance sessions, marking owner boundaries for `paper-download-subagent`, `wiki-evidence-worker`, logical `wiki-synthesis-worker`, and `wiki-agent`.
+11. `wiki/journal.ts` records begin/complete events for multi-file writes such as source, page, alias, and structure-plan operations. `wiki/health.ts` scans download, parse, summary, V1/V2 manifest artifact, typed page, and interrupted operation status and triggers repairs when requested.
+12. `wiki/review.ts` is the single-page adversarial review layer. It does not call an LLM or write files. It reads typed pages or recoverable frontmatter and reports unsupported claims, weak quantitative provenance, stale/speculative/disputed state, missing caveats, low-confidence claims, and similar findings. `wiki_review_page` is its tool entrypoint.
+13. `wiki/lint.ts`, `wiki/structure-plan.ts`, and `wiki/structure-apply.ts` form the governance layer: report structure/evidence issues, create a reviewable plan, then apply only low-risk deterministic fixes. Evidence-audit and evidence-backed design checks in `lint.ts` include missing knowledge state, missing last-reviewed date, disputed pages without contradiction evidence, missing quantitative provenance, unconfirmed contradiction candidates, legacy `related_pages` not upgraded, missing experiment paths, code-backed pages without experiment refs, material parameters without units/conditions, missing template sections, design records without uses relations, and software docs without version metadata.
+14. `wiki/worker.ts` creates clean-context summary/page workers. `agent-runtime.ts` only injects them. Page-worker `templateGuidance` is a separate input and should not be concatenated into the raw user question.
 
-### Design 代码、依赖和版图
+### Design Code, Dependencies, And Layout
 
-1. `src/design-agent.ts` 固定 design-agent prompt 和 `design-agent` boundary tool profile；它只通过 `src/agent/agent-cli.ts` 进入 runtime，不在入口层实现业务特判。
-2. `src/agent/tool-types.ts` 的 `DESIGN_AGENT_TOOL_NAMES` 是设计边界白名单：`list_files`、`read_file`、wiki/paper local retrieval、`update_design_dependency`、`sync_design_environment`、`verify_design_python_import`、`write_design_code_file`、`replace_design_code_file_text`、`run_design_script`、`write_design_artifact`。
-3. `src/agent/file-tools.ts` 是 design-agent 写入和执行能力的实现层。`write_design_code_file` / `replace_design_code_file_text` 只能写 `design-repo/design-code/`；`write_design_artifact` 只能写 `design-repo/design-records/` 的结构化记录；普通 `write_file` 不属于 design-agent boundary。
-4. Python 依赖由 `design-repo/design-code/pyproject.toml` 声明。`update_design_dependency` 修改声明，`sync_design_environment` 只允许对 `design-repo/design-code/` 运行 `uv sync`，并强制 `UV_PROJECT_ENVIRONMENT=<repo>/.venv`，所以所有设计项目共享仓库根 `.venv`。不要引入 `design-projects/` 或 per-project `.venv`。
-5. `verify_design_python_import` 使用根 `.venv/bin/python` 检查包是否可 import。对 `gdsfactory` 这类需求，正确路径是 dependency declaration -> `sync_design_environment` -> import verification，而不是 assistant 或 agent 直接运行 `pip install`。
-6. `run_design_script` 只运行 `design-repo/design-code/` 下的 `.py` layout/verification 脚本或 KLayout batch script。Python 脚本通过根 `.venv/bin/python` 运行，并要求系统存在 `bwrap`。
-7. `run_design_script` 会把 `design-repo/design-code/` 复制到临时 workspace，在 `bwrap` 中用只读根文件系统和可写临时 design-code 副本执行脚本，然后只把调用者声明的 design-code 输出复制回真实 `design-repo/design-code/`。这阻止脚本用绝对路径修改 TypeScript repo、wiki pages、sources 或其它 workspace 文件。
-8. 设计结果进入 wiki 的方式是异步的：design-agent 产出 design-code、GDS/logs/results、design records 或 design-artifact manifests；wiki-agent 再读取这些产物，用 `build_wiki_page` / `wiki_lint` / `wiki_review_page` 把经过证据约束的结论高度浓缩为 durable wiki pages。不要把 design artifact 作为 `knowledge-base/sources/design-artifact-*` 写入。
-9. `design-repo/design-code/` 是嵌套 Git 仓库，通常由 bridge repo manager 的 `design` workspace 单独 status/diff/commit/push。TypeScript 主 repo 不应把设计代码当普通 `src/**` 变更管理。
+1. `src/design-agent.ts` fixes the design-agent prompt and `design-agent` boundary tool profile. It enters runtime only through `src/agent/agent-cli.ts` and does not implement business special cases at the wrapper layer.
+2. `DESIGN_AGENT_TOOL_NAMES` in `src/agent/tool-types.ts` is the design boundary allowlist: `list_files`, `read_file`, wiki/paper local retrieval, `update_design_dependency`, `sync_design_environment`, `verify_design_python_import`, `write_design_code_file`, `replace_design_code_file_text`, `run_design_script`, and `write_design_artifact`.
+3. `src/agent/file-tools.ts` implements design-agent write and execution capabilities. `write_design_code_file` and `replace_design_code_file_text` can only write under `design-repo/design-code/`; `write_design_artifact` can only write structured records under `design-repo/design-records/`; the generic `write_file` tool is not part of the design-agent boundary.
+4. Python dependencies are declared in `design-repo/design-code/pyproject.toml`. `update_design_dependency` modifies that declaration. `sync_design_environment` may only run `uv sync` for `design-repo/design-code/` and forces `UV_PROJECT_ENVIRONMENT=<repo>/.venv`, so all design projects share the repository root `.venv`. Do not introduce `design-projects/` or per-project `.venv` directories.
+5. `verify_design_python_import` uses root `.venv/bin/python` to check whether a package is importable. For packages such as `gdstk`, the correct path is dependency declaration -> `sync_design_environment` -> import verification, not direct `pip install` by the assistant or agent.
+6. `run_design_script` only runs `.py` layout/verification scripts or KLayout batch scripts under `design-repo/design-code/`. Python scripts run through root `.venv/bin/python` and require `bwrap` on the system.
+7. `run_design_script` copies `design-repo/design-code/` into a temporary workspace, runs the script inside `bwrap` with a read-only root filesystem and writable temporary design-code copy, then copies only caller-declared design-code outputs back into the real `design-repo/design-code/`. This prevents scripts from using absolute paths to mutate the TypeScript repo, wiki pages, sources, or other workspace files.
+8. Design results enter the wiki asynchronously: design-agent produces design code, GDS/logs/results, design records, or design-artifact manifests; wiki-agent reads those outputs and uses `build_wiki_page`, `wiki_lint`, and `wiki_review_page` to condense evidence-bound conclusions into durable wiki pages. Do not write design artifacts as `knowledge-base/sources/design-artifact-*`.
+9. `design-repo/design-code/` is the parent-managed `pi-chip-design` Python package. The parent repo tracks package source, tests, `pyproject.toml`, and `uv.lock`, while generated outputs, caches, and egg-info metadata stay ignored.
 
-### Feishu 消息
+### Feishu Messages
 
-1. `feishu-bridge/index.ts` 加载配置、初始化 Lark client、memory store、RPC client cache 和 per-chat queue。
-2. Feishu event 进入后，`message-utils.ts` 提取文本并判断是否响应，`mention-detection.ts` 处理群聊 @。
-3. 桥接层先识别 `paper-git.ts` 管理的 repo 命令，否则构造 prompt 交给 `PiRpcClient`。
-4. `pi-client.ts` 管理 agent RPC 子进程，`agent-tool-status.ts` 把 tool events 变成可读状态。
-5. `stream-updater.ts` 和 `card-builder.ts` 维护流式卡片，`reply-sender.ts` 负责最终回复重试。
-6. `pdf-delivery.ts` 从 agent 事件或文本中解析 PDF 附件并回传到 Feishu。
+1. `feishu-bridge/index.ts` loads config and initializes the Lark client, memory store, RPC client cache, and per-chat queue.
+2. After a Feishu event arrives, `message-utils.ts` extracts text and decides whether to respond, while `mention-detection.ts` handles group mentions.
+3. The bridge first recognizes repo commands managed by `paper-git.ts`; otherwise it builds a prompt and passes it to `PiRpcClient`.
+4. `pi-client.ts` manages the agent RPC subprocess, and `agent-tool-status.ts` turns tool events into readable status text.
+5. `stream-updater.ts` and `card-builder.ts` maintain streaming cards, while `reply-sender.ts` handles final reply retries.
+6. `pdf-delivery.ts` parses PDF attachments from agent events or text and sends them back to Feishu.
 
-### 浏览器扩展 native host
+### Browser Extension Native Host
 
-1. agent 通过 `createPaperExtensionJob()` 追加 job event。
-2. 浏览器扩展轮询 native host，native host 用 `parseExtensionHostMessage()` 校验消息。
-3. `handleExtensionHostMessage()` 根据消息类型返回 jobs、登记 job status、登记下载 PDF 或登记网页快照。
-4. PDF 登记经 `paper-store.ts` 写入 paper record；网页快照经 `paper-webpage-fetch.ts`/`paper-reader/engines/webpage.ts` 保存 parse artifacts。
-5. `writeNativeHostManifest()` 写 native host manifest；浏览器端配置在 `extension/paper-downloader/**`，测试在 `test/browser-extension/**`。
+1. The agent appends job events through `createPaperExtensionJob()`.
+2. The browser extension polls the native host, and the native host validates messages with `parseExtensionHostMessage()`.
+3. `handleExtensionHostMessage()` returns jobs, records job status, registers downloaded PDFs, or registers webpage snapshots by message type.
+4. PDF registration writes paper records through `paper-store.ts`; webpage snapshots save parse artifacts through `paper-webpage-fetch.ts` and `paper-reader/engines/webpage.ts`.
+5. `writeNativeHostManifest()` writes the native host manifest. Browser-side configuration is under `extension/paper-downloader/**`, and tests are under `test/browser-extension/**`.
 
-## 生产代码文件索引
+## Production Code Index
 
-### 顶层入口
+### Top-Level Entrypoints
 
-| 文件 | 职责 | 上游调用者 | 下游依赖 | 重构注意点 |
+| File | Responsibility | Upstream callers | Downstream dependencies | Refactor notes |
 | --- | --- | --- | --- | --- |
-| `src/wiki-agent.ts` | wiki-agent CLI/RPC 包装入口。 | `npm run wiki-agent`、`npm run wiki-agent:rpc`、Feishu bridge 默认 RPC 子进程。 | `agent-cli.ts`。 | 只固定 profile；REPL/RPC 逻辑不要放进顶层包装。 |
-| `src/design-agent.ts` | design-agent CLI/RPC 包装入口。 | `npm run design-agent`、`npm run design-agent:rpc`。 | `agent-cli.ts`。 | 只固定 profile；design 行为应来自 prompt 和 boundary，不要在入口层特判。 |
-| `src/pi-agent.ts` | 旧集成直启兼容和 agent runtime 相关导出。 | 内部/旧集成直启、测试。 | runtime、routing、prompt 和 CLI helper 模块。 | 保持兼容直启判断简单；公开聊天/RPC 文档不要把它当 public script。 |
-| `src/index.ts` | package 级公共导出面。 | 外部导入者、`test/index.test.ts`。 | 多个 `src/agent/**` 模块。 | 新增导出会扩大公共 API；删除导出前先查测试和脚本。 |
-| `src/paper-extension-host.ts` | native messaging host 的直启包装。 | `npm run paper-extension-host`、native host manifest。 | `agent/paper/extension/paper-extension-host.ts`。 | 只保留入口逻辑；协议、登记和 manifest 逻辑应留在 paper domain 模块。 |
+| `src/wiki-agent.ts` | wiki-agent CLI/RPC wrapper. | `npm run wiki-agent`, `npm run wiki-agent:rpc`, Feishu bridge default RPC subprocess. | `agent-cli.ts`. | Only fix the profile here; keep REPL/RPC logic out of top-level wrappers. |
+| `src/design-agent.ts` | design-agent CLI/RPC wrapper. | `npm run design-agent`, `npm run design-agent:rpc`. | `agent-cli.ts`. | Only fix the profile here; design behavior should come from prompt and boundary, not wrapper special cases. |
+| `src/pi-agent.ts` | Legacy direct-run compatibility and agent-runtime-related exports. | Internal/legacy direct runs and tests. | runtime, routing, prompt, and CLI helper modules. | Keep direct-run compatibility simple; public chat/RPC docs should not treat it as a public script. |
+| `src/index.ts` | Package-level public export surface. | External importers, `test/index.test.ts`. | Multiple `src/agent/**` modules. | New exports expand the public API; search tests and scripts before deleting exports. |
+| `src/paper-extension-host.ts` | Direct-run wrapper for the native messaging host. | `npm run paper-extension-host`, native host manifest. | `agent/paper/extension/paper-extension-host.ts`. | Keep only entrypoint logic here; protocol, registration, and manifest logic belong in the paper-domain module. |
 
-### Agent runtime 与工具边界
+### Agent Runtime And Tool Boundary
 
-| 文件 | 职责 | 上游调用者 | 下游依赖 | 重构注意点 |
+| File | Responsibility | Upstream callers | Downstream dependencies | Refactor notes |
 | --- | --- | --- | --- | --- |
-| `src/agent/agent-cli.ts` | CLI/RPC 进程、模型解析、REPL 事件格式、session 统计。 | 公开包装入口 `src/wiki-agent.ts`、`src/design-agent.ts`，以及旧兼容直启包装。 | `agent-runtime.ts`、`model-resolver.ts`、`env-proxy.ts`、`paper-download-jobs.ts`、RPC helpers。 | 这是入口层大文件；拆分时优先按 CLI args、REPL formatting、RPC mode、session stats 分组，并保留现有事件文本测试。 |
-| `src/agent/agent-runtime.ts` | 单 turn agentLoop、worker route 执行、工具生命周期、失败 turn 处理、瞬时模型错误重试。 | `agent-cli.ts`、顶层导出测试。 | `tools.ts`、`agent-routing.ts`、`paper-extension-bridge.ts`、`wiki/worker.ts`。 | 高耦合点是 routed worker 执行与 runtime tool 注入；改动要同时看 worker handoff、tool cleanup 和失败消息持久化。 |
-| `src/agent/agent-routing.ts` | 自然语言/显式前缀到 worker role 的路由，worker handoff 路径提取。 | `agent-runtime.ts`、`src/pi-agent.ts` 导出。 | `agent-prompts.ts`、Pi message type。 | 路由正则会影响用户请求归属；新增工具产物时同步 `extractWorkerHandoffPaths()`。 |
-| `src/agent/agent-prompts.ts` | main agent 与各 worker 的 system prompt 常量。 | `agent-routing.ts`、`agent-runtime.ts`、`pi-agent.ts`。 | 无运行时依赖。 | 修改 prompt 等同修改行为；同步 README 中 worker 边界说明和相关路由测试。 |
-| `src/agent/tools.ts` | 聚合 file/web/paper/wiki/design/health 工具，提供 full/default profile 与 boundary 工具过滤。 | `agent-runtime.ts`、测试、公共导出。 | `file-tools.ts`、`web-tools.ts`、`paper/tools.ts`、`wiki/tools.ts`、`library-health-tools.ts`、`tool-types.ts`。 | 新工具必须同时考虑默认工具顺序、full profile、cleanup、boundary 白名单和测试；默认顺序应来自领域 factory 的命名分组，避免靠数组 `slice()` 推断。 |
-| `src/agent/tool-types.ts` | 工具依赖注入接口、工具集合 metadata 类型、`ToolProfile`、worker role 和各 boundary 可见工具名。 | 各 `*-tools.ts`、`tools.ts`、README/文档。 | paper、wiki、browser、web 相关类型。 | 这是工具契约和安全边界 owner；新增工具不能只在 `tools.ts` 暴露，必须确认哪些 worker 可见。测试替身也从这里进来，改类型时优先保持可选依赖便于单测。 |
-| `src/agent/model-resolver.ts` | 从 CLI/env/auth 状态中选择初始 provider/model。 | `agent-cli.ts`、测试。 | `@mariozechner/pi-ai` 类型。 | 这是启动失败诊断热点；修改错误信息会影响用户排查和测试。 |
-| `src/agent/env-proxy.ts` | 从环境变量配置 undici 全局代理。 | `agent-cli.ts`、测试。 | `undici`。 | WSL/代理问题常落在这里；保持 env 读取集中。 |
+| `src/agent/agent-cli.ts` | CLI/RPC process, model resolution, REPL event formatting, session statistics. | Public wrappers `src/wiki-agent.ts`, `src/design-agent.ts`, and legacy direct-run wrapper. | `agent-runtime.ts`, `model-resolver.ts`, `env-proxy.ts`, `paper-download-jobs.ts`, RPC helpers. | Large entry layer; split first by CLI args, REPL formatting, RPC mode, and session stats while preserving current event-text tests. |
+| `src/agent/agent-runtime.ts` | Single-turn `agentLoop`, worker-route execution, tool lifecycle, failed-turn handling, transient model-error retry. | `agent-cli.ts`, top-level export tests. | `tools.ts`, `agent-routing.ts`, `paper-extension-bridge.ts`, `wiki/worker.ts`. | High-coupling points are routed-worker execution and runtime tool injection; inspect worker handoff, tool cleanup, and failed-message persistence together. |
+| `src/agent/agent-routing.ts` | Natural-language/explicit-prefix routing to worker roles, worker handoff path extraction. | `agent-runtime.ts`, `src/pi-agent.ts` exports. | `agent-prompts.ts`, Pi message types. | Route regex changes affect request ownership; when adding tool artifacts, update `extractWorkerHandoffPaths()`. |
+| `src/agent/agent-prompts.ts` | System prompt constants for the main agent and workers. | `agent-routing.ts`, `agent-runtime.ts`, `pi-agent.ts`. | None. | Prompt changes are behavior changes; update README worker-boundary docs and related routing tests. |
+| `src/agent/tools.ts` | Aggregates file/web/paper/wiki/design/health tools, and provides full/default profiles plus boundary tool filtering. | `agent-runtime.ts`, tests, public exports. | `file-tools.ts`, `web-tools.ts`, `paper/tools.ts`, `wiki/tools.ts`, `library-health-tools.ts`, `tool-types.ts`. | New tools must consider default order, full profile, cleanup, boundary allowlists, and tests. Default ordering should come from named domain factories, not array `slice()` inference. |
+| `src/agent/tool-types.ts` | Tool dependency injection interfaces, tool collection metadata types, `ToolProfile`, worker roles, and boundary-visible tool names. | All `*-tools.ts`, `tools.ts`, README/docs. | Paper, wiki, browser, and web-related types. | This owns the tool contract and safety boundary. Do not expose a new tool only in `tools.ts`; confirm which workers may see it. Test doubles also enter here, so keep dependencies optional where practical. |
+| `src/agent/model-resolver.ts` | Chooses the initial provider/model from CLI/env/auth state. | `agent-cli.ts`, tests. | `@mariozechner/pi-ai` types. | Startup diagnostics depend on this; changing errors affects troubleshooting and tests. |
+| `src/agent/env-proxy.ts` | Configures the undici global proxy from environment variables. | `agent-cli.ts`, tests. | `undici`. | WSL/proxy issues often land here; keep environment reads centralized. |
 
-### Agent 工具包装
+### Agent Tool Wrappers
 
-| 文件 | 职责 | 上游调用者 | 下游依赖 | 重构注意点 |
+| File | Responsibility | Upstream callers | Downstream dependencies | Refactor notes |
 | --- | --- | --- | --- | --- |
-| `src/agent/file-tools.ts` | workspace 受限文件读写、列表、删除、文本替换、时间、写作技能加载、LaTeX 编译、设计记录写入、design-code 文件工具、uv 环境同步、import 验证和 sandboxed design script execution。 | `tools.ts`、worker boundary。 | Node fs/path/child_process、`wiki/store.ts` 的 filename sanitizer。 | 路径安全是核心；所有写操作必须经过 workspace 校验，CLI trace 依赖工具参数字段。Design-agent 写代码只能走 `design-repo/design-code/` 专用工具，依赖同步只能走根 `.venv`，脚本运行必须通过 `bwrap` 临时副本和 declared-output copyback。 |
-| `src/agent/web-tools.ts` | `web_search`、`fetch_url`、`fetch_paper_webpage` 工具包装。 | `tools.ts`。 | `web-search.ts`、`web-fetch.ts`、`paper-webpage-fetch.ts`。 | 区分普通网页抓取与论文网页抓取，避免把 publisher 解析逻辑塞进通用 fetch。 |
-| `src/agent/library-health-tools.ts` | 本地论文列表/搜索、wiki health、wiki health fix 的 tool schema。 | `tools.ts`。 | `local-paper-library.ts`、`wiki/health.ts`、`paper-manager.ts`、`wiki/summary.ts`。 | `wiki_health_fix` 会触发下载/解析/总结；测试时优先用依赖注入隔离真实网络。 |
+| `src/agent/file-tools.ts` | Workspace-limited file read/write/list/delete/replace, time, writing-skill loading, LaTeX compilation, design-record writing, design-code file tools, uv environment sync, import verification, and sandboxed design script execution. | `tools.ts`, worker boundaries. | Node fs/path/child_process, filename sanitizer from `wiki/store.ts`. | Path safety is central. Every write must pass workspace validation, and CLI trace text depends on tool parameter fields. Design-agent code writes must use dedicated `design-repo/design-code/` tools, dependency sync must use root `.venv`, and script execution must use `bwrap` temporary copy plus declared-output copyback. |
+| `src/agent/web-tools.ts` | Tool wrappers for `web_search`, `fetch_url`, and `fetch_paper_webpage`. | `tools.ts`. | `web-search.ts`, `web-fetch.ts`, `paper-webpage-fetch.ts`. | Keep generic webpage fetch separate from paper webpage fetch; do not move publisher parsing into generic fetch. |
+| `src/agent/library-health-tools.ts` | Tool schemas for local paper list/search, wiki health, and wiki health fix. | `tools.ts`. | `local-paper-library.ts`, `wiki/health.ts`, `paper-manager.ts`, `wiki/summary.ts`. | `wiki_health_fix` may trigger downloads, parsing, and summaries; tests should isolate real network through dependency injection. |
 
-### 论文检索、下载与记录
+### Paper Search, Download, And Records
 
-| 文件 | 职责 | 上游调用者 | 下游依赖 | 重构注意点 |
+| File | Responsibility | Upstream callers | Downstream dependencies | Refactor notes |
 | --- | --- | --- | --- | --- |
-| `src/agent/paper/index.ts` | paper domain facade，统一导出论文获取、解析、存储、浏览器和扩展接口。 | `src/index.ts`、外部/测试导入者。 | `paper/**` 子模块和 `knowledge-base.ts` 路径 helper。 | 外部工具优先从这里或明确子域入口导入，避免重新穿透到旧平铺路径。 |
-| `src/agent/paper/tools.ts` | 论文检索/下载/blocklist/manual/login/parse/inspect/read/search 的 tool schema 和执行器。 | `tools.ts`、`wiki/tools.ts` 复用部分工具。 | `paper-manager.ts`、`paper-download.ts`、`paper-reader/**`、`paper-store.ts`、browser manager、extension bridge。 | 大文件；拆分时按 search/download/extension/reader 工具拆，但保持 tool name、details shape 和 boundary 测试不变。 |
-| `src/agent/paper/acquisition/arxiv.ts` | arXiv ID 解析、HTML URL 构造、搜索和 PDF 下载。 | `paper-manager.ts`、测试。 | Node/fetch。 | arXiv canonical id 会进入 paper key；改规范化逻辑要迁移或兼容旧记录。 |
-| `src/agent/paper/acquisition/aps-search.ts` | APS 检索结果解析和搜索。 | `paper-manager.ts`、测试。 | fetch/HTML 解析逻辑。 | APS 站点结构易变；保持 parser 单测覆盖真实样例 HTML。 |
-| `src/agent/network.ts` | 网络响应/错误处理小工具。 | 下载和 web 相关模块。 | fetch/Response 类型。 | 保持低层无业务语义，避免散落 publisher 特例。 |
-| `src/agent/web-search.ts` | agent 侧 web search provider 调用和结果规范化。 | `web-tools.ts`、`paper-manager.ts`。 | child_process 或外部检索命令。 | 与 Feishu bridge 的 `web/search.ts` 是两套实现；合并前先确认缓存和格式差异。 |
-| `src/agent/web-fetch.ts` | 普通网页内容抓取。 | `web-tools.ts`、测试。 | fetch。 | 不承担论文网页结构化解析；论文网页走 `paper-webpage-fetch.ts`。 |
-| `src/agent/paper/acquisition/paper-download.ts` | 低层 PDF 下载、publisher canonical id、supported publisher 下载。 | `paper-manager.ts`、`paper/tools.ts`、`paper-extension-host.ts`。 | publisher adapters、fetch、browser/session fallback。 | license/access/Cloudflare 错误分类会影响 fallback 和 blocklist；不要把高层策略塞进这里。 |
-| `src/agent/paper/acquisition/paper-manager.ts` | 高层论文检索/下载策略：去重、blocklist、arXiv fallback、publisher/manual/extension flow、APS batch。 | `paper/tools.ts`、`wiki/health.ts`、测试。 | `arxiv.ts`、`aps-search.ts`、`paper-download.ts`、`paper-store.ts`、`paper-blocklist.ts`、`publisher-access-state.ts`、browser/extension。 | 最大业务文件；拆分方向是 search aggregation、candidate ranking、download strategy、publisher fallback、manual registration。每步要保留 result shape。 |
-| `src/agent/paper/storage/paper-store.ts` | paper record/source metadata 路径、读写、查重、parse/reading 状态回写。 | `paper-manager.ts`、`paper-reader-store.ts`、`paper-extension-host.ts`、`wiki/health.ts`。 | `knowledge-base.ts`、`paper-types.ts`、Node fs/path/crypto。 | 这是数据格式 owner；改字段要兼容现有 JSON，优先加迁移/宽松读取。 |
-| `src/agent/paper/types.ts` | paper source、record、download/search/result 等共享类型。 | paper、reader、wiki、extension 多模块。 | 无运行时依赖。 | 类型是跨子系统契约；重命名状态值会波及测试和持久 JSON。 |
-| `src/agent/knowledge-base.ts` | 解析 workspace 下 knowledge-base/raw/wiki 路径。 | store、local library、wiki store。 | Node path。 | 路径布局 owner；不要在各模块硬编码新路径。 |
-| `src/agent/paper/storage/knowledge-paths.ts` | paper domain 对 knowledge-base 路径 helper 的 facade。 | `paper/index.ts`、边界测试。 | `knowledge-base.ts`。 | 当前只重导出路径 API；若后续拆 wiki/paper 路径，这里是兼容层。 |
-| `src/agent/paper/storage/local-paper-library.ts` | 扫描本地 paper records、parse manifest 和 source summaries，提供 list/search。 | `library-health-tools.ts`、`wiki/health.ts`、`wiki/bootstrap.ts`、`wiki/tools.ts`。 | `knowledge-base.ts`、`paper-download.ts`、reader types。 | 是 wiki/health 的本地索引层；搜索评分变更会影响 evidence bootstrap。 |
-| `src/agent/paper/acquisition/paper-blocklist.ts` | 下载 blocklist 读写、匹配和 paper key 推导。 | `paper-manager.ts`、`paper/tools.ts`、`wiki/health.ts`。 | `paper-types.ts`、Node fs/path。 | reason code 是运维语义；`download-blocked` 类健康降级依赖这里的匹配。 |
-| `src/agent/paper/acquisition/publisher-access-state.ts` | publisher 访问状态、Cloudflare cooldown 等持久状态。 | `paper-manager.ts`。 | Node fs/path。 | 限流/阻断判断影响是否访问真实 publisher；测试中保持 now/read/write 可注入。 |
-| `src/agent/paper/extension/paper-download-jobs.ts` | extension job event log 路径、追加、读取、汇总。 | `paper-manager.ts`、`paper-extension-bridge.ts`、`paper-extension-host.ts`、`agent-cli.ts`。 | `paper-types.ts`、extension protocol 类型。 | 这是队列事件源；新增 status/purpose 要同步 extension protocol 和 browser-extension 测试。 |
-| `src/agent/paper/extension/paper-extension-bridge.ts` | agent 侧创建 extension job，并提供 queued bridge 实现。 | `agent-runtime.ts`、`paper-manager.ts`、`paper/tools.ts`。 | `paper-download-jobs.ts`。 | 它只写 queue，不直接和浏览器通信；不要引入 native messaging 进程依赖。 |
+| `src/agent/paper/index.ts` | Paper-domain facade exporting acquisition, parsing, storage, browser, and extension APIs. | `src/index.ts`, external/test importers. | `paper/**` submodules and `knowledge-base.ts` path helpers. | External tools should prefer this facade or explicit subdomain entrypoints, not old flat paths. |
+| `src/agent/paper/tools.ts` | Tool schemas and executors for paper search/download/blocklist/manual/login/parse/inspect/read/search. | `tools.ts`, some reuse in `wiki/tools.ts`. | `paper-manager.ts`, `paper-download.ts`, `paper-reader/**`, `paper-store.ts`, browser manager, extension bridge. | Large file; split by search/download/extension/reader tools while preserving tool names, details shape, and boundary tests. |
+| `src/agent/paper/acquisition/arxiv.ts` | arXiv ID parsing, HTML URL construction, search, and PDF download. | `paper-manager.ts`, tests. | Node/fetch. | Canonical arXiv IDs enter paper keys; normalization changes require migration or legacy compatibility. |
+| `src/agent/paper/acquisition/aps-search.ts` | APS search result parsing and search. | `paper-manager.ts`, tests. | fetch/HTML parsing logic. | APS site structure changes often; keep parser unit tests against real sample HTML. |
+| `src/agent/network.ts` | Low-level network response/error helpers. | Download and web-related modules. | fetch/Response types. | Keep this layer business-neutral; avoid scattering publisher special cases here. |
+| `src/agent/web-search.ts` | Agent-side web search provider calls and result normalization. | `web-tools.ts`, `paper-manager.ts`. | child_process or external search command. | This is separate from Feishu bridge `web/search.ts`; confirm cache and format differences before merging. |
+| `src/agent/web-fetch.ts` | Generic webpage content fetch. | `web-tools.ts`, tests. | fetch. | Does not handle structured paper webpage parsing; papers use `paper-webpage-fetch.ts`. |
+| `src/agent/paper/acquisition/paper-download.ts` | Low-level PDF download, publisher canonical IDs, supported publisher download. | `paper-manager.ts`, `paper/tools.ts`, `paper-extension-host.ts`. | publisher adapters, fetch, browser/session fallback. | License/access/Cloudflare classification affects fallback and blocklist; keep high-level policy out of this layer. |
+| `src/agent/paper/acquisition/paper-manager.ts` | High-level paper search/download policy: dedupe, blocklist, arXiv fallback, publisher/manual/extension flow, APS batch. | `paper/tools.ts`, `wiki/health.ts`, tests. | `arxiv.ts`, `aps-search.ts`, `paper-download.ts`, `paper-store.ts`, `paper-blocklist.ts`, `publisher-access-state.ts`, browser/extension. | Largest business file; split toward search aggregation, candidate ranking, download strategy, publisher fallback, and manual registration while preserving result shape. |
+| `src/agent/paper/storage/paper-store.ts` | Paper record/source metadata paths, read/write, dedupe, parse/reading status updates. | `paper-manager.ts`, `paper-reader-store.ts`, `paper-extension-host.ts`, `wiki/health.ts`. | `knowledge-base.ts`, `paper-types.ts`, Node fs/path/crypto. | Owns the data format; field changes must read existing JSON, preferably through migrations or tolerant parsing. |
+| `src/agent/paper/types.ts` | Shared types for paper sources, records, download/search/results, and related contracts. | Paper, reader, wiki, and extension modules. | None. | Cross-subsystem contract; renaming status values affects tests and persisted JSON. |
+| `src/agent/knowledge-base.ts` | Resolves knowledge-base/raw/wiki paths under the workspace. | Stores, local library, wiki store. | Node path. | Owns path layout; do not hardcode new paths in individual modules. |
+| `src/agent/paper/storage/knowledge-paths.ts` | Paper-domain facade over knowledge-base path helpers. | `paper/index.ts`, boundary tests. | `knowledge-base.ts`. | Currently re-exports path APIs; if wiki/paper paths split later, this is the compatibility layer. |
+| `src/agent/paper/storage/local-paper-library.ts` | Scans local paper records, parse manifests, and source summaries; provides list/search. | `library-health-tools.ts`, `wiki/health.ts`, `wiki/bootstrap.ts`, `wiki/tools.ts`. | `knowledge-base.ts`, `paper-download.ts`, reader types. | Local index layer for wiki/health; search-score changes affect evidence bootstrap. |
+| `src/agent/paper/acquisition/paper-blocklist.ts` | Reads/writes download blocklist, matching, and paper-key derivation. | `paper-manager.ts`, `paper/tools.ts`, `wiki/health.ts`. | `paper-types.ts`, Node fs/path. | Reason codes are operational semantics; `download-blocked` health downgrade depends on these matches. |
+| `src/agent/paper/acquisition/publisher-access-state.ts` | Persistent publisher access state and Cloudflare cooldowns. | `paper-manager.ts`. | Node fs/path. | Throttling/block decisions affect live publisher access; keep now/read/write injectable in tests. |
+| `src/agent/paper/extension/paper-download-jobs.ts` | Extension job event-log path, append/read/summarize. | `paper-manager.ts`, `paper-extension-bridge.ts`, `paper-extension-host.ts`, `agent-cli.ts`. | `paper-types.ts`, extension protocol types. | Queue event source; new statuses/purposes must sync extension protocol and browser-extension tests. |
+| `src/agent/paper/extension/paper-extension-bridge.ts` | Agent-side extension job creation and queued bridge implementation. | `agent-runtime.ts`, `paper-manager.ts`, `paper/tools.ts`. | `paper-download-jobs.ts`. | It only writes the queue; do not add direct browser communication or native-messaging process dependencies. |
 
-### Publisher adapters
+### Publisher Adapters
 
-| 文件 | 职责 | 上游调用者 | 下游依赖 | 重构注意点 |
+| File | Responsibility | Upstream callers | Downstream dependencies | Refactor notes |
 | --- | --- | --- | --- | --- |
-| `src/agent/paper/acquisition/publisher-adapters/types.ts` | publisher adapter 接口。 | `publisher-adapters/index.ts`。 | 无。 | 接口变更要同步所有 adapter。 |
-| `src/agent/paper/acquisition/publisher-adapters/index.ts` | 根据输入选择 Science/Nature/APS adapter，并从 HTML 解析 PDF path。 | `paper-download.ts`、测试。 | `science.ts`、`nature.ts`、`aps.ts`。 | 统一入口；新增 publisher 从这里注册。 |
-| `src/agent/paper/acquisition/publisher-adapters/science.ts` | Science URL/HTML/PDF 识别规则。 | adapter index。 | adapter types。 | 站点规则易变，先加 fixture 测试再改。 |
-| `src/agent/paper/acquisition/publisher-adapters/nature.ts` | Nature URL/HTML/PDF 识别规则。 | adapter index。 | adapter types。 | 与 Nature download/webpage 流程相关，改动后跑 Nature 相关单测。 |
-| `src/agent/paper/acquisition/publisher-adapters/aps.ts` | APS URL/HTML/PDF 识别规则。 | adapter index。 | adapter types。 | APS DOI 规范化也在 `paper-download.ts`，两处要一致。 |
+| `src/agent/paper/acquisition/publisher-adapters/types.ts` | Publisher adapter interface. | `publisher-adapters/index.ts`. | None. | Interface changes must update every adapter. |
+| `src/agent/paper/acquisition/publisher-adapters/index.ts` | Selects Science/Nature/APS adapters and parses PDF paths from HTML. | `paper-download.ts`, tests. | `science.ts`, `nature.ts`, `aps.ts`. | Central registration point for new publishers. |
+| `src/agent/paper/acquisition/publisher-adapters/science.ts` | Science URL/HTML/PDF recognition rules. | adapter index. | adapter types. | Site rules drift; add fixture tests before changing. |
+| `src/agent/paper/acquisition/publisher-adapters/nature.ts` | Nature URL/HTML/PDF recognition rules. | adapter index. | adapter types. | Related to Nature download/webpage flow; run Nature-related unit tests after changes. |
+| `src/agent/paper/acquisition/publisher-adapters/aps.ts` | APS URL/HTML/PDF recognition rules. | adapter index. | adapter types. | APS DOI normalization also exists in `paper-download.ts`; keep both consistent. |
 
-### 浏览器与扩展
+### Browser And Extension
 
-| 文件 | 职责 | 上游调用者 | 下游依赖 | 重构注意点 |
+| File | Responsibility | Upstream callers | Downstream dependencies | Refactor notes |
 | --- | --- | --- | --- | --- |
-| `src/agent/paper/browser/browser-session.ts` | Playwright/CDP/system Chrome 启动、manual login、授权状态分类。 | `paper-manager.ts`、`paper/tools.ts`、测试。 | Playwright、Node child_process/fs。 | 浏览器路径和 profile 逻辑跨 WSL/Windows；改动要跑 browser-session 相关测试。 |
-| `src/agent/paper/browser/paper-browser-manager-types.ts` | browser manager HTTP API 类型。 | client/server/discovery。 | 无。 | API 类型要与 client/server 同步。 |
-| `src/agent/paper/browser/paper-browser-manager-discovery.ts` | browser manager metadata 文件读写、stale 判断、发现。 | `paper-browser-manager-client.ts`、测试。 | Node fs/path。 | metadata stale 规则影响是否复用浏览器 manager。 |
-| `src/agent/paper/browser/paper-browser-manager-client.ts` | 发现或启动 browser manager，并调用 open/download API。 | `paper/tools.ts`、测试。 | discovery、HTTP fetch、child_process。 | 进程启动和 HTTP 调用交织；拆分时保留 spawn result 兼容。 |
-| `src/agent/paper/browser/paper-browser-manager-server.ts` | browser manager HTTP server。 | browser manager 进程、测试。 | HTTP、manager types。 | 端口绑定在沙箱可能失败；测试中区分环境限制和逻辑失败。 |
-| `src/agent/paper/extension/paper-extension-protocol.ts` | native host 消息/响应类型和 runtime parser。 | `paper-extension-host.ts`、browser-extension 测试。 | `paper-types.ts`。 | 协议契约 owner；新增字段要保持 parser 严格但向后兼容可选字段。 |
-| `src/agent/paper/extension/paper-extension-host.ts` | native messaging 编解码、job polling、PDF/bytes/download path 登记、网页快照登记、manifest 写入。 | `src/paper-extension-host.ts`、浏览器 native host、测试。 | protocol、jobs、paper-store、paper-reader、paper-webpage-fetch。 | 大文件；拆分方向是 native framing、message handler、PDF registration、webpage registration、manifest。路径候选和 WSL 兼容要谨慎。 |
-| `src/agent/paper/acquisition/paper-webpage-fetch.ts` | 论文网页 HTML 抓取、诊断、Pandoc/LaTeXML markdown 清洗和结构化提取。 | `web-tools.ts`、`paper-extension-host.ts`、reader webpage engine。 | `paper-reader/latexml-markdown.ts`、child_process、fetch。 | 大文件；HTML parser 变动要用 publisher fixture 覆盖 access status、metadata、assets。 |
+| `src/agent/paper/browser/browser-session.ts` | Playwright/CDP/system Chrome launch, manual login, authorization-state classification. | `paper-manager.ts`, `paper/tools.ts`, tests. | Playwright, Node child_process/fs. | Browser path and profile logic spans WSL/Windows; run browser-session tests after changes. |
+| `src/agent/paper/browser/paper-browser-manager-types.ts` | Browser manager HTTP API types. | client/server/discovery. | None. | Keep API types in sync with client/server. |
+| `src/agent/paper/browser/paper-browser-manager-discovery.ts` | Browser manager metadata read/write, stale detection, discovery. | `paper-browser-manager-client.ts`, tests. | Node fs/path. | Metadata stale rules decide whether a browser manager is reused. |
+| `src/agent/paper/browser/paper-browser-manager-client.ts` | Discovers or starts browser manager and calls open/download APIs. | `paper/tools.ts`, tests. | discovery, HTTP fetch, child_process. | Process startup and HTTP calls are interleaved; preserve spawn result compatibility when splitting. |
+| `src/agent/paper/browser/paper-browser-manager-server.ts` | Browser manager HTTP server. | browser manager process, tests. | HTTP, manager types. | Port binding may fail in sandboxes; tests should distinguish environment limits from logic failures. |
+| `src/agent/paper/extension/paper-extension-protocol.ts` | Native-host message/response types and runtime parser. | `paper-extension-host.ts`, browser-extension tests. | `paper-types.ts`. | Protocol contract owner; new fields should keep parser strict but backward-compatible through optional fields. |
+| `src/agent/paper/extension/paper-extension-host.ts` | Native messaging framing, job polling, PDF/bytes/download-path registration, webpage snapshot registration, manifest writing. | `src/paper-extension-host.ts`, browser native host, tests. | protocol, jobs, paper-store, paper-reader, paper-webpage-fetch. | Large file; split toward native framing, message handler, PDF registration, webpage registration, and manifest. Be careful with path candidates and WSL compatibility. |
+| `src/agent/paper/acquisition/paper-webpage-fetch.ts` | Paper webpage HTML fetch, diagnostics, Pandoc/LaTeXML markdown cleanup, structured extraction. | `web-tools.ts`, `paper-extension-host.ts`, reader webpage engine. | `paper-reader/latexml-markdown.ts`, child_process, fetch. | Large file; HTML parser changes need publisher fixtures covering access status, metadata, and assets. |
 
-### 论文阅读与解析
+### Paper Reading And Parsing
 
-| 文件 | 职责 | 上游调用者 | 下游依赖 | 重构注意点 |
+| File | Responsibility | Upstream callers | Downstream dependencies | Refactor notes |
 | --- | --- | --- | --- | --- |
-| `src/agent/paper/reading/types.ts` | 解析文档、section、quality、engine 等 reader 类型和 `PaperReaderError`。 | reader engines、`paper/tools.ts`、wiki/health。 | 无。 | 这是 parse artifact 的类型契约；新增 engine/status 要同步 store 和 tests。 |
-| `src/agent/paper/reading/paper-reader.ts` | `parsePaper`、`inspectPaper`、`readPaperSection`、`searchPaperText` 的主编排。 | `paper/tools.ts`、`wiki/summary.ts`、`wiki/health.ts`。 | reader store、engines、quality、chunks。 | 解析 engine 选择和缓存策略集中在这里；改默认 engine 会影响大量行为。 |
-| `src/agent/paper/reading/paper-reader-store.ts` | PDF/source 定位、parse artifact 路径、缓存读写、paper key 查找。 | `paper-reader.ts`、`paper-store.ts`、tests。 | `paper-store.ts`、Node fs/path/crypto。 | 保持 repo-managed-path 约束；外部路径放开会扩大安全面。 |
-| `src/agent/paper/reading/quality.ts` | Markdown/section parse 质量评分。 | `paper-reader.ts`、`webpage.ts`、`wiki/health.ts`。 | reader types。 | 健康检查和总结 gating 依赖评分阈值；改评分要同步测试预期。 |
-| `src/agent/paper/reading/chunks.ts` | 从 parsed document 生成检索 chunks。 | `paper-reader.ts`。 | reader types。 | chunk id 和位置字段影响 `search_paper_text` 结果。 |
-| `src/agent/paper/reading/latexml-markdown.ts` | HTML entity 解码和 LaTeXML/Pandoc markdown 清洗。 | `paper-webpage-fetch.ts`、webpage engine。 | 无。 | 清洗规则太激进会破坏公式和引用；用 fixture 回归。 |
-| `src/agent/paper/reading/engines/opendataloader.ts` | OpenDataLoader local/hybrid 解析。 | `paper-reader.ts`。 | child_process、reader types。 | 外部工具依赖可能缺失；错误应可诊断并允许 fallback。 |
-| `src/agent/paper/reading/engines/docling.ts` | Docling 解析。 | `paper-reader.ts`。 | child_process、reader types。 | 同样是外部工具边界；保持失败信息具体。 |
-| `src/agent/paper/reading/engines/tex-source.ts` | arXiv/TeX source 解析为文档结构。 | `paper-reader.ts`。 | Node fs/path、reader types。 | TeX 解析启发式多，改动需覆盖章节、公式、参考文献样例。 |
-| `src/agent/paper/reading/engines/plain-text-baseline.ts` | PDF 文本 baseline 解析。 | `paper-reader.ts` fallback。 | child_process、reader types。 | 是兜底引擎；宁可低质量也要稳定返回可诊断 artifact。 |
-| `src/agent/paper/reading/engines/webpage.ts` | 保存网页快照解析 artifact。 | `paper-extension-host.ts`、`paper-reader.ts`。 | `paper-webpage-fetch.ts` 类型、quality、store。 | 与 extension webpage snapshot 协议联动；quality 字段要兼容。 |
+| `src/agent/paper/reading/types.ts` | Reader types for parsed documents, sections, quality, engines, and `PaperReaderError`. | reader engines, `paper/tools.ts`, wiki/health. | None. | Parse artifact contract; new engines/statuses must sync store and tests. |
+| `src/agent/paper/reading/paper-reader.ts` | Main orchestration for `parsePaper`, `inspectPaper`, `readPaperSection`, and `searchPaperText`. | `paper/tools.ts`, `wiki/summary.ts`, `wiki/health.ts`. | reader store, engines, quality, chunks. | Engine selection and cache policy are centralized here; changing defaults affects many behaviors. |
+| `src/agent/paper/reading/paper-reader-store.ts` | PDF/source location, parse artifact paths, cache read/write, paper-key lookup. | `paper-reader.ts`, `paper-store.ts`, tests. | `paper-store.ts`, Node fs/path/crypto. | Keep repo-managed-path constraints; allowing arbitrary external paths expands the safety surface. |
+| `src/agent/paper/reading/quality.ts` | Markdown/section parse quality scoring. | `paper-reader.ts`, `webpage.ts`, `wiki/health.ts`. | reader types. | Health and summary gating depend on thresholds; update tests when scoring changes. |
+| `src/agent/paper/reading/chunks.ts` | Generates retrieval chunks from parsed documents. | `paper-reader.ts`. | reader types. | Chunk IDs and locator fields affect `search_paper_text` results. |
+| `src/agent/paper/reading/latexml-markdown.ts` | HTML entity decoding and LaTeXML/Pandoc markdown cleanup. | `paper-webpage-fetch.ts`, webpage engine. | None. | Over-aggressive cleanup can damage formulas and citations; use fixtures for regressions. |
+| `src/agent/paper/reading/engines/opendataloader.ts` | OpenDataLoader local/hybrid parsing. | `paper-reader.ts`. | child_process, reader types. | External tool dependency may be missing; errors should be diagnostic and allow fallback. |
+| `src/agent/paper/reading/engines/docling.ts` | Docling parsing. | `paper-reader.ts`. | child_process, reader types. | External tool boundary; keep failure information specific. |
+| `src/agent/paper/reading/engines/tex-source.ts` | Parses arXiv/TeX source into document structure. | `paper-reader.ts`. | Node fs/path, reader types. | TeX parsing heuristics are broad; changes need examples for sections, formulas, and references. |
+| `src/agent/paper/reading/engines/plain-text-baseline.ts` | Baseline PDF text parsing. | `paper-reader.ts` fallback. | child_process, reader types. | Fallback engine; prefer stable low-quality diagnostic artifacts over crashes. |
+| `src/agent/paper/reading/engines/webpage.ts` | Saves webpage snapshot parse artifacts. | `paper-extension-host.ts`, `paper-reader.ts`. | `paper-webpage-fetch.ts` types, quality, store. | Linked to extension webpage snapshot protocol; keep quality fields compatible. |
 
-### Wiki、source summary 与健康检查
+### Wiki, Source Summary, And Health
 
-| 文件 | 职责 | 上游调用者 | 下游依赖 | 重构注意点 |
+| File | Responsibility | Upstream callers | Downstream dependencies | Refactor notes |
 | --- | --- | --- | --- | --- |
-| `src/agent/wiki/index.ts` | wiki domain facade，统一导出 source/page/bootstrap/lint/summary/relations/health/worker API。 | `src/index.ts`、边界测试、外部复用者。 | `wiki/**` 子模块。 | 外部导入优先走这里或明确子域入口，避免重新形成散落路径。 |
-| `src/agent/wiki/types.ts` | wiki source/page/search/bootstrap/worker 类型。 | wiki tools、content、bootstrap、worker。 | 无。 | Worker JSON 输出契约在这里；字段变动要同步 prompt 和 parser。 |
-| `src/agent/wiki/workspace-contract.ts` | `knowledge-base/` lifecycle roots、index/log/journal 路径和相对路径 helper。 | `store.ts`、tests、外部 wiki 集成。 | `knowledge-base.ts`、Node path。 | 新路径类先加到 contract，再让旧 helper 委托；避免各模块重新拼目录。 |
-| `src/agent/wiki/page-schema.ts` | typed wiki page frontmatter 类型、解析、验证、序列化，含 `knowledge_state`、`last_reviewed_at`、`freshness_audit`、`execution_binding` 和 evidence-audit metadata 校验。 | `typed-store.ts`、`health.ts`、`maintenance.ts`、`retrieval-contract.ts`、`review.ts`。 | `domain-bindings.ts`。 | schema 是持久 Markdown 契约；新增字段要保持旧页面宽松读取，并补 malformed diagnostics。知识状态只能使用 `established`、`promising_unverified`、`speculative`、`disputed`；定量 `claims` 必须绑定 page/figure/table/element/chunk/code-output 等具体 provenance；`freshness_audit` 记录最新外部搜索、缺失近期论文、stale warning 和领域更新频率；`experiment_refs` 路径必须 workspace-relative。 |
-| `src/agent/wiki/typed-store.ts` | 列出/读取/写入 typed wiki pages，保留 Markdown body，并把坏页面报告为 diagnostics。 | `retrieval-contract.ts`、`health.ts`、`lint.ts`、`maintenance.ts`。 | `page-schema.ts`、`store.ts`。 | 不负责下载或 LLM；写入时不能绕过 source/page 边界。 |
-| `src/agent/wiki/domain-bindings.ts` | validated executable helper binding 的 metadata registry。 | `page-schema.ts`、domain binding 测试。 | 无。 | 这里只描述 binding schema，不执行页面内容；返回值要深拷贝避免调用者修改 registry。 |
-| `src/agent/wiki/store.ts` | wiki 目录、source/page/assets/manifests/state 路径和 scaffold。 | `content.ts`、`tools.ts`、`file-tools.ts` 的设计工件写入。 | `knowledge-base.ts`、`workspace-contract.ts`、Node fs/path。 | 这是兼容路径 facade；新增路径应来自 workspace contract，共享文档要避免写死用户 home 路径。 |
-| `src/agent/wiki/manifest-store.ts` | source manifest 读写、从旧 `summary.md` 回填 manifest、V1 到 V2 归一化、generalized source kind/status 类型。 | `content.ts`、`health.ts`、`retrieval-contract.ts`、`bootstrap.ts`。 | `store.ts`、Node fs/path。 | manifest 是 wiki-facing provenance index，不替代 acquisition/parse record；V2 覆盖论文以外的材料/软件/标准等证据，读取时必须校验文件 key 与内部 `sourceKey` 一致。 |
-| `src/agent/wiki/journal.ts` | 多文件 wiki 操作 WAL：begin/complete events、读取和未完成操作识别。 | `content.ts`、`structure-apply.ts`、`health.ts`。 | `store.ts`、Node fs/path。 | 写入前先 begin，全部完成后 complete；修复工具依赖 operation id 和 planned files。 |
-| `src/agent/wiki/retrieval-contract.ts` | read-only evidence contract：读/列 source evidence 和 typed page evidence，合并 manifest、sourceKind/sourceKey、diagnostics、knowledge state、review date、claims、typed relations、experiment refs 和 reviewer critique。 | `retrieval-search.ts`、`bootstrap.ts`、downstream workers。 | `manifest-store.ts`、`typed-store.ts`、`store.ts`、`page-schema.ts` 类型。 | 下游 agent 应优先消费这里，不直接依赖物理目录；坏 key、坏 manifest、manifest 身份不一致都只能降级为 malformed diagnostics，不能污染引用 key。 |
-| `src/agent/wiki/retrieval-search.ts` | 结构化 evidence search，返回 score、match reasons、warnings、structured filter results 和 insufficient evidence 状态。 | `content.ts`、tests。 | `retrieval-contract.ts`。 | 排序语义会影响 answer/build grounding；强 score 优先于 preferred kind。`maxEvidenceAgeDays` 只有调用者提供时才触发 freshness warning；不要把当前时间假设写死在检索层。 |
-| `src/agent/wiki/evidence-pack.ts` | 为 `build_wiki_page` 构造固定 synthesis evidence pack：summary 用于召回/压缩，raw chunks 和 claim provenance 支撑最终 claim，contradiction notes 保留争议。 | `wiki/tools.ts`。 | retrieval contract、paper reader artifacts、source manifests。 | 不应把 summary 当最终证据；chunk 读取要保持有界，缺失 chunks 只能降级并报告 diagnostics。 |
-| `src/agent/wiki/page-templates.ts` | 根据 evidence/query 推断 concept/method/finding/dataset/capability-boundary/design-record 模板，提供必需章节和 worker guidance，并验证 draft 章节。 | `wiki/tools.ts`、`lint.ts`、tests。 | `manifest-store.ts`、`page-schema.ts` 类型。 | 材料参数、软件文档、能力边界和 design record 的页面质量门禁从这里进入；新增模板时同步 lint 和 worker guidance 测试。 |
-| `src/agent/wiki/content.ts` | 写 source summary、写 synthesis page、alias merge、wiki 搜索。 | `wiki/tools.ts`、`wiki/summary.ts`、tests。 | store、manifest-store、journal、typed-store、retrieval-search、paper reader store。 | Source/page 文件格式 owner；写 source/page/alias 时要保持 manifest、index、journal 和 typed metadata 一致。 |
-| `src/agent/wiki/bootstrap.ts` | 为新 wiki page 构建固定 evidence 包和 seed queries。 | `wiki/tools.ts`、tests。 | `retrieval-contract.ts`、`local-paper-library.ts`、`wiki/content.ts`。 | 这是 no-page-yet bootstrap 入口；优先读结构化 evidence，再回退到本地论文库。 |
-| `src/agent/wiki/lint.ts` | Wiki 结构、引用、typed evidence contract、coverage、evidence-audit、freshness metadata、evidence-backed design 和 governance lint。 | `wiki/tools.ts`、tests。 | wiki store、typed-store、maintenance helpers、wiki types、page templates。 | lint severity 会影响 agent 修复建议；保持 issue kind 稳定，低风险修复和 LLM 重写要分开。Knowledge state、last-reviewed date、disputed contradiction evidence、claim provenance、contradiction candidate、typed relation、experiment ref、材料参数单位/条件、模板章节、软件版本这类检查应保持确定性。 |
-| `src/agent/wiki/review.ts` | Typed wiki page adversarial review，生成 deterministic findings，不写文件。 | `wiki/tools.ts`、tests。 | `page-schema.ts`、`typed-store.ts`、`store.ts`。 | 这是研究结论发布前的审查门；即使页面 frontmatter 有局部 schema 错误，也应尽量恢复原始 claims 以报告弱定量 provenance，而不是静默跳过风险。 |
-| `src/agent/wiki/maintenance.ts` | 读取 typed/legacy 页面和 source summaries，计算 coverage、concept gaps、semantic aliases、scope drift。 | `lint.ts`、`structure-plan.ts`、tests。 | `typed-store.ts`、`manifest-store.ts`、`store.ts`。 | legacy/typed 共存期要宽松读取；unsafe manifest-only source path 必须跳过。 |
-| `src/agent/wiki/structure-plan.ts` | 将 lint/governance issues 转成预算化、可审阅的维护 action。 | `wiki/tools.ts`、tests。 | `maintenance.ts`、lint 类型。 | 只规划，不写文件；action schema 是 `wiki_apply_structure_plan` 输入契约。 |
-| `src/agent/wiki/structure-apply.ts` | 应用批准的低风险 structure actions，支持 dry-run、preflight、journal 和验证。 | `wiki/tools.ts`、tests。 | `content.ts`、`journal.ts`、`lint.ts`、store。 | 只能做 deterministic 修复；别在这里引入 LLM 重写。 |
-| `src/agent/wiki/summary.ts` | 从 parsed paper 构建 summary evidence，调用 worker 生成/写入 source summary。 | `wiki/tools.ts`、`library-health-tools.ts`、`wiki/health.ts`。 | `paper-reader.ts`、`wiki/content.ts`、`local-paper-library.ts`。 | 证据截断和 worker confidence gating 是质量关键；不要让 worker 无证据扩写。 |
-| `src/agent/wiki/relations.ts` | 发现和更新 source summary 的 related paper keys。 | `wiki/tools.ts`、`wiki/summary.ts`。 | `local-paper-library.ts`、`wiki/store.ts`。 | 关系评分会影响知识图谱；写入模式 append/replace 要保留。 |
-| `src/agent/wiki/health.ts` | 检查/修复 wiki、parse、summary、download、V1/V2 manifest artifacts、typed page、operation journal 状态。 | `library-health-tools.ts`、tests。 | `local-paper-library.ts`、`paper-manager.ts`、`paper-reader.ts`、`paper-blocklist.ts`、`manifest-store.ts`、`typed-store.ts`、`journal.ts`、`wiki/lint.ts`。 | 大文件；download-blocked 降级、manifest backfill、typed diagnostics、自动下载、自动总结都在这里，拆分时保持 issue kind/status 稳定。 |
-| `src/agent/wiki/coordinator.ts` | 根据 intent/evidence/blocker 生成 deterministic wiki coordination plan。 | `wiki/tools.ts`、tests。 | 无。 | owner 边界是审计契约；`wiki-synthesis-worker` 是逻辑 owner label，不是 router role。 |
-| `src/agent/wiki/tools.ts` | Wiki source/page/relations/review/health answer/research/bootstrap/build/alias 相关工具编排，并返回 evidenceStatus/coordination metadata。 | `tools.ts`。 | `wiki/**` 领域服务、`local-paper-library.ts`、`paper/tools.ts`。 | 最大耦合文件；优先拆分为 source tools、page tools、research-answer flow、topic expansion，同时保留外部证据禁用开关、structured retrieval filters、template write gate 和 coordination details shape。 |
-| `src/agent/wiki/worker.ts` | 创建 clean-context `wiki-evidence-worker` summary/page 子任务，并解析 worker JSON 输出。 | `agent-runtime.ts`。 | `agent-prompts.ts`、`tools.ts` boundary、`agentLoop`。 | 递归工具过滤是关键，不能让 worker 直接调用 `generate_paper_wiki_summary` 或 `build_wiki_page` 形成自递归；page worker 的 `question` 与 `templateGuidance` 要保持分离。 |
+| `src/agent/wiki/index.ts` | Wiki-domain facade exporting source/page/bootstrap/lint/summary/relations/health/worker APIs. | `src/index.ts`, boundary tests, external reuse. | `wiki/**` submodules. | External imports should prefer this facade or explicit subdomain entrypoints to avoid scattered paths. |
+| `src/agent/wiki/types.ts` | Wiki source/page/search/bootstrap/worker types. | wiki tools, content, bootstrap, worker. | None. | Worker JSON output contract lives here; field changes must sync prompt and parser. |
+| `src/agent/wiki/workspace-contract.ts` | `knowledge-base/` lifecycle roots, index/log/journal paths, relative-path helpers. | `store.ts`, tests, external wiki integration. | `knowledge-base.ts`, Node path. | Add new path classes to the contract first, then delegate old helpers to it. Avoid rebuilding directories ad hoc in modules. |
+| `src/agent/wiki/page-schema.ts` | Typed wiki page frontmatter types, parse/validate/serialize, including `knowledge_state`, `last_reviewed_at`, `freshness_audit`, `execution_binding`, and evidence-audit metadata validation. | `typed-store.ts`, `health.ts`, `maintenance.ts`, `retrieval-contract.ts`, `review.ts`. | `domain-bindings.ts`. | Schema is the durable Markdown contract. New fields must tolerate old pages and add malformed diagnostics. Knowledge state values are limited to `established`, `promising_unverified`, `speculative`, and `disputed`; quantitative `claims` must bind concrete provenance such as page/figure/table/element/chunk/code-output; `freshness_audit` records latest external search, missing recent papers, stale warnings, and field update cadence; `experiment_refs` paths must be workspace-relative. |
+| `src/agent/wiki/typed-store.ts` | Lists, reads, and writes typed wiki pages while preserving Markdown body and reporting bad pages as diagnostics. | `retrieval-contract.ts`, `health.ts`, `lint.ts`, `maintenance.ts`. | `page-schema.ts`, `store.ts`. | Does not download or call LLMs; writes must not bypass source/page boundaries. |
+| `src/agent/wiki/domain-bindings.ts` | Metadata registry for validated executable helper bindings. | `page-schema.ts`, domain-binding tests. | None. | Describes binding schema only; it does not execute page content. Return deep copies to prevent callers mutating the registry. |
+| `src/agent/wiki/store.ts` | Wiki directories, source/page/assets/manifests/state paths, and scaffold. | `content.ts`, `tools.ts`, design artifact writes in `file-tools.ts`. | `knowledge-base.ts`, `workspace-contract.ts`, Node fs/path. | Compatibility path facade; new paths should come from the workspace contract. Shared docs should avoid hardcoded user-home paths. |
+| `src/agent/wiki/manifest-store.ts` | Source manifest read/write, manifest backfill from old `summary.md`, V1-to-V2 normalization, generalized source kind/status types. | `content.ts`, `health.ts`, `retrieval-contract.ts`, `bootstrap.ts`. | `store.ts`, Node fs/path. | Manifest is the wiki-facing provenance index, not a replacement for acquisition/parse records. V2 covers paper and non-paper evidence such as materials/software/standards; reads must verify filename key and internal `sourceKey` identity. |
+| `src/agent/wiki/journal.ts` | Multi-file wiki operation WAL: begin/complete events, reads, unfinished-operation detection. | `content.ts`, `structure-apply.ts`, `health.ts`. | `store.ts`, Node fs/path. | Begin before writes and complete after all writes. Repair tools depend on operation ID and planned files. |
+| `src/agent/wiki/retrieval-contract.ts` | Read-only evidence contract: reads/lists source evidence and typed page evidence, merging manifest, `sourceKind`/`sourceKey`, diagnostics, knowledge state, review date, claims, typed relations, experiment refs, and reviewer critique. | `retrieval-search.ts`, `bootstrap.ts`, downstream workers. | `manifest-store.ts`, `typed-store.ts`, `store.ts`, `page-schema.ts` types. | Downstream agents should consume this contract instead of physical directories. Bad keys, malformed manifests, and identity mismatches must degrade into diagnostics, not trusted reference keys. |
+| `src/agent/wiki/retrieval-search.ts` | Structured evidence search returning score, match reasons, warnings, structured filter results, and insufficient-evidence state. | `content.ts`, tests. | `retrieval-contract.ts`. | Ranking affects answer/build grounding. Strong scores outrank preferred kind. `maxEvidenceAgeDays` should only trigger freshness warnings when supplied by the caller; do not hardcode current time assumptions here. |
+| `src/agent/wiki/evidence-pack.ts` | Builds fixed synthesis evidence packs for `build_wiki_page`: summaries for recall/compression, raw chunks and claim provenance for final claims, contradiction notes for disputes. | `wiki/tools.ts`. | retrieval contract, paper reader artifacts, source manifests. | Do not treat summaries as final evidence. Chunk reads must stay bounded; missing chunks should degrade with diagnostics. |
+| `src/agent/wiki/page-templates.ts` | Infers concept/method/finding/dataset/capability-boundary/design-record templates from evidence/query, provides required sections and worker guidance, and validates draft sections. | `wiki/tools.ts`, `lint.ts`, tests. | `manifest-store.ts`, `page-schema.ts` types. | Material-parameter, software-doc, capability-boundary, and design-record gates enter here. New templates need synchronized lint and worker-guidance tests. |
+| `src/agent/wiki/content.ts` | Writes source summaries, writes synthesis pages, merges aliases, and searches wiki. | `wiki/tools.ts`, `wiki/summary.ts`, tests. | store, manifest-store, journal, typed-store, retrieval-search, paper reader store. | Owns source/page file format. Source/page/alias writes must keep manifest, index, journal, and typed metadata consistent. |
+| `src/agent/wiki/bootstrap.ts` | Builds fixed evidence packs and seed queries for new wiki pages. | `wiki/tools.ts`, tests. | `retrieval-contract.ts`, `local-paper-library.ts`, `wiki/content.ts`. | No-page-yet bootstrap entrypoint; prefer structured evidence first, then fall back to the local paper library. |
+| `src/agent/wiki/lint.ts` | Wiki structure, citations, typed evidence contract, coverage, evidence-audit, freshness metadata, evidence-backed design, and governance lint. | `wiki/tools.ts`, tests. | wiki store, typed-store, maintenance helpers, wiki types, page templates. | Lint severity affects repair recommendations. Keep issue kinds stable and separate low-risk deterministic fixes from LLM rewrites. Checks for knowledge state, last-reviewed date, disputed contradiction evidence, claim provenance, contradiction candidates, typed relation, experiment ref, material parameter units/conditions, template sections, and software versions should remain deterministic. |
+| `src/agent/wiki/review.ts` | Typed wiki page adversarial review producing deterministic findings without writing files. | `wiki/tools.ts`, tests. | `page-schema.ts`, `typed-store.ts`, `store.ts`. | Review gate before publishing research conclusions. Even when frontmatter has partial schema errors, try to recover raw claims and report weak quantitative provenance instead of silently skipping risk. |
+| `src/agent/wiki/maintenance.ts` | Reads typed/legacy pages and source summaries; computes coverage, concept gaps, semantic aliases, and scope drift. | `lint.ts`, `structure-plan.ts`, tests. | `typed-store.ts`, `manifest-store.ts`, `store.ts`. | During legacy/typed coexistence, read leniently. Unsafe manifest-only source paths must be skipped. |
+| `src/agent/wiki/structure-plan.ts` | Converts lint/governance issues into budgeted, reviewable maintenance actions. | `wiki/tools.ts`, tests. | `maintenance.ts`, lint types. | Plans only, does not write files. The action schema is the `wiki_apply_structure_plan` input contract. |
+| `src/agent/wiki/structure-apply.ts` | Applies approved low-risk structure actions with dry-run, preflight, journal, and validation support. | `wiki/tools.ts`, tests. | `content.ts`, `journal.ts`, `lint.ts`, store. | Deterministic fixes only; do not introduce LLM rewrites here. |
+| `src/agent/wiki/summary.ts` | Builds summary evidence from parsed papers and calls the worker to generate/write source summaries. | `wiki/tools.ts`, `library-health-tools.ts`, `wiki/health.ts`. | `paper-reader.ts`, `wiki/content.ts`, `local-paper-library.ts`. | Evidence truncation and worker confidence gating are quality-critical; never let the worker expand without evidence. |
+| `src/agent/wiki/relations.ts` | Discovers and updates related paper keys for source summaries. | `wiki/tools.ts`, `wiki/summary.ts`. | `local-paper-library.ts`, `wiki/store.ts`. | Relation scoring affects the knowledge graph; preserve append/replace modes. |
+| `src/agent/wiki/health.ts` | Checks and repairs wiki, parse, summary, download, V1/V2 manifest artifacts, typed page, and operation journal state. | `library-health-tools.ts`, tests. | `local-paper-library.ts`, `paper-manager.ts`, `paper-reader.ts`, `paper-blocklist.ts`, `manifest-store.ts`, `typed-store.ts`, `journal.ts`, `wiki/lint.ts`. | Large file; download-blocked downgrade, manifest backfill, typed diagnostics, automatic download, and automatic summary live here. Preserve issue kind/status semantics when splitting. |
+| `src/agent/wiki/coordinator.ts` | Builds deterministic wiki coordination plans from intent/evidence/blockers. | `wiki/tools.ts`, tests. | None. | Owner boundaries are the audit contract. `wiki-synthesis-worker` is a logical owner label, not a router role. |
+| `src/agent/wiki/tools.ts` | Orchestrates wiki source/page/relations/review/health answer/research/bootstrap/build/alias tools and returns `evidenceStatus`/coordination metadata. | `tools.ts`. | `wiki/**` domain services, `local-paper-library.ts`, `paper/tools.ts`. | Highest coupling file; split toward source tools, page tools, research-answer flow, and topic expansion while preserving external-evidence disable switches, structured retrieval filters, template write gate, and coordination details shape. |
+| `src/agent/wiki/worker.ts` | Creates clean-context `wiki-evidence-worker` summary/page subtasks and parses worker JSON output. | `agent-runtime.ts`. | `agent-prompts.ts`, `tools.ts` boundary, `agentLoop`. | Recursive tool filtering is critical. The worker must not call `generate_paper_wiki_summary` or `build_wiki_page` recursively. Keep page-worker `question` separate from `templateGuidance`. |
 
-### 支撑脚本与本地 viewer
+### Support Scripts And Local Viewer
 
-| 文件 | 职责 | 上游调用者 | 下游依赖 | 重构注意点 |
+| File | Responsibility | Upstream callers | Downstream dependencies | Refactor notes |
 | --- | --- | --- | --- | --- |
-| `scripts/wiki-web.mjs` | 本地 wiki web viewer 和 `/graph-data.json` 生成。 | `npm run wiki:web`、`test/scripts/wiki-web-graph.test.mjs`。 | Node http/fs/path。 | 这是脚本层，不应反向依赖 `dist/src/**`。Graph data 优先读取 page frontmatter 的 `typed_relations`，并保留 legacy `related_pages`、Markdown 链接和 bracket reference fallback。导入安全性由脚本级测试保护，避免测试 import 时启动 server。 |
+| `scripts/wiki-web.mjs` | Local wiki web viewer and `/graph-data.json` generator. | `npm run wiki:web`, `test/scripts/wiki-web-graph.test.mjs`. | Node http/fs/path. | Script layer should not depend back on `dist/src/**`. Graph data should prefer page-frontmatter `typed_relations`, while retaining legacy `related_pages`, Markdown links, and bracket-reference fallback. Script-level tests protect import safety so importing tests does not start a server. |
 
-### Feishu bridge
+### Feishu Bridge
 
-| 文件 | 职责 | 上游调用者 | 下游依赖 | 重构注意点 |
+| File | Responsibility | Upstream callers | Downstream dependencies | Refactor notes |
 | --- | --- | --- | --- | --- |
-| `src/feishu-bridge/index.ts` | Feishu 长连接主流程、消息队列、RPC client 管理、streaming reply、repo command/PDF delivery/memory 编排。 | `npm run feishu-bridge`。 | 几乎所有 `feishu-bridge/**` helper、Lark SDK。 | 最大桥接文件；拆分优先按 event parse、agent invocation、reply rendering、side effects。不要放入领域推理。 |
-| `src/feishu-bridge/config.ts` | `.env`/环境变量配置加载，含 Windows env 读取。 | `index.ts`、tests。 | Node fs/path/child_process。 | 配置名是部署契约；改默认值要同步 env example 和 README。 |
-| `src/feishu-bridge/types.ts` | bridge 内部 incoming message 类型。 | `index.ts`、session/memory helper。 | 无。 | 保持 ParsedIncomingMessage 稳定，避免影响 per-chat session key。 |
-| `src/feishu-bridge/colors.ts` | 控制台颜色和日志 helper。 | `index.ts`。 | 无。 | 只做呈现，不承载逻辑。 |
-| `src/feishu-bridge/chat-queue.ts` | per-key 串行队列。 | `index.ts`、tests。 | 无。 | 群聊/私聊并发顺序依赖它；避免引入全局阻塞。 |
-| `src/feishu-bridge/pi-client.ts` | JSONL RPC agent 子进程 client，事件解析和命令发送。 | `index.ts`、tests。 | Node child_process/events。 | 与 `agent-cli.ts` RPC event 协议强耦合；新增 event 要双边测试。 |
-| `src/feishu-bridge/pi-client-retry.ts` | 启动 PiRpcClient 的重试包装。 | `index.ts`、tests。 | `pi-client.ts`。 | 保持只处理启动重试，不吞掉长期运行错误。 |
-| `src/feishu-bridge/pi-session.ts` | 按消息解析 agent session dir、client options 和 client key。 | `index.ts`、tests。 | bridge types。 | session key 变化会影响上下文隔离和记忆复用。 |
-| `src/feishu-bridge/agent-tool-status.ts` | 将 RPC tool events 格式化为 Feishu 进度状态。 | `index.ts`、tests。 | `pi-client.ts` 事件类型。 | UI 文案改动会影响可观测性测试。 |
-| `src/feishu-bridge/agent-web-search.ts` | 旧式 agent web search follow-up 指令和结果包装。 | `index.ts`。 | `web/search.ts`。 | 与 agent 自身工具检索不同；合并前先确认桥接 fallback 语义。 |
-| `src/feishu-bridge/paper-git.ts` | Feishu 侧 managed repo status/diff/log/commit/push 和自动提交。 | `index.ts`、tests。 | child_process、fs。 | 这是桥接侧服务，不是 LLM tool；保持仓库命令受配置限制。 |
-| `src/feishu-bridge/web/search.ts` | Feishu bridge 独立 web search、缓存 key、Jina/DuckDuckGo 解析和格式化。 | `agent-web-search.ts`、`index.ts`。 | child_process/fetch。 | 不要误认为 agent 工具 `web-search.ts`；两者测试分开。 |
-| `src/feishu-bridge/feishu/message-utils.ts` | Feishu 消息文本提取、@ stripping、是否响应、prompt 构造。 | `index.ts`、tests。 | 无。 | 群聊触发规则敏感；mention metadata 由 `mention-detection.ts` 补充。 |
-| `src/feishu-bridge/feishu/mention-detection.ts` | 检测 bot mention，信任 Feishu mention metadata。 | `index.ts`、tests。 | 无。 | 群 @ 修复热点；`mentioned_type:"bot"` 应优先于 open_id 猜测。 |
-| `src/feishu-bridge/feishu/sender-name.ts` | 获取/解析 Feishu sender display name。 | `index.ts`、tests。 | Lark client。 | 失败时应降级，不阻断回复。 |
-| `src/feishu-bridge/feishu/card-builder.ts` | 生成 Feishu thinking/status/stream/error card JSON。 | `index.ts`、tests。 | 无。 | 卡片 JSON 字段变动需跑 card 测试。 |
-| `src/feishu-bridge/feishu/stream-updater.ts` | 流式卡片更新节流/状态管理。 | `index.ts`、tests。 | 无。 | 避免过频 API 调用；异常要允许最终文本回复兜底。 |
-| `src/feishu-bridge/feishu/reply-sender.ts` | Feishu 回复发送与错误解析/重试。 | `index.ts`、tests。 | Lark client。 | API 错误分类影响重试和日志。 |
-| `src/feishu-bridge/feishu/long-message.ts` | 长文本分片。 | `index.ts`、tests。 | 无。 | 分片要保持 markdown/链接基本可读。 |
-| `src/feishu-bridge/feishu/pdf-delivery.ts` | 从 agent event/text/config 解析和回传 PDF 附件。 | `index.ts`、tests。 | Node fs/path。 | 路径必须受 workspace/config 限制，避免任意文件泄露。 |
-| `src/feishu-bridge/memory/chat-memory.ts` | per-chat 短期历史存储。 | `index.ts`、tests。 | Node fs/path。 | prompt_history 和 stored_history 区分很重要，避免 assistant 回复回灌。 |
-| `src/feishu-bridge/memory/long-term-memory.ts` | 长期 fact/preference 存储。 | `index.ts`、tests。 | Node fs/path。 | 只存可持久事实，不要写入敏感信息。 |
-| `src/feishu-bridge/memory/key-memory.ts` | 关键记忆候选提取和 key-based store。 | `index.ts`、tests。 | Node fs/path。 | 提取规则影响长期偏好质量；保持可解释。 |
-| `src/feishu-bridge/memory/extractors.ts` | 从文本提取 durable user/group facts。 | `index.ts`、tests。 | 无。 | 规则应保守，避免把临时聊天当长期事实。 |
-| `src/feishu-bridge/memory/debug.ts` | memory debug 行格式化。 | `index.ts`、tests。 | memory 类型。 | 调试输出要避免泄露敏感路径或密钥。 |
+| `src/feishu-bridge/index.ts` | Feishu long-connection main flow, message queue, RPC client management, streaming replies, repo command/PDF delivery/memory orchestration. | `npm run feishu-bridge`. | Almost every `feishu-bridge/**` helper, Lark SDK. | Largest bridge file; split first by event parsing, agent invocation, reply rendering, and side effects. Do not put domain reasoning here. |
+| `src/feishu-bridge/config.ts` | Loads `.env`/environment configuration, including Windows env reads. | `index.ts`, tests. | Node fs/path/child_process. | Config names are deployment contracts; default changes must update env example and README. |
+| `src/feishu-bridge/types.ts` | Internal incoming-message types for the bridge. | `index.ts`, session/memory helpers. | None. | Keep `ParsedIncomingMessage` stable to avoid changing per-chat session keys. |
+| `src/feishu-bridge/colors.ts` | Console colors and log helpers. | `index.ts`. | None. | Presentation only, no logic. |
+| `src/feishu-bridge/chat-queue.ts` | Per-key serial queue. | `index.ts`, tests. | None. | Group/private chat ordering depends on this; avoid global blocking. |
+| `src/feishu-bridge/pi-client.ts` | JSONL RPC agent subprocess client, event parsing, command sending. | `index.ts`, tests. | Node child_process/events. | Tightly coupled to the `agent-cli.ts` RPC event protocol; new events need tests on both sides. |
+| `src/feishu-bridge/pi-client-retry.ts` | Retry wrapper for starting `PiRpcClient`. | `index.ts`, tests. | `pi-client.ts`. | Only handle startup retries; do not swallow long-running errors. |
+| `src/feishu-bridge/pi-session.ts` | Resolves agent session dir, client options, and client key from messages. | `index.ts`, tests. | bridge types. | Session key changes affect context isolation and memory reuse. |
+| `src/feishu-bridge/agent-tool-status.ts` | Formats RPC tool events into Feishu progress status. | `index.ts`, tests. | `pi-client.ts` event types. | UI text changes affect observability tests. |
+| `src/feishu-bridge/agent-web-search.ts` | Legacy agent web-search follow-up instructions and result wrapper. | `index.ts`. | `web/search.ts`. | Distinct from the agent's own tools; confirm fallback semantics before merging. |
+| `src/feishu-bridge/paper-git.ts` | Bridge-side managed repo status/diff/log/commit/push and automatic commit. | `index.ts`, tests. | child_process, fs. | Bridge-side service, not an LLM tool. Keep repo commands configuration-limited. |
+| `src/feishu-bridge/web/search.ts` | Feishu bridge standalone web search, cache keys, Jina/DuckDuckGo parsing and formatting. | `agent-web-search.ts`, `index.ts`. | child_process/fetch. | Do not confuse this with agent tool `web-search.ts`; tests are separate. |
+| `src/feishu-bridge/feishu/message-utils.ts` | Feishu message text extraction, mention stripping, response decision, prompt construction. | `index.ts`, tests. | None. | Group-chat trigger rules are sensitive; mention metadata is supplemented by `mention-detection.ts`. |
+| `src/feishu-bridge/feishu/mention-detection.ts` | Detects bot mentions and trusts Feishu mention metadata. | `index.ts`, tests. | None. | Group mention repairs are common; `mentioned_type:"bot"` should take priority over open_id guessing. |
+| `src/feishu-bridge/feishu/sender-name.ts` | Gets/parses Feishu sender display names. | `index.ts`, tests. | Lark client. | Failures should degrade without blocking replies. |
+| `src/feishu-bridge/feishu/card-builder.ts` | Builds Feishu thinking/status/stream/error card JSON. | `index.ts`, tests. | None. | Card JSON field changes require card tests. |
+| `src/feishu-bridge/feishu/stream-updater.ts` | Streaming card update throttling and state management. | `index.ts`, tests. | None. | Avoid excessive API calls; exceptions should still allow final text reply fallback. |
+| `src/feishu-bridge/feishu/reply-sender.ts` | Sends Feishu replies and parses/retries errors. | `index.ts`, tests. | Lark client. | API error classification affects retries and logs. |
+| `src/feishu-bridge/feishu/long-message.ts` | Splits long text messages. | `index.ts`, tests. | None. | Chunks should keep markdown and links readable. |
+| `src/feishu-bridge/feishu/pdf-delivery.ts` | Parses and returns PDF attachments from agent events/text/config. | `index.ts`, tests. | Node fs/path. | Paths must be restricted by workspace/config to avoid arbitrary file disclosure. |
+| `src/feishu-bridge/memory/chat-memory.ts` | Per-chat short-term history storage. | `index.ts`, tests. | Node fs/path. | Keep `prompt_history` distinct from `stored_history` to avoid feeding assistant replies back into prompts. |
+| `src/feishu-bridge/memory/long-term-memory.ts` | Long-term fact/preference storage. | `index.ts`, tests. | Node fs/path. | Store only durable facts, not sensitive information. |
+| `src/feishu-bridge/memory/key-memory.ts` | Key memory candidate extraction and key-based store. | `index.ts`, tests. | Node fs/path. | Extraction rules affect long-term preference quality; keep them explainable. |
+| `src/feishu-bridge/memory/extractors.ts` | Extracts durable user/group facts from text. | `index.ts`, tests. | None. | Rules should be conservative and avoid treating transient chat as long-term fact. |
+| `src/feishu-bridge/memory/debug.ts` | Formats memory debug lines. | `index.ts`, tests. | memory types. | Debug output should avoid leaking sensitive paths or secrets. |
 
-## 测试映射
+## Test Map
 
-按生产模块优先看的测试：
+Tests to inspect first by production module:
 
-- Runtime/CLI/router/tools: `test/agent/pi-agent.test.ts`、`test/agent/tools.test.ts`、`test/agent/tools-extension.test.ts`、`test/agent/model-resolver.test.ts`、`test/agent/env-proxy.test.ts`、`test/index.test.ts`。
-- Design-agent boundary/design-code tooling: `test/agent/tools.test.ts` covers design-agent tool exposure, design-code write constraints, root `.venv` sync/import behavior, and `run_design_script` sandbox/output copyback. The nested Python package has its own checks under `design-repo/design-code/tests` and linting under `design-repo/design-code/src`.
-- 论文检索/下载/store/blocklist/jobs: `test/agent/arxiv.test.ts`、`test/agent/aps-search.test.ts`、`test/agent/paper-download.test.ts`、`test/agent/paper-manager.test.ts`、`test/agent/paper-manager-extension.test.ts`、`test/agent/paper-store.test.ts`、`test/agent/paper-download-jobs.test.ts`、`test/agent/publisher-adapters/index.test.ts`。
-- 浏览器和扩展: `test/agent/browser-session.test.ts`、`test/agent/browser-session-runtime.test.ts`、`test/agent/paper-browser-manager-client.test.ts`、`test/agent/paper-browser-manager-discovery.test.ts`、`test/agent/paper-browser-manager-server.test.ts`、`test/agent/paper-extension-host.test.ts`、`test/agent/paper-extension-host-registration.test.ts`、`test/agent/paper-extension-protocol.test.ts`、`test/browser-extension/paper-downloader.test.mjs`。
-- 论文解析/阅读/网页: `test/agent/paper-reader.test.ts`、`test/agent/paper-webpage-fetch.test.ts`、`test/agent/local-paper-library.test.ts`。
-- Wiki core/source/relations/health/evidence audit: `test/agent/wiki-domain-boundary.test.ts`、`test/agent/wiki-workspace-contract.test.ts`、`test/agent/wiki-page-schema.test.ts`、`test/agent/wiki-typed-store.test.ts`、`test/agent/wiki-manifest-store.test.ts`、`test/agent/wiki-retrieval-contract.test.ts`、`test/agent/wiki-review.test.ts`、`test/agent/wiki-page-templates.test.ts`、`test/agent/wiki-coordinator.test.ts`、`test/agent/wiki-domain-bindings.test.ts`、`test/agent/paper-summary.test.ts`、`test/agent/paper-relations.test.ts`、`test/agent/wiki-health.test.ts`、`test/agent/wiki-maintenance.test.ts`、`test/agent/local-paper-library.test.ts`、`test/agent/tools.test.ts`。
-- Local wiki web graph scripts: `test/scripts/wiki-web-graph.test.mjs`。
-- Web 工具: `test/agent/web-fetch.test.ts`、`test/agent/web-search.test.ts`。
-- Feishu bridge: `test/feishu-bridge/*.test.ts`，按文件名基本一一对应 `src/feishu-bridge/**`；主流程相关优先看 `pi-client.test.ts`、`pi-session.test.ts`、`agent-tool-status.test.ts`、`mention-detection.test.ts`、`message-utils.test.ts`、`paper-git.test.ts`、`pdf-delivery.test.ts`、`config.test.ts`。
+- Runtime/CLI/router/tools: `test/agent/pi-agent.test.ts`, `test/agent/tools.test.ts`, `test/agent/tools-extension.test.ts`, `test/agent/model-resolver.test.ts`, `test/agent/env-proxy.test.ts`, `test/index.test.ts`.
+- Design-agent boundary/design-code tooling: `test/agent/tools.test.ts` covers design-agent tool exposure, design-code write constraints, root `.venv` sync/import behavior, and `run_design_script` sandbox/output copyback. The parent-managed Python package has its own checks under `design-repo/design-code/tests` and linting under `design-repo/design-code/src`.
+- Paper search/download/store/blocklist/jobs: `test/agent/arxiv.test.ts`, `test/agent/aps-search.test.ts`, `test/agent/paper-download.test.ts`, `test/agent/paper-manager.test.ts`, `test/agent/paper-manager-extension.test.ts`, `test/agent/paper-store.test.ts`, `test/agent/paper-download-jobs.test.ts`, `test/agent/publisher-adapters/index.test.ts`.
+- Browser and extension: `test/agent/browser-session.test.ts`, `test/agent/browser-session-runtime.test.ts`, `test/agent/paper-browser-manager-client.test.ts`, `test/agent/paper-browser-manager-discovery.test.ts`, `test/agent/paper-browser-manager-server.test.ts`, `test/agent/paper-extension-host.test.ts`, `test/agent/paper-extension-host-registration.test.ts`, `test/agent/paper-extension-protocol.test.ts`, `test/browser-extension/paper-downloader.test.mjs`.
+- Paper parsing/reading/webpage: `test/agent/paper-reader.test.ts`, `test/agent/paper-webpage-fetch.test.ts`, `test/agent/local-paper-library.test.ts`.
+- Wiki core/source/relations/health/evidence audit: `test/agent/wiki-domain-boundary.test.ts`, `test/agent/wiki-workspace-contract.test.ts`, `test/agent/wiki-page-schema.test.ts`, `test/agent/wiki-typed-store.test.ts`, `test/agent/wiki-manifest-store.test.ts`, `test/agent/wiki-retrieval-contract.test.ts`, `test/agent/wiki-review.test.ts`, `test/agent/wiki-page-templates.test.ts`, `test/agent/wiki-coordinator.test.ts`, `test/agent/wiki-domain-bindings.test.ts`, `test/agent/paper-summary.test.ts`, `test/agent/paper-relations.test.ts`, `test/agent/wiki-health.test.ts`, `test/agent/wiki-maintenance.test.ts`, `test/agent/local-paper-library.test.ts`, `test/agent/tools.test.ts`.
+- Local wiki web graph scripts: `test/scripts/wiki-web-graph.test.mjs`.
+- Web tools: `test/agent/web-fetch.test.ts`, `test/agent/web-search.test.ts`.
+- Feishu bridge: `test/feishu-bridge/*.test.ts`, mostly one-to-one with `src/feishu-bridge/**`. For main-flow issues inspect `pi-client.test.ts`, `pi-session.test.ts`, `agent-tool-status.test.ts`, `mention-detection.test.ts`, `message-utils.test.ts`, `paper-git.test.ts`, `pdf-delivery.test.ts`, and `config.test.ts` first.
 
-## 重构切入建议
+## Refactor Entry Points
 
-- `src/agent/paper/acquisition/paper-manager.ts`: 先抽纯函数和策略对象，不先动持久 JSON 格式。建议切为 search aggregation、candidate ranking、download orchestration、publisher fallback、manual registration。
-- `src/agent/paper/storage/paper-store.ts`: 先补数据格式 fixture，再动路径和 record schema。任何字段改名都要支持旧记录读取。
-- `src/agent/wiki/**` schema-first 核心层: 路径先走 `workspace-contract.ts`，页面字段先走 `page-schema.ts`，下游读取先走 `retrieval-contract.ts`。不要让新 workflow 重新直接扫描物理目录。Evidence-audit 字段也是页面契约，不要绕过 schema 用 ad hoc frontmatter 解析；非论文证据必须通过 V2 manifest 的 `sourceKind`/`sourceKey` 和模板门禁进入页面构建。
-- `src/agent/wiki/tools.ts`: 先按工具族拆分 helper，保留 public tool names、details shape、`evidenceStatus` 和 coordination metadata。`answer_research_question` 与 `build_wiki_page` 的外部证据开关是关键边界。
-- `src/agent/wiki/health.ts` 与 `src/agent/wiki/maintenance.ts`: 先按 issue kind/diagnostic source 拆纯函数，不先改 issue kind 名称。`source_manifest_*`、`wiki_page_*`、`wiki_operation_interrupted` 是当前治理层外部语义。
-- `src/agent/paper/extension/paper-extension-host.ts`: 先拆 native framing、protocol handling、PDF registration、webpage snapshot registration、manifest writer。每一步都要跑 extension host 和 browser-extension 测试。
-- `src/feishu-bridge/index.ts`: 先抽无状态 helper，不改变消息队列、memory、RPC client cache 的生命周期。桥接层不要吸收 agent/domain 逻辑。
-- `src/agent/agent-cli.ts`: 可拆 CLI args、RPC mode、REPL event formatting、session stats；改 `[tool:start]`/`[tool:end]` 文本前先看 `test/agent/pi-agent.test.ts`。
+- `src/agent/paper/acquisition/paper-manager.ts`: start by extracting pure functions and strategy objects, without changing durable JSON formats. Good split targets are search aggregation, candidate ranking, download orchestration, publisher fallback, and manual registration.
+- `src/agent/paper/storage/paper-store.ts`: add data-format fixtures before changing paths or record schema. Any field rename must support old record reads.
+- `src/agent/wiki/**` schema-first core: route paths through `workspace-contract.ts`, page fields through `page-schema.ts`, and downstream reads through `retrieval-contract.ts`. Do not let new workflows scan physical directories directly. Evidence-audit fields are also page contracts; do not bypass schema with ad hoc frontmatter parsing. Non-paper evidence must enter page construction through V2 manifest `sourceKind`/`sourceKey` and template gates.
+- `src/agent/wiki/tools.ts`: split helpers by tool family while preserving public tool names, details shape, `evidenceStatus`, and coordination metadata. The external-evidence switches in `answer_research_question` and `build_wiki_page` are key boundaries.
+- `src/agent/wiki/health.ts` and `src/agent/wiki/maintenance.ts`: split pure functions by issue kind or diagnostic source without renaming issue kinds first. `source_manifest_*`, `wiki_page_*`, and `wiki_operation_interrupted` are external governance semantics.
+- `src/agent/paper/extension/paper-extension-host.ts`: split native framing, protocol handling, PDF registration, webpage snapshot registration, and manifest writer. Run extension-host and browser-extension tests at each step.
+- `src/feishu-bridge/index.ts`: extract stateless helpers without changing message queue, memory, or RPC client cache lifecycles. The bridge layer should not absorb agent/domain logic.
+- `src/agent/agent-cli.ts`: can be split into CLI args, RPC mode, REPL event formatting, and session stats. Inspect `test/agent/pi-agent.test.ts` before changing `[tool:start]` or `[tool:end]` text.
 
-重构前的最低验证建议：
+Minimum verification before refactors:
 
-1. 改 runtime/tools/router: 跑 `npm test`。
-2. 改 extension/native host: 跑 `npm test` 加 `test/browser-extension/paper-downloader.test.mjs` 覆盖。
-3. 改 wiki web graph 脚本: 跑 `npm run build` 和 `node --test --experimental-test-isolation=none test/scripts/wiki-web-graph.test.mjs`。
-4. 改 design-agent 工具边界、dependency sync 或 script sandbox: 跑 `npm test`，再跑 `.venv/bin/python -m pytest design-repo/design-code/tests` 和 `.venv/bin/python -m ruff check design-repo/design-code/src design-repo/design-code/tests`。
-5. 改 docs-only: 跑 `npm run build`，并做 `src/**` 路径覆盖检查。
+1. Runtime/tools/router changes: run `npm test`.
+2. Extension/native-host changes: run `npm test` plus `test/browser-extension/paper-downloader.test.mjs` coverage.
+3. Wiki web graph script changes: run `npm run build` and `node --test --experimental-test-isolation=none test/scripts/wiki-web-graph.test.mjs`.
+4. Design-agent tool boundary, dependency sync, or script sandbox changes: run `npm test`, then `.venv/bin/python -m pytest design-repo/design-code/tests` and `.venv/bin/python -m ruff check design-repo/design-code/src design-repo/design-code/tests`.
+5. Docs-only changes: run `npm run build`, and check path references under `src/**`.

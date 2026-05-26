@@ -82,7 +82,7 @@ Feishu users interact with the durable knowledge workflow. If a Feishu user asks
 - read-only local wiki and paper retrieval tools such as `answer_paper_wiki_question`, `search_paper_wiki`, `search_local_papers`, and `list_local_papers`.
 - design dependency and environment tools.
 - scoped design-code file write/replace tools.
-- bounded design script execution tools that run only `knowledge-base/design-code/` scripts in a `bwrap` sandbox with an isolated temporary design-code copy and copy back declared design-code outputs.
+- bounded design script execution tools that run only `design-repo/design-code/` scripts in a `bwrap` sandbox with an isolated temporary design-code copy and copy back declared design-code outputs.
 - design artifact and design record writing tools.
 
 `design-agent` must not expose:
@@ -100,7 +100,7 @@ Feishu users interact with the durable knowledge workflow. If a Feishu user asks
 The agents collaborate through durable files, not implicit runtime routing.
 
 1. `design-agent` reads wiki/paper evidence when it needs design context.
-2. `design-agent` updates code under `knowledge-base/design-code/`, manages dependencies through the design `pyproject.toml`, syncs the root `.venv`, runs bounded verification, and writes design records or artifacts.
+2. `design-agent` updates code under the parent-managed `design-repo/design-code/` Python package, manages dependencies through the design `pyproject.toml`, syncs the root `.venv`, runs bounded verification, and writes design records or artifacts.
 3. `wiki-agent` later reads those design records/artifacts and decides how to update wiki pages, source manifests, indexes, and knowledge-base summaries.
 
 This keeps design execution auditable and keeps wiki curation under the wiki-agent boundary.

@@ -4,9 +4,9 @@
 
 **Goal:** Promote the current `design-subagent` into a first-class `design-agent` that owns bounded layout-code editing, dependency declaration, root `.venv` sync, script execution, and design artifact handoff.
 
-**Architecture:** Keep the existing routed-worker runtime, but rename the public design role to `design-agent` while retaining `design-subagent` as a compatibility alias. Add design-specific tools to the existing tool assembly so the design agent can edit only `knowledge-base/design-code/`, update only that package's `pyproject.toml`, sync only that package into the root `.venv`, and continue handing structured artifacts back to the wiki agent.
+**Architecture:** Keep the existing routed-worker runtime, but rename the public design role to `design-agent` while retaining `design-subagent` as a compatibility alias. Add design-specific tools to the existing tool assembly so the design agent can edit only `design-repo/design-code/`, update only that package's `pyproject.toml`, sync only that package into the root `.venv`, and continue handing structured artifacts back to the wiki agent.
 
-**Tech Stack:** TypeScript, Node built-in `fs/promises`, `child_process.execFile`, `@mariozechner/pi-ai` tool schemas, `node:test`, `uv`, root `.venv`, nested `knowledge-base/design-code` Python package.
+**Tech Stack:** TypeScript, Node built-in `fs/promises`, `child_process.execFile`, `@mariozechner/pi-ai` tool schemas, `node:test`, `uv`, root `.venv`, nested `design-repo/design-code` Python package.
 
 ---
 
@@ -29,30 +29,30 @@
 
 - [ ] **Step 1: Write failing routing tests**
 
-Add these assertions to `test("runSessionPrompt routes paper write commands to the paper-writing worker boundary", ...)` in `test/agent/pi-agent.test.ts`, next to the existing `design 写一个芯片设计 failure record` assertion:
+Add these assertions to `test("runSessionPrompt routes paper write commands to the paper-writing worker boundary", ...)` in `test/agent/pi-agent.test.ts`, next to the existing `design write a chip-design failure record` assertion:
 
 ```ts
-  assert.deepEqual(routeChatPromptToWorker!("design-agent 安装 gdsfactory"), {
+  assert.deepEqual(routeChatPromptToWorker!("design-agent install gdstk"), {
     role: "design-agent",
-    instruction: "安装 gdsfactory",
+    instruction: "install gdstk",
     reason: "explicit",
   });
 
-  assert.deepEqual(routeChatPromptToWorker!("design subagent 安装 gdsfactory"), {
+  assert.deepEqual(routeChatPromptToWorker!("design subagent install gdstk"), {
     role: "design-agent",
-    instruction: "安装 gdsfactory",
+    instruction: "install gdstk",
     reason: "explicit",
   });
 
-  assert.deepEqual(routeChatPromptToWorker!("请让design subagent安装gdsfactory这个python包"), {
+  assert.deepEqual(routeChatPromptToWorker!("please ask design subagent to install the gdstk Python package"), {
     role: "design-agent",
-    instruction: "请让design subagent安装gdsfactory这个python包",
+    instruction: "please ask design subagent to install the gdstk Python package",
     reason: "intent",
   });
 
-  assert.deepEqual(routeChatPromptToWorker!("请同步 knowledge-base/design-code 的 uv 环境"), {
+  assert.deepEqual(routeChatPromptToWorker!("please sync the uv environment for design-repo/design-code"), {
     role: "design-agent",
-    instruction: "请同步 knowledge-base/design-code 的 uv 环境",
+    instruction: "please sync the uv environment for design-repo/design-code",
     reason: "intent",
   });
 ```
@@ -89,8 +89,8 @@ Replace the current design explicit route block with:
       /^\/?design-subagent\s+([\s\S]+)$/i,
       /^\/?design\s+subagent\s+([\s\S]+)$/i,
       /^\/?design\s+([\s\S]+)$/i,
-      /^\/?芯片设计\s+([\s\S]+)$/i,
-      /^\/?设计任务\s+([\s\S]+)$/i
+      /^\/?chip\s+design\s+([\s\S]+)$/i,
+      /^\/?design\s+task\s+([\s\S]+)$/i
     ]);
 ```
 
@@ -100,8 +100,8 @@ In `src/agent/agent-routing.ts`, replace the `designIntent` block with:
 
 ```ts
   const designExecutionIntent =
-    /(design[-\s]?agent|design[-\s]?subagent|design-code|gdsfactory|klayout|gds|版图|layout|芯片|量子|qubit|resonator|coupler|python\s*包|依赖|uv\s*环境|uv\s*sync|pyproject\.toml)/i.test(trimmed) &&
-    /(安装|同步|更新|添加|声明|运行|生成|检查|验证|设计|仿真|失败|install|sync|update|add|declare|run|generate|check|verify|simulate|failure|record|artifact|benchmark|layout)/i.test(trimmed);
+    /(design[-\s]?agent|design[-\s]?subagent|design-code|gdstk|klayout|gds|layout|chip|quantum|qubit|resonator|coupler|python\s*package|dependency|uv\s*environment|uv\s*sync|pyproject\.toml)/i.test(trimmed) &&
+    /(install|sync|update|add|declare|run|generate|check|verify|design|simulate|failure|record|artifact|benchmark|layout)/i.test(trimmed);
   if (designExecutionIntent) {
     return { role: "design-agent", instruction: trimmed, reason: "intent" };
   }
@@ -214,9 +214,9 @@ In `src/agent/agent-prompts.ts`, rename `DESIGN_SUBAGENT_SYSTEM_PROMPT` to `DESI
 export const DESIGN_AGENT_SYSTEM_PROMPT = [
   "You are the design-agent for this project. You operate in a clean context with a restricted chip-design engineering, layout-code, dependency-management, and verification tool surface.",
   "Use local wiki and paper evidence before writing design artifacts. Keep design outputs as structured design records, verification reports, failure records, benchmark cases, or generated layout artifacts.",
-  "All self-developed layout code belongs under knowledge-base/design-code/. Treat it as a separate design-code Git repository that is part of the knowledge base, not as ordinary parent-repo TypeScript source.",
-  "Do not create or use design-projects/ for new work. That path is deprecated; migrate useful legacy design code into knowledge-base/design-code/ when implementation work requires it.",
-  "Manage Python dependencies through knowledge-base/design-code/pyproject.toml and uv.lock. The only managed Python runtime environment is the parent repository root .venv.",
+  "All self-developed layout code belongs under design-repo/design-code/. Treat it as a separate design-code Git repository that is part of the knowledge base, not as ordinary parent-repo TypeScript source.",
+  "Do not create or use design-projects/ for new work. That path is deprecated; migrate useful legacy design code into design-repo/design-code/ when implementation work requires it.",
+  "Manage Python dependencies through design-repo/design-code/pyproject.toml and uv.lock. The only managed Python runtime environment is the parent repository root .venv.",
   "When Python dependencies may be missing, first update or confirm dependency declarations, then call sync_design_environment before running layout or verification scripts. Do not install packages ad hoc with pip or use uv as a general shell.",
   "Run workspace-local layout or verification scripts with run_design_script when the user asks for concrete design artifacts such as GDS files. Use the klayout runner for KLayout Python scripts and report generated output paths or the exact execution failure.",
   "Write design artifacts with write_design_artifact. Do not edit parent-repo source files, write wiki pages, download papers, run external web search, or use run_design_script as a general shell.",
@@ -322,7 +322,7 @@ test("update_design_dependency adds a main dependency to design-code pyproject",
         "version = \"0.1.0\"",
         "requires-python = \">=3.11\"",
         "dependencies = [",
-        "  \"gdsfactory>=8\"",
+        "  \"gdstk>=8\"",
         "]",
         "",
         "[project.optional-dependencies]",
@@ -347,7 +347,7 @@ test("update_design_dependency adds a main dependency to design-code pyproject",
 
     assert.deepEqual(result.details, {
       status: "updated",
-      path: "knowledge-base/design-code/pyproject.toml",
+      path: "design-repo/design-code/pyproject.toml",
       group: "main",
       dependency: "klayout>=0.29",
       changed: true,
@@ -409,7 +409,7 @@ In `src/agent/file-tools.ts`, add the schema near `syncDesignEnvironmentParamete
 ```ts
 const updateDesignDependencyParameters = Type.Object({
   name: Type.String({
-    description: "Python package name to declare in knowledge-base/design-code/pyproject.toml."
+    description: "Python package name to declare in design-repo/design-code/pyproject.toml."
   }),
   specifier: Type.Optional(
     Type.String({
@@ -498,7 +498,7 @@ async function updateDesignDependency(input: {
   dependency: string;
   changed: boolean;
 }> {
-  const projectDir = await resolveDesignCodeProjectPath(input.workspaceDir, "knowledge-base/design-code");
+  const projectDir = await resolveDesignCodeProjectPath(input.workspaceDir, "design-repo/design-code");
   const pyprojectPath = path.join(projectDir, "pyproject.toml");
   const dependency = normalizePythonDependency({ name: input.name, specifier: input.specifier });
   const group = input.group ?? "main";
@@ -509,7 +509,7 @@ async function updateDesignDependency(input: {
   const sectionHeader = `[${sectionName}]`;
   const sectionStart = lines.findIndex((line) => line.trim() === sectionHeader);
   if (sectionStart === -1) {
-    throw new Error(`knowledge-base/design-code/pyproject.toml is missing ${sectionHeader}.`);
+    throw new Error(`design-repo/design-code/pyproject.toml is missing ${sectionHeader}.`);
   }
   const nextSection = lines.findIndex((line, index) => index > sectionStart && /^\[[^\]]+\]\s*$/.test(line.trim()));
   const sectionEnd = nextSection === -1 ? lines.length : nextSection;
@@ -535,7 +535,7 @@ async function updateDesignDependency(input: {
   }
   return {
     status: "updated",
-    path: "knowledge-base/design-code/pyproject.toml",
+    path: "design-repo/design-code/pyproject.toml",
     group,
     dependency,
     changed
@@ -567,7 +567,7 @@ Create the tool inside `createFileTools()`:
     name: "update_design_dependency",
     label: "Update Design Dependency",
     description:
-      "Adds or updates a Python dependency declaration in knowledge-base/design-code/pyproject.toml. This does not run pip or arbitrary uv commands; call sync_design_environment afterwards.",
+      "Adds or updates a Python dependency declaration in design-repo/design-code/pyproject.toml. This does not run pip or arbitrary uv commands; call sync_design_environment afterwards.",
     parameters: updateDesignDependencyParameters,
     executionMode: "sequential",
     execute: async (_toolCallId: string, args: Static<typeof updateDesignDependencyParameters>) => {
@@ -659,7 +659,7 @@ test("write_design_code_file writes only under knowledge-base design-code", asyn
     );
 
     assert.deepEqual(result.details, {
-      path: "knowledge-base/design-code/src/pi_chip_design/layouts/demo.py",
+      path: "design-repo/design-code/src/pi_chip_design/layouts/demo.py",
       bytes: Buffer.byteLength("def build():\n    return 'layout'\n", "utf8"),
     });
   } finally {
@@ -710,14 +710,14 @@ In `src/agent/file-tools.ts`, add schemas near `writeFileParameters`:
 ```ts
 const writeDesignCodeFileParameters = Type.Object({
   path: Type.String({
-    description: "Path inside knowledge-base/design-code. Both design-code-relative paths and knowledge-base/design-code/... paths are accepted."
+    description: "Path inside design-repo/design-code. Both design-code-relative paths and design-repo/design-code/... paths are accepted."
   }),
   content: Type.String({ description: "Full UTF-8 file content to write." })
 });
 
 const replaceDesignCodeFileTextParameters = Type.Object({
   path: Type.String({
-    description: "Path inside knowledge-base/design-code. Both design-code-relative paths and knowledge-base/design-code/... paths are accepted."
+    description: "Path inside design-repo/design-code. Both design-code-relative paths and design-repo/design-code/... paths are accepted."
   }),
   search: Type.String({ description: "Exact existing text block to replace." }),
   replacement: Type.String({ description: "Replacement text." }),
@@ -729,12 +729,12 @@ Add resolver:
 
 ```ts
 async function resolveDesignCodeWritableFilePath(workspaceDir: string, requestedPath: string): Promise<string> {
-  const projectDir = await resolveDesignCodeProjectPath(workspaceDir, "knowledge-base/design-code");
-  const relativeRequest = requestedPath.startsWith("knowledge-base/design-code/")
-    ? requestedPath.slice("knowledge-base/design-code/".length)
+  const projectDir = await resolveDesignCodeProjectPath(workspaceDir, "design-repo/design-code");
+  const relativeRequest = requestedPath.startsWith("design-repo/design-code/")
+    ? requestedPath.slice("design-repo/design-code/".length)
     : requestedPath;
   if (!relativeRequest.trim() || path.isAbsolute(relativeRequest)) {
-    throw new Error("design-code file tools only write under knowledge-base/design-code.");
+    throw new Error("design-code file tools only write under design-repo/design-code.");
   }
   const resolvedPath = path.resolve(projectDir, relativeRequest);
   assertPathInsideDirectory(projectDir, resolvedPath);
@@ -772,7 +772,7 @@ Add tool definitions inside `createFileTools()`:
     name: "write_design_code_file",
     label: "Write Design Code File",
     description:
-      "Creates or overwrites a UTF-8 file only inside knowledge-base/design-code. This is for the design-agent's self-developed layout code repository.",
+      "Creates or overwrites a UTF-8 file only inside design-repo/design-code. This is for the design-agent's self-developed layout code repository.",
     parameters: writeDesignCodeFileParameters,
     executionMode: "sequential",
     execute: async (_toolCallId: string, args: Static<typeof writeDesignCodeFileParameters>) => {
@@ -793,7 +793,7 @@ Add tool definitions inside `createFileTools()`:
     name: "replace_design_code_file_text",
     label: "Replace Design Code File Text",
     description:
-      "Replaces an exact UTF-8 text block only inside knowledge-base/design-code. Use this instead of generic replace_file_text for design-agent code edits.",
+      "Replaces an exact UTF-8 text block only inside design-repo/design-code. Use this instead of generic replace_file_text for design-agent code edits.",
     parameters: replaceDesignCodeFileTextParameters,
     executionMode: "sequential",
     execute: async (_toolCallId: string, args: Static<typeof replaceDesignCodeFileTextParameters>) => {
@@ -889,7 +889,7 @@ test("verify_design_python_import uses root venv python", async () => {
     const result = await tool.execute(
       "call-verify-import",
       {
-        moduleName: "gdsfactory",
+        moduleName: "gdstk",
       },
       undefined,
     );
@@ -920,7 +920,7 @@ In `src/agent/file-tools.ts`, add:
 ```ts
 const verifyDesignPythonImportParameters = Type.Object({
   moduleName: Type.String({
-    description: "Python module name to import with the repository root .venv Python, such as gdsfactory."
+    description: "Python module name to import with the repository root .venv Python, such as gdstk."
   }),
   maxOutputChars: Type.Optional(Type.Integer({ description: "Maximum combined stdout/stderr characters to return. Defaults to 12000.", minimum: 1000 }))
 });
@@ -1056,7 +1056,7 @@ test("runSessionPrompt routes design package requests to design-agent boundary",
     model: registration.getModel(),
     workspaceDir: process.cwd(),
     context,
-    prompt: "请让design subagent安装gdsfactory这个python包"
+    prompt: "please ask design subagent to install the gdstk Python package"
   });
 
   const handoff = result.newMessages
@@ -1071,7 +1071,7 @@ test("runSessionPrompt routes design package requests to design-agent boundary",
     .find((candidate) => candidate?.role === "design-agent");
 
   assert.ok(handoff);
-  assert.equal(handoff.instruction, "请让design subagent安装gdsfactory这个python包");
+  assert.equal(handoff.instruction, "please ask design subagent to install the gdstk Python package");
 });
 ```
 
@@ -1140,7 +1140,7 @@ Inside `runRoutedWorkerPrompt()`, define `normalizedRole` before the handoff is 
 In `README.md`, replace user-facing `design-subagent` wording in the router and tool-boundary sections with `design-agent`, and add this paragraph near the design tools section:
 
 ```md
-The design-agent is the engineering owner for executable layout code. It manages `knowledge-base/design-code/` as a nested design-code Git repository, updates design-code dependency declarations, syncs them into the parent root `.venv` with `uv`, runs bounded layout and verification scripts, and returns generated artifacts and design records to the wiki agent. `design-subagent` remains a compatibility alias for older prompts.
+The design-agent is the engineering owner for executable layout code. It manages `design-repo/design-code/` as a nested design-code Git repository, updates design-code dependency declarations, syncs them into the parent root `.venv` with `uv`, runs bounded layout and verification scripts, and returns generated artifacts and design records to the wiki agent. `design-subagent` remains a compatibility alias for older prompts.
 ```
 
 Keep references to `design-subagent` only where describing compatibility aliases.
@@ -1152,7 +1152,7 @@ In `docs/feishu-bridge.env.example`, update the comment above `BRIDGE_DESIGN_WOR
 ```env
 # Optional managed design workspace for design-agent code and verification artifacts.
 # design-subagent is accepted as a compatibility alias, but design-agent owns this workspace.
-BRIDGE_DESIGN_WORKSPACE_DIR=knowledge-base/design-code
+BRIDGE_DESIGN_WORKSPACE_DIR=design-repo/design-code
 ```
 
 - [ ] **Step 6: Run docs and handoff tests**
@@ -1203,7 +1203,7 @@ Expected: PASS. Use plain `npm test` for full validation.
 Run:
 
 ```bash
-.venv/bin/python -m pytest knowledge-base/design-code/tests
+.venv/bin/python -m pytest design-repo/design-code/tests
 ```
 
 Expected: PASS.
@@ -1211,7 +1211,7 @@ Expected: PASS.
 Run:
 
 ```bash
-.venv/bin/python -m ruff check knowledge-base/design-code/src knowledge-base/design-code/tests
+.venv/bin/python -m ruff check design-repo/design-code/src design-repo/design-code/tests
 ```
 
 Expected: `All checks passed!`

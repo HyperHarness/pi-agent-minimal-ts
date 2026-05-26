@@ -69,7 +69,7 @@ test("runSessionPrompt can disable worker routing for fixed design-agent session
       model: registration.getModel(),
       workspaceDir: process.cwd(),
       context,
-      prompt: "design-agent 安装 gdsfactory",
+      prompt: "design-agent install gdstk",
       workerRouting: "none"
     });
 
@@ -98,7 +98,7 @@ test("runSessionPrompt wiki routing policy refuses design worker handoff while k
       model: registration.getModel(),
       workspaceDir: process.cwd(),
       context,
-      prompt: "请让design-agent安装gdsfactory这个python包",
+      prompt: "please ask design-agent to install the gdstk Python package",
       workerRouting: "wiki-paper"
     });
     assert.equal(designResult.action, "continue");
@@ -683,7 +683,7 @@ Add a concise boundary section:
 The public CLI has two strict entrypoints:
 
 - `npm run wiki-agent`: wiki and paper workflows. This is the Feishu bridge target. It can update wiki pages and paper-backed knowledge records, and it can read design-agent outputs for curation.
-- `npm run design-agent`: design/code workflows. It can manage `knowledge-base/design-code`, declare dependencies, sync the root `.venv`, run bounded design scripts, and write design records/artifacts. It can retrieve wiki and local paper evidence, but it cannot write wiki pages.
+- `npm run design-agent`: design/code workflows. It can manage `design-repo/design-code`, declare dependencies, sync the root `.venv`, run bounded design scripts, and write design records/artifacts. It can retrieve wiki and local paper evidence, but it cannot write wiki pages.
 
 `npm run agent` and `npm run agent:rpc` are intentionally not public scripts. Use the specific entrypoint that matches the work.
 ```
@@ -751,8 +751,8 @@ Expected:
 Run:
 
 ```bash
-.venv/bin/python -m pytest knowledge-base/design-code/tests
-.venv/bin/python -m ruff check knowledge-base/design-code/src knowledge-base/design-code/tests
+.venv/bin/python -m pytest design-repo/design-code/tests
+.venv/bin/python -m ruff check design-repo/design-code/src design-repo/design-code/tests
 ```
 
 Expected:
@@ -769,7 +769,7 @@ Run:
 ```bash
 git diff --check
 git status --short --branch
-git -C knowledge-base/design-code status --short --branch
+git -C design-repo/design-code status --short --branch
 ```
 
 Expected:
@@ -777,7 +777,7 @@ Expected:
 ```text
 git diff --check has no output
 main is ahead of origin/main by the new commits
-knowledge-base/design-code has no uncommitted changes
+design-repo/design-code has no uncommitted changes
 ```
 
 - [ ] **Step 4: Final commit only if verification required fixes**

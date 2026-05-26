@@ -218,7 +218,7 @@ const syncDesignEnvironmentParameters = Type.Object({
 
 const verifyDesignPythonImportParameters = Type.Object({
   moduleName: Type.String({
-    description: "Python module name to import with the repository root .venv Python, such as gdsfactory."
+    description: "Python module name to import with the repository root .venv Python, such as gdstk."
   }),
   maxOutputChars: Type.Optional(
     Type.Integer({

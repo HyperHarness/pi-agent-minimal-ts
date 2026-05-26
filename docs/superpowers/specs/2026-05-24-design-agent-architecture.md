@@ -34,15 +34,15 @@ The design agent may retrieve local wiki and paper evidence, but it should not d
 The design agent owns the self-developed design-code repository at:
 
 ```text
-knowledge-base/design-code/
+design-repo/design-code/
 ```
 
-This directory is a separate Git repository inside the knowledge base. It is not normal parent-repo TypeScript source. The parent repo may document and invoke it, but design-code commits belong to the nested repository.
+This directory is a Python package tracked by the parent `pi-agent-minimal-ts` repository. It is not TypeScript source, but its source, tests, dependency declarations, and lockfile are part of the parent agent project.
 
 The design agent may create and update files under:
 
 ```text
-knowledge-base/design-code/
+design-repo/design-code/
 knowledge-base/design-records/
 knowledge-base/design-artifacts/
 ```
@@ -70,9 +70,9 @@ Allowed tools:
 
 - local wiki retrieval: answer/search wiki evidence for design decisions
 - local paper retrieval: search/list/read already-acquired papers
-- design dependency declaration: add/update/remove dependencies in `knowledge-base/design-code/pyproject.toml`
-- design environment sync: run fixed `uv sync` for `knowledge-base/design-code/` into root `.venv`
-- design code editing: write/replace files only inside `knowledge-base/design-code/`
+- design dependency declaration: add/update/remove dependencies in `design-repo/design-code/pyproject.toml`
+- design environment sync: run fixed `uv sync` for `design-repo/design-code/` into root `.venv`
+- design code editing: write/replace files only inside `design-repo/design-code/`
 - design script execution: run workspace-local Python or KLayout scripts with bounded output and expected artifact checks
 - design tests/lints: run project-local test and lint commands through fixed `uv`/root-venv entry points
 - design artifact writing: write generated outputs and structured records under `knowledge-base/design-artifacts/` and `knowledge-base/design-records/`
@@ -92,16 +92,16 @@ Forbidden tools:
 
 The design agent should not install Python packages by direct shell commands. Package changes should be a two-step controlled workflow:
 
-1. Update dependency declarations in `knowledge-base/design-code/pyproject.toml`.
+1. Update dependency declarations in `design-repo/design-code/pyproject.toml`.
 2. Run the existing fixed environment sync:
 
 ```text
-UV_PROJECT_ENVIRONMENT=<parent-repo>/.venv uv sync --project <parent-repo>/knowledge-base/design-code --extra dev
+UV_PROJECT_ENVIRONMENT=<parent-repo>/.venv uv sync --project <parent-repo>/design-repo/design-code --extra dev
 ```
 
-For user requests such as "install gdsfactory", the design agent should interpret the request as:
+For user requests such as "install gdstk", the design agent should interpret the request as:
 
-- ensure `gdsfactory` is declared in `pyproject.toml`
+- ensure `gdstk` is declared in `pyproject.toml`
 - update `uv.lock` through `uv sync`
 - verify importability from the root `.venv`
 - report the exact dependency state and Python path
@@ -116,9 +116,9 @@ Add first-class routes for design-agent requests. These should include both expl
 - `design-agent ...`
 - `design subagent ...` for backward compatibility
 - `design ...`
-- `芯片设计 ...`
-- `设计任务 ...`
-- requests mentioning GDS, gdsfactory, KLayout, layout scripts, chip layout, design-code, Python package dependencies, or design environment sync
+- `chip design ...`
+- `design task ...`
+- requests mentioning GDS, gdstk, KLayout, layout scripts, chip layout, design-code, Python package dependencies, or design environment sync
 
 The old `design-subagent` name should remain as a compatibility alias during migration, but user-visible docs should move toward `design-agent`.
 
@@ -141,7 +141,7 @@ The wiki agent should treat this handoff as input evidence. It may later build o
 
 The design agent should fail closed:
 
-- If `knowledge-base/design-code/` is missing or is a symlink, stop and report the boundary violation.
+- If `design-repo/design-code/` is missing or is a symlink, stop and report the boundary violation.
 - If `pyproject.toml` is missing, stop unless the user explicitly asked to initialize the design-code package.
 - If `uv sync` fails, report the command, normalized project path, stderr summary, and whether root `.venv` changed.
 - If an import check fails after sync, report the root `.venv` Python path and exact import error.
@@ -163,7 +163,7 @@ The design agent should fail closed:
 
 - Do not introduce an arbitrary terminal shell for the design agent.
 - Do not let design-agent manage unrelated Python projects.
-- Do not merge the nested `knowledge-base/design-code` Git repository into the parent repo.
+- Do not recreate a parent-managed Python package under `design-repo/design-code`; the parent repo owns this package.
 - Do not let the design agent download papers or browse the web directly in the first version.
 - Do not make the wiki agent responsible for layout-code structure, package versions, or generated GDS validation.
 
@@ -171,10 +171,10 @@ The design agent should fail closed:
 
 The migration is successful when:
 
-- A request like "让 design agent 安装 gdsfactory" routes to the design agent.
-- The agent updates or confirms `knowledge-base/design-code/pyproject.toml`.
+- A request like "ask the design agent to install gdstk" routes to the design agent.
+- The agent updates or confirms `design-repo/design-code/pyproject.toml`.
 - The agent runs `uv sync` into the parent root `.venv`.
-- The agent verifies `import gdsfactory` with root `.venv/bin/python`.
-- The agent can write and run a layout script under `knowledge-base/design-code/`.
+- The agent verifies `import gdstk` with root `.venv/bin/python`.
+- The agent can write and run a layout script under `design-repo/design-code/`.
 - Generated GDS files and verification records are written under knowledge-base design artifact paths.
 - The wiki agent receives a compact handoff instead of owning the engineering workflow.

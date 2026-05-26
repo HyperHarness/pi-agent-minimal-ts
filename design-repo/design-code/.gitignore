@@ -1,0 +1,16 @@
+.venv/
+.ruff_cache/
+.pytest_cache/
+__pycache__/
+*.py[cod]
+outputs/
+src/*.egg-info/
+**/__pycache__/
+.pytest_cache/
+.ruff_cache/
+*.gds
+*.oas
+*.lyrdb
+dist/
+build/
+*.egg-info/
