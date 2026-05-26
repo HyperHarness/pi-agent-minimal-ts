@@ -6,6 +6,7 @@ import {
   relativeToWorkspace,
   sanitizeWikiFilename
 } from "./store.js";
+import { isPathInsideDirectory } from "../knowledge-base.js";
 
 export type WikiSourceKind =
   | "paper"
@@ -75,6 +76,7 @@ export interface KnowledgeSourceMetadata {
     canonicalId?: string;
     recordPath?: string;
     rawPath?: string;
+    downloadPath?: string;
     rawSha256?: string;
     retrievedAt?: string;
     version?: string;
@@ -165,6 +167,7 @@ const KNOWLEDGE_SOURCE_PROVENANCE_OPTIONAL_STRING_FIELDS = [
   "canonicalId",
   "recordPath",
   "rawPath",
+  "downloadPath",
   "rawSha256",
   "retrievedAt",
   "version",
@@ -187,9 +190,76 @@ export async function writeKnowledgeSourceMetadata(input: {
   metadata: KnowledgeSourceMetadata;
 }): Promise<string> {
   const metadataPath = getKnowledgeSourceMetadataPath(input.workspaceDir, input.metadata.sourceKey);
+  const metadata = normalizeKnowledgeSourceMetadataPaths(input.workspaceDir, input.metadata);
   await mkdir(path.dirname(metadataPath), { recursive: true });
-  await writeFile(metadataPath, `${JSON.stringify(input.metadata, null, 2)}\n`, "utf8");
+  await writeFile(metadataPath, `${JSON.stringify(metadata, null, 2)}\n`, "utf8");
   return relativeToWorkspace(input.workspaceDir, metadataPath);
+}
+
+function normalizePortableFilePath(filePath: string): string {
+  const drivePathMatch = filePath.match(/^([A-Za-z]):[\\/](.*)$/);
+  if (drivePathMatch?.[1] && drivePathMatch[2]) {
+    return path.posix.join(
+      "/mnt",
+      drivePathMatch[1].toLowerCase(),
+      ...drivePathMatch[2].split(/[\\/]+/).filter(Boolean)
+    );
+  }
+
+  const uncWslMatch = filePath.match(/^\\\\(?:wsl\.localhost|wsl\$)\\[^\\]+\\(.+)$/i);
+  if (uncWslMatch?.[1]) {
+    return path.posix.join("/", ...uncWslMatch[1].split(/[\\/]+/).filter(Boolean));
+  }
+
+  if (filePath.startsWith("\\") && !filePath.startsWith("\\\\")) {
+    return path.posix.join("/", ...filePath.split(/[\\/]+/).filter(Boolean));
+  }
+
+  return filePath.includes("\\") ? filePath.replace(/\\/g, "/") : filePath;
+}
+
+function toWorkspaceRelativePath(workspaceDir: string, filePath: string): string {
+  const normalizedPath = normalizePortableFilePath(filePath);
+  if (!path.isAbsolute(normalizedPath)) {
+    return normalizedPath;
+  }
+
+  const resolvedWorkspaceDir = path.resolve(workspaceDir);
+  const resolvedPath = path.resolve(normalizedPath);
+  return isPathInsideDirectory(resolvedWorkspaceDir, resolvedPath)
+    ? path.relative(resolvedWorkspaceDir, resolvedPath)
+    : normalizedPath;
+}
+
+function normalizeOptionalPathField(workspaceDir: string, value: unknown): unknown {
+  return typeof value === "string" ? toWorkspaceRelativePath(workspaceDir, value) : value;
+}
+
+function normalizeKnowledgeSourceMetadataPaths(
+  workspaceDir: string,
+  metadata: KnowledgeSourceMetadata
+): KnowledgeSourceMetadata {
+  const provenance = metadata.provenance as KnowledgeSourceMetadata["provenance"] & {
+    downloadPath?: string;
+  };
+  return {
+    ...metadata,
+    summaryPath: toWorkspaceRelativePath(workspaceDir, metadata.summaryPath),
+    provenance: {
+      ...provenance,
+      acquisitionPath: normalizeOptionalPathField(workspaceDir, provenance.acquisitionPath) as string | undefined,
+      recordPath: normalizeOptionalPathField(workspaceDir, provenance.recordPath) as string | undefined,
+      rawPath: normalizeOptionalPathField(workspaceDir, provenance.rawPath) as string | undefined,
+      downloadPath: normalizeOptionalPathField(workspaceDir, provenance.downloadPath) as string | undefined
+    },
+    artifacts: metadata.artifacts.map((artifact) => ({
+      ...artifact,
+      path: toWorkspaceRelativePath(workspaceDir, artifact.path),
+      markdownPath: normalizeOptionalPathField(workspaceDir, artifact.markdownPath) as string | undefined,
+      jsonPath: normalizeOptionalPathField(workspaceDir, artifact.jsonPath) as string | undefined,
+      qualityPath: normalizeOptionalPathField(workspaceDir, artifact.qualityPath) as string | undefined
+    }))
+  };
 }
 
 export async function readKnowledgeSourceMetadata(input: {

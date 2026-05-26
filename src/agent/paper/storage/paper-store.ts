@@ -1117,13 +1117,40 @@ function appendArtifact(artifacts: KnowledgeSourceArtifact[], artifact: Knowledg
   return [...artifacts, artifact];
 }
 
+function normalizeKnowledgeSourceArtifact(input: {
+  workspaceDir: string;
+  artifact: KnowledgeSourceArtifact;
+}): KnowledgeSourceArtifact {
+  return {
+    ...input.artifact,
+    path: toWorkspacePath({ workspaceDir: input.workspaceDir, filePath: input.artifact.path }),
+    ...(input.artifact.markdownPath ? {
+      markdownPath: toWorkspacePath({ workspaceDir: input.workspaceDir, filePath: input.artifact.markdownPath })
+    } : {}),
+    ...(input.artifact.jsonPath ? {
+      jsonPath: toWorkspacePath({ workspaceDir: input.workspaceDir, filePath: input.artifact.jsonPath })
+    } : {}),
+    ...(input.artifact.qualityPath ? {
+      qualityPath: toWorkspacePath({ workspaceDir: input.workspaceDir, filePath: input.artifact.qualityPath })
+    } : {})
+  };
+}
+
 function buildPaperMetadataArtifacts(input: {
   workspaceDir: string;
   record: PaperRecord;
   existing?: ExistingPaperMetadata;
   rawPath?: string;
 }): KnowledgeSourceArtifact[] {
-  let artifacts = Array.isArray(input.existing?.artifacts) ? [...input.existing.artifacts] : [];
+  let artifacts = Array.isArray(input.existing?.artifacts)
+    ? input.existing.artifacts.reduce<KnowledgeSourceArtifact[]>(
+        (normalizedArtifacts, artifact) => appendArtifact(normalizedArtifacts, normalizeKnowledgeSourceArtifact({
+          workspaceDir: input.workspaceDir,
+          artifact
+        })),
+        []
+      )
+    : [];
   if (input.rawPath) {
     artifacts = appendArtifact(artifacts, { kind: "raw", path: input.rawPath });
   }
@@ -1168,7 +1195,7 @@ export async function writePaperMetadataForRecord(input: {
         ...(input.fetchImpl ? { fetchImpl: input.fetchImpl } : {})
       })
     : undefined;
-  const title = completeString(readRecordString(input.record, "title"), existing?.title, localParseMetadata?.title, remoteMetadata?.title);
+  const title = completeString(readRecordString(input.record, "title"), localParseMetadata?.title, remoteMetadata?.title, existing?.title);
   const authors = completeAuthors(
     Array.isArray(existingCitation?.authors)
     ? existingCitation.authors.filter((author): author is string => typeof author === "string" && author.trim().length > 0)

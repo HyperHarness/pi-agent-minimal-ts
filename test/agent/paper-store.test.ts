@@ -790,6 +790,154 @@ test("updatePaperRecordParseManifest backfills citation metadata from local pars
   }
 });
 
+test("writePaperMetadataForRecord repairs legacy absolute metadata paths and stale supplemental title", async () => {
+  const workspaceDir = await mkdtemp(path.join(os.tmpdir(), "paper-store-"));
+  const paperKey = "aps-10.1103-PhysRevLett.111.080502";
+  const pdfPath = resolvePaperPdfPath({
+    workspaceDir,
+    source: "aps",
+    canonicalId: "10.1103/PhysRevLett.111.080502"
+  });
+  const supplementalPath = resolvePaperSupplementalPdfPath({
+    workspaceDir,
+    source: "aps",
+    canonicalId: "10.1103/PhysRevLett.111.080502",
+    filename: "Barends2013supp.pdf"
+  });
+  const parsePath = path.join(workspaceDir, "knowledge-base", "sources", paperKey, "parses", "webpage", "parse.json");
+
+  try {
+    await mkdir(path.dirname(pdfPath), { recursive: true });
+    await mkdir(path.dirname(supplementalPath), { recursive: true });
+    await mkdir(path.dirname(parsePath), { recursive: true });
+    await writeFile(pdfPath, "%PDF-1.7\npaper\n", "utf8");
+    await writeFile(supplementalPath, "%PDF-1.7\nsupplement\n", "utf8");
+    await writeFile(parsePath, `${JSON.stringify({
+      paperKey,
+      engine: "webpage",
+      pdfSha256: "webpage-hash",
+      createdAt: "2026-05-26T10:01:00.000Z",
+      title: "Coherent Josephson Qubit Suitable for Scalable Quantum Integrated Circuits",
+      pages: 1,
+      elements: [
+        {
+          id: "webpage-00001",
+          type: "heading",
+          text: "Coherent Josephson Qubit Suitable for Scalable Quantum Integrated Circuits",
+          page: 1,
+          headingLevel: 1
+        },
+        {
+          id: "webpage-00002",
+          type: "paragraph",
+          text: "R. Barends, J. Kelly, A. Megrant, D. Sank, E. Jeffrey, Y. Chen, Y. Yin, B. Chiaro, J. Mutus, C. Neill, P. O’Malley, P. Roushan, J. Wenner, T. C. White, A. N. Cleland, and John M. Martinis",
+          page: 1
+        },
+        {
+          id: "webpage-00003",
+          type: "paragraph",
+          text: "Phys. Rev. Lett. 111, 080502 - Published 22 August, 2013",
+          page: 1
+        },
+        {
+          id: "webpage-00004",
+          type: "paragraph",
+          text: "https://doi.org/10.1103/PhysRevLett.111.080502",
+          page: 1
+        }
+      ],
+      sections: []
+    }, null, 2)}\n`, "utf8");
+
+    const recordPath = await writePaperRecord({
+      workspaceDir,
+      record: {
+        source: "aps",
+        articleUrl: "https://journals.aps.org/prl/abstract/10.1103/PhysRevLett.111.080502",
+        recordedAt: "2026-05-26T10:00:00.000Z",
+        handlingMethod: "browser_session",
+        status: "downloaded",
+        canonicalId: "10.1103/PhysRevLett.111.080502",
+        pdfUrl: "https://journals.aps.org/prl/pdf/10.1103/PhysRevLett.111.080502",
+        downloadPath: pdfPath,
+        supplementalMaterials: [{
+          url: "https://journals.aps.org/prl/supplemental/10.1103/PhysRevLett.111.080502/Barends2013supp.pdf",
+          title: "Supplemental Material",
+          filename: "Barends2013supp.pdf",
+          path: supplementalPath,
+          sha256: "supplement-sha",
+          downloadedAt: "2026-05-26T10:00:30.000Z"
+        }]
+      }
+    });
+
+    await updatePaperRecordParseManifest({
+      workspaceDir,
+      recordPath,
+      strategy: "webpage",
+      status: "parsed",
+      paperKey,
+      engine: "webpage",
+      sourceSha256: "webpage-hash",
+      artifacts: {
+        markdownPath: path.join(workspaceDir, "knowledge-base", "sources", paperKey, "parses", "webpage", "document.md"),
+        parsePath,
+        qualityPath: path.join(workspaceDir, "knowledge-base", "sources", paperKey, "parses", "webpage", "quality.json"),
+        chunksPath: path.join(workspaceDir, "knowledge-base", "sources", paperKey, "chunks", "webpage.jsonl")
+      },
+      quality: {
+        status: "good",
+        score: 1,
+        pages: 1,
+        totalTextLength: 25532,
+        warnings: []
+      },
+      updatedAt: "2026-05-26T10:01:00.000Z"
+    });
+
+    const metadataPath = path.join(path.dirname(recordPath), "metadata.json");
+    const existing = JSON.parse(await readFile(metadataPath, "utf8")) as KnowledgeSourceMetadata;
+    await writeFile(metadataPath, `${JSON.stringify({
+      ...existing,
+      title: "Supplemental Material",
+      summaryPath: path.join(workspaceDir, "knowledge-base", "sources", paperKey, "summary.md").replace(/\//g, "\\"),
+      provenance: {
+        ...existing.provenance,
+        recordPath,
+        acquisitionPath: recordPath,
+        rawPath: pdfPath,
+        downloadPath: pdfPath
+      },
+      artifacts: [{
+        kind: "raw",
+        path: supplementalPath,
+        sha256: "supplement-sha",
+        note: "Supplemental Material"
+      }, {
+        kind: "raw",
+        path: pdfPath
+      }]
+    }, null, 2)}\n`, "utf8");
+
+    const saved = await readPaperRecordByPath({ workspaceDir, recordPath });
+    assert.ok(saved);
+    await writePaperMetadataForRecord({ workspaceDir, record: saved.record, recordPath });
+
+    const repaired = JSON.parse(await readFile(metadataPath, "utf8"));
+    assert.equal(repaired.title, "Coherent Josephson Qubit Suitable for Scalable Quantum Integrated Circuits");
+    assert.equal(repaired.summaryPath, `knowledge-base/sources/${paperKey}/summary.md`);
+    assert.equal(repaired.provenance.recordPath, `knowledge-base/sources/${paperKey}/acquisition.json`);
+    assert.equal(repaired.provenance.acquisitionPath, `knowledge-base/sources/${paperKey}/acquisition.json`);
+    assert.equal(repaired.provenance.rawPath, `knowledge-base/raw/pdfs/${paperKey}.pdf`);
+    assert.equal(repaired.provenance.downloadPath, `knowledge-base/raw/pdfs/${paperKey}.pdf`);
+    assert.equal(repaired.artifacts.length, 2);
+    assert.equal(repaired.artifacts[0]?.path, `knowledge-base/raw/pdfs/${paperKey}-supplemental-Barends2013supp.pdf`);
+    assert.equal(repaired.artifacts[1]?.path, `knowledge-base/raw/pdfs/${paperKey}.pdf`);
+  } finally {
+    await rm(workspaceDir, { recursive: true, force: true });
+  }
+});
+
 test("updatePaperRecordReadingFailure preserves an existing ready webpage reading source", async () => {
   const workspaceDir = await mkdtemp(path.join(os.tmpdir(), "paper-store-"));
   const pdfPath = resolvePaperPdfPath({

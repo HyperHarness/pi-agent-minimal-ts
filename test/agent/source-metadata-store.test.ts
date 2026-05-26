@@ -85,6 +85,45 @@ test("writeKnowledgeSourceMetadata writes per-source pretty JSON with trailing n
   });
 });
 
+test("writeKnowledgeSourceMetadata normalizes workspace-local path fields", async () => {
+  await withWorkspace("source-metadata-normalize-paths-", async (workspaceDir) => {
+    const sourceKey = "aps-10.1103-PhysRevLett.111.080502";
+    const fixture = metadata({
+      sourceKind: "paper",
+      sourceKey,
+      title: "Coherent Josephson Qubit Suitable for Scalable Quantum Integrated Circuits",
+      summaryPath: path.join(workspaceDir, "knowledge-base", "sources", sourceKey, "summary.md").replace(/\//g, "\\"),
+      provenance: {
+        recordPath: path.join(workspaceDir, "knowledge-base", "sources", sourceKey, "acquisition.json"),
+        rawPath: path.join(workspaceDir, "knowledge-base", "raw", "pdfs", `${sourceKey}.pdf`).replace(/\//g, "\\")
+      },
+      artifacts: [{
+        kind: "raw",
+        path: path.join(workspaceDir, "knowledge-base", "raw", "pdfs", `${sourceKey}.pdf`)
+      }, {
+        kind: "parse",
+        path: path.join(workspaceDir, "knowledge-base", "sources", sourceKey, "parses", "webpage"),
+        markdownPath: path.join(workspaceDir, "knowledge-base", "sources", sourceKey, "parses", "webpage", "document.md").replace(/\//g, "\\"),
+        jsonPath: path.join(workspaceDir, "knowledge-base", "sources", sourceKey, "parses", "webpage", "parse.json"),
+        qualityPath: path.join(workspaceDir, "knowledge-base", "sources", sourceKey, "parses", "webpage", "quality.json")
+      }]
+    });
+
+    const relativePath = await writeKnowledgeSourceMetadata({ workspaceDir, metadata: fixture });
+    const saved = JSON.parse(await readFile(path.join(workspaceDir, relativePath), "utf8")) as KnowledgeSourceMetadata;
+
+    assert.equal(relativePath, `knowledge-base/sources/${sourceKey}/metadata.json`);
+    assert.equal(saved.summaryPath, `knowledge-base/sources/${sourceKey}/summary.md`);
+    assert.equal(saved.provenance.recordPath, `knowledge-base/sources/${sourceKey}/acquisition.json`);
+    assert.equal(saved.provenance.rawPath, `knowledge-base/raw/pdfs/${sourceKey}.pdf`);
+    assert.equal(saved.artifacts[0]?.path, `knowledge-base/raw/pdfs/${sourceKey}.pdf`);
+    assert.equal(saved.artifacts[1]?.path, `knowledge-base/sources/${sourceKey}/parses/webpage`);
+    assert.equal(saved.artifacts[1]?.markdownPath, `knowledge-base/sources/${sourceKey}/parses/webpage/document.md`);
+    assert.equal(saved.artifacts[1]?.jsonPath, `knowledge-base/sources/${sourceKey}/parses/webpage/parse.json`);
+    assert.equal(saved.artifacts[1]?.qualityPath, `knowledge-base/sources/${sourceKey}/parses/webpage/quality.json`);
+  });
+});
+
 test("readKnowledgeSourceMetadata reads ready metadata by source key", async () => {
   await withWorkspace("source-metadata-read-", async (workspaceDir) => {
     const fixture = metadata();
