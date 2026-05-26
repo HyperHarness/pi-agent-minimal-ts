@@ -9,6 +9,7 @@ import {
 } from "../../src/agent/wiki/retrieval-contract.js";
 import { searchWikiEvidence } from "../../src/agent/wiki/retrieval-search.js";
 import { searchPaperWiki } from "../../src/agent/wiki/content.js";
+import { getKnowledgeSourceMetadataPath } from "../../src/agent/wiki/source-metadata-store.js";
 import { writeTypedWikiPage } from "../../src/agent/wiki/typed-store.js";
 
 async function withWorkspace(
@@ -382,6 +383,10 @@ test("retrieval contract reads source evidence by key from legacy summary and ma
     assert.equal(result.item?.evidenceContract, "mixed");
     assert.match(result.item?.body ?? "", /durable evidence text/);
     assert.equal(result.item?.relativePath, `knowledge-base/sources/${paperKey}/summary.md`);
+    assert.equal(
+      getKnowledgeSourceMetadataPath(workspaceDir, paperKey),
+      path.join(workspaceDir, "knowledge-base", "sources", paperKey, "metadata.json")
+    );
   });
 });
 

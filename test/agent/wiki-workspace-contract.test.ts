@@ -22,16 +22,16 @@ test("resolveWikiWorkspaceContract exposes stable lifecycle roots", async () => 
     assert.equal(contract.roots.sourceSummaries.relativePath, "knowledge-base/sources");
     assert.equal(contract.roots.synthesisPages.relativePath, "knowledge-base/pages");
     assert.equal(contract.roots.assets.relativePath, "knowledge-base/assets");
-    assert.equal(contract.roots.manifests.relativePath, "knowledge-base/manifests");
+    assert.equal(Object.hasOwn(contract.roots, "manifests"), false);
     assert.equal(contract.roots.runtimeState.relativePath, "knowledge-base/state");
     assert.equal(contract.files.index.relativePath, "knowledge-base/index.md");
     assert.equal(contract.files.humanLog.relativePath, "knowledge-base/log.md");
     assert.equal(contract.files.operationJournal.relativePath, "knowledge-base/state/wiki-operations.jsonl");
 
-    const lifecycle: WikiLifecycleKind = "manifests";
+    const lifecycle: WikiLifecycleKind = "sourceRecords";
     assert.equal(
-      wikiPathForLifecycle(contract, lifecycle, "arxiv-2601.00003.json").relativePath,
-      "knowledge-base/manifests/arxiv-2601.00003.json"
+      wikiPathForLifecycle(contract, lifecycle, "arxiv-2601.00003/metadata.json").relativePath,
+      "knowledge-base/sources/arxiv-2601.00003/metadata.json"
     );
   } finally {
     await rm(workspace, { recursive: true, force: true });

@@ -27,7 +27,7 @@ export function getPaperWikiAssetsDir(workspaceDir: string): string {
 }
 
 export function getPaperWikiManifestsDir(workspaceDir: string): string {
-  return resolveWikiWorkspaceContract(workspaceDir).roots.manifests.absolutePath;
+  return path.join(getPaperWikiDir(workspaceDir), "manifests");
 }
 
 export function getPaperWikiStateDir(workspaceDir: string): string {
@@ -35,10 +35,14 @@ export function getPaperWikiStateDir(workspaceDir: string): string {
 }
 
 export function getPaperWikiSourceManifestPath(workspaceDir: string, paperKey: string): string {
+  return path.join(getPaperWikiManifestsDir(workspaceDir), `${sanitizeWikiFilename(paperKey)}.json`);
+}
+
+export function getKnowledgeSourceMetadataPath(workspaceDir: string, sourceKey: string): string {
   return wikiPathForLifecycle(
     resolveWikiWorkspaceContract(workspaceDir),
-    "manifests",
-    `${sanitizeWikiFilename(paperKey)}.json`
+    "sourceRecords",
+    `${sanitizeWikiFilename(sourceKey)}/metadata.json`
   ).absolutePath;
 }
 

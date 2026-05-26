@@ -64,25 +64,13 @@ const invalidExternalSearchSource = {
   // @ts-expect-error external search sources must not expose supported-source identifiers
 } satisfies PaperSearchSource;
 
-test("resolvePaperLibraryPaths uses knowledge-base as the wiki root", async () => {
-  const workspaceDir = await mkdtemp(path.join(os.tmpdir(), "paper-store-paths-"));
-  try {
-    const paths = resolvePaperLibraryPaths(workspaceDir);
+test("resolvePaperLibraryPaths exposes source directories without top-level manifests root", () => {
+  const workspaceDir = path.resolve("/tmp/pi-workspace");
+  const paths = resolvePaperLibraryPaths(workspaceDir);
 
-    assert.equal(paths.libraryRoot, path.join(workspaceDir, "knowledge-base"));
-    assert.equal(paths.wikiRoot, path.join(workspaceDir, "knowledge-base"));
-    assert.equal(paths.rawRoot, path.join(workspaceDir, "knowledge-base", "raw"));
-    assert.equal(paths.sourcesRoot, path.join(workspaceDir, "knowledge-base", "sources"));
-    assert.equal(paths.sourceArtifactsRoot, path.join(workspaceDir, "knowledge-base", "sources"));
-    assert.equal(paths.pagesRoot, path.join(workspaceDir, "knowledge-base", "pages"));
-    assert.equal(paths.assetsRoot, path.join(workspaceDir, "knowledge-base", "assets"));
-    assert.equal(paths.manifestsRoot, path.join(workspaceDir, "knowledge-base", "manifests"));
-    assert.equal(paths.stateRoot, path.join(workspaceDir, "knowledge-base", "state"));
-    assert.equal(paths.indexPath, path.join(workspaceDir, "knowledge-base", "index.md"));
-    assert.equal(paths.logPath, path.join(workspaceDir, "knowledge-base", "log.md"));
-  } finally {
-    await rm(workspaceDir, { recursive: true, force: true });
-  }
+  assert.equal(paths.sourceArtifactsRoot, path.join(workspaceDir, "knowledge-base", "sources"));
+  assert.equal(paths.sourcesRoot, path.join(workspaceDir, "knowledge-base", "sources"));
+  assert.equal(Object.hasOwn(paths, "manifestsRoot"), false);
 });
 
 test("writePaperRecord persists publisher supplemental materials into source metadata", async () => {

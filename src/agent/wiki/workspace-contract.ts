@@ -8,7 +8,6 @@ export type WikiLifecycleKind =
   | "sourceSummaries"
   | "synthesisPages"
   | "assets"
-  | "manifests"
   | "runtimeState";
 
 export interface WikiWorkspacePath {
@@ -49,7 +48,6 @@ export function resolveWikiWorkspaceContract(workspaceDir: string): WikiWorkspac
       sourceSummaries: toWikiPath(workspaceDir, paths.sourcesRoot),
       synthesisPages: toWikiPath(workspaceDir, paths.pagesRoot),
       assets: toWikiPath(workspaceDir, paths.assetsRoot),
-      manifests: toWikiPath(workspaceDir, paths.manifestsRoot),
       runtimeState: toWikiPath(workspaceDir, statePath)
     },
     files: {
