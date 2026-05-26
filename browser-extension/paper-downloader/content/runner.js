@@ -19,6 +19,15 @@
     return root.PiAgentPaperCommon.findPdfCandidate;
   }
 
+  function chooseSupplementalMaterialHelper(hostname) {
+    var normalizedHostname = String(hostname || "").toLowerCase();
+    if (normalizedHostname === "journals.aps.org" || normalizedHostname === "aps.org") {
+      return root.PiAgentPaperAps.findApsSupplementalMaterialCandidates;
+    }
+
+    return root.PiAgentPaperCommon.findSupplementalMaterialCandidates;
+  }
+
   function isChallengePage(url, title, text) {
     var combined = [url, title, text].join(" ").toLowerCase();
     return (
@@ -244,6 +253,7 @@
 
   function buildMessage() {
     var helper = choosePublisherHelper(root.location.hostname);
+    var supplementalHelper = chooseSupplementalMaterialHelper(root.location.hostname);
     var pageText = root.document.body ? root.document.body.innerText : "";
     var classification = root.PiAgentPaperCommon.classifyPage({
       url: root.location.href,
@@ -262,25 +272,36 @@
       }
     }
 
+    var supplementalMaterials = classification.status === "page_classified"
+      ? supplementalHelper({
+        document: root.document,
+        baseUrl: root.location.href
+      })
+      : undefined;
+    var message = {
+      type: "paper_page_classified",
+      status: classification.status,
+      message: classification.message,
+      pdfUrl: pdfUrl,
+      finalUrl: root.location.href,
+      title: root.document.title,
+      html: classification.status === "page_classified"
+        ? collectArticleSnapshotHtml(root.document)
+        : undefined,
+      webpageAssets: classification.status === "page_classified"
+        ? collectArticleImageCandidates(root.document)
+        : undefined
+    };
+    if (supplementalMaterials && supplementalMaterials.length > 0) {
+      message.supplementalMaterials = supplementalMaterials;
+    }
+
     return {
       classification: classification,
       pdfUrl: pdfUrl,
       shouldWait: shouldWaitForScienceAccess(root, classification, pdfUrl),
       shouldWaitForApsArticleText: shouldWaitForApsArticleText(root, classification),
-      message: {
-        type: "paper_page_classified",
-        status: classification.status,
-        message: classification.message,
-        pdfUrl: pdfUrl,
-        finalUrl: root.location.href,
-        title: root.document.title,
-        html: classification.status === "page_classified"
-          ? collectArticleSnapshotHtml(root.document)
-          : undefined,
-        webpageAssets: classification.status === "page_classified"
-          ? collectArticleImageCandidates(root.document)
-          : undefined
-      }
+      message: message
     };
   }
 

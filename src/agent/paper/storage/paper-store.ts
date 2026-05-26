@@ -1120,6 +1120,9 @@ export async function writePaperSourceMetadataForRecord(input: {
     recordPath: acquisitionPath,
     ...(existing?.bibPath ? { bibPath: existing.bibPath } : {}),
     ...(existing?.cslPath ? { cslPath: existing.cslPath } : {}),
+    ...("supplementalMaterials" in input.record && input.record.supplementalMaterials
+      ? { supplementalMaterials: input.record.supplementalMaterials }
+      : {}),
     downloadStatus: input.record.status,
     ...(input.record.reading?.status ? { readingStatus: input.record.reading.status } : {}),
     citationStatus: missingFields.length === 0 ? "complete" : "incomplete",

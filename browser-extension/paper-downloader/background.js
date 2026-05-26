@@ -7,6 +7,8 @@ const QUICK_POLL_ACTIVE_MS = 5 * 60 * 1000;
 const MAX_WEBPAGE_ASSET_COUNT = 40;
 const MAX_WEBPAGE_ASSET_BYTES = 4 * 1024 * 1024;
 const MAX_WEBPAGE_ASSET_TOTAL_BYTES = 24 * 1024 * 1024;
+const MAX_SUPPLEMENTAL_MATERIAL_COUNT = 8;
+const MAX_SUPPLEMENTAL_MATERIAL_BYTES = 32 * 1024 * 1024;
 
 const jobsById = new Map();
 const jobsByTabId = new Map();
@@ -297,6 +299,60 @@ async function fetchWebpageAssets(candidates) {
   }
 
   return assets;
+}
+
+function supplementalFilenameFromUrl(value) {
+  try {
+    return defaultWebpageAssetFilename({ url: value }, "application/octet-stream");
+  } catch (error) {
+    return "supplemental-material";
+  }
+}
+
+async function fetchSupplementalMaterials(job, candidates) {
+  if (!Array.isArray(candidates) || candidates.length === 0 || typeof fetch !== "function") {
+    return;
+  }
+
+  var seen = {};
+  var registeredCount = 0;
+  for (var index = 0; index < candidates.length && registeredCount < MAX_SUPPLEMENTAL_MATERIAL_COUNT; index += 1) {
+    var candidate = candidates[index] || {};
+    if (!candidate.url || seen[candidate.url]) {
+      continue;
+    }
+    seen[candidate.url] = true;
+
+    try {
+      var response = await fetch(candidate.url, { credentials: "include" });
+      if (!response.ok) {
+        throw new Error("HTTP " + response.status + " " + (response.statusText || ""));
+      }
+      var buffer = await response.arrayBuffer();
+      if (buffer.byteLength > MAX_SUPPLEMENTAL_MATERIAL_BYTES) {
+        throw new Error("Supplemental material exceeds the size limit.");
+      }
+
+      await sendNativeMessage({
+        type: "register_supplemental_material",
+        jobId: job.jobId,
+        articleUrl: job.articleUrl,
+        source: job.source,
+        materialUrl: candidate.url,
+        materialBase64: arrayBufferToBase64(buffer),
+        filename: candidate.filename || supplementalFilenameFromUrl(candidate.url),
+        ...(response.headers.get("content-type") ? { mimeType: response.headers.get("content-type") } : {}),
+        ...(candidate.title ? { title: candidate.title } : {})
+      });
+      registeredCount += 1;
+    } catch (error) {
+      await reportJobStatus(
+        job,
+        "supplemental_material_failed",
+        error instanceof Error ? error.message : "Supplemental material download failed."
+      );
+    }
+  }
 }
 
 async function reportJobStatus(job, status, message, failureCode) {
@@ -681,6 +737,7 @@ async function handlePaperPageClassified(message, sender) {
     }
 
     if (message.pdfUrl) {
+      await fetchSupplementalMaterials(job, message.supplementalMaterials);
       await startAutomaticDownload(job, message.pdfUrl);
       return;
     }

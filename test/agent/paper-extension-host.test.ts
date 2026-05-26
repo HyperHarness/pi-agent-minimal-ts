@@ -592,6 +592,55 @@ test("handleExtensionHostMessage rejects Science supplementary material PDFs", a
   }
 });
 
+test("handleExtensionHostMessage registers APS supplemental material on the publisher record", async () => {
+  const workspaceDir = await createWorkspaceDir();
+  const articleUrl = "https://journals.aps.org/prl/abstract/10.1103/PhysRevLett.111.080502";
+  const materialUrl = "https://journals.aps.org/prl/supplemental/10.1103/PhysRevLett.111.080502/SM.pdf";
+
+  try {
+    const response = await handleExtensionHostMessage({
+      workspaceDir,
+      now: () => new Date("2026-05-26T10:30:00.000Z"),
+      message: {
+        type: "register_supplemental_material",
+        jobId: "job-aps-supplement",
+        articleUrl,
+        source: "aps",
+        materialUrl,
+        materialBase64: Buffer.from("%PDF-1.7\nsupplement pdf\n").toString("base64"),
+        filename: "SM.pdf",
+        mimeType: "application/pdf",
+        title: "Supplemental Material"
+      }
+    });
+
+    assert.equal(response.type, "supplemental_registered");
+    assert.equal(response.articleUrl, articleUrl);
+    assert.equal(response.materialUrl, materialUrl);
+    assert.match(
+      response.path,
+      /knowledge-base\/raw\/supplemental\/aps\/10\.1103-PhysRevLett\.111\.080502\/SM\.pdf$/
+    );
+
+    const recordPath = resolvePaperRecordPath({
+      workspaceDir,
+      source: "aps",
+      canonicalId: "10.1103/PhysRevLett.111.080502",
+      articleUrl
+    });
+    const record = JSON.parse(await readFile(recordPath, "utf8"));
+    assert.equal(record.status, "publisher_pending");
+    assert.equal(record.supplementalMaterials[0].url, materialUrl);
+    assert.equal(await readFile(response.path, "utf8"), "%PDF-1.7\nsupplement pdf\n");
+
+    const events = await readPaperDownloadJobEvents({ workspaceDir });
+    assert.equal(events.at(-1)?.status, "supplemental_material_downloaded");
+    assert.equal(events.at(-1)?.downloadPath, response.path);
+  } finally {
+    await rm(workspaceDir, { recursive: true, force: true });
+  }
+});
+
 test("handleExtensionHostMessage rejects publisher record conflicts without overwriting", async () => {
   const workspaceDir = await createWorkspaceDir();
   const existingArticleUrl = "https://www.nature.com/articles/s41586-019-1666-5";

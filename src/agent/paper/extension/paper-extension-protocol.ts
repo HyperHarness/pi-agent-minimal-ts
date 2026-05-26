@@ -11,7 +11,9 @@ export type ExtensionJobStatus =
   | "awaiting_user_manual_download"
   | "manual_download_observed"
   | "downloaded"
-  | "webpage_snapshot_ready";
+  | "webpage_snapshot_ready"
+  | "supplemental_material_downloaded"
+  | "supplemental_material_failed";
 
 export type ExtensionJobPurpose = "download" | "webpage" | "download_and_webpage";
 
@@ -66,6 +68,17 @@ export type ExtensionHostMessage =
       title?: string;
     }
   | {
+      type: "register_supplemental_material";
+      jobId: string;
+      articleUrl: string;
+      source: PaperSource;
+      materialUrl: string;
+      materialBase64: string;
+      filename?: string;
+      mimeType?: string;
+      title?: string;
+    }
+  | {
       type: "register_webpage_snapshot";
       jobId: string;
       articleUrl: string;
@@ -112,6 +125,16 @@ export type ExtensionHostResponse =
       title?: string;
     }
   | {
+      type: "supplemental_registered";
+      jobId: string;
+      articleUrl: string;
+      materialUrl: string;
+      path: string;
+      sha256: string;
+      recordPath: string;
+      title?: string;
+    }
+  | {
       type: "status_ack";
       jobId: string;
       status: ExtensionJobStatus;
@@ -136,7 +159,9 @@ const VALID_JOB_STATUSES = new Set<ExtensionJobStatus>([
   "awaiting_user_manual_download",
   "manual_download_observed",
   "downloaded",
-  "webpage_snapshot_ready"
+  "webpage_snapshot_ready",
+  "supplemental_material_downloaded",
+  "supplemental_material_failed"
 ]);
 
 const VALID_JOB_PURPOSES = new Set<ExtensionJobPurpose>([
@@ -372,6 +397,18 @@ export function parseExtensionHostMessage(value: unknown): ExtensionHostMessage 
     };
   }
 
+  if (type === "register_supplemental_material") {
+    return {
+      type,
+      jobId: parseRequiredString(record, "jobId"),
+      articleUrl: parseRequiredString(record, "articleUrl"),
+      source: parsePaperSource(record, "source"),
+      materialUrl: parseRequiredString(record, "materialUrl"),
+      materialBase64: parseRequiredString(record, "materialBase64"),
+      ...parseOptionalFields(record, ["title", "filename", "mimeType"])
+    };
+  }
+
   if (type === "register_webpage_snapshot") {
     return {
       type,
@@ -445,6 +482,19 @@ export function parseExtensionHostResponse(value: unknown): ExtensionHostRespons
       qualityPath: parseRequiredString(record, "qualityPath"),
       chunksPath: parseRequiredString(record, "chunksPath"),
       ...parseOptionalWebpageQualityField(record, "quality"),
+      ...parseOptionalFields(record, ["title"])
+    };
+  }
+
+  if (type === "supplemental_registered") {
+    return {
+      type,
+      jobId: parseRequiredString(record, "jobId"),
+      articleUrl: parseRequiredString(record, "articleUrl"),
+      materialUrl: parseRequiredString(record, "materialUrl"),
+      path: parseRequiredString(record, "path"),
+      sha256: parseRequiredString(record, "sha256"),
+      recordPath: parseRequiredString(record, "recordPath"),
       ...parseOptionalFields(record, ["title"])
     };
   }

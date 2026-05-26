@@ -58,6 +58,21 @@
     );
   }
 
+  function isSupplementalMaterialCandidate(anchor, href) {
+    var text = normalizeText(anchor && anchor.textContent).toLowerCase();
+    var normalizedHref = normalizeText(href).toLowerCase();
+
+    return (
+      text.indexOf("supplemental material") !== -1 ||
+      text.indexOf("supplementary material") !== -1 ||
+      text.indexOf("supplementary materials") !== -1 ||
+      text.indexOf("supplementary information") !== -1 ||
+      normalizedHref.indexOf("/supplemental/") !== -1 ||
+      normalizedHref.indexOf("/doi/suppl/") !== -1 ||
+      normalizedHref.indexOf("suppl_file") !== -1
+    );
+  }
+
   function findPdfCandidate(input) {
     var currentDocument = input && input.document;
     var baseUrl = input && input.baseUrl;
@@ -83,8 +98,40 @@
     return null;
   }
 
+  function findSupplementalMaterialCandidates(input) {
+    var currentDocument = input && input.document;
+    var baseUrl = input && input.baseUrl;
+    if (!currentDocument || !baseUrl || typeof currentDocument.querySelectorAll !== "function") {
+      return [];
+    }
+
+    var anchors = currentDocument.querySelectorAll("a[href]");
+    var seen = {};
+    var results = [];
+    for (var index = 0; index < anchors.length; index += 1) {
+      var anchor = anchors[index];
+      var href =
+        typeof anchor.getAttribute === "function" ? anchor.getAttribute("href") : anchor.href;
+      if (!href || !isSupplementalMaterialCandidate(anchor, href)) {
+        continue;
+      }
+
+      var candidate = resolveCandidateUrl(href, baseUrl);
+      if (candidate && !seen[candidate]) {
+        seen[candidate] = true;
+        results.push({
+          url: candidate,
+          title: normalizeText(anchor && anchor.textContent) || "Supplemental Material"
+        });
+      }
+    }
+
+    return results;
+  }
+
   root.PiAgentPaperCommon = {
     classifyPage: classifyPage,
-    findPdfCandidate: findPdfCandidate
+    findPdfCandidate: findPdfCandidate,
+    findSupplementalMaterialCandidates: findSupplementalMaterialCandidates
   };
 })(globalThis);

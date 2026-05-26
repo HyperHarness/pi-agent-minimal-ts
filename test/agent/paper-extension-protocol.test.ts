@@ -51,6 +51,32 @@ test("parseExtensionHostMessage accepts register_download_bytes messages", () =>
   });
 });
 
+test("parseExtensionHostMessage accepts register_supplemental_material messages", () => {
+  const message = parseExtensionHostMessage({
+    type: "register_supplemental_material",
+    jobId: "job-supplement",
+    articleUrl: "https://journals.aps.org/prl/abstract/10.1103/PhysRevLett.111.080502",
+    source: "aps",
+    materialUrl: "https://journals.aps.org/prl/supplemental/10.1103/PhysRevLett.111.080502/SM.pdf",
+    materialBase64: "JVBERi0xLjQK",
+    filename: "SM.pdf",
+    mimeType: "application/pdf",
+    title: "Supplemental Material"
+  });
+
+  assert.deepEqual(message, {
+    type: "register_supplemental_material",
+    jobId: "job-supplement",
+    articleUrl: "https://journals.aps.org/prl/abstract/10.1103/PhysRevLett.111.080502",
+    source: "aps",
+    materialUrl: "https://journals.aps.org/prl/supplemental/10.1103/PhysRevLett.111.080502/SM.pdf",
+    materialBase64: "JVBERi0xLjQK",
+    filename: "SM.pdf",
+    mimeType: "application/pdf",
+    title: "Supplemental Material"
+  });
+});
+
 test("parseExtensionHostMessage accepts register_webpage_snapshot messages", () => {
   const message = parseExtensionHostMessage({
     type: "register_webpage_snapshot",
@@ -247,6 +273,30 @@ test("parseExtensionHostResponse accepts webpage_registered responses", () => {
       warnings: []
     },
     title: "Science Paper"
+  });
+});
+
+test("parseExtensionHostResponse accepts supplemental_registered responses", () => {
+  const response = parseExtensionHostResponse({
+    type: "supplemental_registered",
+    jobId: "job-supplement",
+    articleUrl: "https://journals.aps.org/prl/abstract/10.1103/PhysRevLett.111.080502",
+    materialUrl: "https://journals.aps.org/prl/supplemental/10.1103/PhysRevLett.111.080502/SM.pdf",
+    path: "knowledge-base/raw/supplemental/aps/10.1103-PhysRevLett.111.080502/SM.pdf",
+    sha256: "abc123",
+    recordPath: "knowledge-base/sources/aps/10.1103-PhysRevLett.111.080502/acquisition.json",
+    title: "Supplemental Material"
+  });
+
+  assert.deepEqual(response, {
+    type: "supplemental_registered",
+    jobId: "job-supplement",
+    articleUrl: "https://journals.aps.org/prl/abstract/10.1103/PhysRevLett.111.080502",
+    materialUrl: "https://journals.aps.org/prl/supplemental/10.1103/PhysRevLett.111.080502/SM.pdf",
+    path: "knowledge-base/raw/supplemental/aps/10.1103-PhysRevLett.111.080502/SM.pdf",
+    sha256: "abc123",
+    recordPath: "knowledge-base/sources/aps/10.1103-PhysRevLett.111.080502/acquisition.json",
+    title: "Supplemental Material"
   });
 });
 

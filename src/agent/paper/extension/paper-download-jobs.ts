@@ -23,6 +23,9 @@ export interface PaperDownloadJobEvent {
   parsePath?: string;
   qualityPath?: string;
   chunksPath?: string;
+  materialUrl?: string;
+  mimeType?: string;
+  sha256?: string;
   failureCode?: string;
   message?: string;
 }
@@ -38,7 +41,9 @@ const VALID_JOB_STATUSES = new Set<ExtensionJobStatus>([
   "awaiting_user_manual_download",
   "manual_download_observed",
   "downloaded",
-  "webpage_snapshot_ready"
+  "webpage_snapshot_ready",
+  "supplemental_material_downloaded",
+  "supplemental_material_failed"
 ]);
 
 const VALID_PAPER_SOURCES = new Set<PaperSource>(["arxiv", "science", "nature", "aps", "external"]);
@@ -154,6 +159,9 @@ function parsePaperDownloadJobEvent(value: unknown): PaperDownloadJobEvent | nul
       "parsePath",
       "qualityPath",
       "chunksPath",
+      "materialUrl",
+      "mimeType",
+      "sha256",
       "failureCode",
       "message"
     ]),

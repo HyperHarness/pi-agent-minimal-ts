@@ -13,10 +13,10 @@ await import(pathToFileURL(path.join(contentDir, "nature.js")).href);
 await import(pathToFileURL(path.join(contentDir, "science.js")).href);
 await import(pathToFileURL(path.join(contentDir, "aps.js")).href);
 
-const { classifyPage, findPdfCandidate } = globalThis.PiAgentPaperCommon;
+const { classifyPage, findPdfCandidate, findSupplementalMaterialCandidates } = globalThis.PiAgentPaperCommon;
 const { findNaturePdfCandidate } = globalThis.PiAgentPaperNature;
 const { findSciencePdfCandidate } = globalThis.PiAgentPaperScience;
-const { findApsPdfCandidate } = globalThis.PiAgentPaperAps;
+const { findApsPdfCandidate, findApsSupplementalMaterialCandidates } = globalThis.PiAgentPaperAps;
 
 const flushAsyncWork = () => new Promise((resolve) => setTimeout(resolve, 0));
 
@@ -247,9 +247,11 @@ function doc(html) {
 test("helper globals are installed by content helper scripts", () => {
   assert.equal(typeof classifyPage, "function");
   assert.equal(typeof findPdfCandidate, "function");
+  assert.equal(typeof findSupplementalMaterialCandidates, "function");
   assert.equal(typeof findNaturePdfCandidate, "function");
   assert.equal(typeof findSciencePdfCandidate, "function");
   assert.equal(typeof findApsPdfCandidate, "function");
+  assert.equal(typeof findApsSupplementalMaterialCandidates, "function");
 });
 
 test("classifyPage detects Cloudflare and login handoff pages", () => {
@@ -455,6 +457,34 @@ test("publisher helpers extract Nature, Science, and APS PDF candidates", () => 
   );
 });
 
+test("publisher helpers extract supplemental material candidates", () => {
+  assert.deepEqual(
+    findSupplementalMaterialCandidates({
+      document: doc('<a href="/prl/supplemental/10.1103/PhysRevLett.111.080502/SM.pdf">Supplemental Material</a>'),
+      baseUrl: "https://journals.aps.org/prl/abstract/10.1103/PhysRevLett.111.080502"
+    }),
+    [
+      {
+        url: "https://journals.aps.org/prl/supplemental/10.1103/PhysRevLett.111.080502/SM.pdf",
+        title: "Supplemental Material"
+      }
+    ]
+  );
+
+  assert.deepEqual(
+    findApsSupplementalMaterialCandidates({
+      document: doc("<main>No direct links</main>"),
+      baseUrl: "https://journals.aps.org/prl/abstract/10.1103/PhysRevLett.111.080502"
+    }),
+    [
+      {
+        url: "https://journals.aps.org/prl/supplemental/10.1103/PhysRevLett.111.080502",
+        title: "Supplemental Material"
+      }
+    ]
+  );
+});
+
 test("manifest declares required MV3 extension shell fields", async () => {
   const manifest = JSON.parse(await readFile(path.join(extensionDir, "manifest.json"), "utf8"));
 
@@ -651,6 +681,55 @@ test("background fetches webpage image assets with browser credentials before na
   } finally {
     globalThis.fetch = previousFetch;
   }
+});
+
+test("background registers supplemental materials without blocking the main PDF download", async () => {
+  const fetchCalls = [];
+  const job = {
+    jobId: "job-aps-supplement",
+    articleUrl: "https://journals.aps.org/prl/abstract/10.1103/PhysRevLett.111.080502",
+    source: "aps",
+    title: "APS paper"
+  };
+  const fakeChrome = createFakeChrome({
+    jobs: [job],
+    fetchImpl: async (url, init) => {
+      fetchCalls.push({ url, init });
+      return new Response(Buffer.from("%PDF-1.7\nsupplement pdf\n"), {
+        status: 200,
+        headers: { "content-type": "application/pdf" }
+      });
+    }
+  });
+
+  await importBackground(fakeChrome);
+  fakeChrome.events.onMessage.emit(
+    {
+      type: "paper_page_classified",
+      status: "page_classified",
+      pdfUrl: "https://journals.aps.org/prl/pdf/10.1103/PhysRevLett.111.080502",
+      supplementalMaterials: [
+        {
+          url: "https://journals.aps.org/prl/supplemental/10.1103/PhysRevLett.111.080502/SM.pdf",
+          title: "Supplemental Material"
+        }
+      ]
+    },
+    { tab: { id: 100 } }
+  );
+  await flushAsyncWork();
+
+  assert.deepEqual(fetchCalls[0], {
+    url: "https://journals.aps.org/prl/supplemental/10.1103/PhysRevLett.111.080502/SM.pdf",
+    init: { credentials: "include" }
+  });
+  const supplemental = messagesOf(fakeChrome, "register_supplemental_material")[0];
+  assert.equal(
+    supplemental.materialUrl,
+    "https://journals.aps.org/prl/supplemental/10.1103/PhysRevLett.111.080502/SM.pdf"
+  );
+  assert.equal(supplemental.filename, "SM.pdf");
+  assert.equal(messagesOf(fakeChrome, "register_download_bytes").length, 1);
 });
 
 test("background gates publisher PDF downloads on complete webpage snapshot quality", async () => {

@@ -71,6 +71,7 @@ test("resolvePaperLibraryPaths uses knowledge-base as the wiki root", async () =
     assert.equal(paths.libraryRoot, path.join(workspaceDir, "knowledge-base"));
     assert.equal(paths.wikiRoot, path.join(workspaceDir, "knowledge-base"));
     assert.equal(paths.rawRoot, path.join(workspaceDir, "knowledge-base", "raw"));
+    assert.equal(paths.rawSupplementalRoot, path.join(workspaceDir, "knowledge-base", "raw", "supplemental"));
     assert.equal(paths.sourcesRoot, path.join(workspaceDir, "knowledge-base", "sources"));
     assert.equal(paths.sourceArtifactsRoot, path.join(workspaceDir, "knowledge-base", "sources"));
     assert.equal(paths.pagesRoot, path.join(workspaceDir, "knowledge-base", "pages"));
@@ -79,6 +80,59 @@ test("resolvePaperLibraryPaths uses knowledge-base as the wiki root", async () =
     assert.equal(paths.stateRoot, path.join(workspaceDir, "knowledge-base", "state"));
     assert.equal(paths.indexPath, path.join(workspaceDir, "knowledge-base", "index.md"));
     assert.equal(paths.logPath, path.join(workspaceDir, "knowledge-base", "log.md"));
+  } finally {
+    await rm(workspaceDir, { recursive: true, force: true });
+  }
+});
+
+test("writePaperRecord persists publisher supplemental materials into source metadata", async () => {
+  const workspaceDir = await mkdtemp(path.join(os.tmpdir(), "paper-store-supplemental-"));
+  const supplementalPath = path.join(
+    workspaceDir,
+    "knowledge-base",
+    "raw",
+    "supplemental",
+    "aps",
+    "10.1103-PhysRevLett.111.080502",
+    "SM.pdf"
+  );
+  const pdfPath = path.join(workspaceDir, "knowledge-base", "raw", "pdfs", "aps-main.pdf");
+
+  try {
+    await mkdir(path.dirname(pdfPath), { recursive: true });
+    await mkdir(path.dirname(supplementalPath), { recursive: true });
+    await writeFile(pdfPath, "%PDF-1.7\nmain\n", "utf8");
+    await writeFile(supplementalPath, "%PDF-1.7\nsupplement\n", "utf8");
+
+    const recordPath = await writePaperRecord({
+      workspaceDir,
+      record: {
+        source: "aps",
+        articleUrl: "https://journals.aps.org/prl/abstract/10.1103/PhysRevLett.111.080502",
+        recordedAt: "2026-05-26T00:00:00.000Z",
+        handlingMethod: "browser_session",
+        status: "downloaded",
+        canonicalId: "10.1103/PhysRevLett.111.080502",
+        pdfUrl: "https://journals.aps.org/prl/pdf/10.1103/PhysRevLett.111.080502",
+        downloadPath: pdfPath,
+        supplementalMaterials: [
+          {
+            url: "https://journals.aps.org/prl/supplemental/10.1103/PhysRevLett.111.080502/SM.pdf",
+            title: "Supplemental Material",
+            filename: "SM.pdf",
+            path: supplementalPath,
+            mimeType: "application/pdf",
+            sha256: "supplement-sha",
+            downloadedAt: "2026-05-26T00:01:00.000Z"
+          }
+        ]
+      }
+    });
+
+    const acquisition = JSON.parse(await readFile(recordPath, "utf8"));
+    assert.equal(acquisition.supplementalMaterials[0].filename, "SM.pdf");
+    const source = JSON.parse(await readFile(path.join(path.dirname(recordPath), "source.json"), "utf8"));
+    assert.equal(source.supplementalMaterials[0].title, "Supplemental Material");
   } finally {
     await rm(workspaceDir, { recursive: true, force: true });
   }

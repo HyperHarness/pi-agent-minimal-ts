@@ -85,6 +85,16 @@ export interface PaperSourcePreprintFallback {
   status: "downloaded" | "already_downloaded";
 }
 
+export interface PaperSupplementalMaterial {
+  url: string;
+  title?: string;
+  filename: string;
+  path: string;
+  mimeType?: string;
+  sha256: string;
+  downloadedAt: string;
+}
+
 export interface PaperSourceMetadata {
   schemaVersion: 2;
   paperKey: string;
@@ -107,6 +117,7 @@ export interface PaperSourceMetadata {
   recordPath: string;
   bibPath?: string;
   cslPath?: string;
+  supplementalMaterials?: PaperSupplementalMaterial[];
   downloadStatus: PaperRecord["status"];
   readingStatus?: PaperRecordReadingStatus;
   citationStatus: PaperCitationStatus;
@@ -194,6 +205,7 @@ type DownloadedPublisherPaperRecord = {
   canonicalId: string;
   pdfUrl: string;
   downloadPath: string;
+  supplementalMaterials?: PaperSupplementalMaterial[];
   openedUrl?: never;
   failure?: never;
 };
@@ -207,6 +219,7 @@ type PublisherPreprintFallbackPaperRecord = {
   canonicalId: string;
   title?: string;
   preprint: PaperRecordPreprintFallback;
+  supplementalMaterials?: PaperSupplementalMaterial[];
   failure: PaperFailure;
   openedUrl?: never;
   pdfUrl?: never;
@@ -221,6 +234,7 @@ type PublisherPendingPaperRecord = {
   status: "publisher_pending";
   canonicalId: string;
   title?: string;
+  supplementalMaterials?: PaperSupplementalMaterial[];
   failure: PaperFailure;
   openedUrl?: never;
   pdfUrl?: never;
@@ -236,6 +250,7 @@ type ManualFallbackPaperRecord = {
   status: "manual_fallback_opened";
   canonicalId: string;
   title?: string;
+  supplementalMaterials?: PaperSupplementalMaterial[];
   failure: PaperFailure;
   pdfUrl?: never;
   downloadPath?: never;

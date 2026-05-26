@@ -13,6 +13,7 @@ import {
   type ExtensionHostResponse
 } from "./paper-extension-protocol.js";
 import { parsePaperWebPageHtmlWithPandoc } from "../acquisition/paper-webpage-fetch.js";
+import { resolvePaperLibraryPaths } from "../../knowledge-base.js";
 import { savePaperWebPageParse } from "../reading/engines/webpage.js";
 import { parsePaper } from "../reading/paper-reader.js";
 import type { PaperParseResult } from "../reading/types.js";
@@ -25,7 +26,7 @@ import {
   writePaperRecord
 } from "../storage/paper-store.js";
 import { resolvePublisherCanonicalIdFromArticleUrl } from "../acquisition/paper-download.js";
-import type { PaperRecord, SupportedPaperSource } from "../types.js";
+import type { PaperRecord, PaperSupplementalMaterial, SupportedPaperSource } from "../types.js";
 
 const NATIVE_HOST_NAME = "com.pi_agent.paper_downloader";
 const NATIVE_HOST_DESCRIPTION = "Pi Agent paper downloader native host";
@@ -131,6 +132,14 @@ export async function handleExtensionHostMessage(options: {
     });
   }
 
+  if (message.type === "register_supplemental_material") {
+    return registerSupplementalMaterial({
+      workspaceDir: options.workspaceDir,
+      message,
+      recordedAt
+    });
+  }
+
   return registerDownloadedPaper({
     workspaceDir: options.workspaceDir,
     message,
@@ -218,6 +227,167 @@ async function registerWebpageSnapshot(options: {
       message: error instanceof Error ? error.message : "Unable to register webpage snapshot."
     });
   }
+}
+
+async function registerSupplementalMaterial(options: {
+  workspaceDir: string;
+  message: Extract<ExtensionHostMessage, { type: "register_supplemental_material" }>;
+  recordedAt: string;
+}): Promise<ExtensionHostResponse> {
+  if (!SUPPORTED_PUBLISHER_SOURCES.has(options.message.source as SupportedPaperSource)) {
+    return registrationError({
+      jobId: options.message.jobId,
+      code: "unsupported_supplemental_source",
+      message: "Supplemental material registration is only supported for publisher article records."
+    });
+  }
+
+  const source = options.message.source as SupportedPaperSource;
+  const canonicalId = resolvePublisherCanonicalIdFromArticleUrl({
+    publisher: source,
+    articleUrl: options.message.articleUrl
+  });
+  if (!canonicalId) {
+    return registrationError({
+      jobId: options.message.jobId,
+      code: "canonical_id_not_found",
+      message: "Unable to derive a canonical paper identifier from the article URL."
+    });
+  }
+
+  let materialBytes: Buffer;
+  try {
+    materialBytes = Buffer.from(options.message.materialBase64, "base64");
+  } catch {
+    return registrationError({
+      jobId: options.message.jobId,
+      code: "invalid_supplemental_bytes",
+      message: "Unable to decode supplemental material bytes."
+    });
+  }
+  if (materialBytes.byteLength === 0) {
+    return registrationError({
+      jobId: options.message.jobId,
+      code: "invalid_supplemental_bytes",
+      message: "Supplemental material bytes are empty."
+    });
+  }
+
+  const filename = sanitizeSupplementalFilename(options.message.filename, options.message.materialUrl);
+  const downloadPath = path.join(
+    resolvePaperLibraryPaths(options.workspaceDir).rawSupplementalRoot,
+    source,
+    supplementalCanonicalDirectoryName(canonicalId),
+    filename
+  );
+  await mkdir(path.dirname(downloadPath), { recursive: true });
+  await writeFile(downloadPath, materialBytes);
+
+  const sha256 = createHash("sha256").update(materialBytes).digest("hex");
+  const material: PaperSupplementalMaterial = {
+    url: options.message.materialUrl,
+    ...(normalizeOptionalString(options.message.title) ? { title: normalizeOptionalString(options.message.title) } : {}),
+    filename,
+    path: downloadPath,
+    ...(normalizeOptionalString(options.message.mimeType) ? { mimeType: normalizeOptionalString(options.message.mimeType) } : {}),
+    sha256,
+    downloadedAt: options.recordedAt
+  };
+
+  const existingRecord = await readPaperRecord({
+    workspaceDir: options.workspaceDir,
+    source,
+    canonicalId,
+    articleUrl: options.message.articleUrl
+  });
+  const existingMaterials =
+    existingRecord?.record.source === source &&
+    "supplementalMaterials" in existingRecord.record &&
+    Array.isArray(existingRecord.record.supplementalMaterials)
+      ? existingRecord.record.supplementalMaterials
+      : [];
+  const supplementalMaterials = mergeSupplementalMaterials(existingMaterials, material);
+  const record: PaperRecord = existingRecord
+    ? ({
+      ...existingRecord.record,
+      supplementalMaterials
+    } as PaperRecord)
+    : {
+      source,
+      articleUrl: options.message.articleUrl,
+      recordedAt: options.recordedAt,
+      handlingMethod: "accepted_paper",
+      status: "publisher_pending",
+      canonicalId,
+      ...(normalizeOptionalString(options.message.title) ? { title: normalizeOptionalString(options.message.title) } : {}),
+      supplementalMaterials,
+      failure: {
+        code: "supplemental_material_only",
+        message: "Supplemental material was downloaded before the main publisher PDF was registered."
+      }
+    };
+
+  const recordPath = await writePaperRecord({
+    workspaceDir: options.workspaceDir,
+    record
+  });
+
+  await appendPaperDownloadJobEvent({
+    workspaceDir: options.workspaceDir,
+    event: {
+      jobId: options.message.jobId,
+      recordedAt: options.recordedAt,
+      status: "supplemental_material_downloaded",
+      articleUrl: options.message.articleUrl,
+      source,
+      materialUrl: options.message.materialUrl,
+      downloadPath,
+      recordPath,
+      sha256,
+      ...(material.mimeType ? { mimeType: material.mimeType } : {}),
+      ...(material.title ? { title: material.title } : {})
+    }
+  });
+
+  return {
+    type: "supplemental_registered",
+    jobId: options.message.jobId,
+    articleUrl: options.message.articleUrl,
+    materialUrl: options.message.materialUrl,
+    path: downloadPath,
+    sha256,
+    recordPath,
+    ...(material.title ? { title: material.title } : {})
+  };
+}
+
+function mergeSupplementalMaterials(
+  existing: PaperSupplementalMaterial[],
+  material: PaperSupplementalMaterial
+): PaperSupplementalMaterial[] {
+  const byUrl = new Map(existing.map((item) => [item.url, item]));
+  byUrl.set(material.url, material);
+  return [...byUrl.values()];
+}
+
+function sanitizeSupplementalFilename(value: string | undefined, materialUrl: string): string {
+  let fallback = "supplemental-material";
+  try {
+    fallback = path.basename(new URL(materialUrl).pathname) || fallback;
+  } catch {
+    fallback = path.basename(materialUrl.split(/[?#]/, 1)[0] ?? "") || fallback;
+  }
+  const preferred = value?.trim() || fallback;
+  const cleaned = preferred
+    .replace(/[\u0000-\u001f<>:"/\\|?*]+/g, "-")
+    .replace(/\s+/g, " ")
+    .trim()
+    .replace(/[ .]+$/g, "");
+  return cleaned || "supplemental-material";
+}
+
+function supplementalCanonicalDirectoryName(canonicalId: string): string {
+  return canonicalId.replace(/[<>:"/\\|?*\u0000-\u001F]+/g, "-");
 }
 
 async function resolveRecordForExtensionMessage(input: {
