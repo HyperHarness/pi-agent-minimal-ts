@@ -48,7 +48,8 @@ Remote solver submission uses the same manifest and a small service protocol:
 
 ```sh
 cd ../..
-.venv/bin/python -m pi_chip_design.layouts.submit_ten_qubit_q3d_remote
+.venv/bin/python -m pi_chip_design.layouts.submit_ten_qubit_q3d_remote --solver-url http://windows-host:17890
+.venv/bin/python -m pi_chip_design.layouts.submit_single_transmon_q3d_remote --solver-url http://windows-host:17890
 ```
 
-Without `--solver-url`, the command uses an in-process fake runner for protocol validation. With `--solver-url http://windows-host:17890`, it submits to a real solver service that can run on Windows or a simulation server and hide AEDT, license, queue, and file-path details from the WSL agent.
+The design-agent exposes this as `submit_design_simulation` for EM, Q3D, HFSS, AEDT, capacitance-extraction, and frequency-validation requests. The tool uses `solverUrl` when supplied, otherwise `PI_DESIGN_SOLVER_URL` or `PI_SOLVER_URL`. With `--solver-url http://windows-host:17890`, it submits to a real solver service that can run on Windows or a simulation server and hide AEDT, license, queue, and file-path details from the WSL agent.

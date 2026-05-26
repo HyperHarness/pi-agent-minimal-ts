@@ -201,6 +201,30 @@ const runDesignScriptParameters = Type.Object({
   )
 });
 
+const submitDesignSimulationParameters = Type.Object({
+  workflow: Type.Optional(
+    Type.Union([
+      Type.Literal("single_transmon_q3d_capacitance"),
+      Type.Literal("ten_qubit_q3d_capacitance")
+    ], {
+      description:
+        "Fixed remote simulation workflow to submit. Defaults to single_transmon_q3d_capacitance for single-qubit EM simulation requests."
+    })
+  ),
+  solverUrl: Type.Optional(
+    Type.String({
+      description:
+        "Remote solver-runner base URL such as http://windows-host:17890. Defaults to PI_DESIGN_SOLVER_URL or PI_SOLVER_URL."
+    })
+  ),
+  maxOutputChars: Type.Optional(
+    Type.Integer({
+      description: "Maximum combined stdout/stderr characters to return. Defaults to 12000.",
+      minimum: 1000
+    })
+  )
+});
+
 const syncDesignEnvironmentParameters = Type.Object({
   projectPath: Type.Optional(
     Type.String({
@@ -1532,6 +1556,138 @@ async function runDesignScript(input: {
   }
 }
 
+type DesignSimulationWorkflow = "single_transmon_q3d_capacitance" | "ten_qubit_q3d_capacitance";
+
+const DESIGN_SIMULATION_WORKFLOW_MODULES: Record<DesignSimulationWorkflow, string> = {
+  single_transmon_q3d_capacitance: "pi_chip_design.layouts.submit_single_transmon_q3d_remote",
+  ten_qubit_q3d_capacitance: "pi_chip_design.layouts.submit_ten_qubit_q3d_remote"
+};
+
+async function collectDesignSimulationRecords(input: {
+  workspaceDir: string;
+  startTimeMs: number;
+}): Promise<Array<{ path: string; bytes: number }>> {
+  const recordsDir = path.join(input.workspaceDir, "design-repo", "design-records", "simulations");
+  if (!await pathExists(recordsDir)) {
+    return [];
+  }
+
+  const entries = await readdir(recordsDir, { withFileTypes: true });
+  const records: Array<{ path: string; bytes: number }> = [];
+  for (const entry of entries) {
+    if (!entry.isFile() || !entry.name.endsWith(".json")) {
+      continue;
+    }
+    const filePath = path.join(recordsDir, entry.name);
+    const fileStats = await stat(filePath);
+    if (fileStats.mtimeMs + 1000 < input.startTimeMs) {
+      continue;
+    }
+    records.push({
+      path: relativeWorkspacePath(input.workspaceDir, filePath),
+      bytes: fileStats.size
+    });
+  }
+
+  return records.sort((left, right) => {
+    const priority = (record: { path: string }): number => {
+      if (record.path.endsWith(".remote.json")) {
+        return 0;
+      }
+      if (record.path.endsWith(".results.json")) {
+        return 1;
+      }
+      return 2;
+    };
+    return priority(left) - priority(right) || left.path.localeCompare(right.path);
+  });
+}
+
+async function submitDesignSimulation(input: {
+  workspaceDir: string;
+  workflow?: DesignSimulationWorkflow;
+  solverUrl?: string;
+  maxOutputChars: number;
+}): Promise<{
+  status: "completed";
+  workflow: DesignSimulationWorkflow;
+  solverUrl: string;
+  pythonPath: string;
+  command: string;
+  exitCode: 0;
+  stdout: string;
+  stderr: string;
+  records: Array<{ path: string; bytes: number }>;
+}> {
+  const workflow = input.workflow ?? "single_transmon_q3d_capacitance";
+  const moduleName = DESIGN_SIMULATION_WORKFLOW_MODULES[workflow];
+  const solverUrl = input.solverUrl ?? process.env.PI_DESIGN_SOLVER_URL ?? process.env.PI_SOLVER_URL;
+  if (!solverUrl) {
+    throw new Error("Remote solver URL is not configured. Set PI_DESIGN_SOLVER_URL or pass solverUrl.");
+  }
+  const parsedSolverUrl = new URL(solverUrl);
+  if (parsedSolverUrl.protocol !== "http:" && parsedSolverUrl.protocol !== "https:") {
+    throw new Error("Remote solver URL must use http or https.");
+  }
+
+  const pythonPath = await findRootVenvPython(input.workspaceDir);
+  if (!pythonPath) {
+    throw new Error("Root .venv Python was not found. Run sync_design_environment first.");
+  }
+
+  const args = ["-m", moduleName, "--solver-url", solverUrl];
+  const commandLine = formatCommandLine({
+    command: pythonPath,
+    args,
+    cwd: input.workspaceDir
+  });
+  const startTimeMs = Date.now();
+
+  try {
+    const { stdout, stderr } = await execFileAsync(pythonPath, args, {
+      cwd: input.workspaceDir,
+      env: {
+        ...process.env,
+        PYTHONPATH: [
+          path.join(input.workspaceDir, "design-repo", "design-code", "src"),
+          process.env.PYTHONPATH
+        ].filter((entry): entry is string => typeof entry === "string" && entry.length > 0).join(path.delimiter)
+      },
+      timeout: 300000,
+      maxBuffer: Math.max(input.maxOutputChars * 2, 1024 * 1024)
+    }) as { stdout: string | Buffer; stderr: string | Buffer };
+    const output = truncateSeparatedOutput({
+      stdout: stdout.toString(),
+      stderr: stderr.toString(),
+      maxChars: input.maxOutputChars
+    });
+
+    return {
+      status: "completed",
+      workflow,
+      solverUrl,
+      pythonPath: relativeWorkspacePath(input.workspaceDir, pythonPath),
+      command: commandLine,
+      exitCode: 0,
+      stdout: output.stdout,
+      stderr: output.stderr,
+      records: await collectDesignSimulationRecords({
+        workspaceDir: input.workspaceDir,
+        startTimeMs
+      })
+    };
+  } catch (error) {
+    const failed = error as { stdout?: string | Buffer; stderr?: string | Buffer; message?: string };
+    const output = [
+      `$ ${commandLine}`,
+      failed.stdout?.toString() ?? "",
+      failed.stderr?.toString() ?? "",
+      failed.message ?? String(error)
+    ].filter((part) => part.trim().length > 0).join("\n");
+    throw new Error(truncateOutput(output, input.maxOutputChars));
+  }
+}
+
 async function compileLatexDocument(input: {
   workspaceDir: string;
   texPath: string;
@@ -1850,6 +2006,10 @@ type VerifyDesignPythonImportTool = AgentTool<
 type RunDesignScriptTool = AgentTool<
   typeof runDesignScriptParameters,
   Awaited<ReturnType<typeof runDesignScript>>
+>;
+type SubmitDesignSimulationTool = AgentTool<
+  typeof submitDesignSimulationParameters,
+  Awaited<ReturnType<typeof submitDesignSimulation>>
 >;
 
 interface ListFilesEntry {
@@ -2262,6 +2422,29 @@ export function createFileTools(input: {
     }
   };
 
+  const submitDesignSimulationTool: SubmitDesignSimulationTool = {
+    name: "submit_design_simulation",
+    label: "Submit Design Simulation",
+    description:
+      "Submits a fixed pi-chip-design electromagnetic simulation workflow to a remote solver-runner service using the repository root .venv Python. Use this for EM, Q3D, HFSS, AEDT, capacitance-extraction, or frequency-validation requests before claiming simulation is unavailable. The solver URL comes from solverUrl, PI_DESIGN_SOLVER_URL, or PI_SOLVER_URL.",
+    parameters: submitDesignSimulationParameters,
+    executionMode: "sequential",
+    execute: async (_toolCallId: string, args: Static<typeof submitDesignSimulationParameters>) => {
+      const maxOutputChars = normalizeDesignToolOutputChars(args.maxOutputChars);
+      const result = await submitDesignSimulation({
+        workspaceDir: resolvedWorkspaceDir,
+        workflow: args.workflow,
+        solverUrl: args.solverUrl,
+        maxOutputChars
+      });
+
+      return {
+        content: [{ type: "text", text: JSON.stringify(result) }],
+        details: result
+      };
+    }
+  };
+
   return {
     defaultTools: [
       listFilesTool,
@@ -2281,7 +2464,8 @@ export function createFileTools(input: {
       updateDesignDependencyTool,
       syncDesignEnvironmentTool,
       verifyDesignPythonImportTool,
-      runDesignScriptTool
+      runDesignScriptTool,
+      submitDesignSimulationTool
     ],
     tailFullTools: [
       loadPaperWritingSkillTool

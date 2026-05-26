@@ -96,6 +96,18 @@ type RunDesignScriptTool = {
   ) => Promise<ToolResult>;
 };
 
+type SubmitDesignSimulationTool = {
+  execute: (
+    toolCallId: string,
+    args: {
+      workflow?: "single_transmon_q3d_capacitance" | "ten_qubit_q3d_capacitance";
+      solverUrl?: string;
+      maxOutputChars?: number;
+    },
+    signal: undefined,
+  ) => Promise<ToolResult>;
+};
+
 type SyncDesignEnvironmentTool = {
   execute: (
     toolCallId: string,
@@ -608,6 +620,17 @@ function getRunDesignScriptTool(workspace: string): RunDesignScriptTool {
   assert.ok(runDesignScriptTool);
   assert.equal(typeof runDesignScriptTool.execute, "function");
   return runDesignScriptTool as RunDesignScriptTool;
+}
+
+function getSubmitDesignSimulationTool(workspace: string): SubmitDesignSimulationTool {
+  const tools = createTools(workspace, { toolProfile: "full" }) as ReadonlyArray<{
+    name: string;
+    execute?: SubmitDesignSimulationTool["execute"];
+  }>;
+  const submitDesignSimulationTool = tools.find((tool) => tool.name === "submit_design_simulation");
+  assert.ok(submitDesignSimulationTool);
+  assert.equal(typeof submitDesignSimulationTool.execute, "function");
+  return submitDesignSimulationTool as SubmitDesignSimulationTool;
 }
 
 function getSyncDesignEnvironmentTool(workspace: string): SyncDesignEnvironmentTool {
@@ -1734,6 +1757,98 @@ test("run_design_script rejects Python scripts when the root venv Python is miss
   }
 });
 
+test("submit_design_simulation rejects when the root venv Python is missing", async () => {
+  const workspace = await mkdtemp(path.join(tmpdir(), "pi-agent-tools-"));
+
+  try {
+    const submitDesignSimulationTool = getSubmitDesignSimulationTool(workspace);
+    await assert.rejects(
+      submitDesignSimulationTool.execute(
+        "call-submit-design-simulation-missing-root-venv",
+        { workflow: "single_transmon_q3d_capacitance", solverUrl: "http://solver.example:17890" },
+        undefined,
+      ),
+      /Root \.venv Python was not found\. Run sync_design_environment first\./,
+    );
+  } finally {
+    await rm(workspace, { recursive: true, force: true });
+  }
+});
+
+test("submit_design_simulation runs the fixed remote solver workflow with the configured solver URL", { skip: process.platform === "win32" ? "fake python.exe shell-script shims are not executable on Windows" : false }, async () => {
+  const workspace = await mkdtemp(path.join(tmpdir(), "pi-agent-tools-"));
+  const rootVenvPython = rootVenvPythonPath(workspace);
+  const callsPath = path.join(workspace, "python-calls.jsonl");
+  const originalSolverUrl = process.env.PI_DESIGN_SOLVER_URL;
+  const originalCallsPath = process.env.PI_TEST_PYTHON_CALLS_PATH;
+
+  try {
+    process.env.PI_DESIGN_SOLVER_URL = "http://127.0.0.1:17890";
+    process.env.PI_TEST_PYTHON_CALLS_PATH = callsPath;
+    await mkdir(path.dirname(rootVenvPython), { recursive: true });
+    await mkdir(path.join(workspace, "design-repo", "design-code"), { recursive: true });
+    await writeFakePythonExecutable(rootVenvPython, [
+      "#!/bin/sh",
+      "python3 - \"$@\" <<'PY'",
+      "import json, os, pathlib, sys",
+      "workspace = pathlib.Path.cwd()",
+      "records = workspace / 'design-repo' / 'design-records' / 'simulations'",
+      "records.mkdir(parents=True, exist_ok=True)",
+      "record = records / 'single_transmon_5p4ghz-q3d-capacitance.remote.json'",
+      "result = records / 'job-000001.results.json'",
+      "record.write_text(json.dumps({'job_id':'job-000001','status':'solved','solver_url':'http://127.0.0.1:17890'}, separators=(',', ':')) + '\\n')",
+      "result.write_text(json.dumps({'status':'solved','solver':'q3d_capacitance'}, separators=(',', ':')) + '\\n')",
+      "pathlib.Path(os.environ['PI_TEST_PYTHON_CALLS_PATH']).write_text(json.dumps({'argv': sys.argv[1:], 'cwd': str(workspace)}) + '\\n')",
+      "print('remote solver submitted')",
+      "PY",
+    ]);
+
+    const submitDesignSimulationTool = getSubmitDesignSimulationTool(workspace);
+    const result = await submitDesignSimulationTool.execute(
+      "call-submit-design-simulation",
+      { workflow: "single_transmon_q3d_capacitance" },
+      undefined,
+    );
+    const details = result.details as Record<string, unknown>;
+
+    assert.equal(details.status, "completed");
+    assert.equal(details.workflow, "single_transmon_q3d_capacitance");
+    assert.equal(details.solverUrl, "http://127.0.0.1:17890");
+    assert.match(String(details.command), /-m pi_chip_design\.layouts\.submit_single_transmon_q3d_remote --solver-url http:\/\/127\.0\.0\.1:17890/);
+    assert.deepEqual(details.records, [
+      {
+        path: "design-repo/design-records/simulations/single_transmon_5p4ghz-q3d-capacitance.remote.json",
+        bytes: Buffer.byteLength("{\"job_id\":\"job-000001\",\"status\":\"solved\",\"solver_url\":\"http://127.0.0.1:17890\"}\n"),
+      },
+      {
+        path: "design-repo/design-records/simulations/job-000001.results.json",
+        bytes: Buffer.byteLength("{\"status\":\"solved\",\"solver\":\"q3d_capacitance\"}\n"),
+      },
+    ]);
+
+    const call = JSON.parse(await readFile(callsPath, "utf8")) as { argv: string[]; cwd: string };
+    assert.deepEqual(call.argv, [
+      "-m",
+      "pi_chip_design.layouts.submit_single_transmon_q3d_remote",
+      "--solver-url",
+      "http://127.0.0.1:17890",
+    ]);
+    assert.equal(call.cwd, workspace);
+  } finally {
+    if (originalSolverUrl === undefined) {
+      delete process.env.PI_DESIGN_SOLVER_URL;
+    } else {
+      process.env.PI_DESIGN_SOLVER_URL = originalSolverUrl;
+    }
+    if (originalCallsPath === undefined) {
+      delete process.env.PI_TEST_PYTHON_CALLS_PATH;
+    } else {
+      process.env.PI_TEST_PYTHON_CALLS_PATH = originalCallsPath;
+    }
+    await rm(workspace, { recursive: true, force: true });
+  }
+});
+
 test("run_design_script uses the parent root venv Python and ignores nested design-code venvs", { skip: process.platform === "win32" ? "fake python.exe shell-script shims are not executable on Windows" : false }, async () => {
   const workspace = await mkdtemp(path.join(tmpdir(), "pi-agent-tools-"));
   const projectDir = path.join(workspace, "design-repo", "design-code");
@@ -2850,6 +2965,7 @@ const EXPECTED_FULL_ONLY_TOOL_NAMES = [
   "sync_design_environment",
   "verify_design_python_import",
   "run_design_script",
+  "submit_design_simulation",
   "paper_orchestra_prepare_workspace",
   "paper_orchestra_check_draft",
   "paper_orchestra_score_delta",
@@ -2984,6 +3100,7 @@ test("createToolsForBoundary exposes isolated wiki and worker tool surfaces", as
     assert.ok(designTools.some((tool) => tool.name === "sync_design_environment"));
     assert.ok(designTools.some((tool) => tool.name === "verify_design_python_import"));
     assert.ok(designTools.some((tool) => tool.name === "run_design_script"));
+    assert.ok(designTools.some((tool) => tool.name === "submit_design_simulation"));
     assert.ok(!designTools.some((tool) => tool.name === "download_paper"));
     assert.ok(!designTools.some((tool) => tool.name === "web_search"));
     assert.ok(!designTools.some((tool) => tool.name === "build_wiki_page"));

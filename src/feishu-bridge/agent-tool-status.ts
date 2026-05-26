@@ -32,6 +32,7 @@ const WIKI_TOOL_LABELS: Record<string, string> = {
   list_local_papers: '列出本地论文',
   search_local_papers: '检索本地论文',
   write_design_artifact: '写入设计记录',
+  submit_design_simulation: '提交设计仿真',
   load_paper_writing_skill: '加载论文写作技能',
   paper_orchestra_prepare_workspace: '准备论文写作工作区',
   paper_orchestra_check_draft: '检查论文草稿',

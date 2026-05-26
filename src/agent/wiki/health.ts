@@ -639,6 +639,31 @@ function parseIsAcceptable(parse: LocalPaperParseSummary, threshold: number): bo
   return parse.status === "good" && (parse.score === undefined || parse.score >= threshold);
 }
 
+async function parseLooksLikeCapturedPublisherErrorPage(
+  workspaceDir: string,
+  parse: LocalPaperParseSummary
+): Promise<boolean> {
+  if (parse.engine !== "webpage") {
+    return false;
+  }
+  const markdownPath = toWorkspacePath(workspaceDir, parse.markdownPath);
+  if (!markdownPath) {
+    return false;
+  }
+  let markdown = "";
+  try {
+    markdown = await readFile(markdownPath, "utf8");
+  } catch {
+    return false;
+  }
+  const normalized = markdown.replace(/\s+/g, " ").trim().toLowerCase();
+  return (
+    normalized.includes("the page you requested could not be found") ||
+    normalized.includes("please check the link and try again") ||
+    (normalized.includes("not found") && normalized.includes("article lookup"))
+  );
+}
+
 function entryHasUsableParsedReading(entry: LocalPaperEntry | undefined, threshold: number): boolean {
   return Boolean(entry?.hasParsedArtifacts && entry.parses.some((parse) => parseIsAcceptable(parse, threshold)));
 }
@@ -1010,8 +1035,17 @@ export async function checkWikiHealth(options: WikiHealthOptions): Promise<WikiH
       entryIssues.push(baseIssue(entry, "parse_failed", "high", record?.reading?.reason ?? "Record has failed parse, webpage, or reading status."));
     }
 
-    if (!usesPreprintFallback && !isPublisherPending && !needsAuthorization) {
-      for (const parse of entry.parses.filter((candidate) => !hasUsableParsedReading && parseIsLowQuality(candidate, threshold))) {
+    if (!usesPreprintFallback && !needsAuthorization) {
+      for (const parse of entry.parses) {
+        if (hasUsableParsedReading || !parseIsLowQuality(parse, threshold)) {
+          continue;
+        }
+        if (
+          isPublisherPending &&
+          !(await parseLooksLikeCapturedPublisherErrorPage(workspaceDir, parse))
+        ) {
+          continue;
+        }
         entryIssues.push({
           ...baseIssue(entry, "low_quality", "medium", `Parse quality is ${parse.status ?? "unknown"}${typeof parse.score === "number" ? ` with score ${parse.score}` : ""}.`),
           quality: {

@@ -153,6 +153,8 @@ test("router worker system prompts describe isolated responsibilities", () => {
   assert.match(designPrompt as string, /sync_design_environment/);
   assert.match(designPrompt as string, /root \.venv/);
   assert.match(designPrompt as string, /Do not install packages ad hoc with pip/);
+  assert.match(designPrompt as string, /submit_design_simulation/);
+  assert.match(designPrompt as string, /remote solver/);
   assert.match(designPrompt as string, /design-projects\/.*deprecated/);
 });
 

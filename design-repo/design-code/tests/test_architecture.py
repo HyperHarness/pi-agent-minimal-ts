@@ -7,7 +7,23 @@ from pi_chip_design.backends.import_metal import import_metal
 from pi_chip_design.backends.quantum_metal_backend import QuantumMetalRenderer
 from pi_chip_design.core.geometry import Label, PathShape, Rectangle
 from pi_chip_design.core.layers import DEFAULT_LAYERS, LayerSpec
+from pi_chip_design.templates.single_transmon import SingleTransmonSpec, build_single_transmon_model
 from pi_chip_design.templates.ten_qubit import TenQubitSpec, build_ten_qubit_model
+
+
+def test_single_transmon_template_builds_backend_independent_model() -> None:
+    model = build_single_transmon_model(SingleTransmonSpec())
+
+    shape_names = {shape.name for shape in model.shapes if hasattr(shape, "name")}
+
+    assert model.name == "single_transmon_5p4ghz"
+    assert {"left_paddle", "right_paddle", "ground_plane", "readout_resonator"} <= shape_names
+    assert {shape.layer for shape in model.shapes} >= {
+        DEFAULT_LAYERS.metal,
+        DEFAULT_LAYERS.readout,
+        DEFAULT_LAYERS.control,
+        DEFAULT_LAYERS.ground,
+    }
 
 
 def test_ten_qubit_template_builds_backend_independent_model() -> None:

@@ -9,7 +9,27 @@ from pi_chip_design.simulation import (
     SolverType,
     prepare_q3d_capacitance,
 )
+from pi_chip_design.templates.single_transmon import SingleTransmonSpec, build_single_transmon_model
 from pi_chip_design.templates.ten_qubit import TenQubitSpec, build_ten_qubit_model
+
+
+def test_prepare_single_transmon_q3d_capacitance_manifest(tmp_path: Path) -> None:
+    model = build_single_transmon_model(SingleTransmonSpec())
+
+    result = prepare_q3d_capacitance(
+        model,
+        records_dir=tmp_path,
+        ports=[
+            PortSpec(name="qubit_island", kind="terminal", target="right_paddle"),
+            PortSpec(name="ground", kind="reference", target="ground_plane"),
+        ],
+    )
+    manifest = json.loads(result.manifest_path.read_text())
+
+    assert result.manifest_path.name == "single_transmon_5p4ghz-q3d-capacitance.json"
+    assert manifest["layout"]["name"] == "single_transmon_5p4ghz"
+    assert manifest["ports"][0]["target"] == "right_paddle"
+    assert manifest["status"] == "prepared"
 
 
 def test_prepare_q3d_capacitance_writes_manifest(tmp_path: Path) -> None:

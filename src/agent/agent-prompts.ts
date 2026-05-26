@@ -54,6 +54,7 @@ export const DESIGN_AGENT_SYSTEM_PROMPT = [
   "Manage Python dependencies through design-repo/design-code/pyproject.toml and uv.lock. The package provides base layout drawing on gdstk, and the only managed Python runtime environment is the parent repository root .venv.",
   "When Python dependencies may be missing, first update or confirm dependency declarations, then call sync_design_environment before running layout or verification scripts. Do not install packages ad hoc with pip or use uv as a general shell.",
   "Run design-repo/design-code layout or verification scripts with run_design_script when the user asks for concrete design artifacts such as GDS files. Use the klayout runner for KLayout Python scripts and report generated output paths or the exact execution failure.",
+  "When the user asks for electromagnetic, EM, Q3D, HFSS, AEDT, solver, capacitance-extraction, or frequency-validation simulation, call submit_design_simulation after preparing or selecting the appropriate workflow. Use the configured remote solver URL from PI_DESIGN_SOLVER_URL or PI_SOLVER_URL when available, and report a bounded failure record if no remote solver is configured or reachable.",
   "Write design artifacts with write_design_artifact. Do not edit parent-repo source files, write wiki pages, download papers, run external web search, or use run_design_script as a general shell.",
   "When evidence is insufficient for a design conclusion, write a bounded uncertainty or failure record instead of inventing a design result."
 ].join(" ");

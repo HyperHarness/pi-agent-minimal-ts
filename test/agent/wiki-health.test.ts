@@ -1643,6 +1643,64 @@ test("checkWikiHealth treats accepted publisher-pending records as non-actionabl
   }
 });
 
+test("checkWikiHealth reports publisher-pending records with captured APS Not Found pages", async () => {
+  const workspace = await createWorkspace();
+
+  try {
+    const sourceDir = path.join(workspace, "knowledge-base", "sources", "aps-10.1103-rp4w-3n7l");
+    await writeJson(path.join(sourceDir, "acquisition.json"), {
+      source: "aps",
+      articleUrl: "https://journals.aps.org/prapplied/accepted/10.1103/rp4w-3n7l",
+      recordedAt: "2026-05-25T06:43:10.713Z",
+      handlingMethod: "accepted_paper",
+      status: "publisher_pending",
+      canonicalId: "10.1103/rp4w-3n7l",
+      title: "Design and application of N[3]CZ: A controlled-Z gate between next-nearest-neighbor superconducting qubits",
+      failure: {
+        code: "publisher_version_not_available",
+        message: "Publisher page is an accepted paper without a formal PDF yet, and no exact-title arXiv preprint was found."
+      }
+    });
+    await writeJson(path.join(sourceDir, "source.json"), {
+      paperKey: "aps-10.1103-rp4w-3n7l",
+      title: "Design and application of N[3]CZ: A controlled-Z gate between next-nearest-neighbor superconducting qubits",
+      articleUrl: "https://journals.aps.org/prapplied/accepted/10.1103/rp4w-3n7l",
+      source: "aps",
+      canonicalId: "10.1103/rp4w-3n7l"
+    });
+    await writeText(
+      path.join(sourceDir, "parses", "webpage", "document.md"),
+      "Not Found\n\nThe page you requested could not be found, please check the link and try again.\n\nArticle Lookup"
+    );
+    await writeJson(path.join(sourceDir, "parses", "webpage", "quality.json"), {
+      status: "poor",
+      score: 0.2,
+      pages: 1,
+      totalTextLength: 103,
+      emptyPageCount: 0,
+      headingCount: 2,
+      tableCount: 0,
+      figureOrCaptionCount: 0,
+      warnings: [
+        "Extracted text is short for a scientific paper.",
+        "No main body sections were detected; prefer PDF parsing."
+      ]
+    });
+
+    const result = await checkWikiHealth({ workspaceDir: workspace });
+    const issue = result.issues.find((candidate) =>
+      candidate.kind === "low_quality" &&
+      candidate.paperKey === "aps-10.1103-rp4w-3n7l"
+    );
+
+    assert.equal(result.summary.low_quality, 1);
+    assert.ok(issue);
+    assert.equal(issue.quality?.status, "poor");
+  } finally {
+    await rm(workspace, { recursive: true, force: true });
+  }
+});
+
 test("checkWikiHealth treats a good webpage parse as readable but not PDF-downloaded", async () => {
   const workspace = await createWorkspace();
 
