@@ -29,8 +29,8 @@ Local CLI / local harness
 - `src/wiki-agent.ts` 和 `src/design-agent.ts` 是公开 CLI/RPC 包装入口，分别固定 wiki/paper 和 design/code 工作边界；`src/agent/agent-cli.ts` 负责本地 CLI/RPC 进程形态，`src/agent/agent-runtime.ts` 负责一次 agent turn 怎么运行。
 - `src/agent/agent-routing.ts` 保留内部/routed-agent 兼容路由，并在 wiki/paper 流程中识别 `paper-download-subagent`、`wiki-evidence-worker` 或 `paper-writing-worker`。公开 design/code/dependency/layout/verification 工作应从 `design-agent` 入口进入，而不是依赖通用入口自动推断，也不是从 Feishu 默认 wiki-agent 入口绕行。
 - `src/agent/tools.ts` 是工具装配中心，按各领域工具 factory 的命名分组拼出默认/full 工具面；worker 可见工具面的白名单定义在 `src/agent/tool-types.ts`。
-- `wiki-agent` 可以更新 wiki pages、aliases、paper-backed knowledge records，并读取 design-agent 产出的 design records、design-artifact summaries/manifests 和布局结果；它不编辑 `knowledge-base/design-code/`，不安装 Python 包，不运行 layout 脚本。
-- `design-agent` 可以编辑 `knowledge-base/design-code/`、声明依赖、用 `uv sync` 同步根 `.venv`、验证 Python import、运行 sandboxed layout/verification 脚本、写 design records；它只能读取 wiki/paper evidence，不能调用 wiki page 写入、paper download 或 web search 工具。
+- `wiki-agent` 可以更新 wiki pages、aliases、paper-backed knowledge records，并读取 design-agent 产出的 design records、design-artifact summaries/manifests 和布局结果；它不编辑 `design-repo/design-code/`，不安装 Python 包，不运行 layout 脚本。
+- `design-agent` 可以编辑 `design-repo/design-code/`、声明依赖、用 `uv sync` 同步根 `.venv`、验证 Python import、运行 sandboxed layout/verification 脚本、写 design records；它只能读取 wiki/paper evidence，不能调用 wiki page 写入、paper download 或 web search 工具。
 - 论文能力分三层：检索/下载由 `paper-manager.ts` 和 `paper-download.ts` 承担，持久记录由 `paper-store.ts` 承担，解析和阅读由 `paper-reader/**` 承担。
 - 论文工具适配层位于 `src/agent/paper/tools.ts`，和 paper 领域服务放在同一目录树下。
 - Wiki 能力集中在 `src/agent/wiki/**`：`workspace-contract.ts`、`page-schema.ts`、`typed-store.ts`、`manifest-store.ts`、`retrieval-contract.ts`、`retrieval-search.ts`、`page-templates.ts`、`journal.ts`、`coordinator.ts` 是 schema-first 核心层；`content.ts`、`bootstrap.ts`、`lint.ts`、`review.ts`、`summary.ts`、`relations.ts`、`health.ts` 是领域服务；`wiki/tools.ts` 是 agent 工具适配层；`wiki/worker.ts` 承载 clean-context evidence worker。Knowledge state、last-reviewed freshness、claim-level provenance、typed relations、experiment refs 和 reviewer critique 都属于 `page-schema.ts` 的 typed page contract，不是单独的新 agent。
@@ -47,7 +47,7 @@ Local CLI / local harness
 | `npm test` | `npm run build && node --test ...` | 先构建，再跑 `dist/test/**/*.test.js` 和 `test/scripts/**/*.test.mjs`。 |
 | `npm run wiki-agent` | `src/wiki-agent.ts` -> `src/agent/agent-cli.ts` | 构建后启动 wiki/paper REPL/chat；可更新 wiki 页面和 paper-backed knowledge records，可读取 design-agent 输出。 |
 | `npm run wiki-agent:rpc` | `src/wiki-agent.ts --mode rpc` -> `src/agent/agent-cli.ts` | JSONL RPC wiki-agent；Feishu bridge 默认连接这个入口。 |
-| `npm run design-agent` | `src/design-agent.ts` -> `src/agent/agent-cli.ts` | 构建后启动 design/code/dependency/layout/verification REPL/chat；管理 `knowledge-base/design-code/` 和根 `.venv`，可检索 wiki/local paper evidence，但不能写 wiki 页面。 |
+| `npm run design-agent` | `src/design-agent.ts` -> `src/agent/agent-cli.ts` | 构建后启动 design/code/dependency/layout/verification REPL/chat；管理 `design-repo/design-code/` 和根 `.venv`，可检索 wiki/local paper evidence，但不能写 wiki 页面。 |
 | `npm run design-agent:rpc` | `src/design-agent.ts --mode rpc` -> `src/agent/agent-cli.ts` | JSONL RPC design-agent，供本地 harness 或未来直接集成使用；不是 Feishu 默认目标。 |
 | `npm run feishu-bridge` | `src/feishu-bridge/index.ts` | 启动 Feishu 长连接桥，并按配置启动/复用 RPC agent。 |
 | `npm run wiki:web` | `scripts/wiki-web.mjs` | 本地 wiki 和 graph 浏览器，不在 `src/**` 内，但读取 `knowledge-base`；graph data 会优先使用 typed wiki relations。 |
@@ -60,7 +60,7 @@ Local CLI / local harness
 | 边界 | 主要 owner | 可写入 | 只读输入 | 明确禁止 |
 | --- | --- | --- | --- | --- |
 | `wiki-agent` | durable wiki / paper knowledge coordinator | `knowledge-base/pages/`、aliases、paper source/page indexes、wiki operation journal、paper-writing worker 的 manuscript files | local paper library、source summaries、typed pages、design records/artifact summaries/manifests | design-code edits、Python dependency sync、layout script execution |
-| `design-agent` | executable design-code and layout engineering owner | `knowledge-base/design-code/`、`knowledge-base/design-records/`、declared design-code outputs | local wiki retrieval、local paper retrieval、root `.venv` interpreter state | wiki page writes、paper downloads、web search、arbitrary workspace file writes |
+| `design-agent` | executable design-code and layout engineering owner | `design-repo/design-code/`、`design-repo/design-records/`、declared design-code outputs | local wiki retrieval、local paper retrieval、root `.venv` interpreter state | wiki page writes、paper downloads、web search、arbitrary workspace file writes |
 | Feishu bridge | chat transport and repo command host | `.memory/`、bridge logs/cards、configured repo Git operations | Feishu events、agent RPC events、configured workspace state | domain reasoning、direct design-agent connection by default |
 
 `design-subagent` 只是在 `src/agent/tool-types.ts` 中保留的兼容别名；公开文档和 handoff record 应使用 `design-agent`。
@@ -128,13 +128,13 @@ Local CLI / local harness
 
 1. `src/design-agent.ts` 固定 design-agent prompt 和 `design-agent` boundary tool profile；它只通过 `src/agent/agent-cli.ts` 进入 runtime，不在入口层实现业务特判。
 2. `src/agent/tool-types.ts` 的 `DESIGN_AGENT_TOOL_NAMES` 是设计边界白名单：`list_files`、`read_file`、wiki/paper local retrieval、`update_design_dependency`、`sync_design_environment`、`verify_design_python_import`、`write_design_code_file`、`replace_design_code_file_text`、`run_design_script`、`write_design_artifact`。
-3. `src/agent/file-tools.ts` 是 design-agent 写入和执行能力的实现层。`write_design_code_file` / `replace_design_code_file_text` 只能写 `knowledge-base/design-code/`；`write_design_artifact` 只能写 `knowledge-base/design-records/` 的结构化记录；普通 `write_file` 不属于 design-agent boundary。
-4. Python 依赖由 `knowledge-base/design-code/pyproject.toml` 声明。`update_design_dependency` 修改声明，`sync_design_environment` 只允许对 `knowledge-base/design-code/` 运行 `uv sync`，并强制 `UV_PROJECT_ENVIRONMENT=<repo>/.venv`，所以所有设计项目共享仓库根 `.venv`。不要引入 `design-projects/` 或 per-project `.venv`。
+3. `src/agent/file-tools.ts` 是 design-agent 写入和执行能力的实现层。`write_design_code_file` / `replace_design_code_file_text` 只能写 `design-repo/design-code/`；`write_design_artifact` 只能写 `design-repo/design-records/` 的结构化记录；普通 `write_file` 不属于 design-agent boundary。
+4. Python 依赖由 `design-repo/design-code/pyproject.toml` 声明。`update_design_dependency` 修改声明，`sync_design_environment` 只允许对 `design-repo/design-code/` 运行 `uv sync`，并强制 `UV_PROJECT_ENVIRONMENT=<repo>/.venv`，所以所有设计项目共享仓库根 `.venv`。不要引入 `design-projects/` 或 per-project `.venv`。
 5. `verify_design_python_import` 使用根 `.venv/bin/python` 检查包是否可 import。对 `gdsfactory` 这类需求，正确路径是 dependency declaration -> `sync_design_environment` -> import verification，而不是 assistant 或 agent 直接运行 `pip install`。
-6. `run_design_script` 只运行 `knowledge-base/design-code/` 下的 `.py` layout/verification 脚本或 KLayout batch script。Python 脚本通过根 `.venv/bin/python` 运行，并要求系统存在 `bwrap`。
-7. `run_design_script` 会把 `knowledge-base/design-code/` 复制到临时 workspace，在 `bwrap` 中用只读根文件系统和可写临时 design-code 副本执行脚本，然后只把调用者声明的 design-code 输出复制回真实 `knowledge-base/design-code/`。这阻止脚本用绝对路径修改 TypeScript repo、wiki pages、sources 或其它 workspace 文件。
+6. `run_design_script` 只运行 `design-repo/design-code/` 下的 `.py` layout/verification 脚本或 KLayout batch script。Python 脚本通过根 `.venv/bin/python` 运行，并要求系统存在 `bwrap`。
+7. `run_design_script` 会把 `design-repo/design-code/` 复制到临时 workspace，在 `bwrap` 中用只读根文件系统和可写临时 design-code 副本执行脚本，然后只把调用者声明的 design-code 输出复制回真实 `design-repo/design-code/`。这阻止脚本用绝对路径修改 TypeScript repo、wiki pages、sources 或其它 workspace 文件。
 8. 设计结果进入 wiki 的方式是异步的：design-agent 产出 design-code、GDS/logs/results、design records 或 design-artifact summaries/manifests；wiki-agent 再读取这些产物，用 `build_wiki_page` / `wiki_lint` / `wiki_review_page` 把经过证据约束的结论提升为 durable wiki pages。
-9. `knowledge-base/design-code/` 是嵌套 Git 仓库，通常由 bridge repo manager 的 `design` workspace 单独 status/diff/commit/push。TypeScript 主 repo 不应把设计代码当普通 `src/**` 变更管理。
+9. `design-repo/design-code/` 是嵌套 Git 仓库，通常由 bridge repo manager 的 `design` workspace 单独 status/diff/commit/push。TypeScript 主 repo 不应把设计代码当普通 `src/**` 变更管理。
 
 ### Feishu 消息
 
@@ -182,7 +182,7 @@ Local CLI / local harness
 
 | 文件 | 职责 | 上游调用者 | 下游依赖 | 重构注意点 |
 | --- | --- | --- | --- | --- |
-| `src/agent/file-tools.ts` | workspace 受限文件读写、列表、删除、文本替换、时间、写作技能加载、LaTeX 编译、设计记录写入、design-code 文件工具、uv 环境同步、import 验证和 sandboxed design script execution。 | `tools.ts`、worker boundary。 | Node fs/path/child_process、`wiki/store.ts` 的 filename sanitizer。 | 路径安全是核心；所有写操作必须经过 workspace 校验，CLI trace 依赖工具参数字段。Design-agent 写代码只能走 `knowledge-base/design-code/` 专用工具，依赖同步只能走根 `.venv`，脚本运行必须通过 `bwrap` 临时副本和 declared-output copyback。 |
+| `src/agent/file-tools.ts` | workspace 受限文件读写、列表、删除、文本替换、时间、写作技能加载、LaTeX 编译、设计记录写入、design-code 文件工具、uv 环境同步、import 验证和 sandboxed design script execution。 | `tools.ts`、worker boundary。 | Node fs/path/child_process、`wiki/store.ts` 的 filename sanitizer。 | 路径安全是核心；所有写操作必须经过 workspace 校验，CLI trace 依赖工具参数字段。Design-agent 写代码只能走 `design-repo/design-code/` 专用工具，依赖同步只能走根 `.venv`，脚本运行必须通过 `bwrap` 临时副本和 declared-output copyback。 |
 | `src/agent/web-tools.ts` | `web_search`、`fetch_url`、`fetch_paper_webpage` 工具包装。 | `tools.ts`。 | `web-search.ts`、`web-fetch.ts`、`paper-webpage-fetch.ts`。 | 区分普通网页抓取与论文网页抓取，避免把 publisher 解析逻辑塞进通用 fetch。 |
 | `src/agent/library-health-tools.ts` | 本地论文列表/搜索、wiki health、wiki health fix 的 tool schema。 | `tools.ts`。 | `local-paper-library.ts`、`wiki/health.ts`、`paper-manager.ts`、`wiki/summary.ts`。 | `wiki_health_fix` 会触发下载/解析/总结；测试时优先用依赖注入隔离真实网络。 |
 
@@ -320,7 +320,7 @@ Local CLI / local harness
 按生产模块优先看的测试：
 
 - Runtime/CLI/router/tools: `test/agent/pi-agent.test.ts`、`test/agent/tools.test.ts`、`test/agent/tools-extension.test.ts`、`test/agent/model-resolver.test.ts`、`test/agent/env-proxy.test.ts`、`test/index.test.ts`。
-- Design-agent boundary/design-code tooling: `test/agent/tools.test.ts` covers design-agent tool exposure, design-code write constraints, root `.venv` sync/import behavior, and `run_design_script` sandbox/output copyback. The nested Python package has its own checks under `knowledge-base/design-code/tests` and linting under `knowledge-base/design-code/src`.
+- Design-agent boundary/design-code tooling: `test/agent/tools.test.ts` covers design-agent tool exposure, design-code write constraints, root `.venv` sync/import behavior, and `run_design_script` sandbox/output copyback. The nested Python package has its own checks under `design-repo/design-code/tests` and linting under `design-repo/design-code/src`.
 - 论文检索/下载/store/blocklist/jobs: `test/agent/arxiv.test.ts`、`test/agent/aps-search.test.ts`、`test/agent/paper-download.test.ts`、`test/agent/paper-manager.test.ts`、`test/agent/paper-manager-extension.test.ts`、`test/agent/paper-store.test.ts`、`test/agent/paper-download-jobs.test.ts`、`test/agent/publisher-adapters/index.test.ts`。
 - 浏览器和扩展: `test/agent/browser-session.test.ts`、`test/agent/browser-session-runtime.test.ts`、`test/agent/paper-browser-manager-client.test.ts`、`test/agent/paper-browser-manager-discovery.test.ts`、`test/agent/paper-browser-manager-server.test.ts`、`test/agent/paper-extension-host.test.ts`、`test/agent/paper-extension-host-registration.test.ts`、`test/agent/paper-extension-protocol.test.ts`、`test/browser-extension/paper-downloader.test.mjs`。
 - 论文解析/阅读/网页: `test/agent/paper-reader.test.ts`、`test/agent/paper-webpage-fetch.test.ts`、`test/agent/local-paper-library.test.ts`。
@@ -345,5 +345,5 @@ Local CLI / local harness
 1. 改 runtime/tools/router: 跑 `npm test`。
 2. 改 extension/native host: 跑 `npm test` 加 `test/browser-extension/paper-downloader.test.mjs` 覆盖。
 3. 改 wiki web graph 脚本: 跑 `npm run build` 和 `node --test --experimental-test-isolation=none test/scripts/wiki-web-graph.test.mjs`。
-4. 改 design-agent 工具边界、dependency sync 或 script sandbox: 跑 `npm test`，再跑 `.venv/bin/python -m pytest knowledge-base/design-code/tests` 和 `.venv/bin/python -m ruff check knowledge-base/design-code/src knowledge-base/design-code/tests`。
+4. 改 design-agent 工具边界、dependency sync 或 script sandbox: 跑 `npm test`，再跑 `.venv/bin/python -m pytest design-repo/design-code/tests` 和 `.venv/bin/python -m ruff check design-repo/design-code/src design-repo/design-code/tests`。
 5. 改 docs-only: 跑 `npm run build`，并做 `src/**` 路径覆盖检查。

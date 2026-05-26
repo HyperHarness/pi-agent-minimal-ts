@@ -1410,7 +1410,7 @@ test("write_file rejects synthesis wiki page writes", async () => {
   }
 });
 
-test("write_design_artifact writes design subagent records under knowledge-base/design-records", async () => {
+test("write_design_artifact writes design subagent records under design-repo/design-records", async () => {
   const workspace = await mkdtemp(path.join(tmpdir(), "pi-agent-tools-"));
 
   try {
@@ -1430,7 +1430,7 @@ test("write_design_artifact writes design subagent records under knowledge-base/
       undefined,
     );
 
-    const expectedPath = "knowledge-base/design-records/failures/freq-collision-attempt.md";
+    const expectedPath = "design-repo/design-records/failures/freq-collision-attempt.md";
     const artifact = await readFile(path.join(workspace, expectedPath), "utf8");
     assert.match(artifact, /^---\ntype: failure_record\n/m);
     assert.match(artifact, /status: failed/);
@@ -1449,9 +1449,9 @@ test("write_design_artifact writes design subagent records under knowledge-base/
   }
 });
 
-test("write_design_code_file writes only under knowledge-base design-code", async () => {
+test("write_design_code_file writes only under design-repo design-code", async () => {
   const workspace = await mkdtemp(path.join(tmpdir(), "pi-agent-tools-"));
-  const designCodeDir = path.join(workspace, "knowledge-base", "design-code");
+  const designCodeDir = path.join(workspace, "design-repo", "design-code");
   const content = "def build():\n    return 'layout'\n";
 
   try {
@@ -1465,7 +1465,7 @@ test("write_design_code_file writes only under knowledge-base design-code", asyn
       undefined,
     );
 
-    const expectedPath = "knowledge-base/design-code/src/pi_chip_design/layouts/demo.py";
+    const expectedPath = "design-repo/design-code/src/pi_chip_design/layouts/demo.py";
     assert.equal(await readFile(path.join(workspace, expectedPath), "utf8"), content);
     assert.deepEqual(result.details, {
       path: expectedPath,
@@ -1476,9 +1476,31 @@ test("write_design_code_file writes only under knowledge-base design-code", asyn
   }
 });
 
+test("write_design_code_file rejects legacy knowledge-base design-code paths", async () => {
+  const workspace = await mkdtemp(path.join(tmpdir(), "pi-agent-tools-"));
+  const designCodeDir = path.join(workspace, "design-repo", "design-code");
+
+  try {
+    await mkdir(designCodeDir, { recursive: true });
+    await writeFile(path.join(designCodeDir, "pyproject.toml"), "[project]\nname = \"pi-chip-design\"\n", "utf8");
+
+    const writeDesignCodeFileTool = getWriteDesignCodeFileTool(workspace);
+    await assert.rejects(
+      () => writeDesignCodeFileTool.execute(
+        "call-write-design-code-file-legacy-knowledge-base",
+        { path: "knowledge-base/design-code/src/pi_chip_design/layouts/demo.py", content: "unsafe" },
+        undefined,
+      ),
+      /design-code file tools only write under design-repo\/design-code/,
+    );
+  } finally {
+    await rm(workspace, { recursive: true, force: true });
+  }
+});
+
 test("write_design_code_file rejects parent repo paths", async () => {
   const workspace = await mkdtemp(path.join(tmpdir(), "pi-agent-tools-"));
-  const designCodeDir = path.join(workspace, "knowledge-base", "design-code");
+  const designCodeDir = path.join(workspace, "design-repo", "design-code");
 
   try {
     await mkdir(designCodeDir, { recursive: true });
@@ -1491,7 +1513,7 @@ test("write_design_code_file rejects parent repo paths", async () => {
         { path: "../../src/agent/agent-prompts.ts", content: "unsafe" },
         undefined,
       ),
-      /design-code file tools only write under knowledge-base\/design-code/,
+      /design-code file tools only write under design-repo\/design-code/,
     );
   } finally {
     await rm(workspace, { recursive: true, force: true });
@@ -1501,7 +1523,7 @@ test("write_design_code_file rejects parent repo paths", async () => {
 test("write_design_code_file rejects symlink escapes outside design-code", async () => {
   const workspace = await mkdtemp(path.join(tmpdir(), "pi-agent-tools-"));
   const outside = await mkdtemp(path.join(tmpdir(), "pi-agent-tools-outside-"));
-  const designCodeDir = path.join(workspace, "knowledge-base", "design-code");
+  const designCodeDir = path.join(workspace, "design-repo", "design-code");
   const escapedPath = path.join(outside, "escape.py");
 
   try {
@@ -1516,7 +1538,7 @@ test("write_design_code_file rejects symlink escapes outside design-code", async
         { path: "linked/escape.py", content: "unsafe" },
         undefined,
       ),
-      /outside the workspace|outside.*design-code|Requested path is outside|design-code file tools only write under knowledge-base\/design-code/,
+      /outside the workspace|outside.*design-code|Requested path is outside|design-code file tools only write under design-repo\/design-code/,
     );
     await assert.rejects(() => readFile(escapedPath, "utf8"), /ENOENT/);
   } finally {
@@ -1528,7 +1550,7 @@ test("write_design_code_file rejects symlink escapes outside design-code", async
 test("write_design_code_file rejects absolute paths", async () => {
   const workspace = await mkdtemp(path.join(tmpdir(), "pi-agent-tools-"));
   const outside = await mkdtemp(path.join(tmpdir(), "pi-agent-tools-outside-"));
-  const designCodeDir = path.join(workspace, "knowledge-base", "design-code");
+  const designCodeDir = path.join(workspace, "design-repo", "design-code");
 
   try {
     await mkdir(designCodeDir, { recursive: true });
@@ -1541,7 +1563,7 @@ test("write_design_code_file rejects absolute paths", async () => {
         { path: path.join(designCodeDir, "absolute.py"), content: "unsafe" },
         undefined,
       ),
-      /design-code file tools only write under knowledge-base\/design-code|Requested path is outside/,
+      /design-code file tools only write under design-repo\/design-code|Requested path is outside/,
     );
     await assert.rejects(
       () => writeDesignCodeFileTool.execute(
@@ -1549,7 +1571,7 @@ test("write_design_code_file rejects absolute paths", async () => {
         { path: path.join(outside, "absolute.py"), content: "unsafe" },
         undefined,
       ),
-      /design-code file tools only write under knowledge-base\/design-code|Requested path is outside/,
+      /design-code file tools only write under design-repo\/design-code|Requested path is outside/,
     );
   } finally {
     await rm(workspace, { recursive: true, force: true });
@@ -1559,7 +1581,7 @@ test("write_design_code_file rejects absolute paths", async () => {
 
 test("write_design_code_file overwrites existing design-code files", async () => {
   const workspace = await mkdtemp(path.join(tmpdir(), "pi-agent-tools-"));
-  const designCodeDir = path.join(workspace, "knowledge-base", "design-code");
+  const designCodeDir = path.join(workspace, "design-repo", "design-code");
   const target = path.join(designCodeDir, "src", "pi_chip_design", "layouts", "overwrite.py");
   const secondContent = "def build():\n    return 'second'\n";
 
@@ -1575,13 +1597,13 @@ test("write_design_code_file overwrites existing design-code files", async () =>
     );
     const result = await writeDesignCodeFileTool.execute(
       "call-write-design-code-file-overwrite-2",
-      { path: "knowledge-base/design-code/src/pi_chip_design/layouts/overwrite.py", content: secondContent },
+      { path: "design-repo/design-code/src/pi_chip_design/layouts/overwrite.py", content: secondContent },
       undefined,
     );
 
     assert.equal(await readFile(target, "utf8"), secondContent);
     assert.deepEqual(result.details, {
-      path: "knowledge-base/design-code/src/pi_chip_design/layouts/overwrite.py",
+      path: "design-repo/design-code/src/pi_chip_design/layouts/overwrite.py",
       bytes: Buffer.byteLength(secondContent, "utf8"),
     });
   } finally {
@@ -1591,7 +1613,7 @@ test("write_design_code_file overwrites existing design-code files", async () =>
 
 test("replace_design_code_file_text replaces a unique exact block under design-code", async () => {
   const workspace = await mkdtemp(path.join(tmpdir(), "pi-agent-tools-"));
-  const designCodeDir = path.join(workspace, "knowledge-base", "design-code");
+  const designCodeDir = path.join(workspace, "design-repo", "design-code");
   const target = path.join(designCodeDir, "src", "pi_chip_design", "layouts", "demo.py");
 
   try {
@@ -1603,7 +1625,7 @@ test("replace_design_code_file_text replaces a unique exact block under design-c
     const result = await replaceDesignCodeFileTextTool.execute(
       "call-replace-design-code-file-text",
       {
-        path: "knowledge-base/design-code/src/pi_chip_design/layouts/demo.py",
+        path: "design-repo/design-code/src/pi_chip_design/layouts/demo.py",
         search: "return 'old-layout'",
         replacement: "return 'new-layout'",
       },
@@ -1613,7 +1635,7 @@ test("replace_design_code_file_text replaces a unique exact block under design-c
     const updated = "def build():\n    return 'new-layout'\n";
     assert.equal(await readFile(target, "utf8"), updated);
     assert.deepEqual(result.details, {
-      path: "knowledge-base/design-code/src/pi_chip_design/layouts/demo.py",
+      path: "design-repo/design-code/src/pi_chip_design/layouts/demo.py",
       replacements: 1,
       bytes: Buffer.byteLength(updated, "utf8"),
     });
@@ -1624,7 +1646,7 @@ test("replace_design_code_file_text replaces a unique exact block under design-c
 
 test("replace_design_code_file_text rejects duplicate search text without replaceAll", async () => {
   const workspace = await mkdtemp(path.join(tmpdir(), "pi-agent-tools-"));
-  const designCodeDir = path.join(workspace, "knowledge-base", "design-code");
+  const designCodeDir = path.join(workspace, "design-repo", "design-code");
   const target = path.join(designCodeDir, "src", "pi_chip_design", "layouts", "duplicate.py");
 
   try {
@@ -1649,7 +1671,7 @@ test("replace_design_code_file_text rejects duplicate search text without replac
 
 test("replace_design_code_file_text replaces all occurrences when replaceAll is true", async () => {
   const workspace = await mkdtemp(path.join(tmpdir(), "pi-agent-tools-"));
-  const designCodeDir = path.join(workspace, "knowledge-base", "design-code");
+  const designCodeDir = path.join(workspace, "design-repo", "design-code");
   const target = path.join(designCodeDir, "src", "pi_chip_design", "layouts", "replace-all.py");
 
   try {
@@ -1666,7 +1688,7 @@ test("replace_design_code_file_text replaces all occurrences when replaceAll is 
 
     assert.equal(await readFile(target, "utf8"), "bar bar");
     assert.deepEqual(result.details, {
-      path: "knowledge-base/design-code/src/pi_chip_design/layouts/replace-all.py",
+      path: "design-repo/design-code/src/pi_chip_design/layouts/replace-all.py",
       replacements: 2,
       bytes: Buffer.byteLength("bar bar", "utf8"),
     });
@@ -1677,7 +1699,7 @@ test("replace_design_code_file_text replaces all occurrences when replaceAll is 
 
 test("run_design_script rejects Python scripts when the root venv Python is missing", async () => {
   const workspace = await mkdtemp(path.join(tmpdir(), "pi-agent-tools-"));
-  const projectDir = path.join(workspace, "knowledge-base", "design-code");
+  const projectDir = path.join(workspace, "design-repo", "design-code");
   const scriptDir = path.join(projectDir, "scripts");
 
   try {
@@ -1699,9 +1721,9 @@ test("run_design_script rejects Python scripts when the root venv Python is miss
       runDesignScriptTool.execute(
         "call-run-design-script-missing-root-venv",
         {
-          scriptPath: "knowledge-base/design-code/scripts/single_xmon_concept_klayout.py",
+          scriptPath: "design-repo/design-code/scripts/single_xmon_concept_klayout.py",
           runner: "python",
-          outputPaths: ["knowledge-base/design-code/outputs/single_xmon_concept.gds"],
+          outputPaths: ["design-repo/design-code/outputs/single_xmon_concept.gds"],
         },
         undefined,
       ),
@@ -1714,7 +1736,7 @@ test("run_design_script rejects Python scripts when the root venv Python is miss
 
 test("run_design_script uses the parent root venv Python and ignores nested design-code venvs", { skip: process.platform === "win32" ? "fake python.exe shell-script shims are not executable on Windows" : false }, async () => {
   const workspace = await mkdtemp(path.join(tmpdir(), "pi-agent-tools-"));
-  const projectDir = path.join(workspace, "knowledge-base", "design-code");
+  const projectDir = path.join(workspace, "design-repo", "design-code");
   const scriptDir = path.join(projectDir, "scripts");
   const rootVenvPython = rootVenvPythonPath(workspace);
   const nestedVenvPython = rootVenvPythonPath(projectDir);
@@ -1753,9 +1775,9 @@ test("run_design_script uses the parent root venv Python and ignores nested desi
     const result = await runDesignScriptTool.execute(
       "call-run-design-script-root-venv",
       {
-        scriptPath: "knowledge-base/design-code/scripts/generate_gds.py",
+        scriptPath: "design-repo/design-code/scripts/generate_gds.py",
         runner: "python",
-        outputPaths: ["knowledge-base/design-code/outputs/from-root-venv.gds"],
+        outputPaths: ["design-repo/design-code/outputs/from-root-venv.gds"],
       },
       undefined,
     );
@@ -1763,14 +1785,14 @@ test("run_design_script uses the parent root venv Python and ignores nested desi
     assert.deepEqual(result.details, {
       status: "completed",
       runner: "python",
-      scriptPath: "knowledge-base/design-code/scripts/generate_gds.py",
+      scriptPath: "design-repo/design-code/scripts/generate_gds.py",
       command: `${rootVenvPythonCommandPathFromDesignScriptDir()} generate_gds.py`,
       exitCode: 0,
       stdout: "script complete\n",
       stderr: "root-venv-python-used\n",
       outputs: [
         {
-          path: "knowledge-base/design-code/outputs/from-root-venv.gds",
+          path: "design-repo/design-code/outputs/from-root-venv.gds",
           bytes: Buffer.byteLength("root venv gds"),
         },
       ],
@@ -1782,7 +1804,7 @@ test("run_design_script uses the parent root venv Python and ignores nested desi
 
 test("run_design_script copies back only declared design-code outputs from an isolated run", { skip: process.platform === "win32" ? "fake python.exe shell-script shims are not executable on Windows" : false }, async () => {
   const workspace = await mkdtemp(path.join(tmpdir(), "pi-agent-tools-"));
-  const projectDir = path.join(workspace, "knowledge-base", "design-code");
+  const projectDir = path.join(workspace, "design-repo", "design-code");
   const scriptDir = path.join(projectDir, "scripts");
   const rootVenvPython = rootVenvPythonPath(workspace);
   const leakedWikiPath = path.join(workspace, "knowledge-base", "pages", "leaked-design-script.md");
@@ -1815,9 +1837,9 @@ test("run_design_script copies back only declared design-code outputs from an is
     const result = await runDesignScriptTool.execute(
       "call-run-design-script-isolated",
       {
-        scriptPath: "knowledge-base/design-code/scripts/generate_isolated_gds.py",
+        scriptPath: "design-repo/design-code/scripts/generate_isolated_gds.py",
         runner: "python",
-        outputPaths: ["knowledge-base/design-code/outputs/isolated.gds"],
+        outputPaths: ["design-repo/design-code/outputs/isolated.gds"],
       },
       undefined,
     );
@@ -1825,14 +1847,14 @@ test("run_design_script copies back only declared design-code outputs from an is
     assert.deepEqual(result.details, {
       status: "completed",
       runner: "python",
-      scriptPath: "knowledge-base/design-code/scripts/generate_isolated_gds.py",
+      scriptPath: "design-repo/design-code/scripts/generate_isolated_gds.py",
       command: `${rootVenvPythonCommandPathFromDesignScriptDir()} generate_isolated_gds.py`,
       exitCode: 0,
       stdout: "script complete\n",
       stderr: "",
       outputs: [
         {
-          path: "knowledge-base/design-code/outputs/isolated.gds",
+          path: "design-repo/design-code/outputs/isolated.gds",
           bytes: Buffer.byteLength("isolated gds"),
         },
       ],
@@ -1849,13 +1871,14 @@ test("run_design_script copies back only declared design-code outputs from an is
 
 test("run_design_script restores protected wiki paths when a script writes outside design-code", { skip: process.platform === "win32" ? "fake python.exe shell-script shims are not executable on Windows" : false }, async () => {
   const workspace = await mkdtemp(path.join(tmpdir(), "pi-agent-tools-"));
-  const projectDir = path.join(workspace, "knowledge-base", "design-code");
+  const projectDir = path.join(workspace, "design-repo", "design-code");
   const scriptDir = path.join(projectDir, "scripts");
   const rootVenvPython = rootVenvPythonPath(workspace);
   const leakedWikiPath = path.join(workspace, "knowledge-base", "pages", "absolute-leak.md");
 
   try {
     await mkdir(scriptDir, { recursive: true });
+    await mkdir(path.join(workspace, "knowledge-base"), { recursive: true });
     await mkdir(path.dirname(rootVenvPython), { recursive: true });
 
     await writeFakePythonExecutable(rootVenvPython, [
@@ -1884,9 +1907,9 @@ test("run_design_script restores protected wiki paths when a script writes outsi
       () => runDesignScriptTool.execute(
         "call-run-design-script-absolute-leak",
         {
-          scriptPath: "knowledge-base/design-code/scripts/absolute_leak.py",
+          scriptPath: "design-repo/design-code/scripts/absolute_leak.py",
           runner: "python",
-          outputPaths: ["knowledge-base/design-code/outputs/absolute-leak.gds"],
+          outputPaths: ["design-repo/design-code/outputs/absolute-leak.gds"],
         },
         undefined,
       ),
@@ -1905,7 +1928,7 @@ test("run_design_script restores protected wiki paths when a script writes outsi
 
 test("run_design_script cannot mutate absolute parent workspace paths", { skip: process.platform === "win32" ? "fake python.exe shell-script shims are not executable on Windows" : false }, async () => {
   const workspace = await mkdtemp(path.join(tmpdir(), "pi-agent-tools-"));
-  const projectDir = path.join(workspace, "knowledge-base", "design-code");
+  const projectDir = path.join(workspace, "design-repo", "design-code");
   const scriptDir = path.join(projectDir, "scripts");
   const rootVenvPython = rootVenvPythonPath(workspace);
   const packageJsonPath = path.join(workspace, "package.json");
@@ -1938,7 +1961,7 @@ test("run_design_script cannot mutate absolute parent workspace paths", { skip: 
       () => runDesignScriptTool.execute(
         "call-run-design-script-parent-write",
         {
-          scriptPath: "knowledge-base/design-code/scripts/absolute_parent_write.py",
+          scriptPath: "design-repo/design-code/scripts/absolute_parent_write.py",
           runner: "python",
         },
         undefined,
@@ -1952,9 +1975,9 @@ test("run_design_script cannot mutate absolute parent workspace paths", { skip: 
   }
 });
 
-test("sync_design_environment runs uv sync for knowledge-base design-code into the root venv", async () => {
+test("sync_design_environment runs uv sync for design-repo design-code into the root venv", async () => {
   const workspace = await mkdtemp(path.join(tmpdir(), "pi-agent-tools-"));
-  const designCodeDir = path.join(workspace, "knowledge-base", "design-code");
+  const designCodeDir = path.join(workspace, "design-repo", "design-code");
   const fakeBinDir = path.join(workspace, "fake-bin");
   const callsPath = path.join(workspace, "uv-calls.jsonl");
   const originalPath = process.env.PATH;
@@ -2006,17 +2029,17 @@ test("sync_design_environment runs uv sync for knowledge-base design-code into t
     const result = await syncDesignEnvironmentTool.execute(
       "call-sync-design-environment",
       {
-        projectPath: "knowledge-base/design-code",
+        projectPath: "design-repo/design-code",
       },
       undefined,
     );
 
     const details = result.details as Record<string, unknown>;
     assert.equal(details.status, "synced");
-    assert.equal(details.projectPath, "knowledge-base/design-code");
+    assert.equal(details.projectPath, "design-repo/design-code");
     assert.equal(details.environmentPath, ".venv");
     assert.equal(details.pythonPath, rootVenvPythonDisplayPath());
-    assert.equal(details.command, "uv sync --project knowledge-base/design-code --extra dev");
+    assert.equal(details.command, "uv sync --project design-repo/design-code --extra dev");
     assert.equal(details.exitCode, 0);
     assert.equal(details.stderr, "");
     assert.equal(typeof details.stdout, "string");
@@ -2139,7 +2162,7 @@ test("verify_design_python_import rejects missing root venv python", async () =>
 
 test("update_design_dependency adds a main dependency to design-code pyproject", async () => {
   const workspace = await mkdtemp(path.join(tmpdir(), "pi-agent-tools-"));
-  const designCodeDir = path.join(workspace, "knowledge-base", "design-code");
+  const designCodeDir = path.join(workspace, "design-repo", "design-code");
   const pyprojectPath = path.join(designCodeDir, "pyproject.toml");
 
   try {
@@ -2172,7 +2195,7 @@ test("update_design_dependency adds a main dependency to design-code pyproject",
 
     assert.deepEqual(result.details, {
       status: "updated",
-      path: "knowledge-base/design-code/pyproject.toml",
+      path: "design-repo/design-code/pyproject.toml",
       group: "main",
       dependency: "klayout>=0.29",
       changed: true,
@@ -2185,7 +2208,7 @@ test("update_design_dependency adds a main dependency to design-code pyproject",
 
 test("update_design_dependency rejects invalid dependency names", async () => {
   const workspace = await mkdtemp(path.join(tmpdir(), "pi-agent-tools-"));
-  const designCodeDir = path.join(workspace, "knowledge-base", "design-code");
+  const designCodeDir = path.join(workspace, "design-repo", "design-code");
 
   try {
     await mkdir(designCodeDir, { recursive: true });
@@ -2222,7 +2245,7 @@ test("update_design_dependency rejects invalid dependency names", async () => {
 
 test("update_design_dependency preserves dependency extras in multiline arrays", async () => {
   const workspace = await mkdtemp(path.join(tmpdir(), "pi-agent-tools-"));
-  const designCodeDir = path.join(workspace, "knowledge-base", "design-code");
+  const designCodeDir = path.join(workspace, "design-repo", "design-code");
   const pyprojectPath = path.join(designCodeDir, "pyproject.toml");
 
   try {
@@ -2268,7 +2291,7 @@ test("update_design_dependency preserves dependency extras in multiline arrays",
 
 test("update_design_dependency rejects unsupported single-quoted dependency arrays without rewriting", async () => {
   const workspace = await mkdtemp(path.join(tmpdir(), "pi-agent-tools-"));
-  const designCodeDir = path.join(workspace, "knowledge-base", "design-code");
+  const designCodeDir = path.join(workspace, "design-repo", "design-code");
   const pyprojectPath = path.join(designCodeDir, "pyproject.toml");
 
   try {
@@ -2304,7 +2327,7 @@ test("update_design_dependency rejects unsupported single-quoted dependency arra
 
 test("update_design_dependency ignores commented dependencies", async () => {
   const workspace = await mkdtemp(path.join(tmpdir(), "pi-agent-tools-"));
-  const designCodeDir = path.join(workspace, "knowledge-base", "design-code");
+  const designCodeDir = path.join(workspace, "design-repo", "design-code");
   const pyprojectPath = path.join(designCodeDir, "pyproject.toml");
 
   try {
@@ -2346,7 +2369,7 @@ test("update_design_dependency ignores commented dependencies", async () => {
 
 test("update_design_dependency updates dev dependency group", async () => {
   const workspace = await mkdtemp(path.join(tmpdir(), "pi-agent-tools-"));
-  const designCodeDir = path.join(workspace, "knowledge-base", "design-code");
+  const designCodeDir = path.join(workspace, "design-repo", "design-code");
   const pyprojectPath = path.join(designCodeDir, "pyproject.toml");
 
   try {
@@ -2391,7 +2414,7 @@ test("update_design_dependency updates dev dependency group", async () => {
 
 test("update_design_dependency is idempotent for existing dependency", async () => {
   const workspace = await mkdtemp(path.join(tmpdir(), "pi-agent-tools-"));
-  const designCodeDir = path.join(workspace, "knowledge-base", "design-code");
+  const designCodeDir = path.join(workspace, "design-repo", "design-code");
   const pyprojectPath = path.join(designCodeDir, "pyproject.toml");
 
   try {
@@ -2436,7 +2459,7 @@ test("update_design_dependency is idempotent for existing dependency", async () 
   }
 });
 
-test("sync_design_environment rejects projects outside knowledge-base design-code", async () => {
+test("sync_design_environment rejects projects outside design-repo design-code", async () => {
   const workspace = await mkdtemp(path.join(tmpdir(), "pi-agent-tools-"));
 
   try {
@@ -2450,20 +2473,20 @@ test("sync_design_environment rejects projects outside knowledge-base design-cod
         },
         undefined,
       ),
-      /sync_design_environment only runs for knowledge-base\/design-code/,
+      /sync_design_environment only runs for design-repo\/design-code/,
     );
   } finally {
     await rm(workspace, { recursive: true, force: true });
   }
 });
 
-test("sync_design_environment rejects symlinked knowledge-base design-code projects", async () => {
+test("sync_design_environment rejects symlinked design-repo design-code projects", async () => {
   const workspace = await mkdtemp(path.join(tmpdir(), "pi-agent-tools-"));
-  const knowledgeBaseDir = path.join(workspace, "knowledge-base");
+  const designRepoDir = path.join(workspace, "design-repo");
   const otherProjectDir = path.join(workspace, "other-design-code");
 
   try {
-    await mkdir(knowledgeBaseDir, { recursive: true });
+    await mkdir(designRepoDir, { recursive: true });
     await mkdir(otherProjectDir, { recursive: true });
     await writeFile(
       path.join(otherProjectDir, "pyproject.toml"),
@@ -2476,7 +2499,7 @@ test("sync_design_environment rejects symlinked knowledge-base design-code proje
       ].join("\n"),
       "utf8",
     );
-    await symlink(otherProjectDir, path.join(knowledgeBaseDir, "design-code"), "dir");
+    await symlink(otherProjectDir, path.join(designRepoDir, "design-code"), "dir");
 
     const syncDesignEnvironmentTool = getSyncDesignEnvironmentTool(workspace);
 
@@ -2484,11 +2507,11 @@ test("sync_design_environment rejects symlinked knowledge-base design-code proje
       syncDesignEnvironmentTool.execute(
         "call-sync-design-environment-symlink",
         {
-          projectPath: "knowledge-base/design-code",
+          projectPath: "design-repo/design-code",
         },
         undefined,
       ),
-      /sync_design_environment requires knowledge-base\/design-code to be a real directory/,
+      /sync_design_environment requires design-repo\/design-code to be a real directory/,
     );
   } finally {
     await rm(workspace, { recursive: true, force: true });

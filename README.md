@@ -62,7 +62,7 @@ The public entrypoints are intentionally explicit. Do not start a generic agent 
 | --- | --- | --- | --- | --- |
 | `npm run wiki-agent` | wiki, paper, evidence, synthesis, page governance, manuscript coordination | `knowledge-base/pages/`, aliases, source/page indexes, paper-backed knowledge records, manuscript files through the paper-writing worker | local wiki, local paper library, design records/artifacts/summaries | direct design-code editing, dependency installation, layout-script execution |
 | `npm run wiki-agent:rpc` | JSONL RPC wiki-agent for Feishu or another compatible bridge | same as `wiki-agent` | same as `wiki-agent` | same as `wiki-agent` |
-| `npm run design-agent` | design/code/dependency/layout/verification work | `knowledge-base/design-code/`, `knowledge-base/design-records/`, declared design-code outputs | local wiki and local paper evidence through read-only retrieval tools | wiki page writes, paper downloads, web search, arbitrary workspace writes |
+| `npm run design-agent` | design/code/dependency/layout/verification work | `design-repo/design-code/`, `design-repo/design-records/`, declared design-code outputs | local wiki and local paper evidence through read-only retrieval tools | wiki page writes, paper downloads, web search, arbitrary workspace writes |
 | `npm run design-agent:rpc` | JSONL RPC design-agent for local harnesses or future direct integrations | same as `design-agent` | same as `design-agent` | Feishu bridge default operation |
 
 `npm run agent` and `npm run agent:rpc` are intentionally not public scripts. Use the specific entrypoint that matches the work.
@@ -97,7 +97,7 @@ The repo manager is a bridge-side service, not an LLM tool and not a worker. It 
 
 Configured repositories are `paper`, `design`, and optional `wiki`. The paper repository is configured with `BRIDGE_PAPER_WORKSPACE_DIR`; design and wiki use `BRIDGE_DESIGN_WORKSPACE_DIR` and `BRIDGE_WIKI_WORKSPACE_DIR`.
 
-The recommended design workspace root is `knowledge-base/design-code/`. Point `BRIDGE_DESIGN_WORKSPACE_DIR` at `knowledge-base/design-code`. Keep executable design code, generated artifacts, and durable conclusions inside `knowledge-base/` so they can become searchable source summaries, manifests, records, and synthesis pages.
+The recommended design workspace root is `design-repo/design-code/`. Point `BRIDGE_DESIGN_WORKSPACE_DIR` at `design-repo/design-code`. Keep executable design code, generated artifacts, and durable design records inside `design-repo/`; the wiki-agent can read them and publish curated summaries/manifests under `knowledge-base/` when they should become searchable evidence.
 
 Automatic commit/push is still supported. When `BRIDGE_PAPER_GIT_AUTO_COMMIT=true`, the bridge snapshots the paper repo before an agent turn. If the repo was clean and the agent leaves changes, the bridge runs `git add -A` and commits with an `Auto paper update: ...` message. If `BRIDGE_PAPER_GIT_AUTO_PUSH=true`, it also pushes. If the repo was already dirty before the turn, automatic commit is skipped to avoid mixing user edits with agent edits.
 
@@ -205,7 +205,7 @@ Typical design-agent requests are:
 
 ```text
 > add gdsfactory as a design-code dependency, sync the shared venv, and verify the import
-> create a reusable resonator layout module under knowledge-base/design-code/src/pi_chip_design/
+> create a reusable resonator layout module under design-repo/design-code/src/pi_chip_design/
 > run the layout script and verify the declared GDS output
 > write a verification report for the failed coupler-spacing attempt
 ```
@@ -394,9 +394,9 @@ This is deterministic schema, retrieval, review, and lint support. It does not r
 
 ### Design And Paper-Writing Tools
 
-- `write_design_artifact`: full-mode / design-agent tool that writes structured design records, verification reports, failure records, and benchmark cases under `knowledge-base/design-records/`
-- `sync_design_environment`: full-mode / design-agent tool that runs `uv sync` for `knowledge-base/design-code/` while forcing the shared repository root `.venv` as the Python project environment. This is not a general shell and cannot sync arbitrary projects.
-- `run_design_script`: full-mode / design-agent tool that runs `.py` layout or verification scripts from `knowledge-base/design-code/` in a `bwrap` sandbox with a writable temporary design-code copy, then copies back only declared design-code outputs. For Python scripts it requires the repository root `.venv/bin/python`; if it is missing, run `sync_design_environment` first. KLayout scripts still run through `klayout -b -r`.
+- `write_design_artifact`: full-mode / design-agent tool that writes structured design records, verification reports, failure records, and benchmark cases under `design-repo/design-records/`
+- `sync_design_environment`: full-mode / design-agent tool that runs `uv sync` for `design-repo/design-code/` while forcing the shared repository root `.venv` as the Python project environment. This is not a general shell and cannot sync arbitrary projects.
+- `run_design_script`: full-mode / design-agent tool that runs `.py` layout or verification scripts from `design-repo/design-code/` in a `bwrap` sandbox with a writable temporary design-code copy, then copies back only declared design-code outputs. For Python scripts it requires the repository root `.venv/bin/python`; if it is missing, run `sync_design_environment` first. KLayout scripts still run through `klayout -b -r`.
 - `load_paper_writing_skill`: full-mode / paper-writing-worker tool that loads worker-scoped writing prompt modules such as `skills/paper-writing-worker/sciwrite/prompt.md`
 - `paper_orchestra_prepare_workspace`: full-mode / paper-writing-worker tool that creates and validates the controlled PaperOrchestra writing workspace layout
 - `paper_orchestra_check_draft`: full-mode / paper-writing-worker tool that runs orphan-citation, LaTeX sanity, and anonymous anti-leakage draft gates
@@ -405,9 +405,9 @@ This is deterministic schema, retrieval, review, and lint support. It does not r
 - paper-writing-worker tools: project-local writing skill loading, manuscript file reading/writing, PaperOrchestra writing gates, LaTeX compilation, local wiki retrieval, and wiki-grounded Q&A
 - `get_time`: full-mode diagnostic tool for checking the current local time
 
-The design-agent is the engineering owner for executable layout code, dependency declarations, bounded verification scripts, and design records. It works in the nested `knowledge-base/design-code/` repository, declares Python dependencies there, uses `sync_design_environment` to run `uv sync` into the root `.venv`, executes only bounded design-code scripts through `run_design_script`, and returns artifacts or records to the wiki-agent for durable curation. It is the right owner for installing packages such as `gdsfactory`: the agent updates `knowledge-base/design-code/pyproject.toml`, runs `uv sync` into `.venv`, verifies imports, and then uses that shared interpreter for layout scripts. `design-subagent` remains an accepted compatibility alias.
+The design-agent is the engineering owner for executable layout code, dependency declarations, bounded verification scripts, and design records. It works in the nested `design-repo/design-code/` repository, declares Python dependencies there, uses `sync_design_environment` to run `uv sync` into the root `.venv`, executes only bounded design-code scripts through `run_design_script`, and returns artifacts or records to the wiki-agent for durable curation. It is the right owner for installing packages such as `gdsfactory`: the agent updates `design-repo/design-code/pyproject.toml`, runs `uv sync` into `.venv`, verifies imports, and then uses that shared interpreter for layout scripts. `design-subagent` remains an accepted compatibility alias.
 
-Design code, reusable Python packages, scripts, generated-layout setup, and design notes should live under `knowledge-base/design-code/`. This directory is a separate Git repository inside the knowledge base. Keep one Python environment at the repository root `.venv` so `run_design_script` uses the same interpreter regardless of whether the agent was started from WSL, Feishu bridge, or another entrypoint.
+Design code, reusable Python packages, scripts, generated-layout setup, and design notes should live under `design-repo/design-code/`. This directory is a separate Git repository alongside the wiki knowledge base. Keep one Python environment at the repository root `.venv` so `run_design_script` uses the same interpreter regardless of whether the agent was started from WSL, Feishu bridge, or another entrypoint.
 
 ### Tool Profiles And Worker Boundaries
 
@@ -418,7 +418,7 @@ Design code, reusable Python packages, scripts, generated-layout setup, and desi
 | `wiki-agent` | durable knowledge coordinator | local wiki search, page construction, aliases, wiki health/lint, paper search/download | web search, source-summary generation |
 | `paper-download-subagent` | literature acquisition | search/download, browser/manual fallback, webpage capture, local-parse/arXiv/Crossref citation metadata refresh, parsing, health repair | wiki page writes, source-summary authoring |
 | `wiki-evidence-worker` | evidence construction | source summaries, relation maintenance, fixed-evidence page draft output | paper download, external search, autonomous acquisition |
-| `design-agent` | chip-design/layout engineering | `list_files`/`read_file` for inspection; local wiki/paper retrieval; bounded dependency management via `update_design_dependency`; root `.venv` sync via `sync_design_environment`; import verification via `verify_design_python_import`; design-code write/replace under `knowledge-base/design-code/` via `write_design_code_file` and `replace_design_code_file_text`; isolated design-code `run_design_script`; `write_design_artifact` | web search, paper download, wiki page writes, arbitrary file writes |
+| `design-agent` | chip-design/layout engineering | `list_files`/`read_file` for inspection; local wiki/paper retrieval; bounded dependency management via `update_design_dependency`; root `.venv` sync via `sync_design_environment`; import verification via `verify_design_python_import`; design-code write/replace under `design-repo/design-code/` via `write_design_code_file` and `replace_design_code_file_text`; isolated design-code `run_design_script`; `write_design_artifact` | web search, paper download, wiki page writes, arbitrary file writes |
 | `paper-writing-worker` | manuscript writing | project-local writing skills, manuscript read/write, PaperOrchestra workspace/gate/provenance tools, LaTeX compile, wiki retrieval/Q&A | paper download, source-summary generation, wiki page construction, web search |
 
 Use the boundary APIs in benchmarks so each model is evaluated under the same tool surface.
@@ -434,16 +434,6 @@ By default the local knowledge base lives in `knowledge-base/`, which is gitigno
 ```text
 knowledge-base/
   raw/pdfs/                         # original PDFs
-  design-artifacts/<experiment-key>/
-    code/                            # design-agent scripts and helper modules
-    layouts/                         # generated GDS/OAS/DXF and other layout data
-    logs/                            # tool stdout/stderr, DRC/LVS/simulation logs
-    results/                         # derived metrics, reports, screenshots, and tables
-  design-records/
-    design-records/
-    verification-reports/
-    failures/
-    benchmark-cases/
   index.md                          # knowledge-entry catalog over pages/
   log.md                            # page operation log
   sources/<paper-key>/
@@ -459,16 +449,18 @@ knowledge-base/
     wiki-operations.jsonl           # operation journal for multi-file wiki writes
 ```
 
+Design-agent-owned code, records, and generated artifacts live in sibling `design-repo/`. The wiki-agent may read those assets and curate wiki-facing summaries or manifests under `knowledge-base/`, but it should not edit design assets directly.
+
 Typed wiki pages remain normal Markdown files with frontmatter, so humans can edit them directly. The typed store validates the metadata and reports malformed or weak-evidence pages through `wiki_health` / `wiki_lint` instead of making every read fail.
 
 Evidence-audit metadata is stored in the same page frontmatter. Use workspace-relative paths in `experiment_refs`; absolute paths and `..` escapes are rejected by the schema validator. Use `typed_relations` for graph semantics and keep `related_pages` only as legacy compatibility.
 
 ## Design Project Layout
 
-Design code workspaces live inside the knowledge base. Do not create a top-level `design-projects/` tree, and do not create per-design-project virtual environments. The shared Python environment is the repository root `.venv`.
+Design code workspaces live in `design-repo/`, alongside `knowledge-base/`. Do not create a top-level `design-projects/` tree, and do not create per-design-project virtual environments. The shared Python environment is the repository root `.venv`.
 
 ```text
-knowledge-base/
+design-repo/
   design-code/                    # separate Git repository
     README.md
     pyproject.toml
@@ -478,14 +470,14 @@ knowledge-base/
     outputs/
 ```
 
-Use `knowledge-base/design-code/` for maintained executable design code, Python package modules, simulations, generated-layout scripts, and project-local tests. Use `knowledge-base/design-records/` for structured design evidence. Both are knowledge-base content and should feed the data flywheel back into source summaries, manifests, and synthesis pages.
+Use `design-repo/design-code/` for maintained executable design code, Python package modules, simulations, generated-layout scripts, and project-local tests. Use `design-repo/design-records/` for structured design evidence. These are design-agent-owned assets; `knowledge-base/` remains wiki-agent-owned and can contain curated summaries/manifests that cite the design assets.
 
-`knowledge-base/design-code/` is a nested Git repository and should be treated as its own design-code package, not as normal source inside the TypeScript repo. The bridge-side repo manager can point `BRIDGE_DESIGN_WORKSPACE_DIR` at this directory when design code needs independent status/diff/commit/push operations.
+`design-repo/design-code/` is a nested Git repository and should be treated as its own design-code package, not as normal source inside the TypeScript repo. The bridge-side repo manager can point `BRIDGE_DESIGN_WORKSPACE_DIR` at this directory when design code needs independent status/diff/commit/push operations.
 
-Use `knowledge-base/design-artifacts/<experiment-key>/` for design-agent experiment outputs that should become part of the local searchable knowledge base. The path contract is:
+Use `design-repo/design-artifacts/<experiment-key>/` for design-agent experiment outputs that should become part of the local searchable knowledge base. The path contract is:
 
 ```text
-knowledge-base/design-artifacts/<experiment-key>/
+design-repo/design-artifacts/<experiment-key>/
   code/       # runnable experiment scripts, notebooks, and small helper modules
   layouts/    # generated layout data such as GDS/OAS/DXF
   logs/       # DRC/LVS/simulation/tool logs
@@ -499,17 +491,17 @@ knowledge-base/sources/design-artifact-<experiment-key>/summary.md
 knowledge-base/manifests/design-artifact-<experiment-key>.json
 ```
 
-The manifest should use `sourceKind: "design-artifact"` and list scripts, layout files, logs, and results in `artifacts`. The summary is the wiki-agent retrieval surface; large binary layout files stay under `design-artifacts/`. For explicit retrieval, call `search_paper_wiki` with `sourceKinds: ["design-artifact"]` or build a durable `pages/` synthesis page that cites the design-artifact source.
+The manifest should use `sourceKind: "design-artifact"` and list scripts, layout files, logs, and results in `artifacts`. The summary is the wiki-agent retrieval surface; large binary layout files stay under `design-repo/design-artifacts/`. For explicit retrieval, call `search_paper_wiki` with `sourceKinds: ["design-artifact"]` or build a durable `pages/` synthesis page that cites the design-artifact source.
 
-The initial design workspace is the `pi_chip_design` Python package under `knowledge-base/design-code/`. It should hold reusable layout-generation and verification code, with layout families added under `src/pi_chip_design/layouts/`. Its local development setup uses `uv` to sync dependencies into the repository root virtual environment:
+The initial design workspace is the `pi_chip_design` Python package under `design-repo/design-code/`. It should hold reusable layout-generation and verification code, with layout families added under `src/pi_chip_design/layouts/`. Its local development setup uses `uv` to sync dependencies into the repository root virtual environment:
 
 ```sh
-UV_PROJECT_ENVIRONMENT="$PWD/.venv" uv sync --project "$PWD/knowledge-base/design-code" --extra dev
+UV_PROJECT_ENVIRONMENT="$PWD/.venv" uv sync --project "$PWD/design-repo/design-code" --extra dev
 ```
 
-The design-agent normally performs this through `sync_design_environment`; it does not require the parent agent process to activate this environment. `run_design_script` requires the repository root `.venv/bin/python` and the local `bwrap` sandbox command, runs scripts from an isolated copy of `knowledge-base/design-code/`, copies back only declared design-code outputs, and reports that `sync_design_environment` should be run first if the root interpreter is missing.
+The design-agent normally performs this through `sync_design_environment`; it does not require the parent agent process to activate this environment. `run_design_script` requires the repository root `.venv/bin/python` and the local `bwrap` sandbox command, runs scripts from an isolated copy of `design-repo/design-code/`, copies back only declared design-code outputs, and reports that `sync_design_environment` should be run first if the root interpreter is missing.
 
-The design-agent must not call `pip install` directly, create `knowledge-base/design-code/.venv`, or install into a design-project-local environment. Dependency requests should be handled as declarative `pyproject.toml` changes followed by `sync_design_environment` and import/script verification.
+The design-agent must not call `pip install` directly, create `design-repo/design-code/.venv`, or install into a design-project-local environment. Dependency requests should be handled as declarative `pyproject.toml` changes followed by `sync_design_environment` and import/script verification.
 
 Recommended paper-to-wiki path:
 

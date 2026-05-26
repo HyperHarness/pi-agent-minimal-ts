@@ -93,7 +93,7 @@ wiki-agent curates records/artifacts into durable wiki updates
 - `knowledge-base/pages/`：跨来源的 typed synthesis / concept / method / finding 页面。
 - `knowledge-base/manifests/`：source summary 与 acquisition、parse、quality artifact 的 provenance。
 - `knowledge-base/state/wiki-operations.jsonl`：多文件 wiki 操作日志。
-- `knowledge-base/design-records/`：设计决策、验证报告、失败记录、benchmark case。
+- `design-repo/design-records/`：设计决策、验证报告、失败记录、benchmark case。
 - worker handoff：记录 role、instruction、route reason、changed paths、tools used、failed tools、next owner。
 
 ---
@@ -261,12 +261,12 @@ npm run design-agent / design-agent
 
 设计代码、实验产物和知识记录统一纳入 knowledge-base，但保留不同子目录边界：
 
-- `knowledge-base/design-code/`
+- `design-repo/design-code/`
   - Python package：`pi_chip_design`
   - layout family、parameter schema、generator、verification helper、exporter。
-- `knowledge-base/design-artifacts/`
+- `design-repo/design-artifacts/`
   - generated layout、logs、results、experiment code snapshots。
-- `knowledge-base/design-records/`
+- `design-repo/design-records/`
   - design record、verification report、failure record、benchmark case。
 - `knowledge-base/pages/`
   - 经 wiki-agent curated 的稳定知识、方法、概念和发现。

@@ -74,7 +74,7 @@ const writeFileParameters = Type.Object({
 const writeDesignCodeFileParameters = Type.Object({
   path: Type.String({
     description:
-      "UTF-8 text file path under knowledge-base/design-code. Accepts design-code-relative paths or knowledge-base/design-code/... paths."
+      "UTF-8 text file path under design-repo/design-code. Accepts design-code-relative paths or design-repo/design-code/... paths."
   }),
   content: Type.String({ description: "Full UTF-8 file content to write." })
 });
@@ -97,7 +97,7 @@ const replaceFileTextParameters = Type.Object({
 const replaceDesignCodeFileTextParameters = Type.Object({
   path: Type.String({
     description:
-      "UTF-8 text file path under knowledge-base/design-code. Accepts design-code-relative paths or knowledge-base/design-code/... paths."
+      "UTF-8 text file path under design-repo/design-code. Accepts design-code-relative paths or design-repo/design-code/... paths."
   }),
   search: Type.String({ description: "Exact existing text block to replace." }),
   replacement: Type.String({ description: "Replacement text." }),
@@ -205,7 +205,7 @@ const syncDesignEnvironmentParameters = Type.Object({
   projectPath: Type.Optional(
     Type.String({
       description:
-        "Design-code project path. Defaults to knowledge-base/design-code and must resolve exactly to that directory."
+        "Design-code project path. Defaults to design-repo/design-code and must resolve exactly to that directory."
     })
   ),
   maxOutputChars: Type.Optional(
@@ -230,7 +230,7 @@ const verifyDesignPythonImportParameters = Type.Object({
 
 const updateDesignDependencyParameters = Type.Object({
   name: Type.String({
-    description: "Python dependency package name to declare in knowledge-base/design-code/pyproject.toml."
+    description: "Python dependency package name to declare in design-repo/design-code/pyproject.toml."
   }),
   specifier: Type.Optional(
     Type.String({
@@ -579,7 +579,7 @@ async function findBubblewrapCommand(): Promise<string | undefined> {
 }
 
 function designCodeProjectDir(workspaceDir: string): string {
-  return path.join(workspaceDir, "knowledge-base", "design-code");
+  return path.join(workspaceDir, "design-repo", "design-code");
 }
 
 function normalizeWorkspaceRelativePath(workspaceDir: string, resolvedPath: string): string {
@@ -592,29 +592,29 @@ async function resolveDesignCodeProjectPath(workspaceDir: string, requestedPath:
   const expectedProjectDir = path.resolve(designCodeProjectDir(resolvedWorkspaceDir));
   const candidateProjectDir = path.isAbsolute(requestedPath ?? "")
     ? path.resolve(requestedPath ?? "")
-    : path.resolve(resolvedWorkspaceDir, requestedPath ?? "knowledge-base/design-code");
+    : path.resolve(resolvedWorkspaceDir, requestedPath ?? "design-repo/design-code");
   assertPathInsideDirectory(resolvedWorkspaceDir, candidateProjectDir);
 
   if (candidateProjectDir !== expectedProjectDir) {
-    throw new Error("sync_design_environment only runs for knowledge-base/design-code.");
+    throw new Error("sync_design_environment only runs for design-repo/design-code.");
   }
 
   const projectStats = await lstat(expectedProjectDir).catch(() => undefined);
   if (!projectStats?.isDirectory() || projectStats.isSymbolicLink()) {
-    throw new Error("sync_design_environment requires knowledge-base/design-code to be a real directory.");
+    throw new Error("sync_design_environment requires design-repo/design-code to be a real directory.");
   }
 
   const [resolvedProjectDir, resolvedExpectedProjectDir] = await Promise.all([
-    resolveWorkspacePath(workspaceDir, requestedPath ?? "knowledge-base/design-code"),
+    resolveWorkspacePath(workspaceDir, requestedPath ?? "design-repo/design-code"),
     realpath(expectedProjectDir)
   ]);
   if (resolvedProjectDir !== resolvedExpectedProjectDir) {
-    throw new Error("sync_design_environment only runs for knowledge-base/design-code.");
+    throw new Error("sync_design_environment only runs for design-repo/design-code.");
   }
 
   const pyprojectPath = path.join(resolvedProjectDir, "pyproject.toml");
   if (!(await fileExists(pyprojectPath))) {
-    throw new Error("sync_design_environment requires knowledge-base/design-code/pyproject.toml.");
+    throw new Error("sync_design_environment requires design-repo/design-code/pyproject.toml.");
   }
 
   return resolvedProjectDir;
@@ -624,7 +624,7 @@ function assertPathInsideDesignCodeProject(rootDir: string, candidatePath: strin
   try {
     assertPathInsideDirectory(rootDir, candidatePath);
   } catch {
-    throw new Error("design-code file tools only write under knowledge-base/design-code.");
+    throw new Error("design-code file tools only write under design-repo/design-code.");
   }
 }
 
@@ -634,11 +634,18 @@ function designCodeRelativeRequestedPath(requestedPath: string): string {
     throw new Error("Path is required.");
   }
   if (path.isAbsolute(trimmedPath) || path.win32.isAbsolute(trimmedPath)) {
-    throw new Error("design-code file tools only write under knowledge-base/design-code.");
+    throw new Error("design-code file tools only write under design-repo/design-code.");
   }
 
   const platformPath = trimmedPath.split(/[\\/]+/).join(path.sep);
-  const designCodePrefix = path.join("knowledge-base", "design-code");
+  const designCodePrefix = path.join("design-repo", "design-code");
+  const legacyKnowledgeBaseDesignCodePrefix = path.join("knowledge-base", "design-code");
+  if (
+    platformPath === legacyKnowledgeBaseDesignCodePrefix ||
+    platformPath.startsWith(`${legacyKnowledgeBaseDesignCodePrefix}${path.sep}`)
+  ) {
+    throw new Error("design-code file tools only write under design-repo/design-code.");
+  }
   if (platformPath === designCodePrefix) {
     throw new Error("Path is required.");
   }
@@ -649,7 +656,7 @@ function designCodeRelativeRequestedPath(requestedPath: string): string {
 }
 
 async function resolveDesignCodeWritableFilePath(workspaceDir: string, requestedPath: string): Promise<string> {
-  const designCodeDir = await resolveDesignCodeProjectPath(workspaceDir, "knowledge-base/design-code");
+  const designCodeDir = await resolveDesignCodeProjectPath(workspaceDir, "design-repo/design-code");
   const realDesignCodeDir = await realpath(designCodeDir);
   const projectRelativePath = designCodeRelativeRequestedPath(requestedPath);
   const resolvedPath = path.resolve(realDesignCodeDir, projectRelativePath);
@@ -660,7 +667,7 @@ async function resolveDesignCodeWritableFilePath(workspaceDir: string, requested
   while (!(await pathExists(existingAncestorDir))) {
     const nextAncestorDir = path.dirname(existingAncestorDir);
     if (nextAncestorDir === existingAncestorDir) {
-      throw new Error("design-code file tools only write under knowledge-base/design-code.");
+      throw new Error("design-code file tools only write under design-repo/design-code.");
     }
     existingAncestorDir = nextAncestorDir;
   }
@@ -681,7 +688,7 @@ async function resolveDesignCodeWritableFilePath(workspaceDir: string, requested
 }
 
 async function resolveDesignCodeExistingFilePath(workspaceDir: string, requestedPath: string): Promise<string> {
-  const designCodeDir = await resolveDesignCodeProjectPath(workspaceDir, "knowledge-base/design-code");
+  const designCodeDir = await resolveDesignCodeProjectPath(workspaceDir, "design-repo/design-code");
   const realDesignCodeDir = await realpath(designCodeDir);
   const projectRelativePath = designCodeRelativeRequestedPath(requestedPath);
   const resolvedPath = path.resolve(realDesignCodeDir, projectRelativePath);
@@ -748,7 +755,7 @@ async function createIsolatedDesignScriptWorkspace(workspaceDir: string): Promis
   tempWorkspaceDir: string;
   tempDesignCodeDir: string;
 }> {
-  const sourceDesignCodeDir = await resolveDesignCodeProjectPath(workspaceDir, "knowledge-base/design-code");
+  const sourceDesignCodeDir = await resolveDesignCodeProjectPath(workspaceDir, "design-repo/design-code");
   const tempRootDir = await mkdtemp(path.join(tmpdir(), "pi-agent-design-script-"));
   const tempWorkspaceDir = path.join(tempRootDir, "workspace");
   const tempDesignCodeDir = designCodeProjectDir(tempWorkspaceDir);
@@ -1240,7 +1247,7 @@ function consumeDoubleQuotedTomlString(line: string, start: number): number | un
 
 function assertSupportedTomlDependencyArraySyntax(lines: readonly string[], fieldName: string): void {
   const unsupportedMessage =
-    "Unsupported dependency array syntax in knowledge-base/design-code/pyproject.toml; use double-quoted dependency strings.";
+    "Unsupported dependency array syntax in design-repo/design-code/pyproject.toml; use double-quoted dependency strings.";
   const fieldPrefixPattern = new RegExp(`^\\s*${fieldName}\\s*=\\s*\\[`);
 
   for (const line of lines) {
@@ -1437,7 +1444,7 @@ async function runDesignScript(input: {
   stderr: string;
   outputs: Array<{ path: string; bytes: number }>;
 }> {
-  const designCodeDir = await resolveDesignCodeProjectPath(input.workspaceDir, "knowledge-base/design-code");
+  const designCodeDir = await resolveDesignCodeProjectPath(input.workspaceDir, "design-repo/design-code");
   const realDesignCodeDir = await realpath(designCodeDir);
   const resolvedScriptPath = await resolveDesignCodeExistingFilePath(input.workspaceDir, input.scriptPath);
   const scriptStats = await stat(resolvedScriptPath);
@@ -1787,7 +1794,7 @@ async function writeDesignArtifact(
 ): Promise<{ artifactType: WriteDesignArtifactParameters["artifactType"]; path: string; bytes: number; title: string }> {
   const artifactKey = sanitizeWikiFilename(args.artifactKey ?? args.title);
   const directory = DESIGN_ARTIFACT_DIRECTORIES[args.artifactType];
-  const relativePath = `knowledge-base/design-records/${directory}/${artifactKey}.md`;
+  const relativePath = `design-repo/design-records/${directory}/${artifactKey}.md`;
   const resolvedPath = await resolveWorkspaceWritablePath(workspaceDir, relativePath);
   const content = formatDesignArtifactMarkdown(args);
   await writeFile(resolvedPath, content, "utf8");
@@ -2091,7 +2098,7 @@ export function createFileTools(input: {
     name: "write_design_artifact",
     label: "Write Design Artifact",
     description:
-      "Writes a structured chip-design artifact under knowledge-base/design-records/. Use this for minimal design-subagent outputs: design records, verification reports, failure records, and benchmark cases. This tool cannot write wiki pages, paper source summaries, or arbitrary workspace files.",
+      "Writes a structured chip-design artifact under design-repo/design-records/. Use this for minimal design-subagent outputs: design records, verification reports, failure records, and benchmark cases. This tool cannot write wiki pages, paper source summaries, or arbitrary workspace files.",
     parameters: writeDesignArtifactParameters,
     executionMode: "sequential",
     execute: async (_toolCallId: string, args: WriteDesignArtifactParameters) => {
@@ -2108,7 +2115,7 @@ export function createFileTools(input: {
     name: "write_design_code_file",
     label: "Write Design Code File",
     description:
-      "Creates or overwrites a UTF-8 file only under knowledge-base/design-code/. Accepts paths relative to that design-code project or prefixed with knowledge-base/design-code/. This is not a generic workspace file writer.",
+      "Creates or overwrites a UTF-8 file only under design-repo/design-code/. Accepts paths relative to that design-code project or prefixed with design-repo/design-code/. This is not a generic workspace file writer.",
     parameters: writeDesignCodeFileParameters,
     executionMode: "sequential",
     execute: async (_toolCallId: string, args: WriteDesignCodeFileParameters) => {
@@ -2130,7 +2137,7 @@ export function createFileTools(input: {
     name: "replace_design_code_file_text",
     label: "Replace Design Code File Text",
     description:
-      "Replaces an exact text block in a UTF-8 file only under knowledge-base/design-code/. Use read_file first, then replace the smallest exact block. This is not a generic workspace file editor.",
+      "Replaces an exact text block in a UTF-8 file only under design-repo/design-code/. Use read_file first, then replace the smallest exact block. This is not a generic workspace file editor.",
     parameters: replaceDesignCodeFileTextParameters,
     executionMode: "sequential",
     execute: async (_toolCallId: string, args: ReplaceDesignCodeFileTextParameters) => {
@@ -2169,7 +2176,7 @@ export function createFileTools(input: {
     name: "update_design_dependency",
     label: "Update Design Dependency",
     description:
-      "Updates dependency declarations in knowledge-base/design-code/pyproject.toml without running pip or arbitrary uv commands. Follow this with sync_design_environment to install the declared environment.",
+      "Updates dependency declarations in design-repo/design-code/pyproject.toml without running pip or arbitrary uv commands. Follow this with sync_design_environment to install the declared environment.",
     parameters: updateDesignDependencyParameters,
     executionMode: "sequential",
     execute: async (_toolCallId: string, args: UpdateDesignDependencyParameters) => {
@@ -2191,7 +2198,7 @@ export function createFileTools(input: {
     name: "sync_design_environment",
     label: "Sync Design Environment",
     description:
-      "Runs uv sync for knowledge-base/design-code while forcing the shared root .venv as the project environment. This is not a general shell and cannot sync arbitrary projects.",
+      "Runs uv sync for design-repo/design-code while forcing the shared root .venv as the project environment. This is not a general shell and cannot sync arbitrary projects.",
     parameters: syncDesignEnvironmentParameters,
     executionMode: "sequential",
     execute: async (_toolCallId: string, args: SyncDesignEnvironmentParameters) => {

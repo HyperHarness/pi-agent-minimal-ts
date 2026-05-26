@@ -149,7 +149,7 @@ test("router worker system prompts describe isolated responsibilities", () => {
   assert.match(downloadPrompt as string, /past N years/);
   assert.match(designPrompt as string, /design-agent/);
   assert.match(designPrompt as string, /layout-code/);
-  assert.match(designPrompt as string, /knowledge-base\/design-code/);
+  assert.match(designPrompt as string, /design-repo\/design-code/);
   assert.match(designPrompt as string, /sync_design_environment/);
   assert.match(designPrompt as string, /root \.venv/);
   assert.match(designPrompt as string, /Do not install packages ad hoc with pip/);
@@ -1060,9 +1060,9 @@ test("runSessionPrompt routes paper write commands to the paper-writing worker b
     instruction: "请让design subagent安装gdsfactory这个python包",
     reason: "intent"
   });
-  assert.deepEqual(routeChatPromptToWorker!("请同步 knowledge-base/design-code 的 uv 环境"), {
+  assert.deepEqual(routeChatPromptToWorker!("请同步 design-repo/design-code 的 uv 环境"), {
     role: "design-agent",
-    instruction: "请同步 knowledge-base/design-code 的 uv 环境",
+    instruction: "请同步 design-repo/design-code 的 uv 环境",
     reason: "intent"
   });
   assert.deepEqual(routeChatPromptToWorker!("update design-code python dependency"), {

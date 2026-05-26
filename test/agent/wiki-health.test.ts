@@ -355,11 +355,11 @@ test("checkWikiHealth excludes non-paper source manifests from paper repair issu
       "# Single Xmon Concept Layout\n\nA local design artifact summary.\n"
     );
     await writeText(
-      path.join(workspace, "knowledge-base", "design-artifacts", "single-xmon-concept", "README.md"),
+      path.join(workspace, "design-repo", "design-artifacts", "single-xmon-concept", "README.md"),
       "# Single Xmon Concept\n"
     );
     await writeText(
-      path.join(workspace, "knowledge-base", "design-artifacts", "single-xmon-concept", "code", "layout.py"),
+      path.join(workspace, "design-repo", "design-artifacts", "single-xmon-concept", "code", "layout.py"),
       "print('layout')\n"
     );
     await writeJson(path.join(workspace, "knowledge-base", "manifests", `${sourceKey}.json`), {
@@ -372,11 +372,11 @@ test("checkWikiHealth excludes non-paper source manifests from paper repair issu
       updatedAt: "2026-05-19T00:00:00.000Z",
       summaryPath: `knowledge-base/sources/${sourceKey}/summary.md`,
       provenance: {
-        recordPath: "knowledge-base/design-artifacts/single-xmon-concept/README.md"
+        recordPath: "design-repo/design-artifacts/single-xmon-concept/README.md"
       },
       artifacts: [{
         kind: "script",
-        path: "knowledge-base/design-artifacts/single-xmon-concept/code/layout.py"
+        path: "design-repo/design-artifacts/single-xmon-concept/code/layout.py"
       }],
       tags: ["design-artifact"],
       relatedSourceKeys: [],
