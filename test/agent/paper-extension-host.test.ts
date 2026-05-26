@@ -596,6 +596,12 @@ test("handleExtensionHostMessage registers APS supplemental material on the publ
   const workspaceDir = await createWorkspaceDir();
   const articleUrl = "https://journals.aps.org/prl/abstract/10.1103/PhysRevLett.111.080502";
   const materialUrl = "https://journals.aps.org/prl/supplemental/10.1103/PhysRevLett.111.080502/SM.pdf";
+  const expectedSourceDir = path.join(
+    workspaceDir,
+    "knowledge-base",
+    "sources",
+    "aps-10.1103-PhysRevLett.111.080502"
+  );
 
   try {
     const response = await handleExtensionHostMessage({
@@ -617,10 +623,7 @@ test("handleExtensionHostMessage registers APS supplemental material on the publ
     assert.equal(response.type, "supplemental_registered");
     assert.equal(response.articleUrl, articleUrl);
     assert.equal(response.materialUrl, materialUrl);
-    assert.match(
-      response.path,
-      /knowledge-base\/raw\/supplemental\/aps\/10\.1103-PhysRevLett\.111\.080502\/SM\.pdf$/
-    );
+    assert.equal(response.path, path.join(expectedSourceDir, "supplemental", "SM.pdf"));
 
     const recordPath = resolvePaperRecordPath({
       workspaceDir,
@@ -631,11 +634,94 @@ test("handleExtensionHostMessage registers APS supplemental material on the publ
     const record = JSON.parse(await readFile(recordPath, "utf8"));
     assert.equal(record.status, "publisher_pending");
     assert.equal(record.supplementalMaterials[0].url, materialUrl);
+    assert.equal(record.supplementalMaterials[0].path, response.path);
     assert.equal(await readFile(response.path, "utf8"), "%PDF-1.7\nsupplement pdf\n");
 
     const events = await readPaperDownloadJobEvents({ workspaceDir });
     assert.equal(events.at(-1)?.status, "supplemental_material_downloaded");
     assert.equal(events.at(-1)?.downloadPath, response.path);
+  } finally {
+    await rm(workspaceDir, { recursive: true, force: true });
+  }
+});
+
+test("handleExtensionHostMessage rejects supplemental webpage snapshots as standalone sources", async () => {
+  const workspaceDir = await createWorkspaceDir();
+  const articleUrl = "https://journals.aps.org/prl/abstract/10.1103/PhysRevLett.111.080502";
+  const supplementalUrl = "https://journals.aps.org/prl/supplemental/10.1103/PhysRevLett.111.080502";
+
+  try {
+    const response = await handleExtensionHostMessage({
+      workspaceDir,
+      now: () => new Date("2026-05-26T10:35:00.000Z"),
+      message: {
+        type: "register_webpage_snapshot",
+        jobId: "job-aps-supplement-webpage",
+        articleUrl,
+        finalUrl: supplementalUrl,
+        source: "aps",
+        html: "<html><head><title>Supplemental Material</title></head><body>Supplemental PDF listing</body></html>",
+        title: "Supplemental Material"
+      }
+    });
+
+    assert.equal(response.type, "error");
+    assert.equal(response.code, "supplemental_webpage_snapshot_unsupported");
+    assert.equal(
+      await findDownloadedPaperRecord({
+        workspaceDir,
+        source: "aps",
+        canonicalId: "10.1103/PhysRevLett.111.080502",
+        articleUrl
+      }),
+      null
+    );
+    await assert.rejects(
+      readFile(path.join(workspaceDir, "knowledge-base", "sources", "doi-10.1103-PhysRevLett.111.080502", "source.json"), "utf8"),
+      { code: "ENOENT" }
+    );
+  } finally {
+    await rm(workspaceDir, { recursive: true, force: true });
+  }
+});
+
+test("handleExtensionHostMessage rejects non-PDF supplemental material bytes", async () => {
+  const workspaceDir = await createWorkspaceDir();
+  const articleUrl = "https://journals.aps.org/prl/abstract/10.1103/PhysRevLett.111.080502";
+
+  try {
+    const response = await handleExtensionHostMessage({
+      workspaceDir,
+      now: () => new Date("2026-05-26T10:40:00.000Z"),
+      message: {
+        type: "register_supplemental_material",
+        jobId: "job-aps-supplement-html",
+        articleUrl,
+        source: "aps",
+        materialUrl: "https://journals.aps.org/prl/supplemental/10.1103/PhysRevLett.111.080502",
+        materialBase64: Buffer.from("<html>Supplemental listing</html>").toString("base64"),
+        filename: "supplemental.html",
+        mimeType: "text/html",
+        title: "Supplemental Material"
+      }
+    });
+
+    assert.equal(response.type, "error");
+    assert.equal(response.code, "supplement_not_pdf");
+    await assert.rejects(
+      readFile(
+        path.join(
+          workspaceDir,
+          "knowledge-base",
+          "sources",
+          "aps-10.1103-PhysRevLett.111.080502",
+          "supplemental",
+          "supplemental.html"
+        ),
+        "utf8"
+      ),
+      { code: "ENOENT" }
+    );
   } finally {
     await rm(workspaceDir, { recursive: true, force: true });
   }

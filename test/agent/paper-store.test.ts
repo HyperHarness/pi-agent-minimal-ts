@@ -71,7 +71,6 @@ test("resolvePaperLibraryPaths uses knowledge-base as the wiki root", async () =
     assert.equal(paths.libraryRoot, path.join(workspaceDir, "knowledge-base"));
     assert.equal(paths.wikiRoot, path.join(workspaceDir, "knowledge-base"));
     assert.equal(paths.rawRoot, path.join(workspaceDir, "knowledge-base", "raw"));
-    assert.equal(paths.rawSupplementalRoot, path.join(workspaceDir, "knowledge-base", "raw", "supplemental"));
     assert.equal(paths.sourcesRoot, path.join(workspaceDir, "knowledge-base", "sources"));
     assert.equal(paths.sourceArtifactsRoot, path.join(workspaceDir, "knowledge-base", "sources"));
     assert.equal(paths.pagesRoot, path.join(workspaceDir, "knowledge-base", "pages"));
@@ -90,10 +89,9 @@ test("writePaperRecord persists publisher supplemental materials into source met
   const supplementalPath = path.join(
     workspaceDir,
     "knowledge-base",
-    "raw",
+    "sources",
+    "aps-10.1103-PhysRevLett.111.080502",
     "supplemental",
-    "aps",
-    "10.1103-PhysRevLett.111.080502",
     "SM.pdf"
   );
   const pdfPath = path.join(workspaceDir, "knowledge-base", "raw", "pdfs", "aps-main.pdf");

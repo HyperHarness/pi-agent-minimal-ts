@@ -4,7 +4,7 @@
 
 **Goal:** Download supplemental material files for supported publisher articles and attach them to the same paper record as the main article.
 
-**Architecture:** Content scripts detect supplemental material URLs while preserving the main PDF candidate. The background worker fetches supplemental bytes with browser credentials and sends them to the native host through a new protocol message. The native host saves the files under `knowledge-base/raw/supplemental/` and merges metadata into the publisher acquisition record without changing the main PDF status.
+**Architecture:** Content scripts detect supplemental material URLs while preserving the main PDF candidate. The background worker fetches supplemental PDF bytes with browser credentials and sends them to the native host through a new protocol message. The native host saves the files under `knowledge-base/sources/<paperKey>/supplemental/` and merges metadata into the publisher acquisition record without changing the main PDF status.
 
 **Tech Stack:** TypeScript, Node test runner, Chrome MV3 extension JavaScript, existing paper extension native-host protocol.
 
@@ -13,10 +13,10 @@
 ## File Map
 
 - Modify `src/agent/paper/types.ts`: add `PaperSupplementalMaterial` and optional `supplementalMaterials` on publisher paper records and source metadata.
-- Modify `src/agent/knowledge-base.ts`: add `rawSupplementalRoot` to resolved knowledge-base paths.
+- Modify `src/agent/knowledge-base.ts`: keep supplemental material out of global raw roots; files live under the article source directory.
 - Modify `src/agent/paper/storage/paper-store.ts`: preserve `supplementalMaterials` in source metadata and add a helper to merge supplemental material entries by URL.
 - Modify `src/agent/paper/extension/paper-extension-protocol.ts`: add `register_supplemental_material` message and `supplemental_registered` response.
-- Modify `src/agent/paper/extension/paper-extension-host.ts`: handle supplemental registration and write files under `knowledge-base/raw/supplemental/<source>/<canonical-id>/`.
+- Modify `src/agent/paper/extension/paper-extension-host.ts`: handle supplemental registration and write files under `knowledge-base/sources/<paperKey>/supplemental/`.
 - Modify `src/agent/paper/extension/paper-download-jobs.ts`: allow supplemental file metadata in job events.
 - Modify `browser-extension/paper-downloader/content/common.js`: add generic supplemental link detection.
 - Modify `browser-extension/paper-downloader/content/aps.js`: add APS supplemental URL derivation from APS article URLs.
@@ -71,7 +71,7 @@ test("parseExtensionHostResponse accepts supplemental_registered responses", () 
     jobId: "job-supplement",
     articleUrl: "https://journals.aps.org/prl/abstract/10.1103/PhysRevLett.111.080502",
     materialUrl: "https://journals.aps.org/prl/supplemental/10.1103/PhysRevLett.111.080502/SM.pdf",
-    path: "knowledge-base/raw/supplemental/aps/10.1103-PhysRevLett.111.080502/SM.pdf",
+    path: "knowledge-base/sources/aps-10.1103-PhysRevLett.111.080502/supplemental/SM.pdf",
     sha256: "abc123",
     recordPath: "knowledge-base/sources/aps/10.1103-PhysRevLett.111.080502/acquisition.json",
     title: "Supplemental Material"
@@ -82,7 +82,7 @@ test("parseExtensionHostResponse accepts supplemental_registered responses", () 
     jobId: "job-supplement",
     articleUrl: "https://journals.aps.org/prl/abstract/10.1103/PhysRevLett.111.080502",
     materialUrl: "https://journals.aps.org/prl/supplemental/10.1103/PhysRevLett.111.080502/SM.pdf",
-    path: "knowledge-base/raw/supplemental/aps/10.1103-PhysRevLett.111.080502/SM.pdf",
+    path: "knowledge-base/sources/aps-10.1103-PhysRevLett.111.080502/supplemental/SM.pdf",
     sha256: "abc123",
     recordPath: "knowledge-base/sources/aps/10.1103-PhysRevLett.111.080502/acquisition.json",
     title: "Supplemental Material"
@@ -212,7 +212,7 @@ Expected: FAIL from TypeScript compile errors for missing `supplementalMaterials
 
 - [ ] **Step 3: Add data model and path support**
 
-Add `rawSupplementalRoot: string` to `PaperLibraryPaths` in `src/agent/knowledge-base.ts` and set it to `path.join(rawRoot, "supplemental")`.
+Keep `PaperLibraryPaths` focused on global roots. Supplemental files are placed under the resolved source directory for the publisher record.
 
 Add this exported interface in `src/agent/paper/types.ts`:
 
@@ -283,7 +283,7 @@ test("handleExtensionHostMessage registers APS supplemental material on the publ
     assert.equal(response.type, "supplemental_registered");
     assert.equal(response.articleUrl, articleUrl);
     assert.equal(response.materialUrl, materialUrl);
-    assert.match(response.path, /knowledge-base\/raw\/supplemental\/aps\/10\.1103-PhysRevLett\.111\.080502\/SM\.pdf$/);
+    assert.match(response.path, /knowledge-base\/sources\/aps-10\.1103-PhysRevLett\.111\.080502\/supplemental\/SM\.pdf$/);
 
     const recordPath = resolvePaperRecordPath({
       workspaceDir,
@@ -336,12 +336,9 @@ function sanitizeSupplementalFilename(value: string | undefined, materialUrl: st
   return cleaned || "supplemental-material";
 }
 
-function supplementalCanonicalDirectoryName(canonicalId: string): string {
-  return canonicalId.replace(/[<>:"/\\|?*\u0000-\u001F]+/g, "-");
-}
 ```
 
-The registration function resolves the supported publisher canonical ID, writes the decoded bytes under `resolvePaperLibraryPaths(workspaceDir).rawSupplementalRoot`, reads any existing record, merges the material by `url`, and writes a `publisher_pending` record when no record exists.
+The registration function resolves the supported publisher canonical ID, writes the decoded PDF bytes under `path.dirname(resolvePaperRecordPath(...))/supplemental/`, reads any existing record, merges the material by `url`, and writes a `publisher_pending` record when no record exists.
 
 - [ ] **Step 5: Run the native-host test and verify GREEN**
 
@@ -490,7 +487,7 @@ const MAX_SUPPLEMENTAL_MATERIAL_COUNT = 8;
 const MAX_SUPPLEMENTAL_MATERIAL_BYTES = 32 * 1024 * 1024;
 ```
 
-Add `fetchSupplementalMaterials(job, candidates)` that deduplicates URLs, fetches with browser credentials, checks the size cap, base64-encodes bytes, and sends `register_supplemental_material`. Call it from `handlePaperPageClassified` after webpage snapshot handling and before `startAutomaticDownload(job, message.pdfUrl)`.
+Add `fetchSupplementalMaterials(job, candidates)` that deduplicates URLs, fetches with browser credentials, checks the size cap, verifies the response is a PDF, base64-encodes bytes, and sends `register_supplemental_material`. Call it from `handlePaperPageClassified` after webpage snapshot handling and before `startAutomaticDownload(job, message.pdfUrl)`.
 
 - [ ] **Step 4: Run the browser-extension test and verify GREEN**
 

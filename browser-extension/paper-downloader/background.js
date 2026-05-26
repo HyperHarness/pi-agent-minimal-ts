@@ -100,6 +100,18 @@ function arrayBufferToBase64(buffer) {
   return btoa(binary);
 }
 
+function arrayBufferStartsWithPdf(buffer) {
+  var bytes = new Uint8Array(buffer);
+  return (
+    bytes.length >= 5 &&
+    bytes[0] === 0x25 &&
+    bytes[1] === 0x50 &&
+    bytes[2] === 0x44 &&
+    bytes[3] === 0x46 &&
+    bytes[4] === 0x2d
+  );
+}
+
 function stringToBase64(value) {
   if (typeof btoa !== "function" && typeof Buffer !== "undefined") {
     return Buffer.from(value, "binary").toString("base64");
@@ -332,6 +344,10 @@ async function fetchSupplementalMaterials(job, candidates) {
       if (buffer.byteLength > MAX_SUPPLEMENTAL_MATERIAL_BYTES) {
         throw new Error("Supplemental material exceeds the size limit.");
       }
+      var mimeType = response.headers.get("content-type") || "";
+      if (mimeType.toLowerCase().indexOf("application/pdf") === -1 && !arrayBufferStartsWithPdf(buffer)) {
+        throw new Error("Supplemental material response is not a downloaded PDF.");
+      }
 
       await sendNativeMessage({
         type: "register_supplemental_material",
@@ -341,7 +357,7 @@ async function fetchSupplementalMaterials(job, candidates) {
         materialUrl: candidate.url,
         materialBase64: arrayBufferToBase64(buffer),
         filename: candidate.filename || supplementalFilenameFromUrl(candidate.url),
-        ...(response.headers.get("content-type") ? { mimeType: response.headers.get("content-type") } : {}),
+        ...(mimeType ? { mimeType } : {}),
         ...(candidate.title ? { title: candidate.title } : {})
       });
       registeredCount += 1;

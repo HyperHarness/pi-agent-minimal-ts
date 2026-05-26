@@ -13,7 +13,6 @@ import {
   type ExtensionHostResponse
 } from "./paper-extension-protocol.js";
 import { parsePaperWebPageHtmlWithPandoc } from "../acquisition/paper-webpage-fetch.js";
-import { resolvePaperLibraryPaths } from "../../knowledge-base.js";
 import { savePaperWebPageParse } from "../reading/engines/webpage.js";
 import { parsePaper } from "../reading/paper-reader.js";
 import type { PaperParseResult } from "../reading/types.js";
@@ -21,6 +20,7 @@ import {
   readPaperRecord,
   resolveExternalPaperPdfPath,
   resolvePaperPdfPath,
+  resolvePaperRecordPath,
   updatePaperRecordParseManifest,
   updatePaperRecordReadingFailure,
   writePaperRecord
@@ -155,6 +155,17 @@ async function registerWebpageSnapshot(options: {
 }): Promise<ExtensionHostResponse> {
   try {
     const pageUrl = options.message.finalUrl ?? options.message.articleUrl;
+    if (
+      options.message.source !== "external" &&
+      (isPublisherSupplementalUrl(pageUrl) || isPublisherSupplementalUrl(options.message.articleUrl))
+    ) {
+      return registrationError({
+        jobId: options.message.jobId,
+        code: "supplemental_webpage_snapshot_unsupported",
+        message: "Supplemental material pages are not registered as standalone wiki sources; download the supplemental PDF instead."
+      });
+    }
+
     const extraction = await parsePaperWebPageHtmlWithPandoc({
       url: pageUrl,
       html: options.message.html
@@ -272,12 +283,24 @@ async function registerSupplementalMaterial(options: {
       message: "Supplemental material bytes are empty."
     });
   }
+  if (!materialBytes.subarray(0, PDF_SIGNATURE.byteLength).equals(PDF_SIGNATURE)) {
+    return registrationError({
+      jobId: options.message.jobId,
+      code: "supplement_not_pdf",
+      message: "Supplemental material registration only accepts downloaded PDF files."
+    });
+  }
 
   const filename = sanitizeSupplementalFilename(options.message.filename, options.message.materialUrl);
-  const downloadPath = path.join(
-    resolvePaperLibraryPaths(options.workspaceDir).rawSupplementalRoot,
+  const targetRecordPath = resolvePaperRecordPath({
+    workspaceDir: options.workspaceDir,
     source,
-    supplementalCanonicalDirectoryName(canonicalId),
+    canonicalId,
+    articleUrl: options.message.articleUrl
+  });
+  const downloadPath = path.join(
+    path.dirname(targetRecordPath),
+    "supplemental",
     filename
   );
   await mkdir(path.dirname(downloadPath), { recursive: true });
@@ -386,8 +409,28 @@ function sanitizeSupplementalFilename(value: string | undefined, materialUrl: st
   return cleaned || "supplemental-material";
 }
 
-function supplementalCanonicalDirectoryName(canonicalId: string): string {
-  return canonicalId.replace(/[<>:"/\\|?*\u0000-\u001F]+/g, "-");
+function isPublisherSupplementalUrl(value: string | undefined): boolean {
+  if (!value) {
+    return false;
+  }
+  try {
+    const parsed = new URL(value);
+    const pathname = parsed.pathname.toLowerCase();
+    return (
+      pathname.includes("/supplemental/") ||
+      pathname.includes("/doi/suppl/") ||
+      pathname.includes("suppl_file") ||
+      pathname.includes("supplementary")
+    );
+  } catch {
+    const normalized = value.toLowerCase();
+    return (
+      normalized.includes("/supplemental/") ||
+      normalized.includes("/doi/suppl/") ||
+      normalized.includes("suppl_file") ||
+      normalized.includes("supplementary")
+    );
+  }
 }
 
 async function resolveRecordForExtensionMessage(input: {

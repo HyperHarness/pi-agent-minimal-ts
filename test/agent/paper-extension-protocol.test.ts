@@ -282,7 +282,7 @@ test("parseExtensionHostResponse accepts supplemental_registered responses", () 
     jobId: "job-supplement",
     articleUrl: "https://journals.aps.org/prl/abstract/10.1103/PhysRevLett.111.080502",
     materialUrl: "https://journals.aps.org/prl/supplemental/10.1103/PhysRevLett.111.080502/SM.pdf",
-    path: "knowledge-base/raw/supplemental/aps/10.1103-PhysRevLett.111.080502/SM.pdf",
+    path: "knowledge-base/sources/aps-10.1103-PhysRevLett.111.080502/supplemental/SM.pdf",
     sha256: "abc123",
     recordPath: "knowledge-base/sources/aps/10.1103-PhysRevLett.111.080502/acquisition.json",
     title: "Supplemental Material"
@@ -293,7 +293,7 @@ test("parseExtensionHostResponse accepts supplemental_registered responses", () 
     jobId: "job-supplement",
     articleUrl: "https://journals.aps.org/prl/abstract/10.1103/PhysRevLett.111.080502",
     materialUrl: "https://journals.aps.org/prl/supplemental/10.1103/PhysRevLett.111.080502/SM.pdf",
-    path: "knowledge-base/raw/supplemental/aps/10.1103-PhysRevLett.111.080502/SM.pdf",
+    path: "knowledge-base/sources/aps-10.1103-PhysRevLett.111.080502/supplemental/SM.pdf",
     sha256: "abc123",
     recordPath: "knowledge-base/sources/aps/10.1103-PhysRevLett.111.080502/acquisition.json",
     title: "Supplemental Material"

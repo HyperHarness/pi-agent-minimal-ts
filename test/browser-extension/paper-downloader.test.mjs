@@ -732,6 +732,54 @@ test("background registers supplemental materials without blocking the main PDF 
   assert.equal(messagesOf(fakeChrome, "register_download_bytes").length, 1);
 });
 
+test("background ignores non-PDF supplemental responses without blocking the main PDF download", async () => {
+  const job = {
+    jobId: "job-aps-supplement-html",
+    articleUrl: "https://journals.aps.org/prl/abstract/10.1103/PhysRevLett.111.080502",
+    source: "aps",
+    title: "APS paper"
+  };
+  const fakeChrome = createFakeChrome({
+    jobs: [job],
+    fetchImpl: async (url) => {
+      if (String(url).includes("/supplemental/")) {
+        return new Response("<html>Supplemental listing</html>", {
+          status: 200,
+          headers: { "content-type": "text/html" }
+        });
+      }
+      return new Response(Buffer.from("%PDF-1.7\nmain pdf\n"), {
+        status: 200,
+        headers: { "content-type": "application/pdf" }
+      });
+    }
+  });
+
+  await importBackground(fakeChrome);
+  fakeChrome.events.onMessage.emit(
+    {
+      type: "paper_page_classified",
+      status: "page_classified",
+      pdfUrl: "https://journals.aps.org/prl/pdf/10.1103/PhysRevLett.111.080502",
+      supplementalMaterials: [
+        {
+          url: "https://journals.aps.org/prl/supplemental/10.1103/PhysRevLett.111.080502",
+          title: "Supplemental Material"
+        }
+      ]
+    },
+    { tab: { id: 100 } }
+  );
+  await flushAsyncWork();
+
+  assert.equal(messagesOf(fakeChrome, "register_supplemental_material").length, 0);
+  assert.equal(messagesOf(fakeChrome, "register_download_bytes").length, 1);
+  assert.equal(
+    messagesOf(fakeChrome, "job_status").some((message) => message.status === "supplemental_material_failed"),
+    true
+  );
+});
+
 test("background gates publisher PDF downloads on complete webpage snapshot quality", async () => {
   const job = {
     jobId: "job-download-and-webpage-poor",
