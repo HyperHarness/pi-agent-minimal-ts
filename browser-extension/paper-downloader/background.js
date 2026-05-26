@@ -112,6 +112,75 @@ function arrayBufferStartsWithPdf(buffer) {
   );
 }
 
+function arrayBufferToUtf8(buffer) {
+  if (typeof TextDecoder === "function") {
+    return new TextDecoder("utf-8").decode(buffer);
+  }
+  if (typeof Buffer !== "undefined") {
+    return Buffer.from(new Uint8Array(buffer)).toString("utf8");
+  }
+  var bytes = new Uint8Array(buffer);
+  var value = "";
+  for (var index = 0; index < bytes.length; index += 1) {
+    value += String.fromCharCode(bytes[index]);
+  }
+  try {
+    return decodeURIComponent(escape(value));
+  } catch (error) {
+    return value;
+  }
+}
+
+function decodeHtmlAttribute(value) {
+  return String(value || "")
+    .replace(/&amp;/g, "&")
+    .replace(/&quot;/g, '"')
+    .replace(/&#39;/g, "'")
+    .replace(/&lt;/g, "<")
+    .replace(/&gt;/g, ">");
+}
+
+function stripHtmlTags(value) {
+  return String(value || "").replace(/<[^>]*>/g, " ").replace(/\s+/g, " ").trim();
+}
+
+function extractSupplementalPdfCandidatesFromHtml(html, baseUrl, fallbackTitle) {
+  var results = [];
+  var seen = {};
+  var anchorPattern = /<a\b([^>]*)>([\s\S]*?)<\/a>/gi;
+  var match;
+  while ((match = anchorPattern.exec(String(html || ""))) && results.length < MAX_SUPPLEMENTAL_MATERIAL_COUNT) {
+    var attributes = match[1] || "";
+    var hrefMatch = attributes.match(/\bhref\s*=\s*(["'])([\s\S]*?)\1/i);
+    if (!hrefMatch || !hrefMatch[2]) {
+      continue;
+    }
+
+    var href = decodeHtmlAttribute(hrefMatch[2]);
+    if (!/\.pdf(?:[?#]|$)/i.test(href) && href.toLowerCase().indexOf("/supplemental/") === -1) {
+      continue;
+    }
+
+    var url;
+    try {
+      url = new URL(href, baseUrl).toString();
+    } catch (error) {
+      continue;
+    }
+    if (seen[url] || !/\.pdf(?:[?#]|$)/i.test(url)) {
+      continue;
+    }
+
+    seen[url] = true;
+    results.push({
+      url,
+      title: stripHtmlTags(match[2]) || fallbackTitle || "Supplemental Material",
+      filename: supplementalFilenameFromUrl(url)
+    });
+  }
+  return results;
+}
+
 function stringToBase64(value) {
   if (typeof btoa !== "function" && typeof Buffer !== "undefined") {
     return Buffer.from(value, "binary").toString("base64");
@@ -328,8 +397,9 @@ async function fetchSupplementalMaterials(job, candidates) {
 
   var seen = {};
   var registeredCount = 0;
-  for (var index = 0; index < candidates.length && registeredCount < MAX_SUPPLEMENTAL_MATERIAL_COUNT; index += 1) {
-    var candidate = candidates[index] || {};
+  var queue = candidates.slice();
+  for (var index = 0; index < queue.length && registeredCount < MAX_SUPPLEMENTAL_MATERIAL_COUNT; index += 1) {
+    var candidate = queue[index] || {};
     if (!candidate.url || seen[candidate.url]) {
       continue;
     }
@@ -346,6 +416,21 @@ async function fetchSupplementalMaterials(job, candidates) {
       }
       var mimeType = response.headers.get("content-type") || "";
       if (mimeType.toLowerCase().indexOf("application/pdf") === -1 && !arrayBufferStartsWithPdf(buffer)) {
+        if (mimeType.toLowerCase().indexOf("text/html") !== -1) {
+          var linkedPdfCandidates = extractSupplementalPdfCandidatesFromHtml(
+            arrayBufferToUtf8(buffer),
+            response.url || candidate.url,
+            candidate.title
+          );
+          if (linkedPdfCandidates.length > 0) {
+            for (var linkedIndex = 0; linkedIndex < linkedPdfCandidates.length; linkedIndex += 1) {
+              if (!seen[linkedPdfCandidates[linkedIndex].url]) {
+                queue.push(linkedPdfCandidates[linkedIndex]);
+              }
+            }
+            continue;
+          }
+        }
         throw new Error("Supplemental material response is not a downloaded PDF.");
       }
 
@@ -354,7 +439,7 @@ async function fetchSupplementalMaterials(job, candidates) {
         jobId: job.jobId,
         articleUrl: job.articleUrl,
         source: job.source,
-        materialUrl: candidate.url,
+        materialUrl: response.url || candidate.url,
         materialBase64: arrayBufferToBase64(buffer),
         filename: candidate.filename || supplementalFilenameFromUrl(candidate.url),
         ...(mimeType ? { mimeType } : {}),

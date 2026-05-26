@@ -780,6 +780,74 @@ test("background ignores non-PDF supplemental responses without blocking the mai
   );
 });
 
+test("background follows APS supplemental listing pages to downloadable PDFs", async () => {
+  const fetchCalls = [];
+  const job = {
+    jobId: "job-aps-supplement-listing",
+    articleUrl: "https://journals.aps.org/prl/abstract/10.1103/PhysRevLett.111.080502",
+    source: "aps",
+    title: "APS paper"
+  };
+  const listingUrl = "https://journals.aps.org/prl/supplemental/10.1103/PhysRevLett.111.080502";
+  const pdfUrl =
+    "https://journals.aps.org/prl/supplemental/10.1103/PhysRevLett.111.080502/Barends2013supp.pdf";
+  const fakeChrome = createFakeChrome({
+    jobs: [job],
+    fetchImpl: async (url, init) => {
+      fetchCalls.push({ url, init });
+      if (String(url) === listingUrl) {
+        return new Response(
+          `<html><body><a href="/prl/supplemental/10.1103/PhysRevLett.111.080502/Barends2013supp.pdf">Barends2013supp.pdf</a></body></html>`,
+          {
+            status: 200,
+            headers: { "content-type": "text/html; charset=utf-8" }
+          }
+        );
+      }
+      if (String(url) === pdfUrl) {
+        return new Response(Buffer.from("%PDF-1.7\nsupplement pdf\n"), {
+          status: 200,
+          headers: { "content-type": "application/pdf" }
+        });
+      }
+      if (String(url) === "https://journals.aps.org/prl/pdf/10.1103/PhysRevLett.111.080502") {
+        return new Response(Buffer.from("%PDF-1.7\nmain pdf\n"), {
+          status: 200,
+          headers: { "content-type": "application/pdf" }
+        });
+      }
+      return new Response("not found", { status: 404 });
+    }
+  });
+
+  await importBackground(fakeChrome);
+  fakeChrome.events.onMessage.emit(
+    {
+      type: "paper_page_classified",
+      status: "page_classified",
+      pdfUrl: "https://journals.aps.org/prl/pdf/10.1103/PhysRevLett.111.080502",
+      supplementalMaterials: [
+        {
+          url: listingUrl,
+          title: "Supplemental Material"
+        }
+      ]
+    },
+    { tab: { id: 100 } }
+  );
+  await flushAsyncWork();
+
+  assert.deepEqual(
+    fetchCalls.map((call) => call.url).slice(0, 2),
+    [listingUrl, pdfUrl]
+  );
+  const supplemental = messagesOf(fakeChrome, "register_supplemental_material")[0];
+  assert.equal(supplemental.materialUrl, pdfUrl);
+  assert.equal(supplemental.filename, "Barends2013supp.pdf");
+  assert.equal(messagesOf(fakeChrome, "register_download_bytes").length, 1);
+  assert.equal(statusMessagesOf(fakeChrome, "supplemental_material_failed").length, 0);
+});
+
 test("background gates publisher PDF downloads on complete webpage snapshot quality", async () => {
   const job = {
     jobId: "job-download-and-webpage-poor",
