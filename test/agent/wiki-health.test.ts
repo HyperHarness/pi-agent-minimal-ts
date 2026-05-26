@@ -349,10 +349,10 @@ test("checkWikiHealth excludes non-paper source manifests from paper repair issu
   const workspace = await createWorkspace();
 
   try {
-    const sourceKey = "design-artifact-single-xmon-concept";
+    const sourceKey = "code-output-single-xmon-concept";
     await writeText(
       path.join(workspace, "knowledge-base", "sources", sourceKey, "summary.md"),
-      "# Single Xmon Concept Layout\n\nA local design artifact summary.\n"
+      "# Single Xmon Concept Layout\n\nA local code-output summary.\n"
     );
     await writeText(
       path.join(workspace, "design-repo", "design-artifacts", "single-xmon-concept", "README.md"),
@@ -364,7 +364,7 @@ test("checkWikiHealth excludes non-paper source manifests from paper repair issu
     );
     await writeJson(path.join(workspace, "knowledge-base", "manifests", `${sourceKey}.json`), {
       schemaVersion: 2,
-      sourceKind: "design-artifact",
+      sourceKind: "code-output",
       sourceKey,
       title: "Single Xmon Concept Layout",
       status: "needs_review",
@@ -378,7 +378,7 @@ test("checkWikiHealth excludes non-paper source manifests from paper repair issu
         kind: "script",
         path: "design-repo/design-artifacts/single-xmon-concept/code/layout.py"
       }],
-      tags: ["design-artifact"],
+      tags: ["code-output"],
       relatedSourceKeys: [],
       synthesisPageKeys: []
     });

@@ -745,19 +745,19 @@ test("lintPaperWiki does not require synthesis coverage for needs_review V2 sour
   const workspace = await createWorkspace();
 
   try {
-    const sourceKey = "design-artifact-single-xmon-concept";
+    const sourceKey = "code-output-single-xmon-concept";
     await writeSource(
       workspace,
       sourceKey,
       `
 # Single Xmon Concept Layout
 
-Local design artifact awaiting review.
+Local code output awaiting review.
 `
     );
     await writeJson(path.join(workspace, "knowledge-base", "manifests", `${sourceKey}.json`), {
       schemaVersion: 2,
-      sourceKind: "design-artifact",
+      sourceKind: "code-output",
       sourceKey,
       title: "Single Xmon Concept Layout",
       status: "needs_review",
@@ -766,7 +766,7 @@ Local design artifact awaiting review.
       summaryPath: `knowledge-base/sources/${sourceKey}/summary.md`,
       provenance: {},
       artifacts: [],
-      tags: ["design-artifact"],
+      tags: ["code-output"],
       relatedSourceKeys: [],
       synthesisPageKeys: []
     });

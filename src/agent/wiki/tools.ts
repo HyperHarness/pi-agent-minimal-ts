@@ -133,7 +133,6 @@ const wikiSourceKindParameter = Type.Union([
   Type.Literal("standard"),
   Type.Literal("lab-note"),
   Type.Literal("code-output"),
-  Type.Literal("design-artifact"),
   Type.Literal("webpage"),
   Type.Literal("manual")
 ], { description: "Wiki source manifest kind to include." });

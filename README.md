@@ -470,28 +470,23 @@ design-repo/
     outputs/
 ```
 
-Use `design-repo/design-code/` for maintained executable design code, Python package modules, simulations, generated-layout scripts, and project-local tests. Use `design-repo/design-records/` for structured design evidence. These are design-agent-owned assets; `knowledge-base/` remains wiki-agent-owned and can contain curated summaries/manifests that cite the design assets.
+Use `design-repo/design-code/` for maintained executable design code, Python package modules, simulations, generated-layout scripts, and project-local tests. Use `design-repo/design-records/` for structured design evidence. These are design-agent-owned assets; `knowledge-base/` remains wiki-agent-owned and should only contain distilled wiki knowledge pages that cite design assets when the wiki-agent promotes design results.
 
 `design-repo/design-code/` is a nested Git repository and should be treated as its own design-code package, not as normal source inside the TypeScript repo. The bridge-side repo manager can point `BRIDGE_DESIGN_WORKSPACE_DIR` at this directory when design code needs independent status/diff/commit/push operations.
 
-Use `design-repo/design-artifacts/<experiment-key>/` for design-agent experiment outputs that should become part of the local searchable knowledge base. The path contract is:
+Use `design-repo/design-artifacts/<experiment-key>/` for design-agent experiment outputs and design-side source records. These are not wiki source summaries; they stay in the design repository until the wiki-agent distills them into durable knowledge pages. The path contract is:
 
 ```text
 design-repo/design-artifacts/<experiment-key>/
+  README.md   # concise design-side source summary and scope
+  manifest.json
   code/       # runnable experiment scripts, notebooks, and small helper modules
   layouts/    # generated layout data such as GDS/OAS/DXF
   logs/       # DRC/LVS/simulation/tool logs
   results/    # extracted metrics, tables, reports, screenshots, and summaries
 ```
 
-Every searchable design artifact should also publish a wiki source summary and manifest:
-
-```text
-knowledge-base/sources/design-artifact-<experiment-key>/summary.md
-knowledge-base/manifests/design-artifact-<experiment-key>.json
-```
-
-The manifest should use `sourceKind: "design-artifact"` and list scripts, layout files, logs, and results in `artifacts`. The summary is the wiki-agent retrieval surface; large binary layout files stay under `design-repo/design-artifacts/`. For explicit retrieval, call `search_paper_wiki` with `sourceKinds: ["design-artifact"]` or build a durable `pages/` synthesis page that cites the design-artifact source.
+Do not create `knowledge-base/sources/design-artifact-*` entries. When a design result becomes useful to the wiki, the wiki-agent should read the design artifact and write a highly condensed `knowledge-base/pages/` knowledge entry with explicit citations back to `design-repo/design-artifacts/...`.
 
 The initial design workspace is the `pi_chip_design` Python package under `design-repo/design-code/`. It should hold reusable layout-generation and verification code, with layout families added under `src/pi_chip_design/layouts/`. Its local development setup uses `uv` to sync dependencies into the repository root virtual environment:
 

@@ -22,7 +22,6 @@ export type WikiSourceKind =
   | "standard"
   | "lab-note"
   | "code-output"
-  | "design-artifact"
   | "webpage"
   | "manual";
 
@@ -89,7 +88,6 @@ export const WIKI_SOURCE_KINDS: readonly WikiSourceKind[] = [
   "standard",
   "lab-note",
   "code-output",
-  "design-artifact",
   "webpage",
   "manual"
 ];

@@ -4,6 +4,7 @@ import path from "node:path";
 import { mkdir, mkdtemp, readFile, rm, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import {
+  isWikiSourceKind,
   normalizeWikiSourceManifest,
   readNormalizedWikiSourceManifest,
   writeWikiSourceManifestV2,
@@ -73,6 +74,11 @@ test("writeWikiSourceManifestV2 writes a generalized software-doc manifest", asy
     assert.equal(persisted.sourceKey, "software-doc-hfss-eigenmode");
     assert.equal(persisted.provenance.softwareName, "Ansys HFSS");
   });
+});
+
+test("wiki source kinds exclude design artifacts owned by design-repo", () => {
+  assert.equal(isWikiSourceKind("design-artifact"), false);
+  assert.equal(isWikiSourceKind("code-output"), true);
 });
 
 test("normalizeWikiSourceManifest maps legacy paper manifests into generalized shape", () => {

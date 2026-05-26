@@ -29,7 +29,7 @@ Local CLI / local harness
 - `src/wiki-agent.ts` 和 `src/design-agent.ts` 是公开 CLI/RPC 包装入口，分别固定 wiki/paper 和 design/code 工作边界；`src/agent/agent-cli.ts` 负责本地 CLI/RPC 进程形态，`src/agent/agent-runtime.ts` 负责一次 agent turn 怎么运行。
 - `src/agent/agent-routing.ts` 保留内部/routed-agent 兼容路由，并在 wiki/paper 流程中识别 `paper-download-subagent`、`wiki-evidence-worker` 或 `paper-writing-worker`。公开 design/code/dependency/layout/verification 工作应从 `design-agent` 入口进入，而不是依赖通用入口自动推断，也不是从 Feishu 默认 wiki-agent 入口绕行。
 - `src/agent/tools.ts` 是工具装配中心，按各领域工具 factory 的命名分组拼出默认/full 工具面；worker 可见工具面的白名单定义在 `src/agent/tool-types.ts`。
-- `wiki-agent` 可以更新 wiki pages、aliases、paper-backed knowledge records，并读取 design-agent 产出的 design records、design-artifact summaries/manifests 和布局结果；它不编辑 `design-repo/design-code/`，不安装 Python 包，不运行 layout 脚本。
+- `wiki-agent` 可以更新 wiki pages、aliases、paper-backed knowledge records，并读取 design-agent 产出的 design records、design-artifact manifests 和布局结果；它不编辑 `design-repo/design-code/`，不安装 Python 包，不运行 layout 脚本。Design artifacts 不进入 `knowledge-base/sources/`；进入 wiki 时应被浓缩成 `knowledge-base/pages/` 知识条目并引用 `design-repo/` 资产。
 - `design-agent` 可以编辑 `design-repo/design-code/`、声明依赖、用 `uv sync` 同步根 `.venv`、验证 Python import、运行 sandboxed layout/verification 脚本、写 design records；它只能读取 wiki/paper evidence，不能调用 wiki page 写入、paper download 或 web search 工具。
 - 论文能力分三层：检索/下载由 `paper-manager.ts` 和 `paper-download.ts` 承担，持久记录由 `paper-store.ts` 承担，解析和阅读由 `paper-reader/**` 承担。
 - 论文工具适配层位于 `src/agent/paper/tools.ts`，和 paper 领域服务放在同一目录树下。
@@ -112,7 +112,7 @@ Local CLI / local harness
 1. `search_paper_wiki`、`write_paper_wiki_source`、`build_wiki_page`、`answer_research_question` 等工具在 `src/agent/wiki/tools.ts`。
 2. `wiki/workspace-contract.ts` 给出 `knowledge-base/` 的 authoritative lifecycle roots；`wiki/store.ts` 保留兼容路径 helper，并逐步委托到 workspace contract。
 3. `wiki/page-schema.ts` 和 `wiki/typed-store.ts` 解析、验证、列出、写入 typed Markdown pages；坏 frontmatter 不会让整库读取失败，而是转成 diagnostics。Evidence-audit metadata 也在这一层校验：`knowledge_state`、`last_reviewed_at`、`freshness_audit`、`claims`、`typed_relations`、`experiment_refs`、`reviewer_critique`。Knowledge state 的稳定枚举是 `established`、`promising_unverified`、`speculative`、`disputed`。
-4. `wiki/manifest-store.ts` 为 source summary 写入/回填 source manifest；V2 manifest 用 `sourceKind`/`sourceKey` 覆盖论文、材料数据库、软件文档、标准、vendor note、lab note、code output、design artifact、webpage、manual 等非论文证据，并在读取时校验 manifest 文件 key 与内部 `sourceKey` 一致。
+4. `wiki/manifest-store.ts` 为 source summary 写入/回填 source manifest；V2 manifest 用 `sourceKind`/`sourceKey` 覆盖论文、材料数据库、软件文档、标准、vendor note、lab note、code output、webpage、manual 等非论文证据，并在读取时校验 manifest 文件 key 与内部 `sourceKey` 一致。Design artifacts 的 source/manifest 属于 `design-repo/`，不是 wiki source kind。
 5. `wiki/retrieval-contract.ts` 提供 read-only evidence API，把 source summaries、manifests、typed pages、knowledge state、review date、claim provenance、typed relations、experiment refs 和 reviewer critique 统一成下游可消费的 evidence item；坏 manifest 或身份不一致的 manifest 只能返回 diagnostics，不能把内部 key 当可信引用传播。
 6. `wiki/retrieval-search.ts` 做结构化 evidence search，按 title/alias/tag/source_ref/body 以及 typed claims/relations 打分并返回 match reasons、freshness/knowledge-state warnings 和 insufficient-evidence status；`content.ts` 的 `searchPaperWiki()` 优先使用它，再按需回退到旧正文搜索。公开工具 `search_paper_wiki` 会把 `sourceKinds`、`pageTypes`、`claimKinds`、`knowledgeStates`、`evidenceContracts` 和 `maxEvidenceAgeDays` 传到这一层。
 7. `wiki/page-templates.ts` 根据 query 和 `sourceKind` 推断 concept/method/finding/dataset/capability-boundary/design-record 模板，给 page worker 生成必需章节指导；`build_wiki_page` 在 write 模式落盘前校验必需章节，缺失时返回 `needs_worker`。Page synthesis 通过 `wiki/evidence-pack.ts` 把候选 source summaries、选中的 raw chunks、claim provenance 和 contradiction notes 作为固定证据包交给 clean-context worker。
@@ -133,7 +133,7 @@ Local CLI / local harness
 5. `verify_design_python_import` 使用根 `.venv/bin/python` 检查包是否可 import。对 `gdsfactory` 这类需求，正确路径是 dependency declaration -> `sync_design_environment` -> import verification，而不是 assistant 或 agent 直接运行 `pip install`。
 6. `run_design_script` 只运行 `design-repo/design-code/` 下的 `.py` layout/verification 脚本或 KLayout batch script。Python 脚本通过根 `.venv/bin/python` 运行，并要求系统存在 `bwrap`。
 7. `run_design_script` 会把 `design-repo/design-code/` 复制到临时 workspace，在 `bwrap` 中用只读根文件系统和可写临时 design-code 副本执行脚本，然后只把调用者声明的 design-code 输出复制回真实 `design-repo/design-code/`。这阻止脚本用绝对路径修改 TypeScript repo、wiki pages、sources 或其它 workspace 文件。
-8. 设计结果进入 wiki 的方式是异步的：design-agent 产出 design-code、GDS/logs/results、design records 或 design-artifact summaries/manifests；wiki-agent 再读取这些产物，用 `build_wiki_page` / `wiki_lint` / `wiki_review_page` 把经过证据约束的结论提升为 durable wiki pages。
+8. 设计结果进入 wiki 的方式是异步的：design-agent 产出 design-code、GDS/logs/results、design records 或 design-artifact manifests；wiki-agent 再读取这些产物，用 `build_wiki_page` / `wiki_lint` / `wiki_review_page` 把经过证据约束的结论高度浓缩为 durable wiki pages。不要把 design artifact 作为 `knowledge-base/sources/design-artifact-*` 写入。
 9. `design-repo/design-code/` 是嵌套 Git 仓库，通常由 bridge repo manager 的 `design` workspace 单独 status/diff/commit/push。TypeScript 主 repo 不应把设计代码当普通 `src/**` 变更管理。
 
 ### Feishu 消息
