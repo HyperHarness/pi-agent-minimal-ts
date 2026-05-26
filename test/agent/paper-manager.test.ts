@@ -980,17 +980,18 @@ test("downloadPaper enriches source citation metadata after a supported publishe
     });
 
     assert.equal(result.status, "downloaded");
-    const sourcePath = path.join(path.dirname(result.recordPath), "source.json");
-    const source = JSON.parse(await readFile(sourcePath, "utf8"));
+    const metadataPath = path.join(path.dirname(result.recordPath), "metadata.json");
+    const metadata = JSON.parse(await readFile(metadataPath, "utf8"));
 
-    assert.equal(source.title, "Quantum error correction below the surface code threshold");
-    assert.deepEqual(source.authors, ["Google Quantum AI", "A. Researcher"]);
-    assert.equal(source.year, 2025);
-    assert.equal(source.venue, "Nature");
-    assert.equal(source.doi, "10.1038/s41586-024-08449-y");
-    assert.equal(source.citationStatus, "complete");
-    assert.deepEqual(source.missingFields, []);
-    assert.equal(source.resolvedFrom, "crossref_api");
+    assert.equal(metadata.title, "Quantum error correction below the surface code threshold");
+    assert.deepEqual(metadata.citation.authors, ["Google Quantum AI", "A. Researcher"]);
+    assert.equal(metadata.citation.year, 2025);
+    assert.equal(metadata.citation.venue, "Nature");
+    assert.equal(metadata.citation.doi, "10.1038/s41586-024-08449-y");
+    assert.equal(metadata.citation.citationStatus, "complete");
+    assert.equal(metadata.status, "ready");
+    assert.deepEqual(metadata.citation.missingFields, []);
+    assert.equal(metadata.citation.resolvedFrom, "crossref_api");
     assert.equal(citationFetchCalls.length, 1);
   } finally {
     await rm(workspaceDir, { recursive: true, force: true });

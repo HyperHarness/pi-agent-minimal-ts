@@ -255,13 +255,14 @@ test("handleExtensionHostMessage registers supported publisher PDFs using canoni
     });
     assert.equal(savedRecord.download.status, "downloaded");
     assert.equal(savedRecord.reading.status, "not_ready");
-    const source = JSON.parse(await readFile(path.join(path.dirname(expectedRecordPath), "source.json"), "utf8"));
-    assert.equal(source.title, "Quantum error correction below the surface code threshold");
-    assert.deepEqual(source.authors, ["Google Quantum AI", "A. Researcher"]);
-    assert.equal(source.year, 2025);
-    assert.equal(source.venue, "Nature");
-    assert.equal(source.citationStatus, "complete");
-    assert.deepEqual(source.missingFields, []);
+    const metadata = JSON.parse(await readFile(path.join(path.dirname(expectedRecordPath), "metadata.json"), "utf8"));
+    assert.equal(metadata.title, "Quantum error correction below the surface code threshold");
+    assert.deepEqual(metadata.citation.authors, ["Google Quantum AI", "A. Researcher"]);
+    assert.equal(metadata.citation.year, 2025);
+    assert.equal(metadata.citation.venue, "Nature");
+    assert.equal(metadata.citation.citationStatus, "complete");
+    assert.equal(metadata.status, "ready");
+    assert.deepEqual(metadata.citation.missingFields, []);
     const events = await readPaperDownloadJobEvents({ workspaceDir });
     assert.equal(events.at(-1)?.status, "downloaded");
     assert.equal(events.at(-1)?.recordPath, expectedRecordPath);
@@ -678,7 +679,7 @@ test("handleExtensionHostMessage rejects supplemental webpage snapshots as stand
       null
     );
     await assert.rejects(
-      readFile(path.join(workspaceDir, "knowledge-base", "sources", "doi-10.1103-PhysRevLett.111.080502", "source.json"), "utf8"),
+      readFile(path.join(workspaceDir, "knowledge-base", "sources", "doi-10.1103-PhysRevLett.111.080502", "metadata.json"), "utf8"),
       { code: "ENOENT" }
     );
   } finally {

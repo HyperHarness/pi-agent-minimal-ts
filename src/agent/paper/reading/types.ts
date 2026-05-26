@@ -77,7 +77,8 @@ export interface PaperReaderSource {
 }
 
 export interface PaperParseArtifactPaths {
-  sourcePath: string;
+  metadataPath?: string;
+  sourcePath?: string;
   parsePath: string;
   markdownPath: string;
   qualityPath: string;

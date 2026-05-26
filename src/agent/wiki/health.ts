@@ -1777,17 +1777,20 @@ function createDefaultPaperDownloadWorker(input: {
         ...paths
       });
       const source = await readSourceMetadata(refreshedSourcePath);
-      const missingFields = Array.isArray(source?.missingFields)
-        ? source.missingFields.filter((field): field is string => typeof field === "string" && field.trim().length > 0)
+      const sourceCitation = source?.citation as Record<string, unknown> | undefined;
+      const missingFieldsValue = sourceCitation?.missingFields;
+      const missingFields = Array.isArray(missingFieldsValue)
+        ? missingFieldsValue.filter((field): field is string => typeof field === "string" && field.trim().length > 0)
         : [];
-      const citationStatus = source?.citationStatus;
+      const citationStatus = typeof sourceCitation?.citationStatus === "string" ? sourceCitation.citationStatus : undefined;
+      const resolvedFrom = typeof sourceCitation?.resolvedFrom === "string" ? sourceCitation.resolvedFrom : undefined;
       return {
         status: "refreshed",
         sourcePath: refreshedSourcePath,
         ...(citationStatus ? { citationStatus } : {}),
         missingFields,
         message: missingFields.length === 0
-          ? `Source citation metadata was refreshed from ${source?.resolvedFrom ?? "available metadata"}.`
+          ? `Source citation metadata was refreshed from ${resolvedFrom ?? "available metadata"}.`
           : `Source citation metadata was refreshed from available metadata, but still misses: ${missingFields.join(", ")}.`
       };
     }

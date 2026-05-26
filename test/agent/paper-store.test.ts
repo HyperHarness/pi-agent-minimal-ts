@@ -15,16 +15,17 @@ import {
   readPaperRecordByPath,
   resolveExternalPaperPdfPath,
   resolvePaperPdfPath,
-  resolvePaperSourcePath,
+  resolvePaperMetadataPath,
   resolvePaperSupplementalPdfPath,
   resolvePaperRecordPath,
   updatePaperRecordParseManifest,
   updatePaperRecordQueuedReading,
   updatePaperRecordReadingFailure,
-  writePaperSourceMetadataForRecord,
+  writePaperMetadataForRecord,
   writePaperRecord
 } from "../../src/agent/paper/storage/paper-store.js";
 import { resolvePaperLibraryPaths } from "../../src/agent/knowledge-base.js";
+import type { KnowledgeSourceMetadata } from "../../src/agent/wiki/source-metadata-store.js";
 
 type Assert<T extends true> = T;
 type IsEqual<A, B> =
@@ -116,8 +117,8 @@ test("writePaperRecord persists publisher supplemental materials into source met
 
     const acquisition = JSON.parse(await readFile(recordPath, "utf8"));
     assert.equal(acquisition.supplementalMaterials[0].filename, "SM.pdf");
-    const source = JSON.parse(await readFile(path.join(path.dirname(recordPath), "source.json"), "utf8"));
-    assert.equal(source.supplementalMaterials[0].title, "Supplemental Material");
+    const metadata = JSON.parse(await readFile(path.join(path.dirname(recordPath), "metadata.json"), "utf8")) as KnowledgeSourceMetadata;
+    assert.equal(metadata.artifacts.some((artifact) => artifact.note === "Supplemental Material"), true);
   } finally {
     await rm(workspaceDir, { recursive: true, force: true });
   }
@@ -412,7 +413,7 @@ test("writePaperRecord persists supported source records with pretty-printed fai
   }
 });
 
-test("writePaperRecord merges citation metadata into source.json next to acquisition state", async () => {
+test("writePaperRecord writes citation metadata into metadata.json next to acquisition state", async () => {
   const workspaceDir = await mkdtemp(path.join(os.tmpdir(), "paper-store-"));
 
   try {
@@ -426,33 +427,38 @@ test("writePaperRecord merges citation metadata into source.json next to acquisi
         recordedAt: "2026-04-23T14:00:00.000Z",
         handlingMethod: "browser_session",
         status: "manual_fallback_opened",
-        title: "A Science Paper",
+        title: "A test Science paper",
         failure: {
           code: "PAYWALL",
           message: "Browser session required."
         }
       }
     });
-    const sourcePath = resolvePaperSourcePath({
+    const metadataPath = resolvePaperMetadataPath({
       workspaceDir,
       source: "science",
       canonicalId: "10.1126/science.adz8659",
       articleUrl: "https://www.science.org/doi/10.1126/science.adz8659"
     });
-    const source = JSON.parse(await readFile(sourcePath, "utf8"));
+    const metadata = JSON.parse(await readFile(metadataPath, "utf8")) as KnowledgeSourceMetadata & {
+      citation: KnowledgeSourceMetadata["citation"] & { doi?: string; publisher?: string };
+      provenance: KnowledgeSourceMetadata["provenance"] & { acquisitionPath?: string; downloadStatus?: string };
+    };
 
-    assert.equal(sourcePath, path.join(path.dirname(recordPath), "source.json"));
-    assert.equal(source.schemaVersion, 2);
-    assert.equal(source.paperKey, "science-10.1126-science.adz8659");
-    assert.equal(source.source, "science");
-    assert.equal(source.title, "A Science Paper");
-    assert.equal(source.doi, "10.1126/science.adz8659");
-    assert.equal(source.publisher, "American Association for the Advancement of Science");
-    assert.equal(source.downloadStatus, "manual_fallback_opened");
-    assert.equal(source.citationStatus, "incomplete");
-    assert.deepEqual(source.missingFields, ["authors", "year", "venue"]);
-    assert.equal(source.acquisitionPath, "knowledge-base/sources/science-10.1126-science.adz8659/acquisition.json");
-    assert.equal(source.recordPath, "knowledge-base/sources/science-10.1126-science.adz8659/acquisition.json");
+    assert.equal(metadataPath, path.join(path.dirname(recordPath), "metadata.json"));
+    assert.equal(metadata.schemaVersion, 1);
+    assert.equal(metadata.sourceKind, "paper");
+    assert.equal(metadata.sourceKey, "science-10.1126-science.adz8659");
+    assert.equal(metadata.title, "A test Science paper");
+    assert.equal(metadata.status, "citation_incomplete");
+    assert.equal(metadata.provenance.acquisitionPath, "knowledge-base/sources/science-10.1126-science.adz8659/acquisition.json");
+    assert.equal(metadata.provenance.url, "https://www.science.org/doi/10.1126/science.adz8659");
+    assert.equal(metadata.citation.doi, "10.1126/science.adz8659");
+    assert.equal(metadata.citation.publisher, "American Association for the Advancement of Science");
+    assert.equal(metadata.provenance.downloadStatus, "manual_fallback_opened");
+    assert.equal(metadata.citation.citationStatus, "incomplete");
+    assert.deepEqual(metadata.citation.missingFields, ["authors", "year", "venue"]);
+    await assert.rejects(readFile(path.join(path.dirname(recordPath), "source.json"), "utf8"), { code: "ENOENT" });
   } finally {
     await rm(workspaceDir, { recursive: true, force: true });
   }
@@ -482,18 +488,21 @@ test("paper source metadata derives arXiv ids and preserves manually enriched fi
         downloadPath: pdfPath
       }
     });
-    const sourcePath = path.join(path.dirname(recordPath), "source.json");
-    const initial = JSON.parse(await readFile(sourcePath, "utf8"));
-    assert.equal(initial.arxivId, "2401.01234");
-    assert.equal(initial.year, 2024);
-    assert.equal(initial.venue, "arXiv");
-    assert.deepEqual(initial.missingFields, ["title", "authors"]);
+    const metadataPath = path.join(path.dirname(recordPath), "metadata.json");
+    const initial = JSON.parse(await readFile(metadataPath, "utf8"));
+    assert.equal(initial.citation.arxivId, "2401.01234");
+    assert.equal(initial.citation.year, 2024);
+    assert.equal(initial.citation.venue, "arXiv");
+    assert.deepEqual(initial.citation.missingFields, ["title", "authors"]);
 
-    await writeFile(sourcePath, `${JSON.stringify({
+    await writeFile(metadataPath, `${JSON.stringify({
       ...initial,
       title: "Preserved Title",
-      authors: ["Ada Lovelace"],
-      venue: "arXiv"
+      citation: {
+        ...initial.citation,
+        authors: ["Ada Lovelace"],
+        venue: "arXiv"
+      }
     }, null, 2)}\n`, "utf8");
 
     await updatePaperRecordQueuedReading({
@@ -503,19 +512,20 @@ test("paper source metadata derives arXiv ids and preserves manually enriched fi
       message: "Queued webpage parse.",
       updatedAt: "2026-04-25T10:01:00.000Z"
     });
-    const updated = JSON.parse(await readFile(sourcePath, "utf8"));
+    const updated = JSON.parse(await readFile(metadataPath, "utf8"));
     assert.equal(updated.title, "Preserved Title");
-    assert.deepEqual(updated.authors, ["Ada Lovelace"]);
-    assert.equal(updated.venue, "arXiv");
-    assert.equal(updated.readingStatus, "queued");
-    assert.equal(updated.citationStatus, "complete");
-    assert.deepEqual(updated.missingFields, []);
+    assert.deepEqual(updated.citation.authors, ["Ada Lovelace"]);
+    assert.equal(updated.citation.venue, "arXiv");
+    assert.equal(updated.provenance.readingStatus, "queued");
+    assert.equal(updated.citation.citationStatus, "complete");
+    assert.equal(updated.status, "ready");
+    assert.deepEqual(updated.citation.missingFields, []);
   } finally {
     await rm(workspaceDir, { recursive: true, force: true });
   }
 });
 
-test("writePaperSourceMetadataForRecord falls back to Crossref bibliographic search for APS citation metadata", async () => {
+test("writePaperMetadataForRecord falls back to Crossref bibliographic search for APS citation metadata", async () => {
   const workspaceDir = await mkdtemp(path.join(os.tmpdir(), "paper-store-"));
 
   try {
@@ -545,7 +555,7 @@ test("writePaperSourceMetadataForRecord falls back to Crossref bibliographic sea
       }
     });
 
-    const sourcePath = await writePaperSourceMetadataForRecord({
+    const metadataPath = await writePaperMetadataForRecord({
       workspaceDir,
       record: JSON.parse(await readFile(recordPath, "utf8")),
       recordPath,
@@ -583,8 +593,8 @@ test("writePaperSourceMetadataForRecord falls back to Crossref bibliographic sea
       }
     });
 
-    const source = JSON.parse(await readFile(sourcePath, "utf8"));
-    assert.deepEqual(source.authors, [
+    const metadata = JSON.parse(await readFile(metadataPath, "utf8"));
+    assert.deepEqual(metadata.citation.authors, [
       "Figen Yilmaz",
       "Siddharth Singh",
       "Martijn F.S. Zwanenburg",
@@ -592,11 +602,12 @@ test("writePaperSourceMetadataForRecord falls back to Crossref bibliographic sea
       "Taryn V. Stefanski",
       "Christian Kraglund Andersen"
     ]);
-    assert.equal(source.year, 2026);
-    assert.equal(source.venue, "Physical Review Applied");
-    assert.equal(source.citationStatus, "complete");
-    assert.deepEqual(source.missingFields, []);
-    assert.equal(source.resolvedFrom, "crossref_search");
+    assert.equal(metadata.citation.year, 2026);
+    assert.equal(metadata.citation.venue, "Physical Review Applied");
+    assert.equal(metadata.citation.citationStatus, "complete");
+    assert.equal(metadata.status, "ready");
+    assert.deepEqual(metadata.citation.missingFields, []);
+    assert.equal(metadata.citation.resolvedFrom, "crossref_search");
   } finally {
     await rm(workspaceDir, { recursive: true, force: true });
   }
@@ -752,14 +763,15 @@ test("updatePaperRecordParseManifest backfills citation metadata from local pars
       updatedAt: "2026-04-25T10:01:00.000Z"
     });
 
-    const sourcePath = path.join(path.dirname(recordPath), "source.json");
-    const source = JSON.parse(await readFile(sourcePath, "utf8"));
-    assert.deepEqual(source.authors, ["Zewen Zhang", "Pranav Gokhale", "Jeffrey M. Larson"]);
-    assert.equal(source.year, 2025);
-    assert.equal(source.venue, "Phys. Rev. A");
-    assert.equal(source.citationStatus, "complete");
-    assert.deepEqual(source.missingFields, []);
-    assert.equal(source.resolvedFrom, "local_parse");
+    const metadataPath = path.join(path.dirname(recordPath), "metadata.json");
+    const metadata = JSON.parse(await readFile(metadataPath, "utf8"));
+    assert.deepEqual(metadata.citation.authors, ["Zewen Zhang", "Pranav Gokhale", "Jeffrey M. Larson"]);
+    assert.equal(metadata.citation.year, 2025);
+    assert.equal(metadata.citation.venue, "Phys. Rev. A");
+    assert.equal(metadata.citation.citationStatus, "complete");
+    assert.equal(metadata.status, "ready");
+    assert.deepEqual(metadata.citation.missingFields, []);
+    assert.equal(metadata.citation.resolvedFrom, "local_parse");
   } finally {
     await rm(workspaceDir, { recursive: true, force: true });
   }

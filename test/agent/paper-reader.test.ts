@@ -234,22 +234,34 @@ test("parsePaper writes reading artifacts and reuses a same-hash cache", async (
       "arxiv-2406.06015.pdf",
       "Abstract superconducting qubits introduction methods results conclusion"
     );
-    const sourcePath = path.join(workspace, "knowledge-base", "sources", "arxiv-2406.06015", "source.json");
-    await writeJson(sourcePath, {
-      schemaVersion: 2,
-      paperKey: "arxiv-2406.06015",
-      source: "arxiv",
-      canonicalId: "2406.06015",
-      articleUrl: "https://arxiv.org/abs/2406.06015",
+    const metadataPath = path.join(workspace, "knowledge-base", "sources", "arxiv-2406.06015", "metadata.json");
+    await writeJson(metadataPath, {
+      schemaVersion: 1,
+      sourceKind: "paper",
+      sourceKey: "arxiv-2406.06015",
       title: "Preserved source metadata",
-      authors: ["Ada Lovelace"],
-      year: 2024,
-      venue: "arXiv",
-      arxivId: "2406.06015",
-      citationStatus: "complete",
-      missingFields: [],
-      acquisitionPath: "knowledge-base/sources/arxiv-2406.06015/acquisition.json",
-      recordPath: "knowledge-base/sources/arxiv-2406.06015/acquisition.json"
+      status: "ready",
+      createdAt: "2026-05-26T00:00:00.000Z",
+      updatedAt: "2026-05-26T00:00:00.000Z",
+      summaryPath: "knowledge-base/sources/arxiv-2406.06015/summary.md",
+      citation: {
+        citationStatus: "complete",
+        missingFields: [],
+        authors: ["Ada Lovelace"],
+        year: 2024,
+        venue: "arXiv",
+        arxivId: "2406.06015"
+      },
+      provenance: {
+        url: "https://arxiv.org/abs/2406.06015",
+        arxivId: "2406.06015",
+        acquisitionPath: "knowledge-base/sources/arxiv-2406.06015/acquisition.json",
+        recordPath: "knowledge-base/sources/arxiv-2406.06015/acquisition.json"
+      },
+      artifacts: [],
+      tags: [],
+      relatedSourceKeys: [],
+      synthesisPageKeys: []
     });
 
     const first = await parsePaper({
@@ -275,10 +287,11 @@ test("parsePaper writes reading artifacts and reuses a same-hash cache", async (
       elements: Array<{ text: string }>;
     };
     assert.match(parseJson.elements.map((element) => element.text).join("\n"), /superconducting qubits/);
-    const sourceJson = JSON.parse(await readFile(sourcePath, "utf8"));
-    assert.deepEqual(sourceJson.authors, ["Ada Lovelace"]);
-    assert.equal(sourceJson.citationStatus, "complete");
-    assert.equal(sourceJson.pdfSha256, first.pdfSha256);
+    assert.match(first.artifacts.metadataPath ?? "", /knowledge-base\/sources\/arxiv-2406\.06015\/metadata\.json$/);
+    const metadataJson = JSON.parse(await readFile(metadataPath, "utf8"));
+    assert.deepEqual(metadataJson.citation.authors, ["Ada Lovelace"]);
+    assert.equal(metadataJson.citation.citationStatus, "complete");
+    assert.equal(metadataJson.pdfSha256, first.pdfSha256);
   } finally {
     await rm(workspace, { recursive: true, force: true });
   }

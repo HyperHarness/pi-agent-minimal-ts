@@ -221,7 +221,7 @@ export function getPaperParseArtifactPaths(input: {
   const paperDir = getPaperReadingDir(input.workspaceDir, input.paperKey);
   const parseDir = getParseDir(input.workspaceDir, input.paperKey, input.engine);
   return {
-    sourcePath: path.join(paperDir, "source.json"),
+    metadataPath: path.join(paperDir, "metadata.json"),
     parsePath: path.join(parseDir, "parse.json"),
     markdownPath: path.join(parseDir, "document.md"),
     qualityPath: path.join(parseDir, "quality.json"),
@@ -287,18 +287,19 @@ export async function writeParseArtifacts(input: {
     paperKey: input.document.paperKey,
     engine: input.document.engine
   });
+  const metadataPath = artifacts.metadataPath ?? path.join(getPaperReadingDir(input.workspaceDir, input.document.paperKey), "metadata.json");
   await Promise.all([
-    mkdir(path.dirname(artifacts.sourcePath), { recursive: true }),
+    mkdir(path.dirname(metadataPath), { recursive: true }),
     mkdir(path.dirname(artifacts.parsePath), { recursive: true }),
     mkdir(path.dirname(artifacts.chunksPath), { recursive: true })
   ]);
-  const existingSource = await readJsonFile<Record<string, unknown>>(artifacts.sourcePath);
+  const existingMetadata = await readJsonFile<Record<string, unknown>>(metadataPath);
   const source = {
-    ...existingSource,
+    ...existingMetadata,
     ...input.source
   };
   await Promise.all([
-    writeFile(artifacts.sourcePath, `${JSON.stringify(source, null, 2)}\n`, "utf8"),
+    writeFile(metadataPath, `${JSON.stringify(source, null, 2)}\n`, "utf8"),
     writeFile(artifacts.parsePath, `${JSON.stringify(input.document, null, 2)}\n`, "utf8"),
     writeFile(artifacts.markdownPath, `${input.markdown.trimEnd()}\n`, "utf8"),
     writeFile(artifacts.qualityPath, `${JSON.stringify(input.quality, null, 2)}\n`, "utf8"),
@@ -323,9 +324,29 @@ export async function readPaperSourceByKey(input: {
   workspaceDir: string;
   paperKey: string;
 }): Promise<PaperReaderSource | undefined> {
-  const sourcePath = path.join(getPaperReadingDir(input.workspaceDir, input.paperKey), "source.json");
+  const metadataPath = path.join(getPaperReadingDir(input.workspaceDir, input.paperKey), "metadata.json");
   try {
-    return JSON.parse(await readFile(sourcePath, "utf8")) as PaperReaderSource;
+    const metadata = JSON.parse(await readFile(metadataPath, "utf8")) as Record<string, unknown>;
+    const citation = typeof metadata.citation === "object" && metadata.citation !== null
+      ? metadata.citation as Record<string, unknown>
+      : {};
+    const provenance = typeof metadata.provenance === "object" && metadata.provenance !== null
+      ? metadata.provenance as Record<string, unknown>
+      : {};
+    return {
+      ...(metadata as unknown as PaperReaderSource),
+      paperKey: typeof metadata.sourceKey === "string" ? metadata.sourceKey : input.paperKey,
+      createdAt: typeof metadata.createdAt === "string" ? metadata.createdAt : new Date().toISOString(),
+      ...(typeof provenance.rawPath === "string" ? { pdfPath: provenance.rawPath } : {}),
+      ...(typeof provenance.recordPath === "string" ? { recordPath: provenance.recordPath } : {}),
+      ...(typeof provenance.source === "string" ? { source: provenance.source } : {}),
+      ...(typeof provenance.canonicalId === "string" ? { canonicalId: provenance.canonicalId } : {}),
+      ...(typeof provenance.url === "string" ? { articleUrl: provenance.url } : {}),
+      ...(typeof metadata.title === "string" ? { title: metadata.title } : {}),
+      ...(typeof citation.arxivId === "string" && typeof provenance.canonicalId !== "string"
+        ? { canonicalId: citation.arxivId }
+        : {})
+    };
   } catch {
     return undefined;
   }

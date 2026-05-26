@@ -1,3 +1,5 @@
+import type { KnowledgeSourceMetadata } from "../wiki/source-metadata-store.js";
+
 export type PaperSource = "arxiv" | "science" | "nature" | "aps" | "external";
 
 export type PaperAction = "direct_download" | "authorized_download" | "open_url_only";
@@ -95,39 +97,7 @@ export interface PaperSupplementalMaterial {
   downloadedAt: string;
 }
 
-export interface PaperSourceMetadata {
-  schemaVersion: 2;
-  paperKey: string;
-  source: PaperSource;
-  canonicalId?: string;
-  title?: string;
-  authors: string[];
-  year?: number;
-  venue?: string;
-  publisher?: string;
-  doi?: string;
-  arxivId?: string;
-  articleUrl: string;
-  createdAt?: string;
-  pdfUrl?: string;
-  pdfPath?: string;
-  pdfSha256?: string;
-  downloadPath?: string;
-  acquisitionPath: string;
-  recordPath: string;
-  bibPath?: string;
-  cslPath?: string;
-  supplementalMaterials?: PaperSupplementalMaterial[];
-  downloadStatus: PaperRecord["status"];
-  readingStatus?: PaperRecordReadingStatus;
-  citationStatus: PaperCitationStatus;
-  missingFields: string[];
-  resolvedFrom: "acquisition" | "local_parse" | "arxiv_api" | "crossref_api" | "crossref_search" | "semantic_scholar_api";
-  sourceConfidence: "high" | "medium" | "low";
-  recordedAt: string;
-  updatedAt: string;
-  preprintFallback?: PaperSourcePreprintFallback;
-}
+export type PaperSourceMetadata = KnowledgeSourceMetadata;
 
 export interface PaperRecordPreprintFallback {
   source: "arxiv";
