@@ -3127,6 +3127,63 @@ Old paragraph two.
   }
 });
 
+test("applyWikiStructurePlan fixes rendered wiki links that point to missing local pages", async () => {
+  const workspace = await createWorkspace();
+
+  try {
+    await writePage(
+      workspace,
+      "planar-qubit",
+      `
+---
+title: Planar Qubit
+---
+
+# Planar Qubit
+
+The source [[aps-10.1103-PhysRevLett.111.080502]] is evidence, while [[12,2,3]] is a code parameter.
+`
+    );
+
+    const plan = await planWikiStructure({
+      workspaceDir: workspace,
+      maxItems: 20
+    });
+    const actions = plan.actions.filter((action) => action.type === "fix_rendered_wiki_link");
+    assert.equal(actions.length, 2);
+    assert.ok(actions.every((action) => action.recommendedTool === "wiki_apply_structure_plan"));
+
+    const { applyWikiStructurePlan } = await import("../../src/agent/wiki/structure-apply.js");
+    const dryRun = await applyWikiStructurePlan({
+      workspaceDir: workspace,
+      dryRun: true,
+      runVerification: false,
+      actions
+    });
+    assert.equal(dryRun.status, "dry_run");
+    assert.equal(dryRun.applied.length, 2);
+    assert.deepEqual(dryRun.changedFiles, []);
+    assert.ok(dryRun.applied.every((item) => item.changedFiles.includes("knowledge-base/pages/planar-qubit.md")));
+
+    const applied = await applyWikiStructurePlan({
+      workspaceDir: workspace,
+      dryRun: false,
+      runVerification: true,
+      actions
+    });
+
+    assert.equal(applied.status, "applied");
+    assert.deepEqual(applied.changedFiles, ["knowledge-base/pages/planar-qubit.md"]);
+    const page = await readFile(path.join(workspace, "knowledge-base/pages/planar-qubit.md"), "utf8");
+    assert.doesNotMatch(page, /\[\[/);
+    assert.match(page, /`aps-10\.1103-PhysRevLett\.111\.080502`/);
+    assert.match(page, /`12,2,3`/);
+    assert.ok(!applied.verification?.lintAfter?.issues.some((issue) => issue.kind === "rendered_wiki_link"));
+  } finally {
+    await rm(workspace, { recursive: true, force: true });
+  }
+});
+
 test("applyWikiStructurePlan rebuild_index rewrites the wiki index", async () => {
   const workspace = await createWorkspace();
 

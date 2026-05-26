@@ -208,7 +208,7 @@ function actionForIssue(
       path: issue.path,
       target: issue.target,
       reason: issue.reason,
-      recommendedTool: "replace_file_text"
+      recommendedTool: "wiki_apply_structure_plan"
     };
   }
   if (issue.kind === "weak_synthesis_page") {

@@ -276,6 +276,34 @@ function escapeRegExp(value: string): string {
   return value.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
 }
 
+function renderedWikiLinkTarget(value: string): string | undefined {
+  const slug = value
+    .split("|")[0]
+    ?.trim()
+    .toLowerCase()
+    .replace(/[^a-z0-9\u4e00-\u9fff]+/g, "-")
+    .replace(/^-|-$/g, "");
+  return slug ? `knowledge-base/pages/${slug}.md` : undefined;
+}
+
+function renderedWikiLinkReplacement(value: string): string {
+  const rawDisplay = value.split("|")[1]?.trim() || value.split("|")[0]?.trim() || value.trim();
+  const display = rawDisplay.replace(/`/g, "").trim();
+  return display ? `\`${display}\`` : "";
+}
+
+function replaceRenderedWikiLinks(markdown: string, target: string): { markdown: string; count: number } {
+  let count = 0;
+  const updated = markdown.replace(/\[\[([^\]]+)\]\]/g, (fullMatch, rawTarget: string) => {
+    if (renderedWikiLinkTarget(rawTarget) !== target) {
+      return fullMatch;
+    }
+    count += 1;
+    return renderedWikiLinkReplacement(rawTarget);
+  });
+  return { markdown: updated, count };
+}
+
 function rewriteDuplicatePageLinks(markdown: string, redundantPageKey: string, canonicalPageKey: string): string {
   const redundantTarget = `knowledge-base/pages/${redundantPageKey}.md`;
   const canonicalTarget = `knowledge-base/pages/${canonicalPageKey}.md`;
@@ -518,6 +546,42 @@ async function applyDuplicateSectionAction(input: {
   };
 }
 
+async function applyRenderedWikiLinkAction(input: {
+  workspaceDir: string;
+  action: WikiStructurePlanAction;
+  dryRun: boolean;
+}): Promise<AppliedWikiStructureAction | SkippedWikiStructureAction> {
+  const { action, dryRun, workspaceDir } = input;
+  if (!action.path || !action.target) {
+    return { action, reason: "Rendered-link action is missing path or target page." };
+  }
+
+  const resolvedPath = resolveWikiPagePath(workspaceDir, action.path);
+  await assertSafePaperWikiWriteTarget({
+    workspaceDir,
+    filePath: resolvedPath,
+    allowedRoot: getPaperWikiPagesDir(workspaceDir),
+    label: "wiki page"
+  });
+  const original = await readFile(resolvedPath, "utf8");
+  const replacement = replaceRenderedWikiLinks(original, action.target);
+  if (replacement.count === 0 || replacement.markdown === original) {
+    return { action, reason: "Target page no longer has a rendered wiki link matching this action." };
+  }
+
+  if (!dryRun) {
+    await writeFile(resolvedPath, replacement.markdown, "utf8");
+  }
+
+  return {
+    action,
+    changedFiles: [action.path],
+    message: dryRun
+      ? `Would replace ${replacement.count} rendered wiki link(s) in ${action.path}.`
+      : `Replaced ${replacement.count} rendered wiki link(s) in ${action.path}.`
+  };
+}
+
 async function applyAliasAction(input: {
   workspaceDir: string;
   action: WikiStructurePlanAction;
@@ -712,6 +776,8 @@ export async function applyWikiStructurePlan(options: ApplyWikiStructurePlanOpti
       const result =
         action.type === "fix_duplicate_section"
           ? await applyDuplicateSectionAction({ workspaceDir, action, dryRun: actionDryRun })
+          : action.type === "fix_rendered_wiki_link"
+            ? await applyRenderedWikiLinkAction({ workspaceDir, action, dryRun: actionDryRun })
           : action.type === "create_alias"
             ? await applyAliasAction({ workspaceDir, action, dryRun: actionDryRun })
             : action.type === "merge_duplicate_pages"
