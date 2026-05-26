@@ -578,16 +578,16 @@ async function readSourceMetadataDocument(
   }
   const metadata = result.metadata;
   const fallbackSourceSummaryPath = getPaperWikiSourcePath(workspaceDir, metadata.sourceKey);
-  const sourceSummaryPath =
+  const sourceSummaryRelativePath =
     safeMetadataWorkspaceRelativePath(workspaceDir, metadata.summaryPath) ??
     (await pathExists(fallbackSourceSummaryPath) ? relativeToWorkspace(workspaceDir, fallbackSourceSummaryPath) : undefined);
-  if (!sourceSummaryPath) {
+  if (!sourceSummaryRelativePath) {
     return undefined;
   }
   return {
     paperKey: metadata.sourceKey,
     title: metadata.title,
-    path: sourceSummaryPath,
+    path: sourceSummaryRelativePath,
     tags: normalizeTags(metadata.tags),
     relatedPaperKeys: metadata.relatedSourceKeys.map((value) =>
       sanitizeWikiFilename(value.toLowerCase())

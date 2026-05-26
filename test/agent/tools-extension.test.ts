@@ -196,7 +196,7 @@ test("wiki_health_fix routes download repairs through the injected extension bri
               parse_failed: 0,
               low_quality: 0,
               summary_missing: 0,
-              source_manifest_missing: 0,
+              source_metadata_missing: 0,
               missing_artifact: 0,
               download_blocked: 0,
               citation_incomplete: 0,

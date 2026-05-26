@@ -380,8 +380,8 @@ export async function backfillKnowledgeSourceMetadataFromSummary(input: {
   workspaceDir: string;
   sourceKey: string;
 }): Promise<string> {
-  const sourceSummaryPath = getPaperWikiSourcePath(input.workspaceDir, input.sourceKey);
-  const markdown = await readFile(sourceSummaryPath, "utf8");
+  const summaryAbsolutePath = getPaperWikiSourcePath(input.workspaceDir, input.sourceKey);
+  const markdown = await readFile(summaryAbsolutePath, "utf8");
   const frontmatter = extractFrontmatter(markdown);
   const now = new Date().toISOString();
   const sourceKey = readFrontmatterString(frontmatter, "paper_key") ?? input.sourceKey;
@@ -415,7 +415,7 @@ export async function backfillKnowledgeSourceMetadataFromSummary(input: {
       status: (readFrontmatterString(frontmatter, "status") as KnowledgeSourceStatus | undefined) ?? "ready",
       createdAt: readFrontmatterString(frontmatter, "created_at") ?? now,
       updatedAt: readFrontmatterString(frontmatter, "updated_at") ?? now,
-      summaryPath: relativeToWorkspace(input.workspaceDir, sourceSummaryPath),
+      summaryPath: relativeToWorkspace(input.workspaceDir, summaryAbsolutePath),
       citation: {
         citationStatus: "complete",
         missingFields: []

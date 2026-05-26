@@ -135,7 +135,7 @@ const wikiSourceKindParameter = Type.Union([
   Type.Literal("code-output"),
   Type.Literal("webpage"),
   Type.Literal("manual")
-], { description: "Wiki source manifest kind to include." });
+], { description: "Wiki source metadata kind to include." });
 
 const wikiPageTypeParameter = Type.Union([
   Type.Literal("paper-source"),
@@ -177,7 +177,7 @@ const searchPaperWikiParameters = Type.Object({
   maxResults: Type.Optional(Type.Integer({ description: "Maximum matching wiki items to return.", minimum: 1 })),
   sourceKinds: Type.Optional(Type.Array(wikiSourceKindParameter, {
     description:
-      "Limit matches to source manifest kinds such as paper, code-output, software-doc, or material-database."
+      "Limit matches to source metadata kinds such as paper, code-output, software-doc, or material-database."
   })),
   pageTypes: Type.Optional(Type.Array(wikiPageTypeParameter, {
     description: "Limit page matches to typed wiki page types such as finding, method, dataset, or design-record."

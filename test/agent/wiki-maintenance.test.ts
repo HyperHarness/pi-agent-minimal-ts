@@ -42,25 +42,33 @@ async function writePage(workspaceDir: string, pageKey: string, content: string)
   await writeMarkdown(path.join(workspaceDir, "knowledge-base", "pages", `${pageKey}.md`), content);
 }
 
-async function writeReadySourceManifest(workspaceDir: string, paperKey: string, tags: string[] = []): Promise<void> {
-  await writeJson(path.join(workspaceDir, "knowledge-base", "manifests", `${paperKey}.json`), {
+async function writeReadySourceMetadata(workspaceDir: string, paperKey: string, tags: string[] = []): Promise<void> {
+  await writeJson(path.join(workspaceDir, "knowledge-base", "sources", paperKey, "metadata.json"), {
     schemaVersion: 1,
-    kind: "paper-source",
-    paperKey,
+    sourceKind: "paper",
+    sourceKey: paperKey,
     title: `${paperKey} Evidence`,
     status: "ready",
     createdAt: "2026-05-10T00:00:00.000Z",
     updatedAt: "2026-05-10T00:00:00.000Z",
-    sourceSummaryPath: `knowledge-base/sources/${paperKey}/summary.md`,
-    provenance: {},
-    parse: {
+    summaryPath: `knowledge-base/sources/${paperKey}/summary.md`,
+    citation: {
+      citationStatus: "complete",
+      missingFields: []
+    },
+    provenance: {
+      acquisitionPath: `knowledge-base/sources/${paperKey}/acquisition.json`
+    },
+    artifacts: [{
+      kind: "parse",
+      path: `knowledge-base/sources/${paperKey}/parses/plain-text-baseline/document.md`,
       engine: "plain-text-baseline",
       markdownPath: `knowledge-base/sources/${paperKey}/parses/plain-text-baseline/document.md`,
       jsonPath: `knowledge-base/sources/${paperKey}/parses/plain-text-baseline/parse.json`,
       qualityPath: `knowledge-base/sources/${paperKey}/parses/plain-text-baseline/quality.json`
-    },
+    }],
     tags,
-    relatedPaperKeys: [],
+    relatedSourceKeys: [],
     synthesisPageKeys: []
   });
 }
@@ -658,7 +666,7 @@ test("lintPaperWiki reports source_without_synthesis_coverage for ready sources"
 
   try {
     const paperKey = "paper-uncovered";
-    await writeReadySourceManifest(workspace, paperKey, ["uncovered-topic"]);
+    await writeReadySourceMetadata(workspace, paperKey, ["uncovered-topic"]);
     await writeSource(
       workspace,
       paperKey,
@@ -695,7 +703,7 @@ test("lintPaperWiki treats inline paper-key citations as synthesis evidence", as
 
   try {
     const paperKey = "aps-10.1103-PhysRevLett.127.080505";
-    await writeReadySourceManifest(workspace, paperKey, ["agentic-chip-design"]);
+    await writeReadySourceMetadata(workspace, paperKey, ["agentic-chip-design"]);
     await writeSource(
       workspace,
       paperKey,
@@ -755,8 +763,8 @@ test("lintPaperWiki does not require synthesis coverage for needs_review V2 sour
 Local code output awaiting review.
 `
     );
-    await writeJson(path.join(workspace, "knowledge-base", "manifests", `${sourceKey}.json`), {
-      schemaVersion: 2,
+    await writeJson(path.join(workspace, "knowledge-base", "sources", sourceKey, "metadata.json"), {
+      schemaVersion: 1,
       sourceKind: "code-output",
       sourceKey,
       title: "Single Xmon Concept Layout",
@@ -765,6 +773,10 @@ Local code output awaiting review.
       updatedAt: "2026-05-19T00:00:00.000Z",
       summaryPath: `knowledge-base/sources/${sourceKey}/summary.md`,
       provenance: {},
+      citation: {
+        citationStatus: "complete",
+        missingFields: []
+      },
       artifacts: [],
       tags: ["code-output"],
       relatedSourceKeys: [],
@@ -783,32 +795,40 @@ Local code output awaiting review.
   }
 });
 
-test("lintPaperWiki skips manifest-only sources with unsafe sourceSummaryPath", async () => {
+test("lintPaperWiki skips metadata-only sources with unsafe summaryPath", async () => {
   const workspace = await createWorkspace();
   const outside = await createWorkspace();
 
   try {
-    const paperKey = "paper-unsafe-manifest-path";
+    const paperKey = "paper-unsafe-metadata-path";
     const outsideSummaryPath = path.join(outside, "summary.md");
     await writeText(outsideSummaryPath, "outside summary exists");
-    await writeJson(path.join(workspace, "knowledge-base", "manifests", `${paperKey}.json`), {
+    await writeJson(path.join(workspace, "knowledge-base", "sources", paperKey, "metadata.json"), {
       schemaVersion: 1,
-      kind: "paper-source",
-      paperKey,
-      title: "Unsafe Manifest Source",
+      sourceKind: "paper",
+      sourceKey: paperKey,
+      title: "Unsafe Metadata Source",
       status: "ready",
       createdAt: "2026-05-10T00:00:00.000Z",
       updatedAt: "2026-05-10T00:00:00.000Z",
-      sourceSummaryPath: outsideSummaryPath,
-      provenance: {},
-      parse: {
+      summaryPath: outsideSummaryPath,
+      citation: {
+        citationStatus: "complete",
+        missingFields: []
+      },
+      provenance: {
+        acquisitionPath: `knowledge-base/sources/${paperKey}/acquisition.json`
+      },
+      artifacts: [{
+        kind: "parse",
+        path: `knowledge-base/sources/${paperKey}/parses/plain-text-baseline/document.md`,
         engine: "plain-text-baseline",
         markdownPath: `knowledge-base/sources/${paperKey}/parses/plain-text-baseline/document.md`,
         jsonPath: `knowledge-base/sources/${paperKey}/parses/plain-text-baseline/parse.json`,
         qualityPath: `knowledge-base/sources/${paperKey}/parses/plain-text-baseline/quality.json`
-      },
-      tags: ["unsafe-manifest-path"],
-      relatedPaperKeys: [],
+      }],
+      tags: ["unsafe-metadata-path"],
+      relatedSourceKeys: [],
       synthesisPageKeys: []
     });
 
@@ -833,7 +853,7 @@ test("typed source_refs mark sources as covered in coverage diagnostics", async 
 
   try {
     const paperKey = "paper-covered";
-    await writeReadySourceManifest(workspace, paperKey, ["covered-topic"]);
+    await writeReadySourceMetadata(workspace, paperKey, ["covered-topic"]);
     await writeSource(
       workspace,
       paperKey,
@@ -1512,8 +1532,8 @@ test("planWikiStructure promotes concepts from repeated typed source tags", asyn
   const workspace = await createWorkspace();
 
   try {
-    await writeReadySourceManifest(workspace, "typed-source-a", ["cryogenic-routing"]);
-    await writeReadySourceManifest(workspace, "typed-source-b", ["cryogenic-routing"]);
+    await writeReadySourceMetadata(workspace, "typed-source-a", ["cryogenic-routing"]);
+    await writeReadySourceMetadata(workspace, "typed-source-b", ["cryogenic-routing"]);
 
     const result = await planWikiStructure({
       workspaceDir: workspace,
@@ -1715,7 +1735,7 @@ test("planWikiStructure creates aliases from typed pages with shared source_refs
   const workspace = await createWorkspace();
 
   try {
-    await writeReadySourceManifest(workspace, "paper-alias", ["surface-code-routing"]);
+    await writeReadySourceMetadata(workspace, "paper-alias", ["surface-code-routing"]);
     await writePage(
       workspace,
       "surface-code-routing",
@@ -1785,7 +1805,7 @@ test("planWikiStructure plans low-risk duplicate page merges for singular plural
   const workspace = await createWorkspace();
 
   try {
-    await writeReadySourceManifest(workspace, "paper-surface", ["surface-code"]);
+    await writeReadySourceMetadata(workspace, "paper-surface", ["surface-code"]);
     await writePage(
       workspace,
       "surface-code",
