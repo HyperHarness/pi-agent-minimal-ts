@@ -1,4 +1,4 @@
-import { access, readdir, readFile } from "node:fs/promises";
+import { access, mkdir, readdir, readFile, rename, writeFile } from "node:fs/promises";
 import type { Dirent } from "node:fs";
 import path from "node:path";
 import { listLocalPapers, type LocalPaperEntry, type LocalPaperParseSummary } from "../paper/storage/local-paper-library.js";
@@ -29,6 +29,7 @@ import {
   writePaperSourceMetadataForSource
 } from "../paper/storage/paper-store.js";
 import {
+  blockPaperDownload,
   derivePaperKeyForBlocklist,
   findBlockedPaperDownload,
   type PaperBlocklistEntry
@@ -44,6 +45,7 @@ export type WikiHealthIssueKind =
   | "parse_failed"
   | "low_quality"
   | "summary_missing"
+  | "non_paper_source"
   | "source_manifest_missing"
   | "source_manifest_artifact_missing"
   | "missing_artifact"
@@ -179,6 +181,7 @@ const ISSUE_KINDS: WikiHealthIssueKind[] = [
   "parse_failed",
   "low_quality",
   "summary_missing",
+  "non_paper_source",
   "source_manifest_missing",
   "source_manifest_artifact_missing",
   "missing_artifact",
@@ -194,6 +197,14 @@ const DEFAULT_LOW_QUALITY_SCORE_THRESHOLD = 0.7;
 const DOWNLOAD_BLOCKABLE_ISSUE_KINDS = new Set<WikiHealthIssueKind>([
   "needs_download",
   "needs_authorization"
+]);
+const PENDING_EXTENSION_JOB_STATUSES = new Set<PaperDownloadJobEvent["status"]>([
+  "queued",
+  "opened_in_browser",
+  "page_classified",
+  "pdf_candidate_found",
+  "automatic_download_started",
+  "manual_download_observed"
 ]);
 const TYPED_WIKI_PAGE_TYPES = new Set([
   "paper-source",
@@ -426,6 +437,9 @@ function jobAuthorizationReason(job: PaperDownloadJobEvent | undefined): string 
       ? `Browser extension reports: ${job.message}`
       : "Browser extension reports that the publisher page needs user verification.";
   }
+  if (job.status !== "awaiting_user_manual_download" && job.status !== "automatic_download_failed") {
+    return undefined;
+  }
   for (const value of [job.message, job.failureCode]) {
     if (textIncludesAccessProblem(value)) {
       return `Browser extension reports: ${value}`;
@@ -443,6 +457,13 @@ function findAccessProblemJobForEntry(
     textIncludesLicenseProblem(job.failureCode) ||
     textIncludesLicenseProblem(job.message)
   ) ?? accessJobs[0];
+}
+
+function findPendingExtensionJobForEntry(
+  entry: LocalPaperEntry,
+  jobs: PaperDownloadJobEvent[]
+): PaperDownloadJobEvent | undefined {
+  return findMatchingJobsForEntry(entry, jobs).find((job) => PENDING_EXTENSION_JOB_STATUSES.has(job.status));
 }
 
 function entryIsSupportedPublisher(entry: LocalPaperEntry): boolean {
@@ -577,6 +598,33 @@ function entryLooksLikePublisherNonJournalArticle(entry: LocalPaperEntry): boole
     entryHasOnlyWebpageReading(entry) &&
     !entry.parses.some((parse) => parse.status === "good")
   );
+}
+
+function apsPathname(entry: LocalPaperEntry): string {
+  if (!entry.articleUrl) {
+    return "";
+  }
+  try {
+    return new URL(entry.articleUrl).pathname;
+  } catch {
+    return "";
+  }
+}
+
+function nonPaperSourcePollutionReason(entry: LocalPaperEntry): string | undefined {
+  if (entry.source !== "aps") {
+    return undefined;
+  }
+  const title = entry.title?.toLowerCase() ?? "";
+  const pathname = apsPathname(entry).toLowerCase();
+  if (
+    entry.paperKey === "journals.aps.org-aps-institution-site-license" ||
+    pathname === "/aps-institution-site-license" ||
+    title.includes("institution site license")
+  ) {
+    return "APS institution site license is a publisher policy/access page, not a scientific paper source.";
+  }
+  return undefined;
 }
 
 function parseIsLowQuality(parse: LocalPaperParseSummary, threshold: number): boolean {
@@ -797,6 +845,7 @@ function summarizeActions(issues: WikiHealthIssue[]): string[] {
     ["low_quality", "Inspect low-quality parses and prefer webpage/TeX/Docling alternatives where available."],
     ["parse_missing", "Parse downloaded papers that do not yet have reading artifacts."],
     ["summary_missing", "Write wiki source summaries for parsed papers without a summary page."],
+    ["non_paper_source", "Quarantine non-paper publisher pages that were accidentally registered as paper sources."],
     ["source_manifest_missing", "Backfill source manifests for existing wiki source summaries."],
     ["source_manifest_artifact_missing", "Repair source manifests or regenerate the missing parse/source artifacts they reference."],
     ["missing_artifact", "Repair or regenerate acquisition files that point at missing files."],
@@ -856,7 +905,19 @@ export async function checkWikiHealth(options: WikiHealthOptions): Promise<WikiH
     maxResults: Number.MAX_SAFE_INTEGER
   });
   const paperEntries: LocalPaperEntry[] = [];
+  const issues: WikiHealthIssue[] = [];
   for (const entry of localPapers.results) {
+    const nonPaperReason = nonPaperSourcePollutionReason(entry);
+    if (nonPaperReason) {
+      issues.push({
+        ...baseIssue(entry, "non_paper_source", "medium", nonPaperReason),
+        paths: [
+          ...(entry.sourcePath ? [entry.sourcePath] : []),
+          relativeToWorkspace(workspaceDir, getPaperWikiSourceManifestPath(workspaceDir, entry.paperKey))
+        ]
+      });
+      continue;
+    }
     if (
       !(await entryHasNonPaperSourceManifest(workspaceDir, entry)) &&
       !entryLooksLikePublisherNonJournalArticle(entry)
@@ -866,7 +927,6 @@ export async function checkWikiHealth(options: WikiHealthOptions): Promise<WikiH
   }
   const entriesByPaperKey = new Map(paperEntries.map((entry) => [entry.paperKey, entry]));
   const jobEvents = await readPaperDownloadJobEvents({ workspaceDir });
-  const issues: WikiHealthIssue[] = [];
 
   for (const entry of paperEntries) {
     const entryIssues: WikiHealthIssue[] = [];
@@ -882,15 +942,19 @@ export async function checkWikiHealth(options: WikiHealthOptions): Promise<WikiH
       threshold
     );
     const recordAccessReason = recordAuthorizationReason(record);
+    const pendingExtensionJob =
+      !pdfExists && !blocked && !usesPreprintFallback && !isPublisherPending
+        ? findPendingExtensionJobForEntry(entry, jobEvents)
+        : undefined;
     const authorizationReason =
-      hasUsablePreprintFallback
+      hasUsablePreprintFallback || usesPreprintFallback || isPublisherPending
         ? undefined
         : (recordAccessReason && !hasUsableParsedReading ? recordAccessReason : undefined) ??
-          (!pdfExists ? jobAuthorizationReason(findAccessProblemJobForEntry(entry, jobEvents)) : undefined);
+          (!pdfExists && !pendingExtensionJob ? jobAuthorizationReason(findAccessProblemJobForEntry(entry, jobEvents)) : undefined);
     const needsAuthorization = Boolean(authorizationReason);
     const authorizationSeverity: WikiHealthSeverity = hasUsableParsedReading ? "medium" : "high";
 
-    if (!usesPreprintFallback && !isPublisherPending && !needsAuthorization && !hasUsableParsedReading && (entry.status !== "downloaded" || (entry.status === "downloaded" && !pdfExists))) {
+    if (!usesPreprintFallback && !isPublisherPending && !needsAuthorization && !pendingExtensionJob && !hasUsableParsedReading && (entry.status !== "downloaded" || (entry.status === "downloaded" && !pdfExists))) {
       entryIssues.push(baseIssue(
         entry,
         "needs_download",
@@ -905,6 +969,7 @@ export async function checkWikiHealth(options: WikiHealthOptions): Promise<WikiH
       !usesPreprintFallback &&
       !isPublisherPending &&
       !needsAuthorization &&
+      !pendingExtensionJob &&
       entryIsSupportedPublisher(entry) &&
       entryHasOnlyWebpageReading(entry) &&
       !pdfExists
@@ -926,8 +991,15 @@ export async function checkWikiHealth(options: WikiHealthOptions): Promise<WikiH
       ));
     }
 
-    if (recordIsQueued(record)) {
-      entryIssues.push(baseIssue(entry, "queued", "medium", "Record has queued download, webpage, parse, or reading work."));
+    if (recordIsQueued(record) || pendingExtensionJob) {
+      entryIssues.push(baseIssue(
+        entry,
+        "queued",
+        "medium",
+        pendingExtensionJob
+          ? `Browser extension job ${pendingExtensionJob.jobId} is ${pendingExtensionJob.status}; wait for it to finish before judging download health.`
+          : "Record has queued download, webpage, parse, or reading work."
+      ));
     }
 
     if (entry.status === "downloaded" && pdfExists && !entry.hasParsedArtifacts && record?.reading?.status !== "queued") {
@@ -1468,6 +1540,113 @@ async function fixBySourceManifestBackfill(input: {
   }
 }
 
+async function uniquePath(filePath: string): Promise<string> {
+  if (!(await pathExists(filePath))) {
+    return filePath;
+  }
+  for (let index = 2; index < 1000; index += 1) {
+    const candidate = `${filePath}-${index}`;
+    if (!(await pathExists(candidate))) {
+      return candidate;
+    }
+  }
+  throw new Error(`Could not allocate unique quarantine path for ${filePath}.`);
+}
+
+async function renameIfExists(fromPath: string, toPath: string, workspaceDir: string): Promise<string | undefined> {
+  if (!(await pathExists(fromPath))) {
+    return undefined;
+  }
+  await mkdir(path.dirname(toPath), { recursive: true });
+  await rename(fromPath, toPath);
+  return relativeToWorkspace(workspaceDir, toPath);
+}
+
+async function fixByNonPaperSourceQuarantine(input: {
+  workspaceDir: string;
+  issue: WikiHealthIssue;
+  dryRun: boolean;
+}): Promise<WikiHealthFixItem> {
+  const sourceDir = path.join(input.workspaceDir, "knowledge-base", "sources", input.issue.paperKey);
+  const manifestPath = getPaperWikiSourceManifestPath(input.workspaceDir, input.issue.paperKey);
+  const quarantineRoot = await uniquePath(path.join(
+    input.workspaceDir,
+    "knowledge-base",
+    "quarantine",
+    "non-paper-sources",
+    input.issue.paperKey
+  ));
+  const source = isPaperSource(input.issue.source) ? input.issue.source : undefined;
+  const blocklistLookup = {
+    paperKey: input.issue.paperKey,
+    ...(source ? { source } : {}),
+    ...(input.issue.articleUrl ? { articleUrl: input.issue.articleUrl } : {}),
+    ...(input.issue.title ? { title: input.issue.title } : {})
+  };
+
+  if (input.dryRun) {
+    return {
+      issue: input.issue,
+      status: "skipped",
+      action: "non_paper_quarantine",
+      message: `Dry run: would quarantine ${input.issue.paperKey} and add it to the paper download blocklist.`
+    };
+  }
+
+  try {
+    const movedPaths = [
+      await renameIfExists(sourceDir, path.join(quarantineRoot, "source"), input.workspaceDir),
+      await renameIfExists(manifestPath, path.join(quarantineRoot, "manifest.json"), input.workspaceDir)
+    ].filter((value): value is string => Boolean(value));
+    await mkdir(quarantineRoot, { recursive: true });
+    await writeFile(
+      path.join(quarantineRoot, "quarantine.json"),
+      `${JSON.stringify({
+        paperKey: input.issue.paperKey,
+        quarantinedAt: new Date().toISOString(),
+        reason: input.issue.reason,
+        articleUrl: input.issue.articleUrl,
+        title: input.issue.title,
+        movedPaths
+      }, null, 2)}\n`,
+      "utf8"
+    );
+
+    const existingBlock = await findBlockedPaperDownload({
+      workspaceDir: input.workspaceDir,
+      lookup: blocklistLookup
+    });
+    const blockResult = existingBlock
+      ? undefined
+      : await blockPaperDownload({
+        workspaceDir: input.workspaceDir,
+        reasonCode: "not_a_paper",
+        note: input.issue.reason,
+        ...blocklistLookup
+      });
+
+    return {
+      issue: input.issue,
+      status: "fixed",
+      action: "non_paper_quarantine",
+      message: `Quarantined non-paper source ${input.issue.paperKey}.`,
+      details: {
+        quarantineRoot: relativeToWorkspace(input.workspaceDir, quarantineRoot),
+        movedPaths,
+        ...(existingBlock ? { blocklisted: "already_present" } : {}),
+        ...(blockResult ? { blocklistPath: relativeToWorkspace(input.workspaceDir, blockResult.blocklistPath) } : {})
+      }
+    };
+  } catch (error) {
+    return {
+      issue: input.issue,
+      status: "failed",
+      action: "non_paper_quarantine",
+      message: error instanceof Error ? error.message : "Non-paper source quarantine failed."
+    };
+  }
+}
+
 async function readSourceMetadata(sourcePath: string): Promise<Partial<PaperSourceMetadata> | undefined> {
   try {
     return JSON.parse(await readFile(sourcePath, "utf8")) as Partial<PaperSourceMetadata>;
@@ -1684,6 +1863,14 @@ export async function fixWikiHealth(options: WikiHealthFixOptions): Promise<Wiki
         ...(options.paperSummaryWorker ? { paperSummaryWorker: options.paperSummaryWorker } : {}),
         dryRun: options.dryRun === true,
         ...(options.onProgress ? { onProgress: options.onProgress } : {})
+      }));
+      continue;
+    }
+    if (issue.kind === "non_paper_source") {
+      results.push(await fixByNonPaperSourceQuarantine({
+        workspaceDir,
+        issue,
+        dryRun: options.dryRun === true
       }));
       continue;
     }

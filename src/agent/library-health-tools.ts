@@ -58,6 +58,7 @@ const wikiHealthIssueKindParameters = Type.Union([
   Type.Literal("parse_failed"),
   Type.Literal("low_quality"),
   Type.Literal("summary_missing"),
+  Type.Literal("non_paper_source"),
   Type.Literal("missing_artifact"),
   Type.Literal("download_blocked"),
   Type.Literal("citation_incomplete")

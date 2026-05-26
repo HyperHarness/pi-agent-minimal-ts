@@ -170,6 +170,89 @@ test("checkWikiHealth excludes publisher news pages from paper parse health", as
   }
 });
 
+test("wiki_health_fix quarantines APS institution site license non-paper sources", async () => {
+  const workspace = await createWorkspace();
+
+  try {
+    const paperKey = "journals.aps.org-aps-institution-site-license";
+    const articleUrl = "https://journals.aps.org/aps-institution-site-license";
+    const sourceDir = path.join(workspace, "knowledge-base", "sources", paperKey);
+    const parseDir = path.join(sourceDir, "parses", "webpage");
+    const manifestPath = path.join(workspace, "knowledge-base", "manifests", `${paperKey}.json`);
+    await writeJson(path.join(sourceDir, "source.json"), {
+      paperKey,
+      articleUrl,
+      source: "aps",
+      title: "APS Institution Site License",
+      authors: [],
+      year: 2017,
+      publisher: "American Physical Society",
+      citationStatus: "incomplete",
+      missingFields: ["authors", "venue"]
+    });
+    await writeText(path.join(parseDir, "document.md"), "# APS Institution Site License\n\nPolicy text.");
+    await writeJson(path.join(parseDir, "parse.json"), {
+      paperKey,
+      engine: "webpage"
+    });
+    await writeJson(path.join(parseDir, "quality.json"), {
+      status: "good",
+      score: 0.9,
+      pages: 1,
+      totalTextLength: 3000,
+      warnings: []
+    });
+    await writeText(path.join(sourceDir, "chunks", "webpage.jsonl"), "{\"id\":\"chunk-1\"}\n");
+    await writeText(path.join(sourceDir, "summary.md"), "---\ntype: \"paper-source-summary\"\n---\n\nPolicy summary.\n");
+    await writeJson(manifestPath, {
+      schemaVersion: 1,
+      kind: "paper-source",
+      paperKey,
+      title: "APS Institution Site License",
+      status: "ready",
+      createdAt: "2026-05-26T08:50:53.895Z",
+      updatedAt: "2026-05-26T08:50:53.895Z",
+      sourceSummaryPath: `knowledge-base/sources/${paperKey}/summary.md`,
+      provenance: { articleUrl },
+      parse: {
+        engine: "webpage",
+        markdownPath: `knowledge-base/sources/${paperKey}/parses/webpage/document.md`,
+        jsonPath: `knowledge-base/sources/${paperKey}/parses/webpage/parse.json`,
+        qualityPath: `knowledge-base/sources/${paperKey}/parses/webpage/quality.json`
+      },
+      tags: ["license", "publisher-policy", "institutional-access", "aps"],
+      relatedPaperKeys: [],
+      synthesisPageKeys: []
+    });
+
+    const checked = await checkWikiHealth({ workspaceDir: workspace });
+
+    assert.equal(checked.totalPapers, 0);
+    assert.equal(checked.summary.non_paper_source, 1);
+    assert.equal(checked.summary.citation_incomplete, 0);
+    assert.equal(checked.summary.needs_download, 0);
+
+    const fixed = await fixWikiHealth({
+      workspaceDir: workspace,
+      issueKinds: ["non_paper_source"]
+    });
+
+    assert.equal(fixed.fixed, 1);
+    await assert.rejects(readFile(path.join(sourceDir, "source.json"), "utf8"));
+    await assert.rejects(readFile(manifestPath, "utf8"));
+    const quarantinedSource = await readFile(
+      path.join(workspace, "knowledge-base", "quarantine", "non-paper-sources", paperKey, "source", "source.json"),
+      "utf8"
+    );
+    assert.match(quarantinedSource, /APS Institution Site License/);
+    const blocklist = await readFile(path.join(workspace, "knowledge-base", "state", "paper-blocklist.jsonl"), "utf8");
+    assert.match(blocklist, /"reasonCode":"not_a_paper"/);
+    assert.match(blocklist, /aps-institution-site-license/);
+  } finally {
+    await rm(workspace, { recursive: true, force: true });
+  }
+});
+
 test("checkWikiHealth resolves WSL UNC artifact paths before reporting missing files", async () => {
   const workspace = await createWorkspace();
 
@@ -1079,6 +1162,61 @@ test("checkWikiHealth preserves Science license failures from extension history 
   }
 });
 
+test("checkWikiHealth treats APS automatic PDF fetch as queued instead of authorization failure", async () => {
+  const workspace = await createWorkspace();
+
+  try {
+    const paperKey = "aps-10.1103-PhysRevLett.111.080502";
+    const articleUrl = "https://journals.aps.org/prl/abstract/10.1103/PhysRevLett.111.080502";
+    const paperDir = path.join(workspace, "knowledge-base", "sources", paperKey);
+    const parseDir = path.join(paperDir, "parses", "webpage");
+    await writeJson(path.join(paperDir, "source.json"), {
+      paperKey,
+      source: "aps",
+      canonicalId: "10.1103/PhysRevLett.111.080502",
+      articleUrl,
+      title: "Coherent Josephson Qubit Suitable for Scalable Quantum Integrated Circuits"
+    });
+    await writeText(path.join(parseDir, "document.md"), "# Abstract\n\nFull APS article text.\n\n## Article Text\n\nLong body.");
+    await writeJson(path.join(parseDir, "parse.json"), {
+      paperKey,
+      engine: "webpage"
+    });
+    await writeJson(path.join(parseDir, "quality.json"), {
+      status: "good",
+      score: 1,
+      pages: 1,
+      totalTextLength: 25532,
+      emptyPageCount: 0,
+      headingCount: 6,
+      tableCount: 0,
+      figureOrCaptionCount: 4,
+      warnings: []
+    });
+    await writeText(path.join(paperDir, "chunks", "webpage.jsonl"), "{\"id\":\"chunk-1\"}\n");
+    await appendPaperDownloadJobEvent({
+      workspaceDir: workspace,
+      event: {
+        jobId: "paper-aps-fetch",
+        recordedAt: "2026-05-26T08:57:53.864Z",
+        status: "automatic_download_started",
+        articleUrl,
+        source: "aps",
+        message: "Started automatic PDF fetch with browser credentials."
+      }
+    });
+
+    const result = await checkWikiHealth({ workspaceDir: workspace });
+
+    assert.equal(result.summary.needs_authorization, 0);
+    assert.equal(result.summary.needs_download, 0);
+    assert.equal(result.summary.queued, 1);
+    assert.ok(result.issues.some((issue) => issue.kind === "queued" && issue.paperKey === paperKey));
+  } finally {
+    await rm(workspace, { recursive: true, force: true });
+  }
+});
+
 test("checkWikiHealth downgrades blocklisted download issues without hiding summary gaps", async () => {
   const workspace = await createWorkspace();
 
@@ -1123,6 +1261,17 @@ test("checkWikiHealth downgrades blocklisted download issues without hiding summ
         message: "Science reports that the current license does not permit this publication to be downloaded."
       }
     });
+    await appendPaperDownloadJobEvent({
+      workspaceDir: workspace,
+      event: {
+        jobId: "paper-science-stale-observed",
+        recordedAt: "2026-05-06T05:49:30.833Z",
+        status: "manual_download_observed",
+        articleUrl,
+        source: "science",
+        message: "Observed a browser PDF download."
+      }
+    });
     await blockPaperDownload({
       workspaceDir: workspace,
       paperKey,
@@ -1139,6 +1288,7 @@ test("checkWikiHealth downgrades blocklisted download issues without hiding summ
 
     assert.equal(result.summary.needs_authorization, 0);
     assert.equal(result.summary.needs_download, 0);
+    assert.equal(result.summary.queued, 0);
     assert.equal(result.summary.download_blocked, 1);
     assert.equal(result.summary.summary_missing, 1);
     const blockedIssue = result.issues.find((candidate) =>
@@ -1443,6 +1593,17 @@ test("checkWikiHealth treats accepted publisher-pending records as non-actionabl
       failure: {
         code: "publisher_version_not_available",
         message: "Publisher page is an accepted paper without a formal PDF yet, and no exact-title arXiv preprint was found."
+      }
+    });
+    await appendPaperDownloadJobEvent({
+      workspaceDir: workspace,
+      event: {
+        jobId: "paper-aps-rp4w",
+        recordedAt: "2026-05-26T07:42:00.000Z",
+        status: "awaiting_user_verification",
+        articleUrl: "https://journals.aps.org/prapplied/accepted/10.1103/rp4w-3n7l",
+        source: "aps",
+        message: "The webpage snapshot was captured but does not look complete enough to start PDF download. Log in or verify article access, refresh the page, then retry. Quality: needs_hybrid (score 0.55)."
       }
     });
     const legacyPaperDir = path.join(
