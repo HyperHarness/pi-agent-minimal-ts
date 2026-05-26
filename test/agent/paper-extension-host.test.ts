@@ -596,11 +596,12 @@ test("handleExtensionHostMessage registers APS supplemental material on the publ
   const workspaceDir = await createWorkspaceDir();
   const articleUrl = "https://journals.aps.org/prl/abstract/10.1103/PhysRevLett.111.080502";
   const materialUrl = "https://journals.aps.org/prl/supplemental/10.1103/PhysRevLett.111.080502/SM.pdf";
-  const expectedSourceDir = path.join(
+  const expectedSupplementalPath = path.join(
     workspaceDir,
     "knowledge-base",
-    "sources",
-    "aps-10.1103-PhysRevLett.111.080502"
+    "raw",
+    "pdfs",
+    "aps-10.1103-PhysRevLett.111.080502-supplemental-SM.pdf"
   );
 
   try {
@@ -623,7 +624,7 @@ test("handleExtensionHostMessage registers APS supplemental material on the publ
     assert.equal(response.type, "supplemental_registered");
     assert.equal(response.articleUrl, articleUrl);
     assert.equal(response.materialUrl, materialUrl);
-    assert.equal(response.path, path.join(expectedSourceDir, "supplemental", "SM.pdf"));
+    assert.equal(response.path, expectedSupplementalPath);
 
     const recordPath = resolvePaperRecordPath({
       workspaceDir,

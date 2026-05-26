@@ -21,6 +21,7 @@ import {
   resolveExternalPaperPdfPath,
   resolvePaperPdfPath,
   resolvePaperRecordPath,
+  resolvePaperSupplementalPdfPath,
   updatePaperRecordParseManifest,
   updatePaperRecordReadingFailure,
   writePaperRecord
@@ -298,11 +299,12 @@ async function registerSupplementalMaterial(options: {
     canonicalId,
     articleUrl: options.message.articleUrl
   });
-  const downloadPath = path.join(
-    path.dirname(targetRecordPath),
-    "supplemental",
+  const downloadPath = resolvePaperSupplementalPdfPath({
+    workspaceDir: options.workspaceDir,
+    source,
+    canonicalId,
     filename
-  );
+  });
   await mkdir(path.dirname(downloadPath), { recursive: true });
   await writeFile(downloadPath, materialBytes);
 

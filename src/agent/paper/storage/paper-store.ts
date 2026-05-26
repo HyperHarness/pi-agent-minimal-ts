@@ -172,6 +172,30 @@ export function resolvePaperPdfPath(input: {
   return path.join(resolvePaperLibraryPaths(input.workspaceDir).rawPdfRoot, filename);
 }
 
+export function resolvePaperSupplementalPdfPath(input: {
+  workspaceDir: string;
+  source: Exclude<PaperSource, "external">;
+  canonicalId: string;
+  filename: string;
+}): string {
+  const paperKey = resolvePaperRecordKey({
+    source: input.source,
+    canonicalId: input.canonicalId,
+    articleUrl: ""
+  });
+  const supplementalFilename = sanitizeFilenameComponent(input.filename);
+  if (!supplementalFilename) {
+    throw new Error("supplemental filename must contain at least one filename-safe character.");
+  }
+  const pdfFilename = supplementalFilename.toLowerCase().endsWith(".pdf")
+    ? supplementalFilename
+    : `${supplementalFilename}.pdf`;
+  return path.join(
+    resolvePaperLibraryPaths(input.workspaceDir).rawPdfRoot,
+    `${paperKey}-supplemental-${pdfFilename}`
+  );
+}
+
 export function resolvePaperRecordPath(input: {
   workspaceDir: string;
   source: PaperSource;

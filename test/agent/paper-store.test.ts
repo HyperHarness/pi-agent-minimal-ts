@@ -16,6 +16,7 @@ import {
   resolveExternalPaperPdfPath,
   resolvePaperPdfPath,
   resolvePaperSourcePath,
+  resolvePaperSupplementalPdfPath,
   resolvePaperRecordPath,
   updatePaperRecordParseManifest,
   updatePaperRecordQueuedReading,
@@ -86,14 +87,12 @@ test("resolvePaperLibraryPaths uses knowledge-base as the wiki root", async () =
 
 test("writePaperRecord persists publisher supplemental materials into source metadata", async () => {
   const workspaceDir = await mkdtemp(path.join(os.tmpdir(), "paper-store-supplemental-"));
-  const supplementalPath = path.join(
+  const supplementalPath = resolvePaperSupplementalPdfPath({
     workspaceDir,
-    "knowledge-base",
-    "sources",
-    "aps-10.1103-PhysRevLett.111.080502",
-    "supplemental",
-    "SM.pdf"
-  );
+    source: "aps",
+    canonicalId: "10.1103/PhysRevLett.111.080502",
+    filename: "SM.pdf"
+  });
   const pdfPath = path.join(workspaceDir, "knowledge-base", "raw", "pdfs", "aps-main.pdf");
 
   try {
@@ -134,6 +133,26 @@ test("writePaperRecord persists publisher supplemental materials into source met
   } finally {
     await rm(workspaceDir, { recursive: true, force: true });
   }
+});
+
+test("resolvePaperSupplementalPdfPath stores supplemental PDFs under raw pdfs", () => {
+  const workspaceDir = "/tmp/paper-store-supplemental-path";
+
+  assert.equal(
+    resolvePaperSupplementalPdfPath({
+      workspaceDir,
+      source: "aps",
+      canonicalId: "10.1103/PhysRevLett.111.080502",
+      filename: "SM.pdf"
+    }),
+    path.join(
+      workspaceDir,
+      "knowledge-base",
+      "raw",
+      "pdfs",
+      "aps-10.1103-PhysRevLett.111.080502-supplemental-SM.pdf"
+    )
+  );
 });
 
 const manualFallbackPaperRecord = {
