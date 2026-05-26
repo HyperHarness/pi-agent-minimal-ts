@@ -94,10 +94,11 @@ run_solver_runner_background.bat
 stop_solver_runner_background.bat
 ```
 
-The start scripts prefer the local `solver-runner\.venv` environment. They also keep a
-compatibility fallback for a parent repository `.venv` when the runner is used inside the full
-source checkout. The stop script looks for a process listening on the default TCP port `17890`
-and terminates it.
+The start scripts prefer the local `solver-runner\.venv` environment. On first run, they call
+`bootstrap_solver_runner.bat` to create `.venv` and install the runner from the copied folder.
+They also keep a compatibility fallback for a parent repository `.venv` when the runner is used
+inside the full source checkout. The stop script looks for a process listening on the default
+TCP port `17890` and terminates it.
 
 For local-only validation on Windows:
 

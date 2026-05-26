@@ -31,3 +31,6 @@ After installation, Windows users can also start the service with:
 - `run_solver_runner_visible.bat` for a foreground console.
 - `run_solver_runner_background.bat` for a background process with logs under `logs\`.
 - `stop_solver_runner_background.bat` to stop a process listening on the default `17890` port.
+
+On first run, the start scripts call `bootstrap_solver_runner.bat` to create the local `.venv`
+and install the package from the copied `solver-runner` folder.

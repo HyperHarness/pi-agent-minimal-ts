@@ -79,3 +79,20 @@ def test_solver_runner_tree_does_not_import_design_client() -> None:
     ]
 
     assert offenders == []
+
+
+def test_windows_launchers_bootstrap_local_environment() -> None:
+    root = Path(__file__).resolve().parents[1]
+    launchers = [
+        root / "run_solver_runner_visible.bat",
+        root / "run_solver_runner_background.bat",
+    ]
+
+    for launcher in launchers:
+        text = launcher.read_text()
+        assert "bootstrap_solver_runner.bat" in text
+        assert "%SOLVER_RUNNER_DIR%.venv\\Scripts\\pi-solver-runner.exe" in text
+
+    bootstrap = (root / "bootstrap_solver_runner.bat").read_text()
+    assert 'py -3.11 -m venv "%SOLVER_RUNNER_DIR%.venv"' in bootstrap
+    assert '"%PYTHON%" -m pip install -e "%SOLVER_RUNNER_DIR%."' in bootstrap

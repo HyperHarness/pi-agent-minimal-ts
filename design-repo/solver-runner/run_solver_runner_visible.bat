@@ -4,21 +4,18 @@ setlocal
 set "SOLVER_RUNNER_DIR=%~dp0"
 set "REPO_ROOT=%SOLVER_RUNNER_DIR%..\.."
 set "RUNNER=%SOLVER_RUNNER_DIR%.venv\Scripts\pi-solver-runner.exe"
-if not exist "%RUNNER%" set "RUNNER=%REPO_ROOT%\.venv\Scripts\pi-solver-runner.exe"
 set "WORK_DIR=%SOLVER_RUNNER_DIR%jobs"
 
 if not exist "%RUNNER%" (
-  echo ERROR: runner executable not found:
-  echo   %RUNNER%
-  echo.
-  echo Expected virtual environment:
-  echo   %SOLVER_RUNNER_DIR%.venv
-  echo.
-  echo From this solver-runner directory, install it with:
-  echo   py -3.11 -m venv .venv
-  echo   .\.venv\Scripts\python.exe -m pip install -e .
-  pause
-  exit /b 1
+  call "%SOLVER_RUNNER_DIR%bootstrap_solver_runner.bat"
+  if errorlevel 1 (
+    pause
+    exit /b 1
+  )
+)
+
+if not exist "%RUNNER%" (
+  set "RUNNER=%REPO_ROOT%\.venv\Scripts\pi-solver-runner.exe"
 )
 
 if not exist "%WORK_DIR%" mkdir "%WORK_DIR%"
