@@ -216,11 +216,30 @@ test("generatePaperWikiSummary prefers a good parse over a low-quality webpage p
   const receivedEngines: string[] = [];
 
   try {
-    await writeJson(path.join(sourceRoot, "source.json"), {
-      paperKey,
-      source: "aps",
-      canonicalId: "10.1103/example-summary",
-      articleUrl: "https://journals.aps.org/prl/abstract/10.1103/example-summary"
+    await writeJson(path.join(sourceRoot, "metadata.json"), {
+      schemaVersion: 1,
+      sourceKind: "paper",
+      sourceKey: paperKey,
+      title: "Example Summary",
+      status: "ready",
+      createdAt: "2026-05-26T00:00:00.000Z",
+      updatedAt: "2026-05-26T00:00:00.000Z",
+      citation: {
+        authors: ["Example Author"],
+        year: 2026,
+        venue: "Physical Review Letters",
+        doi: "10.1103/example-summary",
+        citationStatus: "complete",
+        missingFields: []
+      },
+      provenance: {
+        url: "https://example.invalid/paper",
+        acquisitionPath: `knowledge-base/sources/${paperKey}/acquisition.json`
+      },
+      artifacts: [],
+      tags: [],
+      relatedSourceKeys: [],
+      synthesisPageKeys: []
     });
     await writeText(path.join(webpageDir, "document.md"), "# Abstract\n\nAccess-limited publisher preview.");
     await writeJson(path.join(webpageDir, "parse.json"), {

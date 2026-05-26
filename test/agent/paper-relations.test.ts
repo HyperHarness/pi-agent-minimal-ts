@@ -32,12 +32,30 @@ async function writeParsedPaper(workspace: string, input: {
 }): Promise<void> {
   const sourceRoot = path.join(workspace, "knowledge-base", "sources", input.paperKey);
   const parseRoot = path.join(sourceRoot, "parses", "webpage");
-  await writeJson(path.join(sourceRoot, "source.json"), {
-    paperKey: input.paperKey,
+  await writeJson(path.join(sourceRoot, "metadata.json"), {
+    schemaVersion: 1,
+    sourceKind: "paper",
+    sourceKey: input.paperKey,
     title: input.title,
-    source: "aps",
-    canonicalId: input.paperKey.replace(/^aps-/, ""),
-    articleUrl: `https://example.test/${input.paperKey}`
+    status: "ready",
+    createdAt: "2026-05-26T00:00:00.000Z",
+    updatedAt: "2026-05-26T00:00:00.000Z",
+    citation: {
+      authors: ["Example Author"],
+      year: 2026,
+      venue: "Example Venue",
+      doi: input.paperKey.replace(/^aps-/, ""),
+      citationStatus: "complete",
+      missingFields: []
+    },
+    provenance: {
+      url: "https://example.invalid/paper",
+      acquisitionPath: `knowledge-base/sources/${input.paperKey}/acquisition.json`
+    },
+    artifacts: [],
+    tags: [],
+    relatedSourceKeys: [],
+    synthesisPageKeys: []
   });
   await writeText(path.join(parseRoot, "document.md"), `# ${input.title}\n\n${input.text}`);
   await writeJson(path.join(parseRoot, "quality.json"), {
