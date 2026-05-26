@@ -65,13 +65,26 @@ const invalidExternalSearchSource = {
   // @ts-expect-error external search sources must not expose supported-source identifiers
 } satisfies PaperSearchSource;
 
-test("resolvePaperLibraryPaths exposes source directories without top-level manifests root", () => {
+test("resolvePaperLibraryPaths exposes the current knowledge-base path contract", () => {
   const workspaceDir = path.resolve("/tmp/pi-workspace");
   const paths = resolvePaperLibraryPaths(workspaceDir);
 
+  assert.deepEqual(Object.keys(paths).sort(), [
+    "assetsRoot",
+    "indexPath",
+    "libraryRoot",
+    "logPath",
+    "pagesRoot",
+    "rawPdfRoot",
+    "rawRoot",
+    "sourceArtifactsRoot",
+    "sourcesRoot",
+    "stateRoot",
+    "wikiRoot",
+    "workspaceDir"
+  ]);
   assert.equal(paths.sourceArtifactsRoot, path.join(workspaceDir, "knowledge-base", "sources"));
   assert.equal(paths.sourcesRoot, path.join(workspaceDir, "knowledge-base", "sources"));
-  assert.equal(Object.hasOwn(paths, "manifestsRoot"), false);
 });
 
 test("writePaperRecord persists publisher supplemental materials into source metadata", async () => {
