@@ -25,8 +25,8 @@ import {
 import {
   updatePaperRecordParseManifest,
   updatePaperRecordReadingFailure,
-  writePaperSourceMetadataForRecord,
-  writePaperSourceMetadataForSource
+  writePaperMetadataForRecord,
+  writePaperMetadataForSourceDirectory
 } from "../paper/storage/paper-store.js";
 import {
   blockPaperDownload,
@@ -292,7 +292,7 @@ function baseIssue(
 
 function missingCitationFields(entry: LocalPaperEntry, sourceExists: boolean): string[] {
   if (!sourceExists) {
-    return ["source.json"];
+    return ["metadata.json"];
   }
   const fields = entry.missingCitationFields?.filter((field) => field.trim().length > 0) ?? [];
   if (fields.length > 0) {
@@ -1722,25 +1722,25 @@ async function refreshSourceCitationMetadata(input: {
   sourcePath?: string;
   recordExists: boolean;
 }): Promise<string> {
-  const recordSiblingSourcePath = input.recordPath
-    ? path.join(path.dirname(input.recordPath), "source.json")
+  const recordSiblingMetadataPath = input.recordPath
+    ? path.join(path.dirname(input.recordPath), "metadata.json")
     : undefined;
   if (
     input.sourcePath &&
     (!input.recordPath ||
       !input.recordExists ||
-      path.resolve(input.sourcePath) !== path.resolve(recordSiblingSourcePath ?? ""))
+      path.resolve(input.sourcePath) !== path.resolve(recordSiblingMetadataPath ?? ""))
   ) {
-    return writePaperSourceMetadataForSource({
+    return writePaperMetadataForSourceDirectory({
       workspaceDir: input.workspaceDir,
-      sourcePath: input.sourcePath,
+      sourceDir: path.dirname(input.sourcePath),
       enrichCitationMetadata: true
     });
   }
 
   if (input.recordPath && input.recordExists) {
     const record = JSON.parse(await readFile(input.recordPath, "utf8")) as PaperRecord;
-    return writePaperSourceMetadataForRecord({
+    return writePaperMetadataForRecord({
       workspaceDir: input.workspaceDir,
       record,
       recordPath: input.recordPath,
@@ -1748,15 +1748,15 @@ async function refreshSourceCitationMetadata(input: {
     });
   }
 
-  if (input.sourcePath || recordSiblingSourcePath) {
-    return writePaperSourceMetadataForSource({
+  if (input.sourcePath || recordSiblingMetadataPath) {
+    return writePaperMetadataForSourceDirectory({
       workspaceDir: input.workspaceDir,
-      sourcePath: input.sourcePath ?? recordSiblingSourcePath!,
+      sourceDir: path.dirname(input.sourcePath ?? recordSiblingMetadataPath!),
       enrichCitationMetadata: true
     });
   }
 
-  throw new Error("Cannot refresh source citation metadata because no source metadata path could be resolved.");
+  throw new Error("Cannot refresh citation metadata because no metadata.json path could be resolved.");
 }
 
 function createDefaultPaperDownloadWorker(input: {
@@ -1769,7 +1769,7 @@ function createDefaultPaperDownloadWorker(input: {
       if (!paths.recordPath && !paths.sourcePath) {
         return {
           status: "skipped",
-          message: "Cannot refresh source citation metadata because the issue has no acquisition recordPath or sourcePath."
+          message: "Cannot refresh citation metadata because the issue has no acquisition recordPath or metadata sourcePath."
         };
       }
       const refreshedSourcePath = await refreshSourceCitationMetadata({

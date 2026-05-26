@@ -14,6 +14,8 @@ import type {
 
 export type LocalPaperListStatus = "all" | "downloaded" | "parsed" | "summarized";
 
+type PaperSourceFile = PaperReaderSource & Partial<PaperSourceMetadata>;
+
 export interface LocalPaperParseSummary {
   engine: ConcretePaperParseEngine;
   status?: PaperParseQualityReport["status"];
@@ -142,6 +144,10 @@ function paperKeyFromSourceDirectory(sourceDirName: string, source: PaperReaderS
   });
   const canonicalKey = canonicalId ? sanitizePaperKey(`${source.source}-${canonicalId}`) : "";
   return canonicalKey || sourceDirName;
+}
+
+function isRecord(value: unknown): value is Record<string, unknown> {
+  return typeof value === "object" && value !== null && !Array.isArray(value);
 }
 
 function readOptionalString(value: unknown): string | undefined {
@@ -285,6 +291,63 @@ async function readJsonFile<T>(filePath: string): Promise<T | undefined> {
   }
 }
 
+function normalizeKnowledgeSourceMetadata(input: {
+  raw: unknown;
+  fallbackPaperKey: string;
+}): PaperSourceFile | undefined {
+  if (!isRecord(input.raw)) {
+    return undefined;
+  }
+  if (input.raw.schemaVersion !== 1 || input.raw.sourceKind !== "paper") {
+    return input.raw as unknown as PaperSourceFile;
+  }
+  const citation = isRecord(input.raw.citation) ? input.raw.citation : {};
+  const provenance = isRecord(input.raw.provenance) ? input.raw.provenance : {};
+  const paperKey = readOptionalString(input.raw.sourceKey) ?? input.fallbackPaperKey;
+  const createdAt = readOptionalString(input.raw.createdAt) ?? new Date().toISOString();
+  const source = readOptionalString(provenance.source);
+  const canonicalId =
+    readOptionalString(provenance.canonicalId) ??
+    readOptionalString(citation.doi) ??
+    readOptionalString(citation.arxivId);
+  const articleUrl = readOptionalString(provenance.url);
+  const recordPath = readOptionalString(provenance.recordPath);
+  const pdfPath = readOptionalString(provenance.rawPath) ?? readOptionalString(provenance.downloadPath);
+
+  return {
+    ...(input.raw as unknown as PaperSourceFile),
+    paperKey,
+    createdAt,
+    ...(readOptionalString(input.raw.title) ? { title: readOptionalString(input.raw.title) } : {}),
+    ...(source ? { source } : {}),
+    ...(canonicalId ? { canonicalId } : {}),
+    ...(articleUrl ? { articleUrl } : {}),
+    ...(recordPath ? { recordPath } : {}),
+    ...(pdfPath ? { pdfPath } : {})
+  };
+}
+
+async function readPreferredSourceMetadata(input: {
+  paperDir: string;
+  paperKey: string;
+}): Promise<{ source: PaperSourceFile; path: string } | undefined> {
+  const metadataPath = path.join(input.paperDir, "metadata.json");
+  const metadata = normalizeKnowledgeSourceMetadata({
+    raw: await readJsonFile<unknown>(metadataPath),
+    fallbackPaperKey: input.paperKey
+  });
+  if (metadata) {
+    return { source: metadata, path: metadataPath };
+  }
+
+  const legacySourcePath = path.join(input.paperDir, "source.json");
+  const legacySource = normalizeKnowledgeSourceMetadata({
+    raw: await readJsonFile<unknown>(legacySourcePath),
+    fallbackPaperKey: input.paperKey
+  });
+  return legacySource ? { source: legacySource, path: legacySourcePath } : undefined;
+}
+
 function resolveKnownPdfPath(workspaceDir: string, pdfPath: string | undefined): string | undefined {
   if (!pdfPath) {
     return undefined;
@@ -314,7 +377,7 @@ async function collectAcquisitions(workspaceDir: string, entries: Map<string, Lo
     }
     const entry = entries.get(paperKey) ?? createEmptyEntry(paperKey);
     applyRecord(entry, record, recordPath, workspaceDir);
-    entry.sourcePath = entry.sourcePath ?? relativeToWorkspace(workspaceDir, path.join(paths.sourceArtifactsRoot, sourceDir.name, "source.json"));
+    entry.sourcePath = entry.sourcePath ?? relativeToWorkspace(workspaceDir, path.join(paths.sourceArtifactsRoot, sourceDir.name, "metadata.json"));
     entry.hasPdf = await pathExists(resolveKnownPdfPath(workspaceDir, entry.pdfPath));
     entries.set(paperKey, entry);
   }
@@ -334,13 +397,18 @@ async function collectParses(workspaceDir: string, entries: Map<string, LocalPap
       continue;
     }
     const paperDir = path.join(paths.sourceArtifactsRoot, sourceDir.name);
-    const sourcePath = path.join(paperDir, "source.json");
-    const source = await readJsonFile<PaperReaderSource & Partial<PaperSourceMetadata>>(sourcePath);
+    const sourceMetadata = await readPreferredSourceMetadata({
+      paperDir,
+      paperKey: sourceDir.name
+    });
+    const source = sourceMetadata?.source;
     const paperKey = paperKeyFromSourceDirectory(sourceDir.name, source);
     const entry = entries.get(paperKey) ?? createEmptyEntry(paperKey);
-    entry.sourcePath = entry.sourcePath ?? relativeToWorkspace(workspaceDir, sourcePath);
+    entry.sourcePath = sourceMetadata
+      ? relativeToWorkspace(workspaceDir, sourceMetadata.path)
+      : entry.sourcePath ?? relativeToWorkspace(workspaceDir, path.join(paperDir, "metadata.json"));
     if (source) {
-      applySource(entry, source, sourcePath, workspaceDir);
+      applySource(entry, source, sourceMetadata.path, workspaceDir);
     }
 
     const parsesDir = path.join(paperDir, "parses");

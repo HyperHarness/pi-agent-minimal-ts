@@ -38,13 +38,35 @@ test("listLocalPapers merges download records with parsed artifacts", async () =
       downloadPath: pdfPath
     });
     const paperDir = path.join(workspace, "knowledge-base", "sources", "nature-s41534-026-01233-y");
-    await writeJson(path.join(paperDir, "source.json"), {
-      paperKey: "nature-s41534-026-01233-y",
+    await writeJson(path.join(paperDir, "metadata.json"), {
+      schemaVersion: 1,
+      sourceKind: "paper",
+      sourceKey: "nature-s41534-026-01233-y",
       title: "Fusion-based implementation of qLDPC codes with quantum emitters",
-      articleUrl: "https://www.nature.com/articles/s41534-026-01233-y",
-      source: "nature",
-      canonicalId: "s41534-026-01233-y",
-      pdfPath
+      status: "ready",
+      createdAt: "2026-04-28T00:00:00.000Z",
+      updatedAt: "2026-04-28T00:00:00.000Z",
+      summaryPath: "knowledge-base/sources/nature-s41534-026-01233-y/summary.md",
+      citation: {
+        citationStatus: "complete",
+        missingFields: [],
+        authors: ["A. Researcher"],
+        year: 2026,
+        venue: "Nature Quantum Information",
+        doi: "10.1038/s41534-026-01233-y"
+      },
+      provenance: {
+        url: "https://www.nature.com/articles/s41534-026-01233-y",
+        source: "nature",
+        canonicalId: "s41534-026-01233-y",
+        recordPath: "knowledge-base/sources/nature-s41534-026-01233-y/acquisition.json",
+        acquisitionPath: "knowledge-base/sources/nature-s41534-026-01233-y/acquisition.json",
+        rawPath: pdfPath
+      },
+      artifacts: [],
+      tags: [],
+      relatedSourceKeys: [],
+      synthesisPageKeys: []
     });
     await writeText(path.join(paperDir, "parses", "opendataloader-local", "document.md"), "Full PDF text");
     await writeJson(path.join(paperDir, "parses", "opendataloader-local", "parse.json"), {
@@ -68,6 +90,7 @@ test("listLocalPapers merges download records with parsed artifacts", async () =
     assert.equal(result.results[0]?.paperKey, "nature-s41534-026-01233-y");
     assert.equal(result.results[0]?.hasPdf, true);
     assert.equal(result.results[0]?.hasParsedArtifacts, true);
+    assert.equal(result.results[0]?.sourcePath, "knowledge-base/sources/nature-s41534-026-01233-y/metadata.json");
     assert.equal(result.results[0]?.parses[0]?.engine, "opendataloader-local");
     assert.equal(result.results[0]?.parses[0]?.status, "good");
   } finally {

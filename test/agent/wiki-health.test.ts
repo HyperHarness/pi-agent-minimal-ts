@@ -1912,7 +1912,7 @@ test("fixWikiHealth delegates citation metadata refresh to the paper download wo
   try {
     const paperKey = "arxiv-2401.00009";
     const recordPath = path.join(workspace, "knowledge-base", "sources", paperKey, "acquisition.json");
-    const sourcePath = path.join(workspace, "knowledge-base", "sources", paperKey, "source.json");
+    const metadataPath = path.join(workspace, "knowledge-base", "sources", paperKey, "metadata.json");
     const calls: Array<{ paperKey: string; recordPath?: string; sourcePath?: string }> = [];
     await writeJson(recordPath, {
       source: "arxiv",
@@ -1924,23 +1924,37 @@ test("fixWikiHealth delegates citation metadata refresh to the paper download wo
       pdfUrl: "https://arxiv.org/pdf/2401.00009.pdf",
       downloadPath: path.join(workspace, "knowledge-base", "raw", "pdfs", "arxiv-2401.00009.pdf")
     });
-    await writeJson(sourcePath, {
-      schemaVersion: 2,
-      paperKey,
-      source: "arxiv",
-      canonicalId: "2401.00009",
-      articleUrl: "https://arxiv.org/abs/2401.00009",
+    await writeJson(metadataPath, {
+      schemaVersion: 1,
+      sourceKind: "paper",
+      sourceKey: paperKey,
       title: "A paper with incomplete citation metadata",
-      authors: [],
-      citationStatus: "incomplete",
-      missingFields: ["authors", "venue"],
-      acquisitionPath: `knowledge-base/sources/${paperKey}/acquisition.json`,
-      recordPath: `knowledge-base/sources/${paperKey}/acquisition.json`,
-      downloadStatus: "downloaded",
-      resolvedFrom: "acquisition",
-      sourceConfidence: "medium",
-      recordedAt: "2026-04-28T04:30:00.000Z",
-      updatedAt: "2026-04-28T04:30:00.000Z"
+      status: "citation_incomplete",
+      createdAt: "2026-04-28T04:30:00.000Z",
+      updatedAt: "2026-04-28T04:30:00.000Z",
+      summaryPath: `knowledge-base/sources/${paperKey}/summary.md`,
+      citation: {
+        citationStatus: "incomplete",
+        missingFields: ["authors", "venue"],
+        authors: [],
+        arxivId: "2401.00009",
+        resolvedFrom: "acquisition",
+        sourceConfidence: "medium"
+      },
+      provenance: {
+        url: "https://arxiv.org/abs/2401.00009",
+        arxivId: "2401.00009",
+        source: "arxiv",
+        canonicalId: "2401.00009",
+        acquisitionPath: `knowledge-base/sources/${paperKey}/acquisition.json`,
+        recordPath: `knowledge-base/sources/${paperKey}/acquisition.json`,
+        downloadStatus: "downloaded",
+        recordedAt: "2026-04-28T04:30:00.000Z"
+      },
+      artifacts: [],
+      tags: [],
+      relatedSourceKeys: [],
+      synthesisPageKeys: []
     });
 
     const result = await fixWikiHealth({
@@ -1970,7 +1984,7 @@ test("fixWikiHealth delegates citation metadata refresh to the paper download wo
     assert.equal(calls.length, 1);
     assert.equal(calls[0]?.paperKey, paperKey);
     assert.equal(calls[0]?.recordPath, `knowledge-base/sources/${paperKey}/acquisition.json`);
-    assert.equal(calls[0]?.sourcePath, `knowledge-base/sources/${paperKey}/source.json`);
+    assert.equal(calls[0]?.sourcePath, `knowledge-base/sources/${paperKey}/metadata.json`);
     assert.equal(result.attempted, 1);
     assert.equal(result.fixed, 1);
     assert.equal(result.results[0]?.action, "metadata_refresh");
@@ -1979,19 +1993,35 @@ test("fixWikiHealth delegates citation metadata refresh to the paper download wo
   }
 });
 
-test("fixWikiHealth refreshes legacy source-only citation metadata through the default worker", async () => {
+test("fixWikiHealth refreshes metadata-only citation metadata through the default worker", async () => {
   const workspace = await createWorkspace();
   const originalFetch = globalThis.fetch;
 
   try {
     const paperKey = "science-10.1126-science.ado6285";
-    await writeJson(path.join(workspace, "knowledge-base", "sources", paperKey, "source.json"), {
-      paperKey,
-      source: "science",
-      canonicalId: "10.1126/science.ado6285",
-      articleUrl: "https://www.science.org/doi/10.1126/science.ado6285",
+    await writeJson(path.join(workspace, "knowledge-base", "sources", paperKey, "metadata.json"), {
+      schemaVersion: 1,
+      sourceKind: "paper",
+      sourceKey: paperKey,
       title: "Beyond-classical computation in quantum simulation",
-      createdAt: "2026-05-06T04:45:58.636Z"
+      status: "citation_incomplete",
+      createdAt: "2026-05-06T04:45:58.636Z",
+      updatedAt: "2026-05-06T04:45:58.636Z",
+      summaryPath: `knowledge-base/sources/${paperKey}/summary.md`,
+      citation: {
+        citationStatus: "incomplete",
+        missingFields: ["authors", "year", "venue"],
+        doi: "10.1126/science.ado6285"
+      },
+      provenance: {
+        url: "https://www.science.org/doi/10.1126/science.ado6285",
+        source: "science",
+        canonicalId: "10.1126/science.ado6285"
+      },
+      artifacts: [],
+      tags: [],
+      relatedSourceKeys: [],
+      synthesisPageKeys: []
     });
     globalThis.fetch = (async (input) => {
       const url = input.toString();
@@ -2039,12 +2069,12 @@ test("fixWikiHealth refreshes legacy source-only citation metadata through the d
     assert.equal(result.attempted, 1);
     assert.equal(result.fixed, 1);
     assert.equal(result.results[0]?.action, "metadata_refresh");
-    const source = JSON.parse(await readFile(path.join(workspace, "knowledge-base", "sources", paperKey, "source.json"), "utf8"));
-    assert.deepEqual(source.authors, ["Adam Smith", "Bao Nguyen"]);
-    assert.equal(source.year, 2025);
-    assert.equal(source.venue, "Science");
-    assert.equal(source.citationStatus, "complete");
-    assert.deepEqual(source.missingFields, []);
+    const metadata = JSON.parse(await readFile(path.join(workspace, "knowledge-base", "sources", paperKey, "metadata.json"), "utf8"));
+    assert.deepEqual(metadata.citation.authors, ["Adam Smith", "Bao Nguyen"]);
+    assert.equal(metadata.citation.year, 2025);
+    assert.equal(metadata.citation.venue, "Science");
+    assert.equal(metadata.citation.citationStatus, "complete");
+    assert.deepEqual(metadata.citation.missingFields, []);
   } finally {
     globalThis.fetch = originalFetch;
     await rm(workspace, { recursive: true, force: true });
