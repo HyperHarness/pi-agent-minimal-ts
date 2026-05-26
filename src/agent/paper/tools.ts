@@ -69,6 +69,12 @@ const downloadPaperParameters = Type.Object({
       description:
         "Optional paper title for exact-title arXiv preprint fallback when a publisher URL cannot be downloaded. If omitted, the manager tries to derive the title from publisher page metadata."
     })
+  ),
+  includeSupplementalMaterials: Type.Optional(
+    Type.Boolean({
+      description:
+        "Set true when the user explicitly asks to download publisher supplemental or supplementary materials. For APS papers, this queues a supplemental-material browser extension job even when the main PDF is already downloaded."
+    })
   )
 });
 
@@ -219,6 +225,11 @@ export type DownloadPaperReadingClosure =
     };
 export type DownloadPaperClosedLoopDetails = PaperDownloadResult & {
   reading?: DownloadPaperReadingClosure;
+  supplementalMaterials?: {
+    status: "queued" | "failed" | "unsupported";
+    jobId?: string;
+    message: string;
+  };
 };
 type DownloadPaperTool = AgentTool<
   typeof downloadPaperParameters,
@@ -854,6 +865,63 @@ export function createPaperTools(input: {
     return undefined;
   };
 
+  const queueSupplementalMaterialDownload = async (
+    result: PaperDownloadResult
+  ): Promise<DownloadPaperClosedLoopDetails["supplementalMaterials"]> => {
+    if (result.source !== "aps") {
+      return {
+        status: "unsupported",
+        message: "Automatic supplemental material capture is currently supported for APS publisher records."
+      };
+    }
+
+    if (result.status === "extension_job_queued") {
+      return {
+        status: "queued",
+        jobId: result.jobId,
+        message:
+          "The queued publisher browser job will also attempt to download supplemental material PDFs."
+      };
+    }
+
+    if (result.status !== "downloaded" && result.status !== "already_downloaded") {
+      return {
+        status: "failed",
+        message: `Supplemental material capture requires a downloaded or queued publisher record; current status is ${result.status}.`
+      };
+    }
+
+    if (dependencies.extensionBridge === undefined) {
+      return {
+        status: "failed",
+        message:
+          "Supplemental material capture requires the browser extension bridge, but no bridge is configured."
+      };
+    }
+
+    try {
+      const queued = await dependencies.extensionBridge.submitJob(
+        createPaperExtensionJob({
+          articleUrl: result.articleUrl,
+          source: result.source,
+          purpose: "supplemental",
+          autoClose: true
+        })
+      );
+      return {
+        status: "queued",
+        jobId: queued.jobId,
+        message:
+          "Supplemental material download job queued. Reload the browser extension if the queued job does not start."
+      };
+    } catch (error) {
+      return {
+        status: "failed",
+        message: formatReadingError(error, "Supplemental material download could not be queued.")
+      };
+    }
+  };
+
   let cleanupPromise: Promise<void> | undefined;
   const closePaperManager = async (): Promise<void> => {
     cleanupPromise ??= paperBrowserManagerClient.close();
@@ -892,7 +960,7 @@ export function createPaperTools(input: {
     name: "download_paper",
     label: "Download Paper",
     description:
-      "Downloads a paper by id or URL through the unified paper manager and closes the reading loop by generating or queuing markdown artifacts. Before downloading, it checks the local paper blocklist and returns blocked for known irrelevant, license-denied, non-paper, duplicate, or repeatedly failed papers. APS, Science, and arXiv use webpage markdown first; Nature reuses good webpage markdown but parses the downloaded PDF when webpage reading is missing, queued, or low quality, which handles online-first pages whose article body is incomplete. arXiv refreshes webpage parsing when only PDF or TeX parsing exists, then falls back to TeX source and PDF parsing, while other PDFs are parsed after download. If a non-arXiv publisher download is blocked, incomplete, or unavailable, the manager tries an exact-title arXiv preprint fallback, deriving the title from publisher metadata when the caller did not pass one. For APS short DOIs, use the exact URL returned by search_papers or a DOI resolver URL such as https://link.aps.org/doi/<doi>; do not fabricate https://journals.aps.org/doi/<doi> URLs.",
+      "Downloads a paper by id or URL through the unified paper manager and closes the reading loop by generating or queuing markdown artifacts. Before downloading, it checks the local paper blocklist and returns blocked for known irrelevant, license-denied, non-paper, duplicate, or repeatedly failed papers. When the user explicitly asks for supplemental or supplementary material, set includeSupplementalMaterials=true so APS supplemental PDFs are queued even if the main PDF already exists. APS, Science, and arXiv use webpage markdown first; Nature reuses good webpage markdown but parses the downloaded PDF when webpage reading is missing, queued, or low quality, which handles online-first pages whose article body is incomplete. arXiv refreshes webpage parsing when only PDF or TeX parsing exists, then falls back to TeX source and PDF parsing, while other PDFs are parsed after download. If a non-arXiv publisher download is blocked, incomplete, or unavailable, the manager tries an exact-title arXiv preprint fallback, deriving the title from publisher metadata when the caller did not pass one. For APS short DOIs, use the exact URL returned by search_papers or a DOI resolver URL such as https://link.aps.org/doi/<doi>; do not fabricate https://journals.aps.org/doi/<doi> URLs.",
     parameters: downloadPaperParameters,
     executionMode: "sequential",
     execute: async (_toolCallId: string, args: DownloadPaperParameters) => {
@@ -905,11 +973,15 @@ export function createPaperTools(input: {
           ? { citationMetadataFetchImpl }
           : {})
       });
-      const reading = shouldDescribeDownloadReadingClosure
+      const supplementalMaterials = args.includeSupplementalMaterials === true
+        ? await queueSupplementalMaterialDownload(rawResult)
+        : undefined;
+      const reading = shouldDescribeDownloadReadingClosure && args.includeSupplementalMaterials !== true
         ? await describeDownloadReadingClosure(rawResult)
         : undefined;
       const result: DownloadPaperClosedLoopDetails = {
         ...rawResult,
+        ...(supplementalMaterials ? { supplementalMaterials } : {}),
         ...(reading ? { reading } : {})
       };
 

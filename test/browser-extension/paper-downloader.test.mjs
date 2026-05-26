@@ -848,6 +848,55 @@ test("background follows APS supplemental listing pages to downloadable PDFs", a
   assert.equal(statusMessagesOf(fakeChrome, "supplemental_material_failed").length, 0);
 });
 
+test("background supplemental-only jobs do not re-download the main PDF", async () => {
+  const fetchCalls = [];
+  const articleUrl = "https://journals.aps.org/prl/abstract/10.1103/PhysRevLett.111.080502";
+  const supplementalUrl =
+    "https://journals.aps.org/prl/supplemental/10.1103/PhysRevLett.111.080502/Barends2013supp.pdf";
+  const job = {
+    jobId: "job-aps-supplement-only",
+    articleUrl,
+    source: "aps",
+    purpose: "supplemental",
+    autoClose: true
+  };
+  const fakeChrome = createFakeChrome({
+    jobs: [job],
+    fetchImpl: async (url, init) => {
+      fetchCalls.push({ url, init });
+      if (String(url) === supplementalUrl) {
+        return new Response(Buffer.from("%PDF-1.7\nsupplement pdf\n"), {
+          status: 200,
+          headers: { "content-type": "application/pdf" }
+        });
+      }
+      throw new Error(`unexpected fetch ${url}`);
+    }
+  });
+
+  await importBackground(fakeChrome);
+  fakeChrome.events.onMessage.emit(
+    {
+      type: "paper_page_classified",
+      status: "page_classified",
+      pdfUrl: "https://journals.aps.org/prl/pdf/10.1103/PhysRevLett.111.080502",
+      supplementalMaterials: [
+        {
+          url: supplementalUrl,
+          title: "Supplemental Material"
+        }
+      ]
+    },
+    { tab: { id: 100 } }
+  );
+  await flushAsyncWork();
+
+  assert.deepEqual(fetchCalls.map((call) => call.url), [supplementalUrl]);
+  assert.equal(messagesOf(fakeChrome, "register_supplemental_material").length, 1);
+  assert.equal(messagesOf(fakeChrome, "register_download_bytes").length, 0);
+  assert.deepEqual(fakeChrome.removedTabs, [100]);
+});
+
 test("background gates publisher PDF downloads on complete webpage snapshot quality", async () => {
   const job = {
     jobId: "job-download-and-webpage-poor",

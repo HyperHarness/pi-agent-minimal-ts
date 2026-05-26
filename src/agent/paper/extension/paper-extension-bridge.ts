@@ -56,7 +56,9 @@ export function createQueuedPaperExtensionBridge(options: {
       ).toString(36)}`;
       const message = job.purpose === "download_and_webpage"
         ? "Paper download and webpage snapshot job queued for the browser extension."
-        : "Paper download job queued for the browser extension.";
+        : job.purpose === "supplemental"
+          ? "Supplemental material download job queued for the browser extension."
+          : "Paper download job queued for the browser extension.";
       await appendPaperDownloadJobEvent({
         workspaceDir: options.workspaceDir,
         event: {

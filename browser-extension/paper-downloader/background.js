@@ -392,7 +392,7 @@ function supplementalFilenameFromUrl(value) {
 
 async function fetchSupplementalMaterials(job, candidates) {
   if (!Array.isArray(candidates) || candidates.length === 0 || typeof fetch !== "function") {
-    return;
+    return 0;
   }
 
   var seen = {};
@@ -454,6 +454,8 @@ async function fetchSupplementalMaterials(job, candidates) {
       );
     }
   }
+
+  return registeredCount;
 }
 
 async function reportJobStatus(job, status, message, failureCode) {
@@ -762,6 +764,26 @@ async function handlePaperPageClassified(message, sender) {
     }
 
     await reportJobStatus(job, "page_classified", message.message);
+
+    if (job.purpose === "supplemental") {
+      const registeredCount = await fetchSupplementalMaterials(job, message.supplementalMaterials);
+      if (registeredCount === 0) {
+        await reportJobStatus(
+          job,
+          "supplemental_material_failed",
+          "No downloadable supplemental material PDFs were found on the publisher page."
+        );
+        return;
+      }
+
+      jobsById.delete(job.jobId);
+      if (typeof job.tabId === "number") {
+        jobsByTabId.delete(job.tabId);
+      }
+      await persistState();
+      await closeCompletedJobTab(job);
+      return;
+    }
 
     var shouldRegisterWebpageSnapshot =
       job.purpose === "webpage" || job.purpose === "download_and_webpage";

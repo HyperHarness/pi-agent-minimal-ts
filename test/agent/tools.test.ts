@@ -185,7 +185,7 @@ type SearchPapersTool = {
 type DownloadPaperTool = {
   execute: (
     toolCallId: string,
-    args: { id?: string; url?: string },
+    args: { id?: string; url?: string; includeSupplementalMaterials?: boolean },
     signal: undefined,
   ) => Promise<ToolResult>;
 };
@@ -4010,6 +4010,76 @@ test("download_paper reuses ready record manifests without re-fetching publisher
       (result.details as { reading?: { markdownPath?: string } }).reading?.markdownPath,
       "knowledge-base/sources/nature-s41586-019-1666-5/parses/webpage/document.md"
     );
+  } finally {
+    await rm(workspace, { recursive: true, force: true });
+  }
+});
+
+test("download_paper queues supplemental material capture for existing APS downloads", async () => {
+  const workspace = await mkdtemp(path.join(tmpdir(), "pi-agent-tools-"));
+  const articleUrl = "https://journals.aps.org/prl/abstract/10.1103/PhysRevLett.111.080502";
+  const pdfPath = resolvePaperPdfPath({
+    workspaceDir: workspace,
+    source: "aps",
+    canonicalId: "10.1103/PhysRevLett.111.080502"
+  });
+
+  try {
+    await mkdir(path.dirname(pdfPath), { recursive: true });
+    await writeFile(pdfPath, "%PDF-1.7\naps pdf\n", "utf8");
+    await writePaperRecord({
+      workspaceDir: workspace,
+      record: {
+        source: "aps",
+        articleUrl,
+        recordedAt: "2026-05-26T10:00:00.000Z",
+        handlingMethod: "browser_session",
+        status: "downloaded",
+        canonicalId: "10.1103/PhysRevLett.111.080502",
+        pdfUrl: "https://journals.aps.org/prl/pdf/10.1103/PhysRevLett.111.080502",
+        downloadPath: pdfPath
+      }
+    });
+    const queuedJobs: unknown[] = [];
+    const downloadPaperTool = getDownloadPaperTool(workspace, {
+      extensionBridge: {
+        async submitJob(job) {
+          queuedJobs.push(job);
+          return {
+            status: "extension_job_queued" as const,
+            source: "aps" as const,
+            articleUrl,
+            jobId: "job-supplemental",
+            message: "Supplemental material download job queued."
+          };
+        }
+      },
+      parsePaper: async () => {
+        throw new Error("supplemental-only requests should not parse the main PDF");
+      }
+    });
+
+    const result = await downloadPaperTool.execute(
+      "call-aps-supplemental",
+      { url: articleUrl, includeSupplementalMaterials: true },
+      undefined
+    );
+
+    assert.deepEqual(queuedJobs, [
+      {
+        jobId: "paper-aps-483be1f811e8",
+        articleUrl,
+        source: "aps",
+        autoClose: true,
+        purpose: "supplemental"
+      }
+    ]);
+    assert.deepEqual((result.details as { supplementalMaterials?: unknown }).supplementalMaterials, {
+      status: "queued",
+      jobId: "job-supplemental",
+      message:
+        "Supplemental material download job queued. Reload the browser extension if the queued job does not start."
+    });
   } finally {
     await rm(workspace, { recursive: true, force: true });
   }

@@ -50,7 +50,8 @@ const VALID_PAPER_SOURCES = new Set<PaperSource>(["arxiv", "science", "nature", 
 const VALID_JOB_PURPOSES = new Set<ExtensionJobPurpose>([
   "download",
   "webpage",
-  "download_and_webpage"
+  "download_and_webpage",
+  "supplemental"
 ]);
 
 export function resolvePaperDownloadJobsPath(options: { workspaceDir: string }): string {

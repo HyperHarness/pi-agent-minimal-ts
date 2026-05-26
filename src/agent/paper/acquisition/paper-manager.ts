@@ -31,6 +31,7 @@ import {
   readPaperDownloadJobEvents,
   summarizePaperDownloadJobs
 } from "../extension/paper-download-jobs.js";
+import type { ExtensionJobPurpose } from "../extension/paper-extension-protocol.js";
 import {
   findDownloadedPaperRecord,
   readPaperRecord,
@@ -840,7 +841,7 @@ async function submitPaperExtensionJob(input: {
   articleUrl: string;
   source: SupportedPaperSource | "external";
   title?: string;
-  purpose?: "download" | "webpage" | "download_and_webpage";
+  purpose?: ExtensionJobPurpose;
 }): Promise<PaperDownloadResult> {
   return input.bridge.submitJob(
     createPaperExtensionJob({
