@@ -413,7 +413,7 @@ test("writePaperRecord persists supported source records with pretty-printed fai
   }
 });
 
-test("writePaperRecord writes citation metadata into metadata.json next to acquisition state", async () => {
+test("writePaperRecord writes citation metadata into metadata.json and omits legacy source json", async () => {
   const workspaceDir = await mkdtemp(path.join(os.tmpdir(), "paper-store-"));
 
   try {

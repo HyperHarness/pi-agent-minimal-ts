@@ -109,10 +109,10 @@ The wiki agent is the durable knowledge coordinator. It decides what concepts ne
 
 The current wiki core is schema-first:
 
-- `workspace-contract.ts` defines the authoritative `knowledge-base/` lifecycle roots for raw inputs, source records, parse artifacts, summaries, pages, manifests, assets, runtime state, index, and human log.
+- `workspace-contract.ts` defines the authoritative `knowledge-base/` lifecycle roots for raw inputs, source records, parse artifacts, summaries, pages, assets, runtime state, index, and human log.
 - `page-schema.ts` and `typed-store.ts` parse, validate, list, and write human-editable Markdown pages with typed frontmatter. Supported page types include `paper-source`, `synthesis`, `concept`, `method`, `finding`, `dataset`, `question`, `capability-boundary`, `design-record`, and `alias`.
 - `page-schema.ts` also owns the wiki evidence-audit contract. Pages can carry `knowledge_state`, `last_reviewed_at`, `freshness_audit`, `claims`, `typed_relations`, `experiment_refs`, and `reviewer_critique` metadata. Quantitative claims must point at concrete provenance such as a page, figure, table, parser element, chunk, or code-output path.
-- `manifest-store.ts` and `retrieval-contract.ts` make source provenance and read-only downstream consumption explicit. Downstream agents can search/read wiki evidence without depending on the physical directory layout.
+- `source-metadata-store.ts` writes and validates per-source `metadata.json` files under `knowledge-base/sources/<sourceKey>/`, while `retrieval-contract.ts` makes read-only downstream consumption explicit. Downstream agents can search/read wiki evidence without depending on the physical directory layout.
 - `retrieval-search.ts` returns structured evidence matches, match reasons, stale/speculative/disputed warnings, preferred evidence-kind ordering, and insufficient-evidence status.
 - `journal.ts` records multi-file wiki operations so interrupted writes can be reported by health checks.
 - `coordinator.ts` plans wiki-agent work with explicit owner assignments such as `paper-download-subagent`, `wiki-evidence-worker`, `wiki-synthesis-worker`, and `wiki-agent`.
@@ -378,8 +378,8 @@ This is deterministic schema, retrieval, review, and lint support. It does not r
 
 ### Wiki Maintenance Tools
 
-- `wiki_health`: reports acquisition state, downloads, authorization state, parse quality, incomplete `source.json` citation metadata, missing summaries, missing artifacts, missing source manifests, unsafe or missing manifest artifact paths, malformed typed wiki pages, weak evidence contracts, and interrupted wiki operations.
-- `wiki_health_fix`: orchestrates supported repairs. Download and citation-metadata repairs go through the paper-download-subagent boundary; citation refresh first reuses local parse artifacts, then uses arXiv/Crossref metadata when an identifier is available. Parsing stays in the ingestion path; missing summaries go through the `wiki-evidence-worker` summary pass; missing source manifests can be backfilled from existing source summaries.
+- `wiki_health`: reports acquisition state, downloads, authorization state, parse quality, incomplete `metadata.json` citation metadata, missing summaries, missing artifacts, malformed source metadata, unsafe or missing source metadata artifact paths, malformed typed wiki pages, weak evidence contracts, and interrupted wiki operations.
+- `wiki_health_fix`: orchestrates supported repairs. Download and citation-metadata repairs go through the paper-download-subagent boundary; citation refresh first reuses local parse artifacts, then uses arXiv/Crossref metadata when an identifier is available. Parsing stays in the ingestion path; missing summaries go through the `wiki-evidence-worker` summary pass; source metadata can be refreshed from paper acquisition and citation evidence.
 - `wiki_lint`: checks wiki structure, source-to-page coverage, repeated concept gaps, evidence-contract gaps, typed `source_refs`, semantic alias candidates, low-risk singular/plural or compact-spelling duplicate page merge candidates, existing simple alias pages that should be deleted, medium-risk source-backed contained-concept duplicate candidates, scope drift, stale index entries, broken links, missing citations, orphan pages, duplicate titles, repeated sections, weak uncited pages, rendered wiki-link failures, ready source summaries not covered by synthesis pages, missing knowledge states, missing review dates, disputed pages without contradiction evidence, missing quantitative claim provenance, unresolved contradiction candidates, legacy `related_pages` without typed relations, broken experiment references, and code-backed pages without experiment refs. Goal/focus options can prioritize concept gaps for a current research direction. Default issue display is capped per issue kind before applying the final response-size cap, so many concept gaps cannot hide duplicate-page cleanup candidates.
 - `wiki_structure_plan`: turns `wiki_lint` findings into a reviewable, budgeted, goal-aware maintenance plan with owner, risk, recommended tool args, and verification actions. It suggests low-risk actions by default, including deterministic duplicate concept-page merges such as singular/plural page pairs and compact spellings like `su2`/`su-2`, and does not rewrite wiki content. Its `maxItems` cap limits primary maintenance actions; verification actions are appended separately so they do not displace cleanup work.
 - `wiki_apply_structure_plan`: applies approved low-risk `wiki_structure_plan` actions with dry-run, preflight, journal, and verification safeguards. Supported writes are deterministic duplicate-section cleanup, safe duplicate-page merge and deletion with inbound-link rewrites, cleanup of existing simple alias pages, safe deliberate alias creation, deterministic index rebuild, and constrained `## Scope Note` updates.
@@ -438,12 +438,11 @@ knowledge-base/
   log.md                            # page operation log
   sources/<paper-key>/
     summary.md                      # LLM-authored paper source summary
-    source.json                     # identity and citation metadata
+    metadata.json                   # source identity, citation metadata, provenance, and artifacts
     acquisition.json                # download, access, parse, and reading state
     parses/                         # parsed markdown, JSON, and quality reports
     chunks/                         # searchable reading chunks
   pages/                            # durable cross-paper topic pages
-  manifests/                        # wiki-facing source provenance manifests
   assets/
   state/
     wiki-operations.jsonl           # operation journal for multi-file wiki writes

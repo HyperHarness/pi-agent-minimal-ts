@@ -1445,12 +1445,28 @@ test("runSessionPrompt routes summary backfill through a configured wiki evidenc
   const observedEvents: AgentEvent[] = [];
 
   try {
-    await writeJson(path.join(workspace, "knowledge-base", "sources", paperKey, "source.json"), {
-      paperKey,
-      source: "nature",
-      canonicalId: "s41586-026-10658-6",
-      articleUrl: "https://www.nature.com/articles/s41586-026-10658-6",
-      title: "An AI system to help scientists write expert-level empirical software"
+    await writeJson(path.join(workspace, "knowledge-base", "sources", paperKey, "metadata.json"), {
+      schemaVersion: 1,
+      sourceKind: "paper",
+      sourceKey: paperKey,
+      title: "An AI system to help scientists write expert-level empirical software",
+      status: "ready",
+      createdAt: "2026-05-26T00:00:00.000Z",
+      updatedAt: "2026-05-26T00:00:00.000Z",
+      summaryPath: `knowledge-base/sources/${paperKey}/summary.md`,
+      citation: {
+        citationStatus: "complete",
+        missingFields: []
+      },
+      provenance: {
+        source: "nature",
+        canonicalId: "s41586-026-10658-6",
+        url: "https://www.nature.com/articles/s41586-026-10658-6"
+      },
+      artifacts: [],
+      tags: [],
+      relatedSourceKeys: [],
+      synthesisPageKeys: []
     });
     await writeText(path.join(parseDir, "document.md"), [
       "# Abstract",

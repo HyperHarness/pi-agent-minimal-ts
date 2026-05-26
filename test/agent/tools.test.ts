@@ -3373,7 +3373,7 @@ test("fetch_paper_webpage saves full article text but returns compact JSON for m
           engine: "webpage",
           pdfSha256: "web-sha",
           artifacts: {
-            sourcePath: path.join(workspace, "knowledge-base/sources/example-paper/source.json"),
+            metadataPath: path.join(workspace, "knowledge-base/sources/example-paper/metadata.json"),
             parsePath: path.join(workspace, "knowledge-base/sources/example-paper/parses/webpage/parse.json"),
             markdownPath: path.join(workspace, "knowledge-base/sources/example-paper/parses/webpage/document.md"),
             qualityPath: path.join(workspace, "knowledge-base/sources/example-paper/parses/webpage/quality.json"),
@@ -3433,7 +3433,7 @@ test("fetch_paper_webpage saves full article text but returns compact JSON for m
         engine: "webpage",
         pdfSha256: "web-sha",
         artifacts: {
-          sourcePath: path.join(workspace, "knowledge-base/sources/example-paper/source.json"),
+          metadataPath: path.join(workspace, "knowledge-base/sources/example-paper/metadata.json"),
           parsePath: path.join(workspace, "knowledge-base/sources/example-paper/parses/webpage/parse.json"),
           markdownPath: path.join(workspace, "knowledge-base/sources/example-paper/parses/webpage/document.md"),
           qualityPath: path.join(workspace, "knowledge-base/sources/example-paper/parses/webpage/quality.json"),
@@ -3621,7 +3621,7 @@ test("download_paper prefers arXiv HTML webpage markdown before TeX source and P
           engine: "webpage",
           pdfSha256: "webpage-hash",
           artifacts: {
-            sourcePath: path.join(workspace, "knowledge-base/sources/arxiv-2601.00425/source.json"),
+            metadataPath: path.join(workspace, "knowledge-base/sources/arxiv-2601.00425/metadata.json"),
             parsePath: path.join(workspace, "knowledge-base/sources/arxiv-2601.00425/parses/webpage/parse.json"),
             markdownPath: path.join(workspace, "knowledge-base/sources/arxiv-2601.00425/parses/webpage/document.md"),
             qualityPath: path.join(workspace, "knowledge-base/sources/arxiv-2601.00425/parses/webpage/quality.json"),
@@ -3749,7 +3749,7 @@ test("download_paper refreshes arXiv webpage parsing when only a PDF parse exist
           engine: "webpage",
           pdfSha256: "webpage-hash",
           artifacts: {
-            sourcePath: path.join(workspace, "knowledge-base/sources/arxiv-2603.11188/source.json"),
+            metadataPath: path.join(workspace, "knowledge-base/sources/arxiv-2603.11188/metadata.json"),
             parsePath: path.join(workspace, "knowledge-base/sources/arxiv-2603.11188/parses/webpage/parse.json"),
             markdownPath: path.join(workspace, "knowledge-base/sources/arxiv-2603.11188/parses/webpage/document.md"),
             qualityPath: path.join(workspace, "knowledge-base/sources/arxiv-2603.11188/parses/webpage/quality.json"),
@@ -3843,7 +3843,7 @@ test("download_paper falls back from arxiv.org HTML to ar5iv labs HTML before Te
           engine: "webpage",
           pdfSha256: "webpage-hash",
           artifacts: {
-            sourcePath: path.join(workspace, "knowledge-base/sources/arxiv-2601.00425/source.json"),
+            metadataPath: path.join(workspace, "knowledge-base/sources/arxiv-2601.00425/metadata.json"),
             parsePath: path.join(workspace, "knowledge-base/sources/arxiv-2601.00425/parses/webpage/parse.json"),
             markdownPath: path.join(workspace, "knowledge-base/sources/arxiv-2601.00425/parses/webpage/document.md"),
             qualityPath: path.join(workspace, "knowledge-base/sources/arxiv-2601.00425/parses/webpage/quality.json"),
@@ -3918,11 +3918,11 @@ test("download_paper falls back to arXiv TeX source before PDF parsing when HTML
           engine: "tex-source",
           pdfSha256: "pdf-hash",
           artifacts: {
-            sourcePath: path.join(workspace, "knowledge-base/sources/arxiv-2601.00425/source.json"),
+            metadataPath: path.join(workspace, "knowledge-base/sources/arxiv-2601.00425/metadata.json"),
             parsePath: path.join(workspace, "knowledge-base/sources/arxiv-2601.00425/parses/tex-source/parse.json"),
             markdownPath: path.join(workspace, "knowledge-base/sources/arxiv-2601.00425/parses/tex-source/document.md"),
             qualityPath: path.join(workspace, "knowledge-base/sources/arxiv-2601.00425/parses/tex-source/quality.json"),
-            chunksPath: path.join(workspace, "knowledge-base/sources/arxiv-2601.00425/chunks/tex-source.jsonl"),
+            chunksPath: path.join(workspace, "knowledge-base/sources/arxiv-2601.00425/chunks/tex-source-chunks.jsonl"),
           },
           quality: {
             status: "good",
@@ -4178,7 +4178,7 @@ test("download_paper parses downloaded Nature PDFs instead of queueing webpage c
           engine: "opendataloader-local" as const,
           pdfSha256: "pdf-hash",
           artifacts: {
-            sourcePath: path.join(workspace, "knowledge-base/sources/nature-s41586-026-10652-y/source.json"),
+            metadataPath: path.join(workspace, "knowledge-base/sources/nature-s41586-026-10652-y/metadata.json"),
             parsePath: path.join(workspace, "knowledge-base/sources/nature-s41586-026-10652-y/parses/opendataloader-local/parse.json"),
             markdownPath: path.join(workspace, "knowledge-base/sources/nature-s41586-026-10652-y/parses/opendataloader-local/document.md"),
             qualityPath: path.join(workspace, "knowledge-base/sources/nature-s41586-026-10652-y/parses/opendataloader-local/quality.json"),
@@ -4739,7 +4739,7 @@ test("parse_paper delegates to the injected paper reader dependency and returns 
         engine: options.engine === "plain-text-baseline" ? "plain-text-baseline" as const : "opendataloader-local" as const,
         pdfSha256: "abc123",
         artifacts: {
-          sourcePath: path.join(options.workspaceDir, "knowledge-base/sources/arxiv-2406.06015/source.json"),
+          metadataPath: path.join(options.workspaceDir, "knowledge-base/sources/arxiv-2406.06015/metadata.json"),
           parsePath: path.join(options.workspaceDir, "knowledge-base/sources/arxiv-2406.06015/parses/plain-text-baseline/parse.json"),
           markdownPath: path.join(options.workspaceDir, "knowledge-base/sources/arxiv-2406.06015/parses/plain-text-baseline/document.md"),
           qualityPath: path.join(options.workspaceDir, "knowledge-base/sources/arxiv-2406.06015/parses/plain-text-baseline/quality.json"),
@@ -5850,11 +5850,11 @@ test("answer_research_question can download, parse, summarize, and refresh wiki 
         engine: "tex-source" as const,
         pdfSha256: "pdf-hash",
         artifacts: {
-          sourcePath: path.join(workspace, "knowledge-base/sources/arxiv-2601.00425/source.json"),
+          metadataPath: path.join(workspace, "knowledge-base/sources/arxiv-2601.00425/metadata.json"),
           parsePath: path.join(workspace, "knowledge-base/sources/arxiv-2601.00425/parses/tex-source/parse.json"),
           markdownPath: path.join(workspace, "knowledge-base/sources/arxiv-2601.00425/parses/tex-source/document.md"),
           qualityPath: path.join(workspace, "knowledge-base/sources/arxiv-2601.00425/parses/tex-source/quality.json"),
-          chunksPath: path.join(workspace, "knowledge-base/sources/arxiv-2601.00425/chunks/tex-source.jsonl"),
+          chunksPath: path.join(workspace, "knowledge-base/sources/arxiv-2601.00425/chunks/tex-source-chunks.jsonl"),
         },
         quality: {
           status: "good" as const,
