@@ -38,7 +38,7 @@ import {
   inferWikiPageTypeForEvidence,
   validateRequiredTemplateSections
 } from "./page-templates.js";
-import { isWikiSourceKind, type WikiSourceKind } from "./manifest-store.js";
+import { isWikiSourceKind, type WikiSourceKind } from "./source-metadata-store.js";
 import type {
   WikiClaimKind,
   WikiEvidenceContract,

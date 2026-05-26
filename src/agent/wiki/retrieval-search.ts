@@ -3,7 +3,7 @@ import {
   type WikiEvidenceItem,
   type WikiEvidenceKind
 } from "./retrieval-contract.js";
-import type { WikiSourceKind } from "./manifest-store.js";
+import type { WikiSourceKind } from "./source-metadata-store.js";
 import type {
   WikiClaimKind,
   WikiEvidenceContract,

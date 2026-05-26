@@ -7,6 +7,21 @@ export * from "./typed-store.js";
 export * from "./retrieval-contract.js";
 export * from "./retrieval-search.js";
 export * from "./store.js";
+export {
+  WIKI_SOURCE_KINDS,
+  getKnowledgeSourceMetadataPath,
+  isWikiSourceKind,
+  readKnowledgeSourceMetadata,
+  validateKnowledgeSourceMetadataIdentity,
+  writeKnowledgeSourceMetadata,
+  type KnowledgeSourceArtifact,
+  type KnowledgeSourceArtifactKind,
+  type KnowledgeSourceCitation,
+  type KnowledgeSourceMetadata,
+  type KnowledgeSourceStatus,
+  type ReadKnowledgeSourceMetadataResult,
+  type WikiSourceKind
+} from "./source-metadata-store.js";
 export * from "./manifest-store.js";
 export * from "./journal.js";
 export * from "./content.js";
