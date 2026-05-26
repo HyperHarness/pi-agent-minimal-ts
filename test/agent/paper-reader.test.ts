@@ -51,6 +51,36 @@ async function writeSourceSummary(workspace: string, paperKey: string, markdown:
   await writeFile(summaryPath, markdown, "utf8");
 }
 
+async function writeSourceMetadata(
+  workspace: string,
+  sourceKey: string,
+  metadata: Record<string, unknown>
+): Promise<void> {
+  await writeJson(
+    path.join(workspace, "knowledge-base", "sources", sourceKey, "metadata.json"),
+    {
+      schemaVersion: 1,
+      sourceKind: "paper",
+      sourceKey,
+      title: sourceKey,
+      status: "ready",
+      createdAt: "2026-05-14T00:00:00.000Z",
+      updatedAt: "2026-05-14T00:00:00.000Z",
+      summaryPath: `knowledge-base/sources/${sourceKey}/summary.md`,
+      citation: {
+        citationStatus: "incomplete",
+        missingFields: []
+      },
+      provenance: {},
+      artifacts: [],
+      tags: [],
+      relatedSourceKeys: [],
+      synthesisPageKeys: [],
+      ...metadata
+    }
+  );
+}
+
 async function writePdfWithFlateTextStream(workspace: string, filename: string): Promise<string> {
   const pdfPath = path.join(workspace, "knowledge-base", "raw", "pdfs", filename);
   const content = "BT /F1 1 Tf [(Cosmic-ray-induced)-220(correlated)-220(errors)]TJ T* [(superconducting)-220(qubit)-220(array)]TJ ET";
@@ -401,30 +431,35 @@ test("writePaperWikiSource saves an LLM source summary and searchPaperWiki finds
       keyFindings: ["Neutral atom arrays are the central experimental platform."]
     });
 
+    const sourceDetails = source as typeof source & { metadataPath?: string };
     assert.equal(source.sourcePath, "knowledge-base/sources/arxiv-2601.00003/summary.md");
-    assert.equal(source.manifestPath, "knowledge-base/manifests/arxiv-2601.00003.json");
+    assert.equal(sourceDetails.metadataPath, "knowledge-base/sources/arxiv-2601.00003/metadata.json");
     assert.equal(source.operationJournalPath, "knowledge-base/state/wiki-operations.jsonl");
     assert.equal(source.indexPath, "knowledge-base/index.md");
     const markdown = await readFile(path.join(workspace, source.sourcePath), "utf8");
     assert.match(markdown, /type: "paper-source-summary"/);
     assert.match(markdown, /parse_markdown: "knowledge-base\/sources\/arxiv-2601\.00003\/parses\/plain-text-baseline\/document\.md"/);
-    const manifest = JSON.parse(await readFile(path.join(workspace, source.manifestPath), "utf8"));
-    assert.equal(manifest.schemaVersion, 1);
-    assert.equal(manifest.kind, "paper-source");
-    assert.equal(manifest.paperKey, "arxiv-2601.00003");
-    assert.equal(manifest.status, "ready");
-    assert.equal(manifest.sourceSummaryPath, "knowledge-base/sources/arxiv-2601.00003/summary.md");
-    assert.equal(manifest.parse.engine, "plain-text-baseline");
-    assert.equal(manifest.parse.markdownPath, "knowledge-base/sources/arxiv-2601.00003/parses/plain-text-baseline/document.md");
-    assert.equal(manifest.provenance.pdfSha256, parsed.pdfSha256);
-    assert.deepEqual(manifest.tags, ["quantum-simulation"]);
-    assert.deepEqual(manifest.relatedPaperKeys, []);
+    const metadata = JSON.parse(await readFile(path.join(workspace, sourceDetails.metadataPath), "utf8"));
+    assert.equal(metadata.schemaVersion, 1);
+    assert.equal(metadata.sourceKind, "paper");
+    assert.equal(metadata.sourceKey, "arxiv-2601.00003");
+    assert.equal(metadata.status, "ready");
+    assert.equal(metadata.summaryPath, "knowledge-base/sources/arxiv-2601.00003/summary.md");
+    assert.equal(metadata.artifacts[0]?.engine, "plain-text-baseline");
+    assert.equal(metadata.artifacts[0]?.markdownPath, "knowledge-base/sources/arxiv-2601.00003/parses/plain-text-baseline/document.md");
+    assert.equal(metadata.provenance.rawSha256, parsed.pdfSha256);
+    assert.deepEqual(metadata.tags, ["quantum-simulation"]);
+    assert.deepEqual(metadata.relatedSourceKeys, []);
+    await assert.rejects(
+      readFile(path.join(workspace, "knowledge-base", "manifests", "arxiv-2601.00003.json"), "utf8"),
+      { code: "ENOENT" }
+    );
     const journalLines = (await readFile(path.join(workspace, source.operationJournalPath), "utf8")).trim().split("\n");
     const journalEvents = journalLines.map((line) => JSON.parse(line));
     assert.equal(journalEvents[0].phase, "begin");
     assert.equal(journalEvents[0].intent, "write_source_summary");
     assert.equal(journalEvents[0].owner, "wiki-agent");
-    assert.ok(journalEvents[0].plannedFiles.includes("knowledge-base/manifests/arxiv-2601.00003.json"));
+    assert.ok(journalEvents[0].plannedFiles.includes("knowledge-base/sources/arxiv-2601.00003/metadata.json"));
     assert.equal(journalEvents.at(-1).phase, "complete");
     assert.equal(journalEvents.at(-1).operationId, journalEvents[0].operationId);
     const log = await readFile(path.join(workspace, source.logPath), "utf8");
@@ -580,17 +615,14 @@ test("searchPaperWiki does not expose generalized non-paper sources as paper res
       "material-sapphire-permittivity",
       "# Sapphire permittivity values\n\nSapphire permittivity requires cryogenic-condition review."
     );
-    await writeJson(
-      path.join(workspace, "knowledge-base", "manifests", "material-sapphire-permittivity.json"),
+    await writeSourceMetadata(
+      workspace,
+      "material-sapphire-permittivity",
       {
-        schemaVersion: 2,
         sourceKind: "material-database",
         sourceKey: "material-sapphire-permittivity",
         title: "Sapphire permittivity values",
         status: "needs_review",
-        createdAt: "2026-05-14T00:00:00.000Z",
-        updatedAt: "2026-05-14T00:00:00.000Z",
-        summaryPath: "knowledge-base/sources/material-sapphire-permittivity/summary.md",
         provenance: {
           url: "https://example.invalid/materials/sapphire",
           retrievedAt: "2026-05-14T00:00:00.000Z"
@@ -629,17 +661,14 @@ test("searchPaperWiki fills maxResults after filtering higher-ranked non-paper s
         sourceKey,
         "# Sapphire permittivity exact match\n\nSapphire permittivity exact match appears in material data."
       );
-      await writeJson(
-        path.join(workspace, "knowledge-base", "manifests", `${sourceKey}.json`),
+      await writeSourceMetadata(
+        workspace,
+        sourceKey,
         {
-          schemaVersion: 2,
           sourceKind: "material-database",
           sourceKey,
           title: "Sapphire permittivity exact match",
           status: "needs_review",
-          createdAt: "2026-05-14T00:00:00.000Z",
-          updatedAt: "2026-05-14T00:00:00.000Z",
-          summaryPath: `knowledge-base/sources/${sourceKey}/summary.md`,
           provenance: {
             url: "https://example.invalid/materials/sapphire",
             retrievedAt: "2026-05-14T00:00:00.000Z"

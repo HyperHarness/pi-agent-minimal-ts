@@ -13,11 +13,9 @@ import {
   getPaperWikiDir,
   getPaperWikiIndexPath,
   getPaperWikiLogPath,
-  getPaperWikiManifestsDir,
   getPaperWikiPagePath,
   getPaperWikiPagesDir,
   getPaperWikiSourcesDir,
-  getPaperWikiSourceManifestPath,
   getPaperWikiSourcePath,
   listPaperWikiPageFiles,
   listPaperWikiSourceFiles,
@@ -27,10 +25,11 @@ import {
   sanitizeWikiFilename
 } from "./store.js";
 import {
-  readNormalizedWikiSourceManifest,
-  writeWikiSourceManifest,
-  type WikiSourceManifest
-} from "./manifest-store.js";
+  getKnowledgeSourceMetadataPath,
+  readKnowledgeSourceMetadata,
+  writeKnowledgeSourceMetadata,
+  type KnowledgeSourceMetadata
+} from "./source-metadata-store.js";
 import { searchWikiEvidence, type WikiEvidenceSearchResult } from "./retrieval-search.js";
 import {
   beginWikiOperation,
@@ -481,16 +480,15 @@ export async function writePaperWikiSource(input: PaperWikiSourceInput): Promise
     engine
   });
   const sourcePath = getPaperWikiSourcePath(input.workspaceDir, input.paperKey);
-  const manifestPath = getPaperWikiSourceManifestPath(input.workspaceDir, input.paperKey);
+  const metadataPath = getKnowledgeSourceMetadataPath(input.workspaceDir, input.paperKey);
   const indexPath = getPaperWikiIndexPath(input.workspaceDir);
   const now = new Date().toISOString();
   const sourcePathRelative = relativeToWorkspace(input.workspaceDir, sourcePath);
-  const manifestPathRelative = relativeToWorkspace(input.workspaceDir, manifestPath);
+  const metadataPathRelative = relativeToWorkspace(input.workspaceDir, metadataPath);
   const indexPathRelative = relativeToWorkspace(input.workspaceDir, indexPath);
   const logPathRelative = relativeToWorkspace(input.workspaceDir, getPaperWikiLogPath(input.workspaceDir));
   await Promise.all([
     mkdir(getPaperWikiSourcesDir(input.workspaceDir), { recursive: true }),
-    mkdir(getPaperWikiManifestsDir(input.workspaceDir), { recursive: true }),
     mkdir(getPaperWikiDir(input.workspaceDir), { recursive: true })
   ]);
   await assertSafePaperWikiWriteTarget({
@@ -501,9 +499,9 @@ export async function writePaperWikiSource(input: PaperWikiSourceInput): Promise
   });
   await assertSafePaperWikiWriteTarget({
     workspaceDir: input.workspaceDir,
-    filePath: manifestPath,
-    allowedRoot: getPaperWikiManifestsDir(input.workspaceDir),
-    label: "wiki source manifest"
+    filePath: metadataPath,
+    allowedRoot: getPaperWikiSourcesDir(input.workspaceDir),
+    label: "wiki source metadata"
   });
   await assertSafePaperWikiWriteTarget({
     workspaceDir: input.workspaceDir,
@@ -523,7 +521,7 @@ export async function writePaperWikiSource(input: PaperWikiSourceInput): Promise
     owner: "wiki-agent",
     plannedFiles: [
       sourcePathRelative,
-      manifestPathRelative,
+      metadataPathRelative,
       indexPathRelative,
       logPathRelative
     ],
@@ -568,37 +566,58 @@ ${sectionList("Open Questions", input.openQuestions)}
 - Parsed markdown: \`${relativeToWorkspace(input.workspaceDir, artifacts.markdownPath)}\`
 `;
 
-  const manifest: WikiSourceManifest = {
+  const previousMetadataResult = await readKnowledgeSourceMetadata({
+    workspaceDir: input.workspaceDir,
+    sourceKey: input.paperKey
+  });
+  const previousMetadata = previousMetadataResult.status === "ready"
+    ? previousMetadataResult.metadata
+    : undefined;
+  const metadata: KnowledgeSourceMetadata = {
+    ...(previousMetadata ?? {}),
     schemaVersion: 1,
-    kind: "paper-source",
-    paperKey: input.paperKey,
+    sourceKind: "paper",
+    sourceKey: input.paperKey,
     title,
     status: "ready",
-    createdAt: now,
+    createdAt: previousMetadata?.createdAt ?? now,
     updatedAt: now,
-    sourceSummaryPath: sourcePathRelative,
+    summaryPath: sourcePathRelative,
+    citation: previousMetadata?.citation ?? {
+      citationStatus: "incomplete",
+      missingFields: []
+    },
     provenance: {
+      ...(previousMetadata?.provenance ?? {}),
       ...(source?.recordPath ? { recordPath: relativeToWorkspace(input.workspaceDir, source.recordPath) } : {}),
-      ...(source?.articleUrl ? { articleUrl: source.articleUrl } : {}),
-      ...(source?.pdfPath ? { rawPdfPath: relativeToWorkspace(input.workspaceDir, source.pdfPath) } : {}),
-      ...(document.pdfSha256 ? { pdfSha256: document.pdfSha256 } : {})
+      ...(source?.articleUrl ? { url: source.articleUrl } : {}),
+      ...(source?.canonicalId && source.source === "arxiv" ? { arxivId: source.canonicalId } : {}),
+      ...(source?.pdfPath ? { rawPath: relativeToWorkspace(input.workspaceDir, source.pdfPath) } : {}),
+      ...(document.pdfSha256 ? { rawSha256: document.pdfSha256 } : {})
     },
-    parse: {
-      engine,
-      markdownPath: relativeToWorkspace(input.workspaceDir, artifacts.markdownPath),
-      jsonPath: relativeToWorkspace(input.workspaceDir, artifacts.parsePath),
-      qualityPath: relativeToWorkspace(input.workspaceDir, artifacts.qualityPath)
-    },
+    artifacts: [
+      ...(previousMetadata?.artifacts ?? []).filter((artifact) =>
+        !(artifact.kind === "parse" && artifact.engine === engine)
+      ),
+      {
+        kind: "parse",
+        path: relativeToWorkspace(input.workspaceDir, artifacts.markdownPath),
+        engine,
+        markdownPath: relativeToWorkspace(input.workspaceDir, artifacts.markdownPath),
+        jsonPath: relativeToWorkspace(input.workspaceDir, artifacts.parsePath),
+        qualityPath: relativeToWorkspace(input.workspaceDir, artifacts.qualityPath)
+      }
+    ],
     tags: cleanStringValues(input.tags),
-    relatedPaperKeys: cleanStringValues(input.relatedPaperKeys),
-    synthesisPageKeys: []
+    relatedSourceKeys: cleanStringValues(input.relatedPaperKeys),
+    synthesisPageKeys: previousMetadata?.synthesisPageKeys ?? []
   };
 
   await mkdir(path.dirname(sourcePath), { recursive: true });
   await writeFile(sourcePath, markdown.trimEnd() + "\n", "utf8");
-  await writeWikiSourceManifest({
+  await writeKnowledgeSourceMetadata({
     workspaceDir: input.workspaceDir,
-    manifest
+    metadata
   });
   await rewriteWikiIndex(input.workspaceDir);
   await completeWikiOperation({
@@ -606,7 +625,7 @@ ${sectionList("Open Questions", input.openQuestions)}
     operationId: operation.operationId,
     writtenFiles: [
       sourcePathRelative,
-      manifestPathRelative,
+      metadataPathRelative,
       indexPathRelative,
       logPathRelative
     ]
@@ -616,7 +635,7 @@ ${sectionList("Open Questions", input.openQuestions)}
     paperKey: input.paperKey,
     title,
     sourcePath: sourcePathRelative,
-    manifestPath: manifestPathRelative,
+    metadataPath: metadataPathRelative,
     operationId: operation.operationId,
     operationJournalPath: operation.journalPath,
     indexPath: indexPathRelative,
@@ -946,26 +965,11 @@ async function isNonPaperSourceSummary(input: {
   workspaceDir: string;
   sourceKey: string;
 }): Promise<boolean> {
-  try {
-    const rawManifest = JSON.parse(
-      await readFile(getPaperWikiSourceManifestPath(input.workspaceDir, input.sourceKey), "utf8")
-    ) as { schemaVersion?: unknown; sourceKind?: unknown };
-    if (
-      rawManifest.schemaVersion === 2 &&
-      typeof rawManifest.sourceKind === "string" &&
-      rawManifest.sourceKind !== "paper"
-    ) {
-      return true;
-    }
-  } catch {
-    // Legacy source summaries can predate manifests; keep them searchable as paper evidence.
-  }
-
-  const manifest = await readNormalizedWikiSourceManifest({
+  const metadata = await readKnowledgeSourceMetadata({
     workspaceDir: input.workspaceDir,
     sourceKey: input.sourceKey
   });
-  return manifest?.sourceKind !== undefined && manifest.sourceKind !== "paper";
+  return metadata.status === "ready" && metadata.metadata.sourceKind !== "paper";
 }
 
 async function searchPaperWikiWithLegacyScoring(options: PaperWikiSearchOptions): Promise<PaperWikiSearchResult> {

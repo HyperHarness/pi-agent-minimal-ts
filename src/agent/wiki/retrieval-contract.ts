@@ -6,12 +6,11 @@ import {
   relativeToWorkspace
 } from "./store.js";
 import {
-  getWikiSourceManifestPath,
-  normalizeUnknownWikiSourceManifest,
-  validateWikiSourceManifestIdentity,
-  type WikiSourceKind,
-  type WikiSourceManifestV2
-} from "./manifest-store.js";
+  getKnowledgeSourceMetadataPath,
+  readKnowledgeSourceMetadata,
+  type KnowledgeSourceMetadata,
+  type WikiSourceKind
+} from "./source-metadata-store.js";
 import {
   type WikiClaimProvenance,
   type WikiEvidenceContract,
@@ -52,7 +51,7 @@ export interface WikiEvidenceItem {
   typedRelations?: WikiTypedRelation[];
   experimentRefs?: WikiExperimentRef[];
   reviewerCritique?: WikiReviewerCritiqueItem[];
-  manifest?: WikiSourceManifestV2;
+  metadata?: KnowledgeSourceMetadata;
   diagnostics: string[];
 }
 
@@ -103,85 +102,51 @@ function diagnosticForKey(kind: WikiEvidenceKind, key: string, error: unknown): 
   return `Invalid ${kind} evidence key "${key}": ${error instanceof Error ? error.message : String(error)}`;
 }
 
-async function readSourceManifestForEvidence(input: {
+async function readSourceMetadataForEvidence(input: {
   workspaceDir: string;
-  manifestPath: string;
   expectedSourceKey: string;
   expectedSummaryPath: string;
 }): Promise<{
-  manifest?: WikiSourceManifestV2;
+  metadata?: KnowledgeSourceMetadata;
   missing: boolean;
   malformed: boolean;
   diagnostics: string[];
 }> {
-  const relativeManifestPath = relativeToWorkspace(input.workspaceDir, input.manifestPath);
-  try {
-    const rawManifest = await readFile(input.manifestPath, "utf8");
-    let parsed: unknown;
-    try {
-      parsed = JSON.parse(rawManifest);
-    } catch (error) {
-      return {
-        missing: false,
-        malformed: true,
-        diagnostics: [
-          `${relativeManifestPath}: malformed manifest JSON: ${error instanceof Error ? error.message : String(error)}`
-        ]
-      };
-    }
-
-    const manifest = normalizeUnknownWikiSourceManifest(parsed);
-    if (!manifest) {
-      return {
-        missing: false,
-        malformed: true,
-        diagnostics: [`${relativeManifestPath}: malformed manifest shape.`]
-      };
-    }
-
-    const identityDiagnostics = validateWikiSourceManifestIdentity({
-      manifest,
-      sourceKey: input.expectedSourceKey,
-      summaryPath: input.expectedSummaryPath
-    });
-    if (identityDiagnostics.length > 0) {
-      return {
-        missing: false,
-        malformed: true,
-        diagnostics: identityDiagnostics.map((diagnostic) => `${relativeManifestPath}: malformed manifest identity: ${diagnostic}`)
-      };
-    }
-
+  const metadataPath = getKnowledgeSourceMetadataPath(input.workspaceDir, input.expectedSourceKey);
+  const relativeMetadataPath = relativeToWorkspace(input.workspaceDir, metadataPath);
+  const result = await readKnowledgeSourceMetadata({
+    workspaceDir: input.workspaceDir,
+    sourceKey: input.expectedSourceKey,
+    summaryPath: input.expectedSummaryPath
+  });
+  if (result.status === "ready") {
     return {
-      manifest,
+      metadata: result.metadata,
       missing: false,
       malformed: false,
       diagnostics: []
     };
-  } catch (error) {
-    if ((error as NodeJS.ErrnoException).code === "ENOENT") {
-      return {
-        missing: true,
-        malformed: false,
-        diagnostics: [`${relativeManifestPath}: missing manifest for source summary.`]
-      };
-    }
+  }
+  if (result.status === "missing") {
     return {
-      missing: false,
-      malformed: true,
-      diagnostics: [
-        `${relativeManifestPath}: malformed manifest: ${error instanceof Error ? error.message : String(error)}`
-      ]
+      missing: true,
+      malformed: false,
+      diagnostics: [`${relativeMetadataPath}: missing metadata for source summary.`]
     };
   }
+  return {
+    missing: false,
+    malformed: true,
+    diagnostics: result.diagnostics.length > 0
+      ? result.diagnostics.map((diagnostic) => `${relativeMetadataPath}: malformed metadata: ${diagnostic}`)
+      : [`${relativeMetadataPath}: malformed metadata.`]
+  };
 }
 
 async function readSourceEvidenceItem(options: ReadWikiEvidenceItemOptions): Promise<ReadWikiEvidenceItemResult> {
   let sourcePath: string;
-  let manifestPath: string;
   try {
     sourcePath = getPaperWikiSourcePath(options.workspaceDir, options.key);
-    manifestPath = getWikiSourceManifestPath(options.workspaceDir, options.key);
   } catch (error) {
     return {
       status: "malformed",
@@ -209,39 +174,38 @@ async function readSourceEvidenceItem(options: ReadWikiEvidenceItemOptions): Pro
     };
   }
 
-  const manifestResult = await readSourceManifestForEvidence({
+  const metadataResult = await readSourceMetadataForEvidence({
     workspaceDir: options.workspaceDir,
-    manifestPath,
     expectedSourceKey: options.key,
     expectedSummaryPath: relativeToWorkspace(options.workspaceDir, sourcePath)
   });
-  const diagnostics = manifestResult.diagnostics;
-  const manifest = manifestResult.manifest;
+  const diagnostics = metadataResult.diagnostics;
+  const metadata = metadataResult.metadata;
 
-  const sourceRefs = manifest ? [manifest.sourceKey] : [];
+  const sourceRefs = metadata ? [metadata.sourceKey ?? options.key] : [];
   const item: WikiEvidenceItem = {
     kind: "source",
-    key: manifest?.sourceKey ?? options.key,
-    title: manifest?.title ?? options.key,
+    key: metadata?.sourceKey ?? options.key,
+    title: metadata?.title ?? options.key,
     body: stripLeadingFrontmatter(markdown).trim(),
     relativePath: relativeToWorkspace(options.workspaceDir, sourcePath),
-    tags: manifest?.tags ?? [],
+    tags: metadata?.tags ?? [],
     aliases: [],
-    evidenceContract: manifest ? "mixed" : "none",
+    evidenceContract: metadata ? "mixed" : "none",
     sourceRefs,
-    ...(manifest
+    ...(metadata
       ? {
-          sourceKind: manifest.sourceKind,
-          sourceKey: manifest.sourceKey,
-          updatedAt: manifest.updatedAt,
-          manifest
+          sourceKind: metadata.sourceKind,
+          sourceKey: metadata.sourceKey ?? options.key,
+          updatedAt: metadata.updatedAt,
+          metadata
         }
       : {}),
     diagnostics
   };
 
   return {
-    status: manifestResult.malformed ? "malformed" : manifest?.status === "blocked" ? "blocked" : "ready",
+    status: metadataResult.malformed ? "malformed" : metadata?.status === "blocked" ? "blocked" : "ready",
     item,
     diagnostics
   };

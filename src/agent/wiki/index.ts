@@ -22,7 +22,6 @@ export {
   type ReadKnowledgeSourceMetadataResult,
   type WikiSourceKind
 } from "./source-metadata-store.js";
-export * from "./manifest-store.js";
 export * from "./journal.js";
 export * from "./content.js";
 export * from "./bootstrap.js";

@@ -9,7 +9,10 @@ import {
 } from "../../src/agent/wiki/retrieval-contract.js";
 import { searchWikiEvidence } from "../../src/agent/wiki/retrieval-search.js";
 import { searchPaperWiki } from "../../src/agent/wiki/content.js";
-import { getKnowledgeSourceMetadataPath } from "../../src/agent/wiki/source-metadata-store.js";
+import {
+  getKnowledgeSourceMetadataPath,
+  type KnowledgeSourceMetadata
+} from "../../src/agent/wiki/source-metadata-store.js";
 import { writeTypedWikiPage } from "../../src/agent/wiki/typed-store.js";
 
 async function withWorkspace(
@@ -34,34 +37,40 @@ async function writeWorkspaceFile(
   await writeFile(filePath, content, "utf8");
 }
 
-function sourceManifest(paperKey: string): Record<string, unknown> {
+function sourceMetadata(paperKey: string): KnowledgeSourceMetadata {
   return {
     schemaVersion: 1,
-    kind: "paper-source",
-    paperKey,
+    sourceKind: "paper",
+    sourceKey: paperKey,
     title: "Frequency allocation for superconducting qubits",
     status: "ready",
     createdAt: "2026-05-10T00:00:00.000Z",
     updatedAt: "2026-05-10T00:00:00.000Z",
-    sourceSummaryPath: `knowledge-base/sources/${paperKey}/summary.md`,
-    provenance: {
-      articleUrl: "https://arxiv.org/abs/2601.00003"
+    summaryPath: `knowledge-base/sources/${paperKey}/summary.md`,
+    citation: {
+      citationStatus: "incomplete",
+      missingFields: []
     },
-    parse: {
+    provenance: {
+      url: "https://arxiv.org/abs/2601.00003"
+    },
+    artifacts: [{
+      kind: "parse",
+      path: `knowledge-base/sources/${paperKey}/parses/fixture/document.md`,
       engine: "fixture",
       markdownPath: "",
       jsonPath: "",
       qualityPath: ""
-    },
+    }],
     tags: ["superconducting-qubits"],
-    relatedPaperKeys: [],
+    relatedSourceKeys: [],
     synthesisPageKeys: []
   };
 }
 
-function generalizedSourceManifest(overrides: Record<string, unknown> = {}): Record<string, unknown> {
+function generalizedSourceMetadata(overrides: Record<string, unknown> = {}): Record<string, unknown> {
   return {
-    schemaVersion: 2,
+    schemaVersion: 1,
     sourceKind: "material-database",
     sourceKey: "material-sapphire-permittivity",
     title: "Sapphire permittivity values",
@@ -69,6 +78,10 @@ function generalizedSourceManifest(overrides: Record<string, unknown> = {}): Rec
     createdAt: "2026-05-14T00:00:00.000Z",
     updatedAt: "2026-05-14T00:00:00.000Z",
     summaryPath: "knowledge-base/sources/material-sapphire-permittivity/summary.md",
+    citation: {
+      citationStatus: "incomplete",
+      missingFields: []
+    },
     provenance: {
       url: "https://example.invalid/materials/sapphire",
       retrievedAt: "2026-05-14T00:00:00.000Z"
@@ -84,7 +97,11 @@ function generalizedSourceManifest(overrides: Record<string, unknown> = {}): Rec
   };
 }
 
-async function writeLegacySourceWithManifest(input: {
+function evidenceItemMetadata(item: unknown): KnowledgeSourceMetadata | undefined {
+  return (item as { metadata?: KnowledgeSourceMetadata } | undefined)?.metadata;
+}
+
+async function writeSourceWithMetadata(input: {
   workspace: string;
   paperKey: string;
   title: string;
@@ -98,9 +115,9 @@ async function writeLegacySourceWithManifest(input: {
   );
   await writeWorkspaceFile(
     input.workspace,
-    `knowledge-base/manifests/${input.paperKey}.json`,
+    `knowledge-base/sources/${input.paperKey}/metadata.json`,
     `${JSON.stringify({
-      ...sourceManifest(input.paperKey),
+      ...sourceMetadata(input.paperKey),
       title: input.title,
       tags: input.tags
     }, null, 2)}\n`
@@ -120,7 +137,7 @@ test("searchWikiEvidence returns match reasons and insufficient evidence status"
     assert.equal(empty.results.length, 0);
 
     // Write fixture evidence directly; this contract test must not depend on parsing or downloading.
-    await writeLegacySourceWithManifest({
+    await writeSourceWithMetadata({
       workspace,
       paperKey: "arxiv-2601.00003",
       title: "Frequency allocation in qubits",
@@ -180,7 +197,7 @@ test("searchWikiEvidence uses preferredKinds for sorting without filtering page 
 
 test("searchWikiEvidence ranks stronger score before preferred evidence kind", async () => {
   await withWorkspace("wiki-structured-search-score-first-", async (workspaceDir) => {
-    await writeLegacySourceWithManifest({
+    await writeSourceWithMetadata({
       workspace: workspaceDir,
       paperKey: "arxiv-weak-source",
       title: "Weak source",
@@ -254,7 +271,7 @@ test("searchWikiEvidence includes two-letter query terms", async () => {
 
 test("searchWikiEvidence ranks qLDPC implementation evidence above broad superconducting lexical matches", async () => {
   await withWorkspace("wiki-structured-search-qldpc-implementation-", async (workspaceDir) => {
-    await writeLegacySourceWithManifest({
+    await writeSourceWithMetadata({
       workspace: workspaceDir,
       paperKey: "aaa-broad-superconducting-readout",
       title: "Superconducting qubit readout implementation bottlenecks",
@@ -310,7 +327,7 @@ test("searchWikiEvidence ranks qLDPC implementation evidence above broad superco
 
 test("searchWikiEvidence warns when evidence is summary-only or lacks claim provenance", async () => {
   await withWorkspace("wiki-structured-search-provenance-warnings-", async (workspaceDir) => {
-    await writeLegacySourceWithManifest({
+    await writeSourceWithMetadata({
       workspace: workspaceDir,
       paperKey: "arxiv-summary-layer",
       title: "qLDPC hardware summary",
@@ -348,7 +365,7 @@ test("searchWikiEvidence warns when evidence is summary-only or lacks claim prov
   });
 });
 
-test("retrieval contract reads source evidence by key from legacy summary and manifest", async () => {
+test("retrieval contract reads source evidence by key from summary and metadata", async () => {
   await withWorkspace("wiki-retrieval-source-", async (workspaceDir) => {
     const paperKey = "arxiv-2601.00003";
     await writeWorkspaceFile(workspaceDir, `knowledge-base/sources/${paperKey}/summary.md`, [
@@ -363,8 +380,8 @@ test("retrieval contract reads source evidence by key from legacy summary and ma
     ].join("\n"));
     await writeWorkspaceFile(
       workspaceDir,
-      `knowledge-base/manifests/${paperKey}.json`,
-      `${JSON.stringify(sourceManifest(paperKey), null, 2)}\n`
+      `knowledge-base/sources/${paperKey}/metadata.json`,
+      `${JSON.stringify(sourceMetadata(paperKey), null, 2)}\n`
     );
 
     const result = await readWikiEvidenceItem({
@@ -376,7 +393,7 @@ test("retrieval contract reads source evidence by key from legacy summary and ma
     assert.equal(result.status, "ready");
     assert.equal(result.item?.kind, "source");
     assert.equal(result.item?.key, paperKey);
-    assert.equal(result.item?.manifest?.status, "ready");
+    assert.equal(evidenceItemMetadata(result.item)?.status, "ready");
     assert.equal(result.item?.sourceKind, "paper");
     assert.equal(result.item?.sourceKey, paperKey);
     assert.deepEqual(result.item?.sourceRefs, [paperKey]);
@@ -399,8 +416,8 @@ test("retrieval contract returns generalized non-paper source evidence", async (
     );
     await writeWorkspaceFile(
       workspaceDir,
-      "knowledge-base/manifests/material-sapphire-permittivity.json",
-      `${JSON.stringify(generalizedSourceManifest(), null, 2)}\n`
+      "knowledge-base/sources/material-sapphire-permittivity/metadata.json",
+      `${JSON.stringify(generalizedSourceMetadata(), null, 2)}\n`
     );
 
     const result = await readWikiEvidenceItem({
@@ -415,15 +432,15 @@ test("retrieval contract returns generalized non-paper source evidence", async (
     assert.equal(result.item?.sourceKey, "material-sapphire-permittivity");
     assert.equal(result.item?.evidenceContract, "mixed");
     assert.deepEqual(result.item?.sourceRefs, ["material-sapphire-permittivity"]);
-    assert.equal(result.item?.manifest?.schemaVersion, 2);
+    assert.equal(evidenceItemMetadata(result.item)?.schemaVersion, 1);
   });
 });
 
-test("retrieval contract rejects malformed generalized source manifests", async () => {
-  const cases: Array<{ name: string; manifest: Record<string, unknown> }> = [
+test("retrieval contract rejects malformed generalized source metadata", async () => {
+  const cases: Array<{ name: string; metadata: Record<string, unknown> }> = [
     {
       name: "invalid-artifact-kind",
-      manifest: generalizedSourceManifest({
+      metadata: generalizedSourceMetadata({
         artifacts: [{
           kind: "spreadsheet",
           path: "knowledge-base/sources/material-sapphire-permittivity/tables/parameters.json"
@@ -432,7 +449,7 @@ test("retrieval contract rejects malformed generalized source manifests", async 
     },
     {
       name: "invalid-artifact-optional-field",
-      manifest: generalizedSourceManifest({
+      metadata: generalizedSourceMetadata({
         artifacts: [{
           kind: "table",
           path: "knowledge-base/sources/material-sapphire-permittivity/tables/parameters.json",
@@ -442,7 +459,7 @@ test("retrieval contract rejects malformed generalized source manifests", async 
     },
     {
       name: "invalid-provenance-optional-field",
-      manifest: generalizedSourceManifest({
+      metadata: generalizedSourceMetadata({
         provenance: {
           url: 42,
           retrievedAt: "2026-05-14T00:00:00.000Z"
@@ -456,12 +473,12 @@ test("retrieval contract rejects malformed generalized source manifests", async 
       await writeWorkspaceFile(
         workspaceDir,
         "knowledge-base/sources/material-sapphire-permittivity/summary.md",
-        "# Sapphire permittivity\n\nMalformed manifest must not provide metadata."
+        "# Sapphire permittivity\n\nMalformed metadata must not provide metadata."
       );
       await writeWorkspaceFile(
         workspaceDir,
-        "knowledge-base/manifests/material-sapphire-permittivity.json",
-        `${JSON.stringify(item.manifest, null, 2)}\n`
+        "knowledge-base/sources/material-sapphire-permittivity/metadata.json",
+        `${JSON.stringify(item.metadata, null, 2)}\n`
       );
 
       const result = await readWikiEvidenceItem({
@@ -471,27 +488,27 @@ test("retrieval contract rejects malformed generalized source manifests", async 
       });
 
       assert.equal(result.status, "malformed", item.name);
-      assert.equal(result.item?.manifest, undefined, item.name);
+      assert.equal(evidenceItemMetadata(result.item), undefined, item.name);
       assert.ok(
-        result.diagnostics.some((diagnostic) => diagnostic.toLowerCase().includes("malformed manifest")),
-        `${item.name}: expected malformed manifest diagnostic, got ${JSON.stringify(result.diagnostics)}`
+        result.diagnostics.some((diagnostic) => diagnostic.toLowerCase().includes("malformed metadata")),
+        `${item.name}: expected malformed metadata diagnostic, got ${JSON.stringify(result.diagnostics)}`
       );
     });
   }
 });
 
-test("retrieval contract rejects generalized source manifest identity mismatches", async () => {
-  const cases: Array<{ name: string; manifest: Record<string, unknown>; expectedDiagnostic: RegExp }> = [
+test("retrieval contract rejects generalized source metadata identity mismatches", async () => {
+  const cases: Array<{ name: string; metadata: Record<string, unknown>; expectedDiagnostic: RegExp }> = [
     {
       name: "source-key-mismatch",
-      manifest: generalizedSourceManifest({
+      metadata: generalizedSourceMetadata({
         sourceKey: "material-silicon-permittivity"
       }),
       expectedDiagnostic: /sourceKey .* does not match requested source key/i
     },
     {
       name: "summary-path-mismatch",
-      manifest: generalizedSourceManifest({
+      metadata: generalizedSourceMetadata({
         summaryPath: "knowledge-base/sources/material-silicon-permittivity/summary.md"
       }),
       expectedDiagnostic: /summaryPath .* does not match source summary path/i
@@ -503,12 +520,12 @@ test("retrieval contract rejects generalized source manifest identity mismatches
       await writeWorkspaceFile(
         workspaceDir,
         "knowledge-base/sources/material-sapphire-permittivity/summary.md",
-        "# Sapphire permittivity\n\nIdentity mismatches must not provide manifest metadata."
+        "# Sapphire permittivity\n\nIdentity mismatches must not provide metadata."
       );
       await writeWorkspaceFile(
         workspaceDir,
-        "knowledge-base/manifests/material-sapphire-permittivity.json",
-        `${JSON.stringify(item.manifest, null, 2)}\n`
+        "knowledge-base/sources/material-sapphire-permittivity/metadata.json",
+        `${JSON.stringify(item.metadata, null, 2)}\n`
       );
 
       const result = await readWikiEvidenceItem({
@@ -519,7 +536,7 @@ test("retrieval contract rejects generalized source manifest identity mismatches
 
       assert.equal(result.status, "malformed", item.name);
       assert.equal(result.item?.key, "material-sapphire-permittivity", item.name);
-      assert.equal(result.item?.manifest, undefined, item.name);
+      assert.equal(evidenceItemMetadata(result.item), undefined, item.name);
       assert.deepEqual(result.item?.sourceRefs, [], item.name);
       assert.ok(
         result.diagnostics.some((diagnostic) => item.expectedDiagnostic.test(diagnostic)),
@@ -619,13 +636,13 @@ test("retrieval contract exposes page evidence audit metadata", async () => {
   });
 });
 
-test("retrieval contract returns diagnostics for source summaries missing manifests", async () => {
-  await withWorkspace("wiki-retrieval-missing-manifest-", async (workspaceDir) => {
+test("retrieval contract returns diagnostics for source summaries missing metadata", async () => {
+  await withWorkspace("wiki-retrieval-missing-metadata-", async (workspaceDir) => {
     const paperKey = "arxiv-2601.00004";
     await writeWorkspaceFile(workspaceDir, `knowledge-base/sources/${paperKey}/summary.md`, [
-      "# Source without manifest",
+      "# Source without metadata",
       "",
-      "Body exists even though the manifest has not been written."
+      "Body exists even though the metadata has not been written."
     ].join("\n"));
 
     const result = await readWikiEvidenceItem({
@@ -636,10 +653,10 @@ test("retrieval contract returns diagnostics for source summaries missing manife
 
     assert.ok(result.status === "ready" || result.status === "malformed");
     assert.equal(result.item?.kind, "source");
-    assert.match(result.item?.body ?? "", /manifest has not been written/);
+    assert.match(result.item?.body ?? "", /metadata has not been written/);
     assert.ok(
-      result.diagnostics.some((diagnostic) => diagnostic.toLowerCase().includes("missing manifest")),
-      `expected missing manifest diagnostic, got ${JSON.stringify(result.diagnostics)}`
+      result.diagnostics.some((diagnostic) => diagnostic.toLowerCase().includes("missing metadata")),
+      `expected missing metadata diagnostic, got ${JSON.stringify(result.diagnostics)}`
     );
   });
 });
@@ -666,8 +683,8 @@ test("retrieval contract returns malformed diagnostics for invalid source and pa
   });
 });
 
-test("retrieval contract reports invalid JSON source manifests as malformed", async () => {
-  await withWorkspace("wiki-retrieval-invalid-json-manifest-", async (workspaceDir) => {
+test("retrieval contract reports invalid JSON source metadata as malformed", async () => {
+  await withWorkspace("wiki-retrieval-invalid-json-metadata-", async (workspaceDir) => {
     const paperKey = "arxiv-2601.00005";
     await writeWorkspaceFile(
       workspaceDir,
@@ -676,7 +693,7 @@ test("retrieval contract reports invalid JSON source manifests as malformed", as
     );
     await writeWorkspaceFile(
       workspaceDir,
-      `knowledge-base/manifests/${paperKey}.json`,
+      `knowledge-base/sources/${paperKey}/metadata.json`,
       "{not valid json"
     );
 
@@ -689,27 +706,27 @@ test("retrieval contract reports invalid JSON source manifests as malformed", as
     assert.equal(result.status, "malformed");
     assert.equal(result.item?.key, paperKey);
     assert.equal(result.item?.title, paperKey);
-    assert.equal(result.item?.manifest, undefined);
+    assert.equal(evidenceItemMetadata(result.item), undefined);
     assert.match(result.item?.body ?? "", /Body remains readable/);
-    assert.ok(result.diagnostics.some((diagnostic) => diagnostic.toLowerCase().includes("malformed manifest")));
+    assert.ok(result.diagnostics.some((diagnostic) => diagnostic.toLowerCase().includes("malformed metadata")));
   });
 });
 
-test("retrieval contract reports wrong-shape source manifests as malformed without using fields", async () => {
-  await withWorkspace("wiki-retrieval-wrong-shape-manifest-", async (workspaceDir) => {
+test("retrieval contract reports wrong-shape source metadata as malformed without using fields", async () => {
+  await withWorkspace("wiki-retrieval-wrong-shape-metadata-", async (workspaceDir) => {
     const paperKey = "arxiv-2601.00006";
     await writeWorkspaceFile(
       workspaceDir,
       `knowledge-base/sources/${paperKey}/summary.md`,
-      "# Source summary\n\nWrong-shape manifest should not provide metadata."
+      "# Source summary\n\nWrong-shape metadata should not provide metadata."
     );
     await writeWorkspaceFile(
       workspaceDir,
-      `knowledge-base/manifests/${paperKey}.json`,
+      `knowledge-base/sources/${paperKey}/metadata.json`,
       `${JSON.stringify({
         schemaVersion: 1,
-        kind: "paper-source",
-        paperKey,
+        sourceKind: "paper",
+        sourceKey: paperKey,
         title: 42,
         status: "ready",
         tags: ["should-not-be-used"]
@@ -725,8 +742,8 @@ test("retrieval contract reports wrong-shape source manifests as malformed witho
     assert.equal(result.status, "malformed");
     assert.equal(result.item?.title, paperKey);
     assert.deepEqual(result.item?.tags, []);
-    assert.equal(result.item?.manifest, undefined);
-    assert.ok(result.diagnostics.some((diagnostic) => diagnostic.toLowerCase().includes("malformed manifest")));
+    assert.equal(evidenceItemMetadata(result.item), undefined);
+    assert.ok(result.diagnostics.some((diagnostic) => diagnostic.toLowerCase().includes("malformed metadata")));
   });
 });
 
@@ -918,7 +935,7 @@ test("searchPaperWiki honors structured filters without legacy fallback", async 
 
 test("searchPaperWiki treats now without freshness threshold as inert", async () => {
   await withWorkspace("wiki-public-search-now-inert-", async (workspaceDir) => {
-    await writeLegacySourceWithManifest({
+    await writeSourceWithMetadata({
       workspace: workspaceDir,
       paperKey: "aaa-common-words",
       title: "Unrelated Common Words",
@@ -929,7 +946,7 @@ test("searchPaperWiki treats now without freshness threshold as inert", async ()
       ].join("\n"),
       tags: []
     });
-    await writeLegacySourceWithManifest({
+    await writeSourceWithMetadata({
       workspace: workspaceDir,
       paperKey: "source-b",
       title: "qLDPC Hardware Constraints",
@@ -975,41 +992,36 @@ test("searchWikiEvidence preserves diagnostic warnings", async () => {
     assert.equal(result.status, "ready");
     assert.equal(result.results[0].item.key, "arxiv-2601.00004");
     assert.ok(
-      result.results[0].warnings.some((warning) => warning.toLowerCase().includes("missing manifest")),
-      `expected missing manifest warning, got ${JSON.stringify(result.results[0].warnings)}`
+      result.results[0].warnings.some((warning) => warning.toLowerCase().includes("missing metadata")),
+      `expected missing metadata warning, got ${JSON.stringify(result.results[0].warnings)}`
     );
   });
 });
 
-test("retrieval contract rejects source manifests missing required fields", async () => {
-  await withWorkspace("wiki-retrieval-missing-fields-manifest-", async (workspaceDir) => {
+test("retrieval contract rejects source metadata missing required fields", async () => {
+  await withWorkspace("wiki-retrieval-missing-fields-metadata-", async (workspaceDir) => {
     const paperKey = "arxiv-2601.00009";
     await writeWorkspaceFile(
       workspaceDir,
       `knowledge-base/sources/${paperKey}/summary.md`,
-      "# Source summary\n\nMissing required manifest fields should not be accepted."
+      "# Source summary\n\nMissing required metadata fields should not be accepted."
     );
     await writeWorkspaceFile(
       workspaceDir,
-      `knowledge-base/manifests/${paperKey}.json`,
+      `knowledge-base/sources/${paperKey}/metadata.json`,
       `${JSON.stringify({
         schemaVersion: 1,
-        kind: "paper-source",
-        paperKey,
-        title: "Incomplete manifest",
+        sourceKind: "paper",
+        sourceKey: paperKey,
+        title: "Incomplete metadata",
         status: "ready",
-        sourceSummaryPath: `knowledge-base/sources/${paperKey}/summary.md`,
+        summaryPath: `knowledge-base/sources/${paperKey}/summary.md`,
         provenance: {
-          articleUrl: 42
+          url: 42
         },
-        parse: {
-          engine: "fixture",
-          markdownPath: "",
-          jsonPath: "",
-          qualityPath: ""
-        },
+        artifacts: [],
         tags: [],
-        relatedPaperKeys: [],
+        relatedSourceKeys: [],
         synthesisPageKeys: []
       }, null, 2)}\n`
     );
@@ -1021,14 +1033,14 @@ test("retrieval contract rejects source manifests missing required fields", asyn
     });
 
     assert.equal(result.status, "malformed");
-    assert.equal(result.item?.manifest, undefined);
+    assert.equal(evidenceItemMetadata(result.item), undefined);
     assert.equal(result.item?.title, paperKey);
-    assert.ok(result.diagnostics.some((diagnostic) => diagnostic.toLowerCase().includes("malformed manifest")));
+    assert.ok(result.diagnostics.some((diagnostic) => diagnostic.toLowerCase().includes("malformed metadata")));
   });
 });
 
-test("retrieval contract returns blocked status with body for blocked source manifests", async () => {
-  await withWorkspace("wiki-retrieval-blocked-manifest-", async (workspaceDir) => {
+test("retrieval contract returns blocked status with body for blocked source metadata", async () => {
+  await withWorkspace("wiki-retrieval-blocked-metadata-", async (workspaceDir) => {
     const paperKey = "arxiv-2601.00007";
     await writeWorkspaceFile(
       workspaceDir,
@@ -1037,8 +1049,8 @@ test("retrieval contract returns blocked status with body for blocked source man
     );
     await writeWorkspaceFile(
       workspaceDir,
-      `knowledge-base/manifests/${paperKey}.json`,
-      `${JSON.stringify({ ...sourceManifest(paperKey), status: "blocked" }, null, 2)}\n`
+      `knowledge-base/sources/${paperKey}/metadata.json`,
+      `${JSON.stringify({ ...sourceMetadata(paperKey), status: "blocked" }, null, 2)}\n`
     );
 
     const result = await readWikiEvidenceItem({
@@ -1048,7 +1060,7 @@ test("retrieval contract returns blocked status with body for blocked source man
     });
 
     assert.equal(result.status, "blocked");
-    assert.equal(result.item?.manifest?.status, "blocked");
+    assert.equal(evidenceItemMetadata(result.item)?.status, "blocked");
     assert.match(result.item?.body ?? "", /Blocked source body/);
   });
 });

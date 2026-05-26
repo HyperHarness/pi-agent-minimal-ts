@@ -144,7 +144,7 @@ async function sourceChunkPathCandidates(item: WikiEvidenceItem, workspaceDir: s
   relativePath: string;
 }>> {
   const candidates: Array<{ path: string; relativePath: string }> = [];
-  for (const artifact of item.manifest?.artifacts ?? []) {
+  for (const artifact of item.metadata?.artifacts ?? []) {
     if (artifact.kind !== "parse" || !artifact.engine || !CONCRETE_PARSE_ENGINES.has(artifact.engine)) {
       continue;
     }

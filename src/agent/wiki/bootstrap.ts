@@ -2,7 +2,10 @@ import { readFile } from "node:fs/promises";
 import path from "node:path";
 import { searchLocalPapers, type SearchLocalPapersResult } from "../paper/storage/local-paper-library.js";
 import { searchPaperWiki } from "./content.js";
-import { readNormalizedWikiSourceManifest, type WikiSourceKind } from "./manifest-store.js";
+import {
+  readKnowledgeSourceMetadata,
+  type WikiSourceKind
+} from "./source-metadata-store.js";
 import {
   searchWikiEvidence,
   type WikiEvidenceSearchResult
@@ -178,19 +181,20 @@ async function readSourceSummaryDocuments(workspaceDir: string): Promise<Map<str
       continue;
     }
     const paperKey = paperKeyFromPaperWikiSourcePath(filePath);
-    const manifest = await readNormalizedWikiSourceManifest({
+    const metadata = await readKnowledgeSourceMetadata({
       workspaceDir,
-      sourceKey: paperKey
+      sourceKey: paperKey,
+      summaryPath: relativeToWorkspace(workspaceDir, filePath)
     });
     const frontmatter = extractFrontmatter(markdown);
     documents.set(paperKey, {
       paperKey,
-      title: manifest?.title ?? extractTitle(markdown, paperKey),
+      title: metadata.metadata?.title ?? extractTitle(markdown, paperKey),
       path: relativeToWorkspace(workspaceDir, filePath),
       body: bodyWithoutFrontmatter(markdown),
-      tags: manifest?.tags ?? extractYamlStringValues(frontmatter, "tags"),
-      relatedPaperKeys: manifest?.relatedSourceKeys ?? extractYamlStringValues(frontmatter, "related_papers"),
-      ...(manifest?.sourceKind ? { sourceKind: manifest.sourceKind } : {})
+      tags: metadata.metadata?.tags ?? extractYamlStringValues(frontmatter, "tags"),
+      relatedPaperKeys: metadata.metadata?.relatedSourceKeys ?? extractYamlStringValues(frontmatter, "related_papers"),
+      ...(metadata.metadata?.sourceKind ? { sourceKind: metadata.metadata.sourceKind } : {})
     });
   }
   return documents;
@@ -237,7 +241,7 @@ function toGeneralizedSourceEvidence(
     origin: "seed_search",
     ...(result.item.sourceKind ? { sourceKind: result.item.sourceKind } : {}),
     tags: result.item.tags,
-    relatedPaperKeys: result.item.manifest?.relatedSourceKeys ?? []
+    relatedPaperKeys: result.item.metadata?.relatedSourceKeys ?? []
   };
 }
 

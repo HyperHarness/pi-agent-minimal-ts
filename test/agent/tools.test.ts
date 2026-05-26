@@ -28,6 +28,35 @@ type ToolContentItem = {
   text?: string;
 };
 
+async function writeSourceMetadataFixture(
+  workspace: string,
+  sourceKey: string,
+  metadata: Record<string, unknown>
+): Promise<void> {
+  const metadataPath = path.join(workspace, "knowledge-base", "sources", sourceKey, "metadata.json");
+  await mkdir(path.dirname(metadataPath), { recursive: true });
+  await writeFile(metadataPath, `${JSON.stringify({
+    schemaVersion: 1,
+    sourceKind: "paper",
+    sourceKey,
+    title: sourceKey,
+    status: "ready",
+    createdAt: "2026-05-14T00:00:00.000Z",
+    updatedAt: "2026-05-14T00:00:00.000Z",
+    summaryPath: `knowledge-base/sources/${sourceKey}/summary.md`,
+    citation: {
+      citationStatus: "incomplete",
+      missingFields: []
+    },
+    provenance: {},
+    artifacts: [],
+    tags: [],
+    relatedSourceKeys: [],
+    synthesisPageKeys: [],
+    ...metadata
+  }, null, 2)}\n`, "utf8");
+}
+
 type ToolResult = {
   content?: ToolContentItem[];
   details?: unknown;
@@ -4860,7 +4889,7 @@ test("write_paper_wiki_source delegates to the injected wiki dependency and retu
           paperKey: options.paperKey,
           title: options.title ?? "Paper title",
           sourcePath: "knowledge-base/sources/arxiv-2406.06015/summary.md",
-          manifestPath: "knowledge-base/manifests/arxiv-2406.06015.json",
+          metadataPath: "knowledge-base/sources/arxiv-2406.06015/metadata.json",
           operationId: "write_source_summary-test",
           operationJournalPath: "knowledge-base/state/wiki-operations.jsonl",
           indexPath: "knowledge-base/index.md",
@@ -4884,6 +4913,7 @@ test("write_paper_wiki_source delegates to the injected wiki dependency and retu
       },
     ]);
     assert.equal((result.details as { sourcePath?: string }).sourcePath, "knowledge-base/sources/arxiv-2406.06015/summary.md");
+    assert.equal((result.details as { metadataPath?: string }).metadataPath, "knowledge-base/sources/arxiv-2406.06015/metadata.json");
   } finally {
     await rm(workspace, { recursive: true, force: true });
   }
@@ -5862,7 +5892,7 @@ test("answer_research_question can download, parse, summarize, and refresh wiki 
           paperKey: options.paperKey,
           title: "Newly summarized paper",
           sourcePath: "knowledge-base/sources/arxiv-2601.00425/summary.md",
-          manifestPath: "knowledge-base/manifests/arxiv-2601.00425.json",
+          metadataPath: "knowledge-base/sources/arxiv-2601.00425/metadata.json",
           operationId: "write_source_summary-test",
           operationJournalPath: "knowledge-base/state/wiki-operations.jsonl",
           indexPath: "knowledge-base/index.md",
@@ -6120,7 +6150,7 @@ test("bootstrap_wiki_page_evidence generates missing source summaries and refres
             paperKey: options.paperKey,
             title: "Small Quantum LDPC Codes",
             sourcePath: "knowledge-base/sources/arxiv-2507.09690/summary.md",
-            manifestPath: "knowledge-base/manifests/arxiv-2507.09690.json",
+            metadataPath: "knowledge-base/sources/arxiv-2507.09690/metadata.json",
             operationId: "write_source_summary-test",
             operationJournalPath: "knowledge-base/state/wiki-operations.jsonl",
             indexPath: "knowledge-base/index.md",
@@ -6484,7 +6514,6 @@ test("build_wiki_page sends evidence pack with raw chunks, provenance, and contr
     const sourceKey = "arxiv-2601.01010";
     const sourceDir = path.join(workspace, "knowledge-base/sources", sourceKey);
     await mkdir(path.join(sourceDir, "chunks"), { recursive: true });
-    await mkdir(path.join(workspace, "knowledge-base/manifests"), { recursive: true });
     await writeFile(path.join(sourceDir, "summary.md"), [
       "---",
       `title: "qLDPC Hardware Evidence"`,
@@ -6521,8 +6550,7 @@ test("build_wiki_page sends evidence pack with raw chunks, provenance, and contr
         elementIds: ["e2"]
       })
     ].join("\n") + "\n", "utf8");
-    await writeFile(path.join(workspace, "knowledge-base/manifests", `${sourceKey}.json`), `${JSON.stringify({
-      schemaVersion: 2,
+    await writeSourceMetadataFixture(workspace, sourceKey, {
       sourceKind: "paper",
       sourceKey,
       title: "qLDPC Hardware Evidence",
@@ -6540,7 +6568,7 @@ test("build_wiki_page sends evidence pack with raw chunks, provenance, and contr
       tags: ["qldpc", "superconducting-chips"],
       relatedSourceKeys: [],
       synthesisPageKeys: []
-    }, null, 2)}\n`, "utf8");
+    });
     await writeTypedWikiPage({
       workspaceDir: workspace,
       page: {
@@ -6735,7 +6763,6 @@ test("build_wiki_page guides material evidence pages from default retrieval with
     const sourceKey = "material-sapphire-permittivity";
     const sourceDir = path.join(workspace, "knowledge-base/sources", sourceKey);
     await mkdir(sourceDir, { recursive: true });
-    await mkdir(path.join(workspace, "knowledge-base/manifests"), { recursive: true });
     await writeFile(path.join(sourceDir, "summary.md"), `---
 title: "Sapphire Permittivity Dataset"
 tags:
@@ -6747,8 +6774,7 @@ tags:
 
 Permittivity and loss tangent parameters for sapphire substrates used in superconducting microwave design.
 `, "utf8");
-    await writeFile(path.join(workspace, "knowledge-base/manifests", `${sourceKey}.json`), `${JSON.stringify({
-      schemaVersion: 2,
+    await writeSourceMetadataFixture(workspace, sourceKey, {
       sourceKind: "material-database",
       sourceKey,
       title: "Sapphire Permittivity Dataset",
@@ -6763,7 +6789,7 @@ Permittivity and loss tangent parameters for sapphire substrates used in superco
       tags: ["sapphire", "permittivity"],
       relatedSourceKeys: [],
       synthesisPageKeys: []
-    }, null, 2)}\n`, "utf8");
+    });
 
     const tool = getBuildWikiPageTool(workspace, {
       paperWikiPageWorker: async (input) => {
@@ -6820,10 +6846,8 @@ test("build_wiki_page refuses to write incomplete material template drafts", asy
     const sourceKey = "material-sapphire-permittivity";
     const sourceDir = path.join(workspace, "knowledge-base/sources", sourceKey);
     await mkdir(sourceDir, { recursive: true });
-    await mkdir(path.join(workspace, "knowledge-base/manifests"), { recursive: true });
     await writeFile(path.join(sourceDir, "summary.md"), "# Sapphire Permittivity Dataset\n\nMaterial parameter evidence.", "utf8");
-    await writeFile(path.join(workspace, "knowledge-base/manifests", `${sourceKey}.json`), `${JSON.stringify({
-      schemaVersion: 2,
+    await writeSourceMetadataFixture(workspace, sourceKey, {
       sourceKind: "material-database",
       sourceKey,
       title: "Sapphire Permittivity Dataset",
@@ -6838,7 +6862,7 @@ test("build_wiki_page refuses to write incomplete material template drafts", asy
       tags: ["sapphire", "permittivity"],
       relatedSourceKeys: [],
       synthesisPageKeys: []
-    }, null, 2)}\n`, "utf8");
+    });
 
     const tool = getBuildWikiPageTool(workspace, {
       paperWikiPageWorker: async () => ({
