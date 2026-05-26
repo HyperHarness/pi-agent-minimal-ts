@@ -22,6 +22,55 @@ async function writeText(filePath: string, value: string): Promise<void> {
   await writeFile(filePath, value, "utf8");
 }
 
+async function writePaperMetadata(filePath: string, value: Record<string, unknown>): Promise<void> {
+  const paperKey = typeof value.paperKey === "string"
+    ? value.paperKey
+    : path.basename(path.dirname(filePath));
+  const citation = {
+    citationStatus: typeof value.citationStatus === "string" ? value.citationStatus : "complete",
+    missingFields: Array.isArray(value.missingFields) ? value.missingFields : [],
+    ...(Array.isArray(value.authors) ? { authors: value.authors } : {}),
+    ...(typeof value.year === "number" ? { year: value.year } : {}),
+    ...(typeof value.venue === "string" ? { venue: value.venue } : {}),
+    ...(typeof value.publisher === "string" ? { publisher: value.publisher } : {}),
+    ...(typeof value.doi === "string" ? { doi: value.doi } : {}),
+    ...(typeof value.arxivId === "string" ? { arxivId: value.arxivId } : {}),
+    ...(typeof value.resolvedFrom === "string" ? { resolvedFrom: value.resolvedFrom } : {}),
+    ...(typeof value.sourceConfidence === "string" ? { sourceConfidence: value.sourceConfidence } : {})
+  };
+  const provenance = {
+    ...(typeof value.articleUrl === "string" ? { url: value.articleUrl } : {}),
+    ...(typeof value.source === "string" ? { source: value.source } : {}),
+    ...(typeof value.canonicalId === "string" ? { canonicalId: value.canonicalId } : {}),
+    ...(typeof value.acquisitionPath === "string" ? { acquisitionPath: value.acquisitionPath } : {}),
+    ...(typeof value.recordPath === "string" ? { recordPath: value.recordPath } : {}),
+    ...(typeof value.pdfPath === "string" ? { rawPath: value.pdfPath } : {}),
+    ...(typeof value.downloadPath === "string" ? { rawPath: value.downloadPath } : {}),
+    ...(typeof value.pdfSha256 === "string" ? { rawSha256: value.pdfSha256 } : {}),
+    ...(typeof value.downloadStatus === "string" ? { downloadStatus: value.downloadStatus } : {}),
+    ...(typeof value.readingStatus === "string" ? { readingStatus: value.readingStatus } : {}),
+    ...(typeof value.recordedAt === "string" ? { recordedAt: value.recordedAt } : {})
+  };
+  await writeJson(filePath, {
+    schemaVersion: 1,
+    sourceKind: "paper",
+    sourceKey: paperKey,
+    title: typeof value.title === "string" ? value.title : paperKey,
+    status: citation.missingFields.length === 0 ? "ready" : "citation_incomplete",
+    createdAt: typeof value.createdAt === "string" ? value.createdAt : "2026-05-26T00:00:00.000Z",
+    updatedAt: typeof value.updatedAt === "string" ? value.updatedAt : "2026-05-26T00:00:00.000Z",
+    summaryPath: typeof value.summaryPath === "string"
+      ? value.summaryPath
+      : `knowledge-base/sources/${paperKey}/summary.md`,
+    citation,
+    provenance,
+    artifacts: [],
+    tags: [],
+    relatedSourceKeys: [],
+    synthesisPageKeys: []
+  });
+}
+
 test("checkWikiHealth reports records that need download, authorization, parsing, and summaries", async () => {
   const workspace = await createWorkspace();
 
@@ -72,7 +121,7 @@ test("checkWikiHealth reports records that need download, authorization, parsing
       "parses",
       "plain-text-baseline"
     );
-    await writeJson(path.join(workspace, "knowledge-base", "sources", "arxiv-2401.00002", "source.json"), {
+    await writePaperMetadata(path.join(workspace, "knowledge-base", "sources", "arxiv-2401.00002", "metadata.json"), {
       paperKey: "arxiv-2401.00002",
       source: "arxiv",
       canonicalId: "2401.00002",
@@ -141,7 +190,7 @@ test("checkWikiHealth excludes publisher news pages from paper parse health", as
     for (const source of newsSources) {
       const sourceDir = path.join(workspace, "knowledge-base", "sources", source.paperKey);
       const parsedDir = path.join(sourceDir, "parses", "webpage");
-      await writeJson(path.join(sourceDir, "source.json"), source);
+      await writePaperMetadata(path.join(sourceDir, "metadata.json"), source);
       await writeText(path.join(parsedDir, "document.md"), `${source.title}\n\nShort news page.`);
       await writeJson(path.join(parsedDir, "parse.json"), {
         paperKey: source.paperKey,
@@ -179,7 +228,7 @@ test("wiki_health_fix quarantines APS institution site license non-paper sources
     const sourceDir = path.join(workspace, "knowledge-base", "sources", paperKey);
     const parseDir = path.join(sourceDir, "parses", "webpage");
     const manifestPath = path.join(workspace, "knowledge-base", "manifests", `${paperKey}.json`);
-    await writeJson(path.join(sourceDir, "source.json"), {
+    await writePaperMetadata(path.join(sourceDir, "metadata.json"), {
       paperKey,
       articleUrl,
       source: "aps",
@@ -238,10 +287,10 @@ test("wiki_health_fix quarantines APS institution site license non-paper sources
     });
 
     assert.equal(fixed.fixed, 1);
-    await assert.rejects(readFile(path.join(sourceDir, "source.json"), "utf8"));
+    await assert.rejects(readFile(path.join(sourceDir, "metadata.json"), "utf8"));
     await assert.rejects(readFile(manifestPath, "utf8"));
     const quarantinedSource = await readFile(
-      path.join(workspace, "knowledge-base", "quarantine", "non-paper-sources", paperKey, "source", "source.json"),
+      path.join(workspace, "knowledge-base", "quarantine", "non-paper-sources", paperKey, "source", "metadata.json"),
       "utf8"
     );
     assert.match(quarantinedSource, /APS Institution Site License/);
@@ -307,7 +356,7 @@ test("checkWikiHealth ignores stale queued webpage work when PDF reading is read
       warnings: []
     });
     await writeText(chunksPath, "{\"id\":\"chunk-1\"}\n");
-    await writeJson(path.join(workspace, "knowledge-base", "sources", paperKey, "source.json"), {
+    await writePaperMetadata(path.join(workspace, "knowledge-base", "sources", paperKey, "metadata.json"), {
       paperKey,
       source: "nature",
       canonicalId: "s41586-026-10644-y",
@@ -373,7 +422,7 @@ test("checkWikiHealth reports incomplete source citation metadata", async () => 
       pdfUrl: "https://arxiv.org/pdf/2401.00008.pdf",
       downloadPath: path.join(workspace, "knowledge-base", "raw", "pdfs", "arxiv-2401.00008.pdf")
     });
-    await writeJson(path.join(workspace, "knowledge-base", "sources", paperKey, "source.json"), {
+    await writePaperMetadata(path.join(workspace, "knowledge-base", "sources", paperKey, "metadata.json"), {
       schemaVersion: 2,
       paperKey,
       source: "arxiv",
@@ -403,7 +452,7 @@ test("checkWikiHealth reports incomplete source citation metadata", async () => 
   }
 });
 
-test("checkWikiHealth reports legacy source metadata without citation status fields", async () => {
+test("checkWikiHealth ignores source json without metadata json", async () => {
   const workspace = await createWorkspace();
 
   try {
@@ -418,11 +467,14 @@ test("checkWikiHealth reports legacy source metadata without citation status fie
 
     const result = await checkWikiHealth({ workspaceDir: workspace });
 
-    assert.equal(result.summary.citation_incomplete, 1);
-    const issue = result.issues.find((candidate) => candidate.kind === "citation_incomplete");
-    assert.equal(issue?.paperKey, paperKey);
-    assert.deepEqual(issue?.metadata?.missingFields, ["authors", "year", "venue"]);
-    assert.equal(issue?.metadata?.sourcePath, `knowledge-base/sources/${paperKey}/source.json`);
+    assert.equal(result.summary.citation_incomplete, 0);
+    assert.equal(
+      result.issues.some((candidate) =>
+        candidate.kind === "citation_incomplete" &&
+        candidate.metadata?.sourcePath === `knowledge-base/sources/${paperKey}/metadata.json`
+      ),
+      false
+    );
   } finally {
     await rm(workspace, { recursive: true, force: true });
   }
@@ -669,7 +721,7 @@ test("checkWikiHealth reports source summaries without manifests", async () => {
       pdfUrl: "https://arxiv.org/pdf/2401.00999.pdf",
       downloadPath: pdfPath
     });
-    await writeJson(path.join(workspace, "knowledge-base", "sources", "arxiv-2401.00999", "source.json"), {
+    await writePaperMetadata(path.join(workspace, "knowledge-base", "sources", "arxiv-2401.00999", "metadata.json"), {
       paperKey: "arxiv-2401.00999",
       source: "arxiv",
       canonicalId: "2401.00999",
@@ -892,7 +944,7 @@ test("fixWikiHealth backfills source manifests from existing summaries", async (
       pdfUrl: "https://arxiv.org/pdf/2401.01000.pdf",
       downloadPath: pdfPath
     });
-    await writeJson(path.join(workspace, "knowledge-base", "sources", "arxiv-2401.01000", "source.json"), {
+    await writePaperMetadata(path.join(workspace, "knowledge-base", "sources", "arxiv-2401.01000", "metadata.json"), {
       paperKey: "arxiv-2401.01000",
       source: "arxiv",
       canonicalId: "2401.01000",
@@ -984,7 +1036,7 @@ test("checkWikiHealth accepts ready webpage reading when PDF parsing failed late
       warnings: []
     });
     await writeText(chunksPath, "{\"id\":\"chunk-1\"}\n");
-    await writeJson(path.join(sourceDir, "source.json"), {
+    await writePaperMetadata(path.join(sourceDir, "metadata.json"), {
       paperKey,
       source: "nature",
       canonicalId: "s41567-025-03102-5",
@@ -1050,7 +1102,7 @@ test("checkWikiHealth reports publisher webpage-only parses as not PDF-downloade
     const paperKey = "science-10.1126-sciadv.adp6388";
     const paperDir = path.join(workspace, "knowledge-base", "sources", paperKey);
     const parseDir = path.join(paperDir, "parses", "webpage");
-    await writeJson(path.join(paperDir, "source.json"), {
+    await writePaperMetadata(path.join(paperDir, "metadata.json"), {
       paperKey,
       source: "science",
       canonicalId: "10.1126/sciadv.adp6388",
@@ -1098,7 +1150,7 @@ test("checkWikiHealth preserves Science license failures from extension history 
     const articleUrl = "https://www.science.org/doi/10.1126/science.ado6285";
     const paperDir = path.join(workspace, "knowledge-base", "sources", paperKey);
     const parseDir = path.join(paperDir, "parses", "webpage");
-    await writeJson(path.join(paperDir, "source.json"), {
+    await writePaperMetadata(path.join(paperDir, "metadata.json"), {
       paperKey,
       source: "science",
       canonicalId: "10.1126/science.ado6285",
@@ -1170,7 +1222,7 @@ test("checkWikiHealth treats APS automatic PDF fetch as queued instead of author
     const articleUrl = "https://journals.aps.org/prl/abstract/10.1103/PhysRevLett.111.080502";
     const paperDir = path.join(workspace, "knowledge-base", "sources", paperKey);
     const parseDir = path.join(paperDir, "parses", "webpage");
-    await writeJson(path.join(paperDir, "source.json"), {
+    await writePaperMetadata(path.join(paperDir, "metadata.json"), {
       paperKey,
       source: "aps",
       canonicalId: "10.1103/PhysRevLett.111.080502",
@@ -1225,7 +1277,7 @@ test("checkWikiHealth downgrades blocklisted download issues without hiding summ
     const articleUrl = "https://www.science.org/doi/10.1126/science.ado6285";
     const paperDir = path.join(workspace, "knowledge-base", "sources", paperKey);
     const parseDir = path.join(paperDir, "parses", "webpage");
-    await writeJson(path.join(paperDir, "source.json"), {
+    await writePaperMetadata(path.join(paperDir, "metadata.json"), {
       paperKey,
       source: "science",
       canonicalId: "10.1126/science.ado6285",
@@ -1308,7 +1360,7 @@ test("checkWikiHealth reports Cloudflare extension handoff as user authorization
   try {
     const paperKey = "aps-10.1103-nv7d-k3wr";
     const articleUrl = "https://journals.aps.org/prl/abstract/10.1103/NV7D-K3WR";
-    await writeJson(path.join(workspace, "knowledge-base", "sources", paperKey, "source.json"), {
+    await writePaperMetadata(path.join(workspace, "knowledge-base", "sources", paperKey, "metadata.json"), {
       paperKey,
       source: "aps",
       canonicalId: "10.1103/NV7D-K3WR",
@@ -1348,7 +1400,7 @@ test("checkWikiHealth does not report an old low-quality parse when a good parse
 
   try {
     const paperDir = path.join(workspace, "knowledge-base", "sources", "arxiv-2401.00007");
-    await writeJson(path.join(paperDir, "source.json"), {
+    await writePaperMetadata(path.join(paperDir, "metadata.json"), {
       paperKey: "arxiv-2401.00007",
       source: "arxiv",
       canonicalId: "2401.00007",
@@ -1431,7 +1483,7 @@ test("checkWikiHealth treats publisher accepted-paper arXiv fallback records as 
       "knowledge-base", "sources",
       "journals.aps.org-prapplied-accepted-10.1103-k3d5-v43c"
     );
-    await writeJson(path.join(legacyPaperDir, "source.json"), {
+    await writePaperMetadata(path.join(legacyPaperDir, "metadata.json"), {
       paperKey: "journals.aps.org-prapplied-accepted-10.1103-k3d5-v43c",
       title: "Superconducting qubits in the millions: The potential and limitations of modularity",
       articleUrl: "https://journals.aps.org/prapplied/accepted/10.1103/k3d5-v43c",
@@ -1481,7 +1533,7 @@ test("checkWikiHealth ignores stale APS authorization jobs when arXiv fallback i
       pdfUrl: "https://arxiv.org/pdf/2406.06015",
       downloadPath: arxivPdfPath
     });
-    await writeJson(path.join(workspace, "knowledge-base", "sources", "arxiv-2406.06015", "source.json"), {
+    await writePaperMetadata(path.join(workspace, "knowledge-base", "sources", "arxiv-2406.06015", "metadata.json"), {
       paperKey: "arxiv-2406.06015",
       source: "arxiv",
       canonicalId: "2406.06015",
@@ -1533,7 +1585,7 @@ test("checkWikiHealth ignores stale APS authorization jobs when arXiv fallback i
         reason: "Publisher version is not available yet; using arXiv preprint 2406.06015."
       }
     });
-    await writeJson(path.join(workspace, "knowledge-base", "sources", "aps-10.1103-k3d5-v43c", "source.json"), {
+    await writePaperMetadata(path.join(workspace, "knowledge-base", "sources", "aps-10.1103-k3d5-v43c", "metadata.json"), {
       paperKey: "aps-10.1103-k3d5-v43c",
       source: "aps",
       canonicalId: "10.1103/k3d5-v43c",
@@ -1611,7 +1663,7 @@ test("checkWikiHealth treats accepted publisher-pending records as non-actionabl
       "knowledge-base", "sources",
       "journals.aps.org-prapplied-accepted-10.1103-rp4w-3n7l"
     );
-    await writeJson(path.join(legacyPaperDir, "source.json"), {
+    await writePaperMetadata(path.join(legacyPaperDir, "metadata.json"), {
       paperKey: "journals.aps.org-prapplied-accepted-10.1103-rp4w-3n7l",
       title: "Design and application of N[3]CZ: A controlled-Z gate between next-nearest-neighbor superconducting qubits",
       articleUrl: "https://journals.aps.org/prapplied/accepted/10.1103/rp4w-3n7l",
@@ -1661,7 +1713,7 @@ test("checkWikiHealth reports publisher-pending records with captured APS Not Fo
         message: "Publisher page is an accepted paper without a formal PDF yet, and no exact-title arXiv preprint was found."
       }
     });
-    await writeJson(path.join(sourceDir, "source.json"), {
+    await writePaperMetadata(path.join(sourceDir, "metadata.json"), {
       paperKey: "aps-10.1103-rp4w-3n7l",
       title: "Design and application of N[3]CZ: A controlled-Z gate between next-nearest-neighbor superconducting qubits",
       articleUrl: "https://journals.aps.org/prapplied/accepted/10.1103/rp4w-3n7l",
@@ -1725,7 +1777,7 @@ test("checkWikiHealth treats a good webpage parse as readable but not PDF-downlo
       "parses",
       "webpage"
     );
-    await writeJson(path.join(workspace, "knowledge-base", "sources", "nature-s41567-022-01591-2", "source.json"), {
+    await writePaperMetadata(path.join(workspace, "knowledge-base", "sources", "nature-s41567-022-01591-2", "metadata.json"), {
       paperKey: "nature-s41567-022-01591-2",
       source: "nature",
       canonicalId: "s41567-022-01591-2",
@@ -1793,7 +1845,7 @@ test("fixWikiHealth parses missing downloaded records and updates the record man
       engine: "plain-text-baseline",
       pdfSha256: "sha-test",
       artifacts: {
-        sourcePath: path.join(workspace, "knowledge-base", "sources", "arxiv-2401.00004", "source.json"),
+        metadataPath: path.join(workspace, "knowledge-base", "sources", "arxiv-2401.00004", "metadata.json"),
         parsePath: path.join(artifactRoot, "parse.json"),
         markdownPath: path.join(artifactRoot, "document.md"),
         qualityPath: path.join(artifactRoot, "quality.json"),
@@ -1859,7 +1911,7 @@ test("fixWikiHealth does not enable browser fallback for missing publisher PDFs"
   try {
     const paperKey = "science-10.1126-sciadv.adp6388";
     const paperDir = path.join(workspace, "knowledge-base", "sources", paperKey);
-    await writeJson(path.join(paperDir, "source.json"), {
+    await writePaperMetadata(path.join(paperDir, "metadata.json"), {
       paperKey,
       source: "science",
       canonicalId: "10.1126/sciadv.adp6388",
@@ -2106,7 +2158,7 @@ test("fixWikiHealth skips user-authored or user-authorized repairs with explicit
       "parses",
       "plain-text-baseline"
     );
-    await writeJson(path.join(workspace, "knowledge-base", "sources", "arxiv-2401.00006", "source.json"), {
+    await writePaperMetadata(path.join(workspace, "knowledge-base", "sources", "arxiv-2401.00006", "metadata.json"), {
       paperKey: "arxiv-2401.00006",
       source: "arxiv",
       canonicalId: "2401.00006",
@@ -2211,7 +2263,7 @@ test("fixWikiHealth generates missing summaries when a summary worker is availab
       "parses",
       "plain-text-baseline"
     );
-    await writeJson(path.join(workspace, "knowledge-base", "sources", "arxiv-2401.00007", "source.json"), {
+    await writePaperMetadata(path.join(workspace, "knowledge-base", "sources", "arxiv-2401.00007", "metadata.json"), {
       paperKey: "arxiv-2401.00007",
       source: "arxiv",
       canonicalId: "2401.00007",
@@ -2289,7 +2341,7 @@ test("fixWikiHealth selects requested issue kinds beyond the health page cap", a
 
     for (const paperKey of ["arxiv-2501.99998", "arxiv-2501.99999"]) {
       const parsedDir = path.join(workspace, "knowledge-base", "sources", paperKey, "parses", "plain-text-baseline");
-      await writeJson(path.join(workspace, "knowledge-base", "sources", paperKey, "source.json"), {
+      await writePaperMetadata(path.join(workspace, "knowledge-base", "sources", paperKey, "metadata.json"), {
         paperKey,
         source: "arxiv",
         canonicalId: paperKey.replace("arxiv-", ""),

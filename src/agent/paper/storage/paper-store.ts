@@ -1408,25 +1408,6 @@ export async function writePaperMetadataForSourceDirectory(input: {
   });
 }
 
-export const writePaperSourceMetadataForRecord = writePaperMetadataForRecord;
-
-export async function writePaperSourceMetadataForSource(input: {
-  workspaceDir: string;
-  sourcePath: string;
-  enrichCitationMetadata?: boolean;
-  fetchImpl?: typeof fetch;
-}): Promise<string> {
-  const sourcePath = path.isAbsolute(input.sourcePath)
-    ? path.resolve(input.sourcePath)
-    : path.resolve(input.workspaceDir, input.sourcePath);
-  return writePaperMetadataForSourceDirectory({
-    workspaceDir: input.workspaceDir,
-    sourceDir: path.dirname(sourcePath),
-    enrichCitationMetadata: input.enrichCitationMetadata,
-    ...(input.fetchImpl ? { fetchImpl: input.fetchImpl } : {})
-  });
-}
-
 async function writePaperRecordAndMetadata(input: {
   workspaceDir: string;
   record: PaperRecord;

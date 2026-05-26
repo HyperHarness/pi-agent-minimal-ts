@@ -292,7 +292,7 @@ function baseIssue(
 
 function missingCitationFields(entry: LocalPaperEntry, sourceExists: boolean): string[] {
   if (!sourceExists) {
-    return ["metadata.json"];
+    return [];
   }
   const fields = entry.missingCitationFields?.filter((field) => field.trim().length > 0) ?? [];
   if (fields.length > 0) {
@@ -306,6 +306,9 @@ async function citationIssueForEntry(workspaceDir: string, entry: LocalPaperEntr
     return undefined;
   }
   const sourceExists = await pathExists(toWorkspacePath(workspaceDir, entry.sourcePath));
+  if (!sourceExists) {
+    return undefined;
+  }
   const fields = missingCitationFields(entry, sourceExists);
   if (fields.length === 0 && entry.citationStatus !== "incomplete") {
     return undefined;

@@ -327,7 +327,7 @@ function normalizeKnowledgeSourceMetadata(input: {
   };
 }
 
-async function readPreferredSourceMetadata(input: {
+async function readSourceMetadata(input: {
   paperDir: string;
   paperKey: string;
 }): Promise<{ source: PaperSourceFile; path: string } | undefined> {
@@ -339,13 +339,7 @@ async function readPreferredSourceMetadata(input: {
   if (metadata) {
     return { source: metadata, path: metadataPath };
   }
-
-  const legacySourcePath = path.join(input.paperDir, "source.json");
-  const legacySource = normalizeKnowledgeSourceMetadata({
-    raw: await readJsonFile<unknown>(legacySourcePath),
-    fallbackPaperKey: input.paperKey
-  });
-  return legacySource ? { source: legacySource, path: legacySourcePath } : undefined;
+  return undefined;
 }
 
 function resolveKnownPdfPath(workspaceDir: string, pdfPath: string | undefined): string | undefined {
@@ -397,7 +391,7 @@ async function collectParses(workspaceDir: string, entries: Map<string, LocalPap
       continue;
     }
     const paperDir = path.join(paths.sourceArtifactsRoot, sourceDir.name);
-    const sourceMetadata = await readPreferredSourceMetadata({
+    const sourceMetadata = await readSourceMetadata({
       paperDir,
       paperKey: sourceDir.name
     });

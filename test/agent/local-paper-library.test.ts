@@ -114,13 +114,30 @@ test("listLocalPapers merges slash canonical IDs using the record filename key",
       downloadPath: pdfPath
     });
     const paperDir = path.join(workspace, "knowledge-base", "sources", "aps-10.1103-PhysRevLett.125.120504");
-    await writeJson(path.join(paperDir, "source.json"), {
-      paperKey: "aps-10.1103-PhysRevLett.125.120504",
+    await writeJson(path.join(paperDir, "metadata.json"), {
+      schemaVersion: 1,
+      sourceKind: "paper",
+      sourceKey: "aps-10.1103-PhysRevLett.125.120504",
       title: "Demonstrating a Continuous Set of Two-Qubit Gates",
-      articleUrl: "https://journals.aps.org/prl/abstract/10.1103/PhysRevLett.125.120504",
-      source: "aps",
-      canonicalId: "10.1103/PhysRevLett.125.120504",
-      pdfPath
+      status: "ready",
+      createdAt: "2026-04-28T00:00:00.000Z",
+      updatedAt: "2026-04-28T00:00:00.000Z",
+      summaryPath: "knowledge-base/sources/aps-10.1103-PhysRevLett.125.120504/summary.md",
+      citation: {
+        citationStatus: "complete",
+        missingFields: [],
+        doi: "10.1103/PhysRevLett.125.120504"
+      },
+      provenance: {
+        url: "https://journals.aps.org/prl/abstract/10.1103/PhysRevLett.125.120504",
+        source: "aps",
+        canonicalId: "10.1103/PhysRevLett.125.120504",
+        rawPath: pdfPath
+      },
+      artifacts: [],
+      tags: [],
+      relatedSourceKeys: [],
+      synthesisPageKeys: []
     });
     await writeText(path.join(paperDir, "parses", "opendataloader-local", "document.md"), "Full PDF text");
     await writeJson(path.join(paperDir, "parses", "opendataloader-local", "quality.json"), {
@@ -176,7 +193,7 @@ test("listLocalPapers resolves WSL UNC PDF paths from download records", async (
   }
 });
 
-test("listLocalPapers canonicalizes accepted APS webpage artifact directories", async () => {
+test("listLocalPapers canonicalizes accepted APS webpage artifact directories from metadata", async () => {
   const workspace = await createWorkspace();
   try {
     await writeJson(path.join(workspace, "knowledge-base", "sources", "aps-10.1103-k3d5-v43c", "acquisition.json"), {
@@ -202,20 +219,37 @@ test("listLocalPapers canonicalizes accepted APS webpage artifact directories", 
       }
     });
 
-    const legacyPaperDir = path.join(
+    const paperDir = path.join(
       workspace,
       "knowledge-base", "sources",
       "journals.aps.org-prapplied-accepted-10.1103-k3d5-v43c"
     );
-    await writeJson(path.join(legacyPaperDir, "source.json"), {
-      paperKey: "journals.aps.org-prapplied-accepted-10.1103-k3d5-v43c",
+    await writeJson(path.join(paperDir, "metadata.json"), {
+      schemaVersion: 1,
+      sourceKind: "paper",
+      sourceKey: "journals.aps.org-prapplied-accepted-10.1103-k3d5-v43c",
       title: "Superconducting qubits in the millions: The potential and limitations of modularity",
-      articleUrl: "https://journals.aps.org/prapplied/accepted/10.1103/k3d5-v43c",
-      source: "aps",
-      canonicalId: "10.1103/k3d5-v43c"
+      status: "citation_incomplete",
+      createdAt: "2026-04-28T00:00:00.000Z",
+      updatedAt: "2026-04-28T00:00:00.000Z",
+      summaryPath: "knowledge-base/sources/journals.aps.org-prapplied-accepted-10.1103-k3d5-v43c/summary.md",
+      citation: {
+        citationStatus: "incomplete",
+        missingFields: ["authors", "year", "venue"],
+        doi: "10.1103/k3d5-v43c"
+      },
+      provenance: {
+        url: "https://journals.aps.org/prapplied/accepted/10.1103/k3d5-v43c",
+        source: "aps",
+        canonicalId: "10.1103/k3d5-v43c"
+      },
+      artifacts: [],
+      tags: [],
+      relatedSourceKeys: [],
+      synthesisPageKeys: []
     });
-    await writeText(path.join(legacyPaperDir, "parses", "webpage", "document.md"), "Accepted paper abstract.");
-    await writeJson(path.join(legacyPaperDir, "parses", "webpage", "quality.json"), {
+    await writeText(path.join(paperDir, "parses", "webpage", "document.md"), "Accepted paper abstract.");
+    await writeJson(path.join(paperDir, "parses", "webpage", "quality.json"), {
       status: "poor",
       score: 0.2,
       totalTextLength: 24,
@@ -273,6 +307,36 @@ test("listLocalPapers reads missing titles from wiki source summaries", async ()
   }
 });
 
+test("listLocalPapers ignores source json as source metadata when metadata json is absent", async () => {
+  const workspace = await createWorkspace();
+  try {
+    const paperDir = path.join(workspace, "knowledge-base", "sources", "arxiv-2601.12345");
+    await writeJson(path.join(paperDir, "source.json"), {
+      paperKey: "arxiv-2601.12345",
+      title: "Legacy source json should not be indexed",
+      articleUrl: "https://arxiv.org/abs/2601.12345",
+      source: "arxiv",
+      canonicalId: "2601.12345"
+    });
+    await writeText(path.join(paperDir, "parses", "plain-text-baseline", "document.md"), "Neutral parse text.");
+    await writeJson(path.join(paperDir, "parses", "plain-text-baseline", "quality.json"), {
+      status: "good",
+      score: 0.9,
+      totalTextLength: 9000,
+      warnings: []
+    });
+
+    const result = await searchLocalPapers({
+      workspaceDir: workspace,
+      query: "Legacy source json"
+    });
+
+    assert.equal(result.count, 0);
+  } finally {
+    await rm(workspace, { recursive: true, force: true });
+  }
+});
+
 test("searchLocalPapers searches metadata, wiki summaries, and parsed markdown", async () => {
   const workspace = await createWorkspace();
   try {
@@ -290,14 +354,31 @@ test("searchLocalPapers searches metadata, wiki summaries, and parsed markdown",
       downloadPath: pdfPath
     });
     const paperDir = path.join(workspace, "knowledge-base", "sources", "arxiv-2406.06015");
-    await writeJson(path.join(paperDir, "source.json"), {
-      paperKey: "arxiv-2406.06015",
+    await writeJson(path.join(paperDir, "metadata.json"), {
+      schemaVersion: 1,
+      sourceKind: "paper",
+      sourceKey: "arxiv-2406.06015",
       title: "Quantum LDPC decoding with local statistics",
-      articleUrl: "https://arxiv.org/abs/2406.06015",
-      source: "arxiv",
-      canonicalId: "2406.06015",
-      pdfPath,
-      recordPath
+      status: "ready",
+      createdAt: "2026-04-28T00:00:00.000Z",
+      updatedAt: "2026-04-28T00:00:00.000Z",
+      summaryPath: "knowledge-base/sources/arxiv-2406.06015/summary.md",
+      citation: {
+        citationStatus: "complete",
+        missingFields: [],
+        arxivId: "2406.06015"
+      },
+      provenance: {
+        url: "https://arxiv.org/abs/2406.06015",
+        source: "arxiv",
+        canonicalId: "2406.06015",
+        rawPath: pdfPath,
+        recordPath
+      },
+      artifacts: [],
+      tags: [],
+      relatedSourceKeys: [],
+      synthesisPageKeys: []
     });
     await writeText(
       path.join(paperDir, "parses", "plain-text-baseline", "document.md"),
