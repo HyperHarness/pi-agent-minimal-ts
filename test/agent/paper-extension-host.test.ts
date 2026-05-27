@@ -606,16 +606,55 @@ test("handleExtensionHostMessage registers APS supplemental material on the publ
   );
 
   try {
+    const supplementalPdf = `%PDF-1.7\n${"supplement pdf body\n".repeat(80)}%%EOF\n`;
     const response = await handleExtensionHostMessage({
       workspaceDir,
       now: () => new Date("2026-05-26T10:30:00.000Z"),
+      supplementalPdfParser: async (input) => ({
+        document: {
+          paperKey: input.paperKey,
+          engine: "opendataloader-local",
+          pdfSha256: input.pdfSha256,
+          createdAt: input.createdAt,
+          title: input.title,
+          pages: 2,
+          elements: [
+            {
+              id: "el-00001",
+              type: "heading",
+              text: "Supplemental Material",
+              page: 1,
+              sectionId: "section-0001",
+              headingLevel: 1
+            },
+            {
+              id: "el-00002",
+              type: "paragraph",
+              text: "Flux-bias calibration and device fabrication details.",
+              page: 2,
+              sectionId: "section-0001"
+            }
+          ],
+          sections: [
+            {
+              id: "section-0001",
+              title: "Supplemental Material",
+              level: 1,
+              pageFrom: 1,
+              pageTo: 2,
+              elementIds: ["el-00001", "el-00002"]
+            }
+          ]
+        },
+        markdown: "# Supplemental Material\n\nFlux-bias calibration and device fabrication details."
+      }),
       message: {
         type: "register_supplemental_material",
         jobId: "job-aps-supplement",
         articleUrl,
         source: "aps",
         materialUrl,
-        materialBase64: Buffer.from("%PDF-1.7\nsupplement pdf\n").toString("base64"),
+        materialBase64: Buffer.from(supplementalPdf).toString("base64"),
         filename: "SM.pdf",
         mimeType: "application/pdf",
         title: "Supplemental Material"
@@ -626,6 +665,9 @@ test("handleExtensionHostMessage registers APS supplemental material on the publ
     assert.equal(response.articleUrl, articleUrl);
     assert.equal(response.materialUrl, materialUrl);
     assert.equal(response.path, expectedSupplementalPath);
+    assert.match(response.supplementMarkdownPath ?? "", /parses\/webpage\/supplement\.md$/);
+    assert.match(response.supplementParsePath ?? "", /parses\/webpage\/supplement\.parse\.json$/);
+    assert.match(response.supplementQualityPath ?? "", /parses\/webpage\/supplement\.quality\.json$/);
 
     const recordPath = resolvePaperRecordPath({
       workspaceDir,
@@ -637,11 +679,25 @@ test("handleExtensionHostMessage registers APS supplemental material on the publ
     assert.equal(record.status, "publisher_pending");
     assert.equal(record.supplementalMaterials[0].url, materialUrl);
     assert.equal(record.supplementalMaterials[0].path, response.path);
-    assert.equal(await readFile(response.path, "utf8"), "%PDF-1.7\nsupplement pdf\n");
+    assert.equal(await readFile(response.path, "utf8"), supplementalPdf);
+    assert.equal(
+      await readFile(response.supplementMarkdownPath ?? "", "utf8"),
+      "# Supplemental Material\n\nFlux-bias calibration and device fabrication details.\n"
+    );
+    const supplementParse = JSON.parse(await readFile(response.supplementParsePath ?? "", "utf8"));
+    assert.equal(supplementParse.paperKey, "aps-10.1103-PhysRevLett.111.080502");
+    assert.equal(supplementParse.engine, "webpage");
+    assert.equal(supplementParse.elements[1].id, "supplement-00002");
+    const metadata = JSON.parse(await readFile(path.join(workspaceDir, "knowledge-base", "sources", "aps-10.1103-PhysRevLett.111.080502", "metadata.json"), "utf8"));
+    assert.ok(metadata.artifacts.some((artifact: { markdownPath?: string; note?: string }) =>
+      artifact.markdownPath === "knowledge-base/sources/aps-10.1103-PhysRevLett.111.080502/parses/webpage/supplement.md" &&
+      artifact.note === "Parsed supplemental material PDF."
+    ));
 
     const events = await readPaperDownloadJobEvents({ workspaceDir });
     assert.equal(events.at(-1)?.status, "supplemental_material_downloaded");
     assert.equal(events.at(-1)?.downloadPath, response.path);
+    assert.match(events.at(-1)?.supplementMarkdownPath ?? "", /parses\/webpage\/supplement\.md$/);
   } finally {
     await rm(workspaceDir, { recursive: true, force: true });
   }

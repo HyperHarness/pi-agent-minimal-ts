@@ -25,6 +25,7 @@ export * from "./reading/engines/webpage.js";
 export * from "./reading/paper-reader.js";
 export * from "./reading/paper-reader-store.js";
 export * from "./reading/quality.js";
+export * from "./reading/supplement.js";
 export * from "./reading/types.js";
 
 export * from "./storage/knowledge-paths.js";

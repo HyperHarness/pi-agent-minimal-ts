@@ -17,6 +17,11 @@ import { savePaperWebPageParse } from "../reading/engines/webpage.js";
 import { parsePaper } from "../reading/paper-reader.js";
 import type { PaperParseResult } from "../reading/types.js";
 import {
+  parseSupplementPdfIntoWebpage,
+  type SupplementalPdfParser,
+  type SupplementalParseResult
+} from "../reading/supplement.js";
+import {
   readPaperRecordByPath,
   readPaperRecord,
   resolveExternalPaperPdfPath,
@@ -69,6 +74,7 @@ export async function handleExtensionHostMessage(options: {
   workspaceDir: string;
   message: unknown;
   citationMetadataFetchImpl?: typeof fetch;
+  supplementalPdfParser?: SupplementalPdfParser;
   now?: () => Date;
 }): Promise<ExtensionHostResponse> {
   let message: ExtensionHostMessage;
@@ -139,7 +145,8 @@ export async function handleExtensionHostMessage(options: {
     return registerSupplementalMaterial({
       workspaceDir: options.workspaceDir,
       message,
-      recordedAt
+      recordedAt,
+      ...(options.supplementalPdfParser ? { supplementalPdfParser: options.supplementalPdfParser } : {})
     });
   }
 
@@ -247,6 +254,7 @@ async function registerSupplementalMaterial(options: {
   workspaceDir: string;
   message: Extract<ExtensionHostMessage, { type: "register_supplemental_material" }>;
   recordedAt: string;
+  supplementalPdfParser?: SupplementalPdfParser;
 }): Promise<ExtensionHostResponse> {
   if (!SUPPORTED_PUBLISHER_SOURCES.has(options.message.source as SupportedPaperSource)) {
     return registrationError({
@@ -358,6 +366,15 @@ async function registerSupplementalMaterial(options: {
     workspaceDir: options.workspaceDir,
     record
   });
+  const supplementParse = await tryParseSupplementalMaterial({
+    workspaceDir: options.workspaceDir,
+    paperKey: path.basename(path.dirname(recordPath)),
+    pdfPath: downloadPath,
+    pdfByteLength: materialBytes.byteLength,
+    title: material.title ?? "Supplemental Material",
+    recordedAt: options.recordedAt,
+    ...(options.supplementalPdfParser ? { supplementalPdfParser: options.supplementalPdfParser } : {})
+  });
 
   await appendPaperDownloadJobEvent({
     workspaceDir: options.workspaceDir,
@@ -371,6 +388,12 @@ async function registerSupplementalMaterial(options: {
       downloadPath,
       recordPath,
       sha256,
+      ...(supplementParse ? {
+        supplementMarkdownPath: supplementParse.artifacts.markdownPath,
+        supplementParsePath: supplementParse.artifacts.parsePath,
+        supplementQualityPath: supplementParse.artifacts.qualityPath,
+        supplementChunksPath: supplementParse.artifacts.chunksPath
+      } : {}),
       ...(material.mimeType ? { mimeType: material.mimeType } : {}),
       ...(material.title ? { title: material.title } : {})
     }
@@ -384,8 +407,41 @@ async function registerSupplementalMaterial(options: {
     path: downloadPath,
     sha256,
     recordPath,
+    ...(supplementParse ? {
+      supplementMarkdownPath: supplementParse.artifacts.markdownPath,
+      supplementParsePath: supplementParse.artifacts.parsePath,
+      supplementQualityPath: supplementParse.artifacts.qualityPath,
+      supplementChunksPath: supplementParse.artifacts.chunksPath
+    } : {}),
     ...(material.title ? { title: material.title } : {})
   };
+}
+
+async function tryParseSupplementalMaterial(input: {
+  workspaceDir: string;
+  paperKey: string;
+  pdfPath: string;
+  pdfByteLength: number;
+  title: string;
+  recordedAt: string;
+  supplementalPdfParser?: SupplementalPdfParser;
+}): Promise<SupplementalParseResult | undefined> {
+  if (input.pdfByteLength < 1024) {
+    return undefined;
+  }
+
+  try {
+    return await parseSupplementPdfIntoWebpage({
+      workspaceDir: input.workspaceDir,
+      paperKey: input.paperKey,
+      pdfPath: input.pdfPath,
+      title: input.title,
+      now: () => new Date(input.recordedAt),
+      ...(input.supplementalPdfParser ? { parser: input.supplementalPdfParser } : {})
+    });
+  } catch {
+    return undefined;
+  }
 }
 
 function mergeSupplementalMaterials(

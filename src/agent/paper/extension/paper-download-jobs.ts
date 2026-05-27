@@ -24,6 +24,10 @@ export interface PaperDownloadJobEvent {
   qualityPath?: string;
   chunksPath?: string;
   materialUrl?: string;
+  supplementMarkdownPath?: string;
+  supplementParsePath?: string;
+  supplementQualityPath?: string;
+  supplementChunksPath?: string;
   mimeType?: string;
   sha256?: string;
   failureCode?: string;
@@ -161,6 +165,10 @@ function parsePaperDownloadJobEvent(value: unknown): PaperDownloadJobEvent | nul
       "qualityPath",
       "chunksPath",
       "materialUrl",
+      "supplementMarkdownPath",
+      "supplementParsePath",
+      "supplementQualityPath",
+      "supplementChunksPath",
       "mimeType",
       "sha256",
       "failureCode",

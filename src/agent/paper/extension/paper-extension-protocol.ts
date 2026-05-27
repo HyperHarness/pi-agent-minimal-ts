@@ -134,6 +134,10 @@ export type ExtensionHostResponse =
       path: string;
       sha256: string;
       recordPath: string;
+      supplementMarkdownPath?: string;
+      supplementParsePath?: string;
+      supplementQualityPath?: string;
+      supplementChunksPath?: string;
       title?: string;
     }
   | {
@@ -499,7 +503,13 @@ export function parseExtensionHostResponse(value: unknown): ExtensionHostRespons
       path: parseRequiredString(record, "path"),
       sha256: parseRequiredString(record, "sha256"),
       recordPath: parseRequiredString(record, "recordPath"),
-      ...parseOptionalFields(record, ["title"])
+      ...parseOptionalFields(record, [
+        "supplementMarkdownPath",
+        "supplementParsePath",
+        "supplementQualityPath",
+        "supplementChunksPath",
+        "title"
+      ])
     };
   }
 
