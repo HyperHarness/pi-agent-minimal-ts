@@ -1397,6 +1397,92 @@ test("inspectPaper distinguishes webpage parses from downloaded PDFs", async () 
   }
 });
 
+test("inspectPaper reads progressive source metadata before stale legacy fields", async () => {
+  const workspace = await createWorkspace();
+  try {
+    const paperKey = "nature-s41534-026-01234-y";
+    const paperDir = path.join(workspace, "knowledge-base", "sources", paperKey);
+    await writeJson(path.join(paperDir, "metadata.json"), {
+      schemaVersion: 1,
+      sourceKind: "paper",
+      sourceKey: paperKey,
+      title: "Progressive Reader Metadata",
+      status: "ready",
+      createdAt: "2026-05-27T00:00:00.000Z",
+      updatedAt: "2026-05-27T00:00:00.000Z",
+      summaryPath: `knowledge-base/sources/${paperKey}/summary.md`,
+      citation: {
+        citationStatus: "complete",
+        missingFields: [],
+        doi: "10.1038/s41534-026-01234-y"
+      },
+      provenance: {
+        url: "https://www.nature.com/articles/s41534-026-01234-y",
+        acquisitionPath: `knowledge-base/sources/${paperKey}/acquisition.json`,
+        source: "science",
+        canonicalId: "10.1126/stale.legacy",
+        recordPath: `knowledge-base/sources/${paperKey}/legacy-record.json`,
+        rawPath: "knowledge-base/raw/pdfs/stale.pdf",
+        downloadPath: "knowledge-base/raw/pdfs/stale.pdf"
+      },
+      pdfPath: "knowledge-base/raw/pdfs/top-level-stale.pdf",
+      pdfSha256: "top-level-stale-sha",
+      recordPath: `knowledge-base/sources/${paperKey}/top-level-record.json`,
+      source: "science",
+      canonicalId: "10.1126/top-level-stale",
+      artifacts: [
+        {
+          kind: "parse",
+          path: `knowledge-base/sources/${paperKey}/parses/webpage/document.md`,
+          engine: "webpage",
+          markdownPath: `knowledge-base/sources/${paperKey}/parses/webpage/document.md`,
+          jsonPath: `knowledge-base/sources/${paperKey}/parses/webpage/parse.json`,
+          qualityPath: `knowledge-base/sources/${paperKey}/parses/webpage/quality.json`
+        }
+      ],
+      tags: [],
+      relatedSourceKeys: [],
+      synthesisPageKeys: []
+    });
+    await writeJson(path.join(paperDir, "parses", "webpage", "parse.json"), {
+      paperKey,
+      engine: "webpage",
+      pdfSha256: "webpage-sha",
+      createdAt: "2026-05-27T00:00:00.000Z",
+      title: "Progressive Reader Metadata",
+      pages: 1,
+      elements: [],
+      sections: []
+    });
+    await writeJson(path.join(paperDir, "parses", "webpage", "quality.json"), {
+      status: "good",
+      score: 1,
+      pages: 1,
+      totalTextLength: 1000,
+      emptyPageCount: 0,
+      headingCount: 1,
+      tableCount: 0,
+      figureOrCaptionCount: 0,
+      warnings: []
+    });
+
+    const inspection = await inspectPaper({ workspaceDir: workspace, paperKey });
+
+    assert.equal(inspection.source?.paperKey, paperKey);
+    assert.equal(inspection.source?.createdAt, "2026-05-27T00:00:00.000Z");
+    assert.equal(inspection.source?.articleUrl, "https://www.nature.com/articles/s41534-026-01234-y");
+    assert.equal(inspection.source?.source, "nature");
+    assert.equal(inspection.source?.canonicalId, "s41534-026-01234-y");
+    assert.equal(inspection.source?.recordPath, `knowledge-base/sources/${paperKey}/acquisition.json`);
+    assert.equal(inspection.source?.title, "Progressive Reader Metadata");
+    assert.equal("pdfPath" in (inspection.source ?? {}), false);
+    assert.equal("pdfSha256" in (inspection.source ?? {}), false);
+    assert.equal(inspection.localPdf.hasPdf, false);
+  } finally {
+    await rm(workspace, { recursive: true, force: true });
+  }
+});
+
 test("inspectPaper resolves extension job ids and finds PDFs registered after webpage parsing", async () => {
   const workspace = await createWorkspace();
   try {

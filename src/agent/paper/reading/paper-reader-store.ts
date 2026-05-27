@@ -447,6 +447,20 @@ function publisherCanonicalIdFromUrl(source: string | undefined, articleUrl: str
   return undefined;
 }
 
+function canonicalIdFromSourceKey(source: string | undefined, sourceKey: string): string | undefined {
+  if (!source || !sourceKey.startsWith(`${source}-`)) {
+    return undefined;
+  }
+  const suffix = sourceKey.slice(source.length + 1);
+  if (!suffix) {
+    return undefined;
+  }
+  if (source === "arxiv" || source === "nature") {
+    return suffix;
+  }
+  return undefined;
+}
+
 function buildParseMetadata(input: {
   workspaceDir: string;
   source: PaperReaderSource;
@@ -537,27 +551,23 @@ export async function readPaperSourceByKey(input: {
       : {};
     const sourceKey = typeof metadata.sourceKey === "string" ? metadata.sourceKey : input.paperKey;
     const articleUrl = typeof provenance.url === "string" ? provenance.url : undefined;
-    const source = typeof provenance.source === "string"
-      ? provenance.source
-      : sourceFromSourceKey(sourceKey) ?? sourceFromUrl(articleUrl);
+    const source =
+      sourceFromSourceKey(sourceKey) ??
+      sourceFromUrl(articleUrl) ??
+      (typeof provenance.source === "string" ? provenance.source : undefined);
     const canonicalId =
-      (typeof provenance.canonicalId === "string" ? provenance.canonicalId : undefined) ??
       publisherCanonicalIdFromUrl(source, articleUrl) ??
       (typeof citation.doi === "string" ? citation.doi : undefined) ??
       (typeof provenance.doi === "string" ? provenance.doi : undefined) ??
       (typeof citation.arxivId === "string" ? citation.arxivId : undefined) ??
       (typeof provenance.arxivId === "string" ? provenance.arxivId : undefined) ??
-      arxivIdFromUrl(articleUrl);
+      arxivIdFromUrl(articleUrl) ??
+      canonicalIdFromSourceKey(source, sourceKey) ??
+      (typeof provenance.canonicalId === "string" ? provenance.canonicalId : undefined);
     return {
-      ...(metadata as unknown as PaperReaderSource),
       paperKey: sourceKey,
       createdAt: typeof metadata.createdAt === "string" ? metadata.createdAt : new Date().toISOString(),
-      ...(typeof provenance.rawPath === "string" ? { pdfPath: provenance.rawPath } : {}),
-      ...(typeof provenance.recordPath === "string"
-        ? { recordPath: provenance.recordPath }
-        : typeof provenance.acquisitionPath === "string"
-          ? { recordPath: provenance.acquisitionPath }
-          : {}),
+      ...(typeof provenance.acquisitionPath === "string" ? { recordPath: provenance.acquisitionPath } : {}),
       ...(source ? { source } : {}),
       ...(canonicalId ? { canonicalId } : {}),
       ...(articleUrl ? { articleUrl } : {}),
