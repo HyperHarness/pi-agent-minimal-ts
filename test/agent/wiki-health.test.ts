@@ -810,6 +810,74 @@ test("checkWikiHealth reports source_metadata_artifact_missing for metadata path
   }
 });
 
+test("checkWikiHealth does not report source_metadata_artifact_missing for a missing planned summary", async () => {
+  const workspace = await createWorkspace();
+
+  try {
+    const paperKey = "nature-nature14270";
+    const rawPath = path.join(workspace, "knowledge-base", "raw", "pdfs", `${paperKey}.pdf`);
+    await writeText(rawPath, "%PDF-1.7\nnature pdf\n");
+    await writeJson(path.join(workspace, "knowledge-base", "sources", paperKey, "acquisition.json"), {
+      source: "nature",
+      articleUrl: "https://www.nature.com/articles/nature14270",
+      recordedAt: "2026-05-26T17:10:14.196Z",
+      handlingMethod: "browser_session",
+      status: "downloaded",
+      canonicalId: "nature14270",
+      pdfUrl: "https://www.nature.com/articles/nature14270.pdf",
+      downloadPath: rawPath,
+      reading: {
+        status: "ready",
+        updatedAt: "2026-05-26T17:10:14.196Z",
+        preferredSource: "webpage"
+      }
+    });
+    await writeJson(path.join(workspace, "knowledge-base", "sources", paperKey, "metadata.json"), {
+      schemaVersion: 1,
+      sourceKind: "paper",
+      sourceKey: paperKey,
+      title: "State preservation by repetitive error detection in a superconducting quantum circuit",
+      status: "ready",
+      createdAt: "2026-05-26T17:10:14.196Z",
+      updatedAt: "2026-05-26T17:10:14.196Z",
+      summaryPath: `knowledge-base/sources/${paperKey}/summary.md`,
+      citation: {
+        citationStatus: "complete",
+        missingFields: [],
+        doi: "10.1038/nature14270",
+        authors: ["J. Kelly"],
+        year: 2015,
+        venue: "Nature"
+      },
+      provenance: {
+        url: "https://www.nature.com/articles/nature14270",
+        source: "nature",
+        canonicalId: "nature14270",
+        acquisitionPath: `knowledge-base/sources/${paperKey}/acquisition.json`,
+        recordPath: `knowledge-base/sources/${paperKey}/acquisition.json`,
+        rawPath: `knowledge-base/raw/pdfs/${paperKey}.pdf`
+      },
+      artifacts: [{
+        kind: "raw",
+        path: `knowledge-base/raw/pdfs/${paperKey}.pdf`
+      }],
+      tags: [],
+      relatedSourceKeys: [],
+      synthesisPageKeys: []
+    });
+
+    const result = await checkWikiHealth({ workspaceDir: workspace });
+
+    assert.equal(result.summary.source_metadata_artifact_missing, 0);
+    assert.ok(!result.issues.some((issue) =>
+      issue.kind === "source_metadata_artifact_missing" &&
+      issue.paperKey === paperKey
+    ));
+  } finally {
+    await rm(workspace, { recursive: true, force: true });
+  }
+});
+
 test("checkWikiHealth reports source_metadata_artifact_missing for metadata artifact paths", async () => {
   const workspace = await createWorkspace();
 

@@ -647,6 +647,200 @@ test("handleExtensionHostMessage registers APS supplemental material on the publ
   }
 });
 
+test("handleExtensionHostMessage completes legacy Nature metadata after supplemental material is registered first", async () => {
+  const workspaceDir = await createWorkspaceDir();
+  const articleUrl = "https://www.nature.com/articles/nature14270";
+  const paperKey = "nature-nature14270";
+  const jobId = "job-nature-legacy";
+  const sourceDir = path.join(workspaceDir, "knowledge-base", "sources", paperKey);
+  const parseDir = path.join(sourceDir, "parses", "webpage");
+  const chunksPath = path.join(sourceDir, "chunks", "webpage.jsonl");
+  const parsePath = path.join(parseDir, "parse.json");
+  const qualityPath = path.join(parseDir, "quality.json");
+  const markdownPath = path.join(parseDir, "document.md");
+  const fetchedUrls: string[] = [];
+
+  try {
+    await mkdir(path.dirname(chunksPath), { recursive: true });
+    await mkdir(parseDir, { recursive: true });
+    await writeFile(markdownPath, "# State preservation by repetitive error detection\n", "utf8");
+    await writeFile(chunksPath, "", "utf8");
+    await writeFile(
+      parsePath,
+      `${JSON.stringify({
+        paperKey,
+        engine: "webpage",
+        pdfSha256: "webpage",
+        title: "State preservation by repetitive error detection in a superconducting quantum circuit",
+        pages: 1,
+        elements: [
+          {
+            id: "webpage-00001",
+            type: "paragraph",
+            text: "State preservation by repetitive error detection in a superconducting quantum circuit",
+            page: 1
+          }
+        ]
+      }, null, 2)}\n`,
+      "utf8"
+    );
+    await writeFile(
+      qualityPath,
+      `${JSON.stringify({
+        status: "good",
+        score: 1,
+        pages: 1,
+        totalTextLength: 12000,
+        warnings: []
+      }, null, 2)}\n`,
+      "utf8"
+    );
+    await appendPaperDownloadJobEvent({
+      workspaceDir,
+      event: {
+        jobId,
+        recordedAt: "2026-05-26T17:09:59.192Z",
+        status: "webpage_snapshot_ready",
+        articleUrl,
+        source: "nature",
+        paperKey,
+        markdownPath,
+        parsePath,
+        qualityPath,
+        chunksPath
+      }
+    });
+
+    const supplementalResponse = await handleExtensionHostMessage({
+      workspaceDir,
+      now: () => new Date("2026-05-26T17:10:08.552Z"),
+      message: {
+        type: "register_supplemental_material",
+        jobId,
+        articleUrl,
+        source: "nature",
+        materialUrl: "https://www.nature.com/articles/nature14270.pdf",
+        materialBase64: Buffer.from("%PDF-1.7\nsupplement pdf\n").toString("base64"),
+        filename: "nature14270.pdf",
+        mimeType: "application/pdf",
+        title: "Download PDF"
+      }
+    });
+    assert.equal(supplementalResponse.type, "supplemental_registered");
+
+    const metadataPath = path.join(sourceDir, "metadata.json");
+    const staleMetadata = JSON.parse(await readFile(metadataPath, "utf8"));
+    await writeFile(
+      metadataPath,
+      `${JSON.stringify({
+        ...staleMetadata,
+        title: "Zertifikatswortschatz Italienisch",
+        status: "citation_incomplete",
+        summaryPath: path.join(sourceDir, "summary.md"),
+        citation: {
+          ...staleMetadata.citation,
+          citationStatus: "incomplete",
+          missingFields: ["venue"],
+          authors: ["Oliver Sparisci"],
+          doi: "10.37307/b.978-3-19-895321-1",
+          year: 2011
+        },
+        provenance: {
+          ...staleMetadata.provenance,
+          doi: "10.37307/b.978-3-19-895321-1",
+          recordPath: path.join(sourceDir, "acquisition.json"),
+          acquisitionPath: path.join(sourceDir, "acquisition.json")
+        },
+        artifacts: staleMetadata.artifacts.map((artifact: { path: string }) => ({
+          ...artifact,
+          path: path.join(workspaceDir, artifact.path)
+        }))
+      }, null, 2)}\n`,
+      "utf8"
+    );
+
+    const response = await handleExtensionHostMessage({
+      workspaceDir,
+      citationMetadataFetchImpl: async (input: RequestInfo | URL) => {
+        const url = new URL(input.toString());
+        fetchedUrls.push(url.toString());
+        if (url.pathname === "/works/10.1038%2Fnature14270") {
+          return new Response(JSON.stringify({
+            message: {
+              DOI: "10.1038/nature14270",
+              title: ["State preservation by repetitive error detection in a superconducting quantum circuit"],
+              author: [
+                { given: "J.", family: "Kelly" },
+                { given: "R.", family: "Barends" }
+              ],
+              published: { "date-parts": [[2015, 3, 4]] },
+              "container-title": ["Nature"]
+            }
+          }), {
+            status: 200,
+            headers: { "content-type": "application/json" }
+          });
+        }
+        return new Response(JSON.stringify({
+          message: {
+            items: [{
+              DOI: "10.37307/b.978-3-19-895321-1",
+              title: ["Zertifikatswortschatz Italienisch"],
+              author: [{ given: "Oliver", family: "Sparisci" }],
+              published: { "date-parts": [[2011]] },
+              publisher: "Springer Nature"
+            }]
+          }
+        }), {
+          status: 200,
+          headers: { "content-type": "application/json" }
+        });
+      },
+      now: () => new Date("2026-05-26T17:10:14.196Z"),
+      message: {
+        type: "register_download_bytes",
+        jobId,
+        articleUrl,
+        source: "nature",
+        pdfUrl: "https://www.nature.com/articles/nature14270.pdf",
+        pdfBase64: Buffer.from("%PDF-1.7\nmain pdf\n").toString("base64")
+      }
+    });
+
+    assert.equal(response.type, "registered");
+    assert.deepEqual(fetchedUrls, ["https://api.crossref.org/works/10.1038%2Fnature14270"]);
+
+    const recordPath = resolvePaperRecordPath({
+      workspaceDir,
+      source: "nature",
+      canonicalId: "nature14270",
+      articleUrl
+    });
+    const record = JSON.parse(await readFile(recordPath, "utf8"));
+    assert.equal(record.reading.status, "ready");
+    assert.equal(record.reading.preferredSource, "webpage");
+    assert.equal(record.webpage.markdownPath, `knowledge-base/sources/${paperKey}/parses/webpage/document.md`);
+
+    const metadata = JSON.parse(await readFile(metadataPath, "utf8"));
+    assert.equal(metadata.title, "State preservation by repetitive error detection in a superconducting quantum circuit");
+    assert.deepEqual(metadata.citation.authors, ["J. Kelly", "R. Barends"]);
+    assert.equal(metadata.citation.year, 2015);
+    assert.equal(metadata.citation.venue, "Nature");
+    assert.equal(metadata.citation.doi, "10.1038/nature14270");
+    assert.equal(metadata.citation.citationStatus, "complete");
+    assert.deepEqual(metadata.citation.missingFields, []);
+    assert.equal(metadata.status, "ready");
+    assert.equal(metadata.summaryPath, `knowledge-base/sources/${paperKey}/summary.md`);
+    assert.equal(metadata.provenance.recordPath, `knowledge-base/sources/${paperKey}/acquisition.json`);
+    assert.equal(metadata.provenance.rawPath, `knowledge-base/raw/pdfs/${paperKey}.pdf`);
+    assert.ok(metadata.artifacts.every((artifact: { path: string }) =>
+      !path.isAbsolute(artifact.path) && !artifact.path.startsWith("\\\\")
+    ));
+  } finally {
+    await rm(workspaceDir, { recursive: true, force: true });
+  }
+});
+
 test("handleExtensionHostMessage rejects supplemental webpage snapshots as standalone sources", async () => {
   const workspaceDir = await createWorkspaceDir();
   const articleUrl = "https://journals.aps.org/prl/abstract/10.1103/PhysRevLett.111.080502";

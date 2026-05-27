@@ -812,13 +812,23 @@ async function sourceMetadataIssues(workspaceDir: string): Promise<WikiHealthIss
     }
 
     const metadata = metadataResult.metadata;
-    const candidatePaths = [
-      { name: "summaryPath", value: metadata.summaryPath },
+    const candidatePaths: Array<{
+      name: string;
+      value: unknown;
+      optional?: boolean;
+      allowMissing?: boolean;
+    }> = ([
+      { name: "summaryPath", value: metadata.summaryPath, allowMissing: !hasSummary },
       { name: "provenance.acquisitionPath", value: readNestedValue(metadata, ["provenance", "acquisitionPath"]), optional: true },
       { name: "provenance.recordPath", value: metadata.provenance.recordPath, optional: true },
       { name: "provenance.rawPath", value: metadata.provenance.rawPath, optional: true },
       ...metadataArtifactPathCandidates(metadata)
-    ].filter((candidate) => !candidate.optional || candidate.value !== undefined);
+    ] as Array<{
+      name: string;
+      value: unknown;
+      optional?: boolean;
+      allowMissing?: boolean;
+    }>).filter((candidate) => !candidate.optional || candidate.value !== undefined);
     const invalidPaths: string[] = [];
     const missingPaths: string[] = [];
     for (const candidatePath of candidatePaths) {
@@ -827,7 +837,7 @@ async function sourceMetadataIssues(workspaceDir: string): Promise<WikiHealthIss
         invalidPaths.push(`${candidatePath.name}: ${validation.rawPath || "<empty>"} (${validation.reason})`);
         continue;
       }
-      if (!(await pathExists(validation.absolutePath))) {
+      if (!candidatePath.allowMissing && !(await pathExists(validation.absolutePath))) {
         missingPaths.push(validation.relativePath);
       }
     }

@@ -466,10 +466,17 @@ function getRecordDoi(record: PaperRecord): string | undefined {
   if ((record.source === "science" || record.source === "aps") && canonicalId.startsWith("10.")) {
     return canonicalId;
   }
-  if (record.source === "nature" && /^s\d{5}-\d{3}-\d{5}-[a-z0-9]$/i.test(canonicalId)) {
+  if (record.source === "nature" && canonicalId.startsWith("10.")) {
+    return canonicalId;
+  }
+  if (record.source === "nature" && !canonicalId.includes("/")) {
     return `10.1038/${canonicalId}`;
   }
   return undefined;
+}
+
+function normalizeCitationIdentity(value: string | undefined): string | undefined {
+  return value?.trim().toLowerCase();
 }
 
 function getRecordArxivId(record: PaperRecord): string | undefined {
@@ -1179,9 +1186,24 @@ export async function writePaperMetadataForRecord(input: {
   const acquisitionPath = toWorkspacePath({ workspaceDir: input.workspaceDir, filePath: input.recordPath });
   const existingCitation = existing?.citation;
   const existingProvenance = existing?.provenance;
-  const baseDoi = getRecordDoi(input.record) ?? existingCitation?.doi ?? existingProvenance?.doi;
-  const baseArxivId = getRecordArxivId(input.record) ?? existingCitation?.arxivId ?? existingProvenance?.arxivId;
-  const baseTitle = readRecordString(input.record, "title") ?? existing?.title;
+  const recordDoi = getRecordDoi(input.record);
+  const recordArxivId = getRecordArxivId(input.record);
+  const existingCitationConflictsWithRecord =
+    Boolean(
+      recordDoi &&
+      existingCitation?.doi &&
+      normalizeCitationIdentity(recordDoi) !== normalizeCitationIdentity(existingCitation.doi)
+    ) ||
+    Boolean(
+      recordArxivId &&
+      existingCitation?.arxivId &&
+      normalizeCitationIdentity(recordArxivId) !== normalizeCitationIdentity(existingCitation.arxivId)
+    );
+  const trustedExistingCitation = existingCitationConflictsWithRecord ? undefined : existingCitation;
+  const trustedExistingTitle = existingCitationConflictsWithRecord ? undefined : existing?.title;
+  const baseDoi = recordDoi ?? trustedExistingCitation?.doi ?? existingProvenance?.doi;
+  const baseArxivId = recordArxivId ?? trustedExistingCitation?.arxivId ?? existingProvenance?.arxivId;
+  const baseTitle = readRecordString(input.record, "title") ?? trustedExistingTitle;
   const localParseMetadata = await readLocalParseCitationMetadata({
     workspaceDir: input.workspaceDir,
     record: input.record,
@@ -1195,19 +1217,19 @@ export async function writePaperMetadataForRecord(input: {
         ...(input.fetchImpl ? { fetchImpl: input.fetchImpl } : {})
       })
     : undefined;
-  const title = completeString(readRecordString(input.record, "title"), localParseMetadata?.title, remoteMetadata?.title, existing?.title);
+  const title = completeString(readRecordString(input.record, "title"), localParseMetadata?.title, remoteMetadata?.title, trustedExistingTitle);
   const authors = completeAuthors(
-    Array.isArray(existingCitation?.authors)
-    ? existingCitation.authors.filter((author): author is string => typeof author === "string" && author.trim().length > 0)
+    Array.isArray(trustedExistingCitation?.authors)
+    ? trustedExistingCitation.authors.filter((author): author is string => typeof author === "string" && author.trim().length > 0)
     : [],
     localParseMetadata?.authors,
     remoteMetadata?.authors
   );
-  const year = typeof existingCitation?.year === "number"
-    ? existingCitation.year
+  const year = typeof trustedExistingCitation?.year === "number"
+    ? trustedExistingCitation.year
     : localParseMetadata?.year ?? remoteMetadata?.year ?? getArxivYear(baseArxivId);
   const venue = completeString(
-    existingCitation?.venue,
+    trustedExistingCitation?.venue,
     localParseMetadata?.venue,
     remoteMetadata?.venue,
     getApsVenueFromDoi(baseDoi),
@@ -1248,7 +1270,7 @@ export async function writePaperMetadataForRecord(input: {
     updatedAt: input.record.updatedAt ?? input.record.recordedAt,
     summaryPath: existing?.summaryPath ?? path.join(path.dirname(acquisitionPath), "summary.md"),
     citation: {
-      ...existingCitation,
+      ...trustedExistingCitation,
       citationStatus,
       missingFields,
       ...(doi ? { doi } : {}),
