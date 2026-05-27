@@ -932,7 +932,7 @@ test("checkWikiHealth reports source_metadata_artifact_missing for metadata arti
   }
 });
 
-test("checkWikiHealth reports source_metadata_artifact_missing for missing metadata recordPath", async () => {
+test("checkWikiHealth reports source_metadata_artifact_missing for missing metadata acquisitionPath", async () => {
   const workspace = await createWorkspace();
 
   try {
@@ -955,7 +955,7 @@ test("checkWikiHealth reports source_metadata_artifact_missing for missing metad
         missingFields: []
       },
       provenance: {
-        recordPath: `knowledge-base/sources/${sourceKey}/acquisition.json`
+        acquisitionPath: `knowledge-base/sources/${sourceKey}/acquisition.json`
       },
       artifacts: [],
       tags: [],
@@ -1041,7 +1041,7 @@ test("checkWikiHealth reports source_metadata_artifact_missing for unsafe metada
   }
 });
 
-test("checkWikiHealth reports source_metadata_artifact_missing for unsafe metadata recordPath", async () => {
+test("checkWikiHealth reports source_metadata_artifact_missing for unsafe metadata acquisitionPath", async () => {
   const workspace = await createWorkspace();
   const outside = await createWorkspace();
 
@@ -1069,7 +1069,7 @@ test("checkWikiHealth reports source_metadata_artifact_missing for unsafe metada
       summaryPath: `knowledge-base/sources/${absoluteSourceKey}/summary.md`,
       citation: { citationStatus: "complete", missingFields: [] },
       provenance: {
-        recordPath: outsideRecordPath
+        acquisitionPath: outsideRecordPath
       },
       artifacts: [],
       tags: [],
@@ -1087,7 +1087,7 @@ test("checkWikiHealth reports source_metadata_artifact_missing for unsafe metada
       summaryPath: `knowledge-base/sources/${traversalSourceKey}/summary.md`,
       citation: { citationStatus: "complete", missingFields: [] },
       provenance: {
-        recordPath: "../outside-acquisition.json"
+        acquisitionPath: "../outside-acquisition.json"
       },
       artifacts: [],
       tags: [],

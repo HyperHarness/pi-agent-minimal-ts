@@ -820,8 +820,6 @@ async function sourceMetadataIssues(workspaceDir: string): Promise<WikiHealthIss
     }> = ([
       { name: "summaryPath", value: metadata.summaryPath, allowMissing: !hasSummary },
       { name: "provenance.acquisitionPath", value: readNestedValue(metadata, ["provenance", "acquisitionPath"]), optional: true },
-      { name: "provenance.recordPath", value: metadata.provenance.recordPath, optional: true },
-      { name: "provenance.rawPath", value: metadata.provenance.rawPath, optional: true },
       ...metadataArtifactPathCandidates(metadata)
     ] as Array<{
       name: string;

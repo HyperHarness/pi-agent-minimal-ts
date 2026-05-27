@@ -241,23 +241,42 @@ function normalizeKnowledgeSourceMetadataPaths(
   const provenance = metadata.provenance as KnowledgeSourceMetadata["provenance"] & {
     downloadPath?: string;
   };
+  const normalizedArtifacts = metadata.artifacts.map((artifact) => ({
+    ...artifact,
+    path: toWorkspaceRelativePath(workspaceDir, artifact.path),
+    markdownPath: normalizeOptionalPathField(workspaceDir, artifact.markdownPath) as string | undefined,
+    jsonPath: normalizeOptionalPathField(workspaceDir, artifact.jsonPath) as string | undefined,
+    qualityPath: normalizeOptionalPathField(workspaceDir, artifact.qualityPath) as string | undefined
+  }));
+  if (metadata.sourceKind === "paper") {
+    return {
+      ...metadata,
+      summaryPath: toWorkspaceRelativePath(workspaceDir, metadata.summaryPath),
+      provenance: {
+        ...(provenance.url ? { url: provenance.url } : {}),
+        ...(provenance.doi ? { doi: provenance.doi } : {}),
+        ...(provenance.arxivId ? { arxivId: provenance.arxivId } : {}),
+        ...(provenance.acquisitionPath ? {
+          acquisitionPath: normalizeOptionalPathField(workspaceDir, provenance.acquisitionPath) as string | undefined
+        } : {}),
+        ...(provenance.retrievedAt ? { retrievedAt: provenance.retrievedAt } : {}),
+        ...(provenance.version ? { version: provenance.version } : {})
+      },
+      artifacts: normalizedArtifacts.filter((artifact) => artifact.kind === "parse")
+    };
+  }
+  const normalizedProvenance = {
+    ...provenance,
+    acquisitionPath: normalizeOptionalPathField(workspaceDir, provenance.acquisitionPath) as string | undefined,
+    recordPath: normalizeOptionalPathField(workspaceDir, provenance.recordPath) as string | undefined,
+    rawPath: normalizeOptionalPathField(workspaceDir, provenance.rawPath) as string | undefined,
+    downloadPath: normalizeOptionalPathField(workspaceDir, provenance.downloadPath) as string | undefined
+  };
   return {
     ...metadata,
     summaryPath: toWorkspaceRelativePath(workspaceDir, metadata.summaryPath),
-    provenance: {
-      ...provenance,
-      acquisitionPath: normalizeOptionalPathField(workspaceDir, provenance.acquisitionPath) as string | undefined,
-      recordPath: normalizeOptionalPathField(workspaceDir, provenance.recordPath) as string | undefined,
-      rawPath: normalizeOptionalPathField(workspaceDir, provenance.rawPath) as string | undefined,
-      downloadPath: normalizeOptionalPathField(workspaceDir, provenance.downloadPath) as string | undefined
-    },
-    artifacts: metadata.artifacts.map((artifact) => ({
-      ...artifact,
-      path: toWorkspaceRelativePath(workspaceDir, artifact.path),
-      markdownPath: normalizeOptionalPathField(workspaceDir, artifact.markdownPath) as string | undefined,
-      jsonPath: normalizeOptionalPathField(workspaceDir, artifact.jsonPath) as string | undefined,
-      qualityPath: normalizeOptionalPathField(workspaceDir, artifact.qualityPath) as string | undefined
-    }))
+    provenance: normalizedProvenance,
+    artifacts: normalizedArtifacts
   };
 }
 

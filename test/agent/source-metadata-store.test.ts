@@ -85,7 +85,7 @@ test("writeKnowledgeSourceMetadata writes per-source pretty JSON with trailing n
   });
 });
 
-test("writeKnowledgeSourceMetadata normalizes workspace-local path fields", async () => {
+test("writeKnowledgeSourceMetadata normalizes paper paths and strips runtime fields", async () => {
   await withWorkspace("source-metadata-normalize-paths-", async (workspaceDir) => {
     const sourceKey = "aps-10.1103-PhysRevLett.111.080502";
     const fixture = metadata({
@@ -94,8 +94,13 @@ test("writeKnowledgeSourceMetadata normalizes workspace-local path fields", asyn
       title: "Coherent Josephson Qubit Suitable for Scalable Quantum Integrated Circuits",
       summaryPath: path.join(workspaceDir, "knowledge-base", "sources", sourceKey, "summary.md").replace(/\//g, "\\"),
       provenance: {
+        acquisitionPath: path.join(workspaceDir, "knowledge-base", "sources", sourceKey, "acquisition.json"),
         recordPath: path.join(workspaceDir, "knowledge-base", "sources", sourceKey, "acquisition.json"),
-        rawPath: path.join(workspaceDir, "knowledge-base", "raw", "pdfs", `${sourceKey}.pdf`).replace(/\//g, "\\")
+        rawPath: path.join(workspaceDir, "knowledge-base", "raw", "pdfs", `${sourceKey}.pdf`).replace(/\//g, "\\"),
+        downloadPath: path.join(workspaceDir, "knowledge-base", "raw", "pdfs", `${sourceKey}.pdf`).replace(/\//g, "\\"),
+        source: "aps",
+        canonicalId: "10.1103/PhysRevLett.111.080502",
+        rawSha256: "legacy-sha"
       },
       artifacts: [{
         kind: "raw",
@@ -114,13 +119,16 @@ test("writeKnowledgeSourceMetadata normalizes workspace-local path fields", asyn
 
     assert.equal(relativePath, `knowledge-base/sources/${sourceKey}/metadata.json`);
     assert.equal(saved.summaryPath, `knowledge-base/sources/${sourceKey}/summary.md`);
-    assert.equal(saved.provenance.recordPath, `knowledge-base/sources/${sourceKey}/acquisition.json`);
-    assert.equal(saved.provenance.rawPath, `knowledge-base/raw/pdfs/${sourceKey}.pdf`);
-    assert.equal(saved.artifacts[0]?.path, `knowledge-base/raw/pdfs/${sourceKey}.pdf`);
-    assert.equal(saved.artifacts[1]?.path, `knowledge-base/sources/${sourceKey}/parses/webpage`);
-    assert.equal(saved.artifacts[1]?.markdownPath, `knowledge-base/sources/${sourceKey}/parses/webpage/document.md`);
-    assert.equal(saved.artifacts[1]?.jsonPath, `knowledge-base/sources/${sourceKey}/parses/webpage/parse.json`);
-    assert.equal(saved.artifacts[1]?.qualityPath, `knowledge-base/sources/${sourceKey}/parses/webpage/quality.json`);
+    assert.equal(saved.provenance.acquisitionPath, `knowledge-base/sources/${sourceKey}/acquisition.json`);
+    for (const forbiddenField of ["recordPath", "rawPath", "downloadPath", "source", "canonicalId", "rawSha256"]) {
+      assert.equal(forbiddenField in saved.provenance, false);
+    }
+    assert.equal(saved.artifacts.length, 1);
+    assert.equal(saved.artifacts[0]?.kind, "parse");
+    assert.equal(saved.artifacts[0]?.path, `knowledge-base/sources/${sourceKey}/parses/webpage`);
+    assert.equal(saved.artifacts[0]?.markdownPath, `knowledge-base/sources/${sourceKey}/parses/webpage/document.md`);
+    assert.equal(saved.artifacts[0]?.jsonPath, `knowledge-base/sources/${sourceKey}/parses/webpage/parse.json`);
+    assert.equal(saved.artifacts[0]?.qualityPath, `knowledge-base/sources/${sourceKey}/parses/webpage/quality.json`);
   });
 });
 
