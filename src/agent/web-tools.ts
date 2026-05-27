@@ -82,7 +82,8 @@ type FetchPaperWebpageDetails =
   | CompactPaperWebpageDetails
   | (Awaited<ReturnType<PaperExtensionBridge["submitJob"]>> & {
       purpose: "webpage";
-      directFetchError: string;
+      directFetchError?: string;
+      directFetchAccess?: Awaited<ReturnType<typeof fetchPaperWebPage>>["access"];
     });
 type FetchPaperWebpageTool = AgentTool<
   typeof fetchPaperWebpageParameters,
@@ -243,6 +244,29 @@ export function createWebTools(input: {
   const fetchWebPageImpl = dependencies.fetchWebPage ?? fetchWebPage;
   const fetchPaperWebPageImpl = dependencies.fetchPaperWebPage ?? fetchPaperWebPage;
   const savePaperWebPageParseImpl = dependencies.savePaperWebPageParse ?? savePaperWebPageParse;
+  const queueExtensionWebpageSnapshot = async (input: {
+    bridge: PaperExtensionBridge;
+    url: string;
+    directFetchError?: string;
+    directFetchAccess?: Awaited<ReturnType<typeof fetchPaperWebPage>>["access"];
+  }): Promise<Extract<FetchPaperWebpageDetails, { purpose: "webpage" }>> => {
+    const source = resolveExtensionPaperSource(input.url);
+    const queued = await input.bridge.submitJob(
+      createPaperExtensionJob({
+        articleUrl: input.url,
+        source,
+        purpose: "webpage",
+        autoClose: true
+      })
+    );
+
+    return {
+      ...queued,
+      purpose: "webpage" as const,
+      ...(input.directFetchError ? { directFetchError: input.directFetchError } : {}),
+      ...(input.directFetchAccess ? { directFetchAccess: input.directFetchAccess } : {})
+    };
+  };
 
   const webSearchTool: WebSearchTool = {
     name: "web_search",
@@ -289,6 +313,23 @@ export function createWebTools(input: {
     execute: async (_toolCallId: string, args: FetchPaperWebpageParameters) => {
       try {
         const result = await fetchPaperWebPageImpl({ url: args.url });
+        if (result.access.status === "access_limited" && args.useExtensionFallback !== false) {
+          if (dependencies.extensionBridge === undefined) {
+            throw new Error(result.access.message ?? "Direct paper webpage fetch returned access-limited content.");
+          }
+
+          const output = await queueExtensionWebpageSnapshot({
+            bridge: dependencies.extensionBridge,
+            url: args.url,
+            directFetchAccess: result.access
+          });
+
+          return {
+            content: [{ type: "text", text: JSON.stringify(output) }],
+            details: output
+          };
+        }
+
         const savedParse = args.save === false
           ? undefined
           : await savePaperWebPageParseImpl({
@@ -322,20 +363,11 @@ export function createWebTools(input: {
           throw error;
         }
 
-        const source = resolveExtensionPaperSource(args.url);
-        const queued = await dependencies.extensionBridge.submitJob(
-          createPaperExtensionJob({
-            articleUrl: args.url,
-            source,
-            purpose: "webpage",
-            autoClose: true
-          })
-        );
-        const output = {
-          ...queued,
-          purpose: "webpage" as const,
+        const output = await queueExtensionWebpageSnapshot({
+          bridge: dependencies.extensionBridge,
+          url: args.url,
           directFetchError: error instanceof Error ? error.message : "Direct paper webpage fetch failed."
-        };
+        });
 
         return {
           content: [{ type: "text", text: JSON.stringify(output) }],

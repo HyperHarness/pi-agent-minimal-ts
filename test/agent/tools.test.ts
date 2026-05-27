@@ -3480,6 +3480,101 @@ test("fetch_paper_webpage saves full article text but returns compact JSON for m
   }
 });
 
+test("fetch_paper_webpage queues an extension webpage snapshot when direct fetch is access-limited", async () => {
+  const workspace = await mkdtemp(path.join(tmpdir(), "pi-agent-tools-"));
+  const capturedSaves: Array<{ markdown: string }> = [];
+  const capturedJobs: Array<{
+    articleUrl: string;
+    source: string;
+    purpose?: string;
+    autoClose?: boolean;
+  }> = [];
+
+  try {
+    const fetchPaperWebpageTool = getFetchPaperWebpageTool(workspace, {
+      fetchPaperWebPage: async (options) => ({
+        url: options.url,
+        title: "Nature subscription article",
+        markdown: [
+          "# Nature subscription article",
+          "",
+          "This is a preview of subscription content, access via your institution.",
+          "",
+          "Access through your institution",
+        ].join("\n"),
+        metadata: {
+          title: "Nature subscription article",
+          doi: "10.1038/nature14270",
+          journal: "Nature",
+          authors: [],
+        },
+        access: {
+          status: "access_limited",
+          signals: ["nature_preview_subscription", "nature_institution_access"],
+          message: "Publisher access wall detected.",
+        },
+        stats: {
+          chars: 180,
+          wordsApprox: 24,
+          navigationLinesRemoved: 0,
+          extractedFrom: "article",
+        },
+      }),
+      savePaperWebPageParse: async (options) => {
+        capturedSaves.push({ markdown: options.extraction.markdown });
+        throw new Error("access-limited direct fetch should not be saved");
+      },
+      extensionBridge: {
+        async submitJob(job) {
+          capturedJobs.push({
+            articleUrl: job.articleUrl,
+            source: job.source,
+            ...(job.purpose ? { purpose: job.purpose } : {}),
+            ...(job.autoClose === undefined ? {} : { autoClose: job.autoClose }),
+          });
+          return {
+            status: "extension_job_queued",
+            source: job.source,
+            articleUrl: job.articleUrl,
+            jobId: "job-webpage",
+            message: "Paper webpage snapshot job queued for the browser extension.",
+          };
+        },
+      },
+    });
+
+    const result = await fetchPaperWebpageTool.execute(
+      "call-paper-webpage-access-limited",
+      { url: "https://www.nature.com/articles/nature14270", force: true },
+      undefined,
+    );
+
+    assert.deepEqual(capturedSaves, []);
+    assert.deepEqual(capturedJobs, [
+      {
+        articleUrl: "https://www.nature.com/articles/nature14270",
+        source: "nature",
+        purpose: "webpage",
+        autoClose: true,
+      },
+    ]);
+    const details = result.details as {
+      status: string;
+      purpose: string;
+      directFetchAccess: unknown;
+    };
+    assert.equal(details.status, "extension_job_queued");
+    assert.equal(details.purpose, "webpage");
+    assert.deepEqual(details.directFetchAccess, {
+      status: "access_limited",
+      signals: ["nature_preview_subscription", "nature_institution_access"],
+      message: "Publisher access wall detected.",
+    });
+  } finally {
+    await rm(workspace, { recursive: true, force: true });
+  }
+});
+
 test("search_papers delegates to the injected paper manager dependency and returns JSON text with details", async () => {
   const workspace = await mkdtemp(path.join(tmpdir(), "pi-agent-tools-"));
   const capturedCalls: Array<{ query: string; maxResults?: number }> = [];
