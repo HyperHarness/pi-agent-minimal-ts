@@ -98,6 +98,112 @@ test("listLocalPapers merges download records with parsed artifacts", async () =
   }
 });
 
+test("listLocalPapers reads download details from acquisition when metadata is minimal", async () => {
+  const workspaceDir = await createWorkspace();
+  try {
+    const paperKey = "arxiv-2401.01234";
+    const sourceDir = path.join(workspaceDir, "knowledge-base", "sources", paperKey);
+    const pdfPath = path.join(workspaceDir, "knowledge-base", "raw", "pdfs", `${paperKey}.pdf`);
+    await writeText(pdfPath, "%PDF-1.7\npaper\n");
+    await writeJson(path.join(sourceDir, "acquisition.json"), {
+      source: "arxiv",
+      articleUrl: "https://arxiv.org/abs/2401.01234",
+      recordedAt: "2026-05-27T00:00:00.000Z",
+      handlingMethod: "direct_http",
+      status: "downloaded",
+      canonicalId: "2401.01234",
+      pdfUrl: "https://arxiv.org/pdf/2401.01234.pdf",
+      downloadPath: pdfPath
+    });
+    await writeJson(path.join(sourceDir, "metadata.json"), {
+      schemaVersion: 1,
+      sourceKind: "paper",
+      sourceKey: paperKey,
+      title: "Minimal Metadata Paper",
+      status: "missing_artifact",
+      createdAt: "2026-05-27T00:00:00.000Z",
+      updatedAt: "2026-05-27T00:00:00.000Z",
+      summaryPath: `knowledge-base/sources/${paperKey}/summary.md`,
+      citation: {
+        citationStatus: "complete",
+        missingFields: [],
+        arxivId: "2401.01234",
+        authors: ["Ada Lovelace"],
+        year: 2024,
+        venue: "arXiv"
+      },
+      provenance: {
+        url: "https://arxiv.org/abs/2401.01234",
+        arxivId: "2401.01234",
+        acquisitionPath: `knowledge-base/sources/${paperKey}/acquisition.json`
+      },
+      artifacts: [],
+      tags: [],
+      relatedSourceKeys: [],
+      synthesisPageKeys: []
+    });
+
+    const result = await listLocalPapers({ workspaceDir, status: "downloaded", maxResults: 10 });
+
+    assert.equal(result.total, 1);
+    assert.equal(result.results[0]?.paperKey, paperKey);
+    assert.equal(result.results[0]?.hasPdf, true);
+    assert.equal(result.results[0]?.recordPath, `knowledge-base/sources/${paperKey}/acquisition.json`);
+    assert.equal(result.results[0]?.pdfPath, `knowledge-base/raw/pdfs/${paperKey}.pdf`);
+  } finally {
+    await rm(workspaceDir, { recursive: true, force: true });
+  }
+});
+
+test("listLocalPapers preserves provenance canonical id for metadata-only schema v1 entries", async () => {
+  const workspaceDir = await createWorkspace();
+  try {
+    const paperKey = "nature-s41534-026-01234-y";
+    const sourceDir = path.join(workspaceDir, "knowledge-base", "sources", paperKey);
+    await writeJson(path.join(sourceDir, "metadata.json"), {
+      schemaVersion: 1,
+      sourceKind: "paper",
+      sourceKey: paperKey,
+      title: "Metadata Only Canonical Paper",
+      status: "citation_incomplete",
+      createdAt: "2026-05-27T00:00:00.000Z",
+      updatedAt: "2026-05-27T00:00:00.000Z",
+      summaryPath: `knowledge-base/sources/${paperKey}/summary.md`,
+      citation: {
+        citationStatus: "incomplete",
+        missingFields: ["stableIdentifier"],
+        doi: "10.1038/s41534-026-99999-y",
+        authors: ["Grace Hopper"],
+        year: 2026,
+        venue: "Nature Quantum Information"
+      },
+      provenance: {
+        url: "https://www.nature.com/articles/s41534-026-01234-y",
+        source: "nature",
+        canonicalId: "s41534-026-01234-y",
+        recordPath: `knowledge-base/sources/${paperKey}/legacy-record.json`,
+        rawPath: `knowledge-base/raw/pdfs/${paperKey}.pdf`,
+        downloadPath: `knowledge-base/raw/pdfs/${paperKey}.pdf`
+      },
+      artifacts: [],
+      tags: [],
+      relatedSourceKeys: [],
+      synthesisPageKeys: []
+    });
+
+    const result = await listLocalPapers({ workspaceDir, status: "all", maxResults: 10 });
+
+    assert.equal(result.total, 1);
+    assert.equal(result.results[0]?.paperKey, paperKey);
+    assert.equal(result.results[0]?.canonicalId, "s41534-026-01234-y");
+    assert.equal(result.results[0]?.recordPath, undefined);
+    assert.equal(result.results[0]?.pdfPath, undefined);
+    assert.equal(result.results[0]?.hasPdf, false);
+  } finally {
+    await rm(workspaceDir, { recursive: true, force: true });
+  }
+});
+
 test("listLocalPapers merges slash canonical IDs using the record filename key", async () => {
   const workspace = await createWorkspace();
   try {
@@ -181,7 +287,7 @@ test("listLocalPapers resolves WSL UNC PDF paths from download records", async (
 
     assert.ok(paper);
     assert.equal(paper.hasPdf, true);
-    assert.equal(paper.pdfPath, pdfPath);
+    assert.equal(paper.pdfPath, "knowledge-base/raw/pdfs/aps-10.1103-nv7d-k3wr.pdf");
 
     const searched = await searchLocalPapers({
       workspaceDir: workspace,

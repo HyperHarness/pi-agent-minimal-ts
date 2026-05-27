@@ -1,7 +1,7 @@
 import { access, readdir, readFile } from "node:fs/promises";
 import type { Dirent } from "node:fs";
 import path from "node:path";
-import { resolvePaperLibraryPaths } from "../../knowledge-base.js";
+import { isPathInsideDirectory, resolvePaperLibraryPaths } from "../../knowledge-base.js";
 import { resolvePublisherCanonicalIdFromArticleUrl } from "../acquisition/paper-download.js";
 import type { ConcretePaperParseEngine, PaperParseQualityReport, PaperReaderSource } from "../reading/types.js";
 import type {
@@ -172,6 +172,19 @@ function normalizePortableFilePath(filePath: string): string {
   return filePath.includes("\\") ? filePath.replace(/\\/g, "/") : filePath;
 }
 
+function toWorkspaceRelativePath(workspaceDir: string, filePath: string): string {
+  const normalizedFilePath = normalizePortableFilePath(filePath);
+  if (!path.isAbsolute(normalizedFilePath)) {
+    return normalizedFilePath;
+  }
+
+  const resolvedWorkspaceDir = path.resolve(workspaceDir);
+  const resolvedFilePath = path.resolve(normalizedFilePath);
+  return isPathInsideDirectory(resolvedWorkspaceDir, resolvedFilePath)
+    ? relativeToWorkspace(resolvedWorkspaceDir, resolvedFilePath)
+    : normalizedFilePath;
+}
+
 function applyRecord(entry: LocalPaperEntry, record: PaperRecord, recordPath: string, workspaceDir: string): void {
   const rawRecord = record as unknown as Record<string, unknown>;
   entry.source = record.source;
@@ -184,10 +197,7 @@ function applyRecord(entry: LocalPaperEntry, record: PaperRecord, recordPath: st
     entry.canonicalId = record.canonicalId;
   }
   if ("downloadPath" in record && typeof record.downloadPath === "string") {
-    const normalizedDownloadPath = normalizePortableFilePath(record.downloadPath);
-    entry.pdfPath = path.isAbsolute(normalizedDownloadPath)
-      ? normalizedDownloadPath
-      : relativeToWorkspace(workspaceDir, path.resolve(workspaceDir, normalizedDownloadPath));
+    entry.pdfPath = toWorkspaceRelativePath(workspaceDir, record.downloadPath);
   }
 }
 
@@ -254,10 +264,10 @@ function applySource(
       : entry.missingCitationFields
   );
   if (source.recordPath && !entry.recordPath) {
-    entry.recordPath = relativeToWorkspace(workspaceDir, source.recordPath);
+    entry.recordPath = toWorkspaceRelativePath(workspaceDir, source.recordPath);
   }
   if (source.pdfPath && !entry.pdfPath) {
-    entry.pdfPath = relativeToWorkspace(workspaceDir, source.pdfPath);
+    entry.pdfPath = toWorkspaceRelativePath(workspaceDir, source.pdfPath);
   }
 }
 
@@ -311,8 +321,8 @@ function normalizeKnowledgeSourceMetadata(input: {
     readOptionalString(citation.doi) ??
     readOptionalString(citation.arxivId);
   const articleUrl = readOptionalString(provenance.url);
-  const recordPath = readOptionalString(provenance.recordPath);
-  const pdfPath = readOptionalString(provenance.rawPath) ?? readOptionalString(provenance.downloadPath);
+  const recordPath = readOptionalString(provenance.acquisitionPath);
+  const pdfPath = undefined;
 
   return {
     ...(input.raw as unknown as PaperSourceFile),
