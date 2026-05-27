@@ -428,20 +428,6 @@ function getRecordCanonicalId(record: PaperRecord): string | undefined {
   return "canonicalId" in record && record.canonicalId ? record.canonicalId : undefined;
 }
 
-function getRecordPdfUrl(record: PaperRecord): string | undefined {
-  if ("pdfUrl" in record && typeof record.pdfUrl === "string" && record.pdfUrl.trim()) {
-    return record.pdfUrl;
-  }
-  return record.status === "preprint_fallback" ? record.preprint.pdfUrl : undefined;
-}
-
-function getRecordDownloadPath(record: PaperRecord): string | undefined {
-  if ("downloadPath" in record && typeof record.downloadPath === "string" && record.downloadPath.trim()) {
-    return record.downloadPath;
-  }
-  return record.status === "preprint_fallback" ? record.preprint.downloadPath : undefined;
-}
-
 function getRecordPublisher(source: PaperSource): string | undefined {
   if (source === "arxiv") {
     return "arXiv";
@@ -581,15 +567,7 @@ type PaperMetadataCitation = KnowledgeSourceMetadata["citation"] & {
 };
 
 type PaperMetadataProvenance = KnowledgeSourceMetadata["provenance"] & {
-  source?: PaperSource;
-  canonicalId?: string;
   acquisitionPath?: string;
-  pdfUrl?: string;
-  downloadPath?: string;
-  downloadStatus?: PaperRecord["status"];
-  readingStatus?: PaperRecordReadingManifest["status"];
-  recordedAt?: string;
-  preprintFallback?: unknown;
 };
 
 type ExistingPaperMetadata = Partial<Omit<KnowledgeSourceMetadata, "citation" | "provenance" | "artifacts">> & {
@@ -1143,32 +1121,54 @@ function normalizeKnowledgeSourceArtifact(input: {
   };
 }
 
+function metadataArtifactFromRecordManifest(input: {
+  workspaceDir: string;
+  manifest: PaperRecordArtifactManifest | undefined;
+}): KnowledgeSourceArtifact | undefined {
+  const manifest = input.manifest;
+  if (
+    !manifest ||
+    (manifest.status !== "parsed" && manifest.status !== "already_parsed") ||
+    !manifest.markdownPath ||
+    !manifest.parsePath ||
+    !manifest.qualityPath ||
+    !manifest.engine
+  ) {
+    return undefined;
+  }
+  const markdownPath = toWorkspacePath({ workspaceDir: input.workspaceDir, filePath: manifest.markdownPath });
+  return {
+    kind: "parse",
+    path: path.dirname(markdownPath),
+    engine: manifest.engine,
+    markdownPath,
+    jsonPath: toWorkspacePath({ workspaceDir: input.workspaceDir, filePath: manifest.parsePath }),
+    qualityPath: toWorkspacePath({ workspaceDir: input.workspaceDir, filePath: manifest.qualityPath })
+  };
+}
+
 function buildPaperMetadataArtifacts(input: {
   workspaceDir: string;
   record: PaperRecord;
   existing?: ExistingPaperMetadata;
-  rawPath?: string;
 }): KnowledgeSourceArtifact[] {
   let artifacts = Array.isArray(input.existing?.artifacts)
-    ? input.existing.artifacts.reduce<KnowledgeSourceArtifact[]>(
-        (normalizedArtifacts, artifact) => appendArtifact(normalizedArtifacts, normalizeKnowledgeSourceArtifact({
-          workspaceDir: input.workspaceDir,
-          artifact
-        })),
-        []
-      )
+    ? input.existing.artifacts
+        .filter((artifact) => artifact.kind === "parse")
+        .reduce<KnowledgeSourceArtifact[]>(
+          (normalizedArtifacts, artifact) => appendArtifact(normalizedArtifacts, normalizeKnowledgeSourceArtifact({
+            workspaceDir: input.workspaceDir,
+            artifact
+          })),
+          []
+        )
     : [];
-  if (input.rawPath) {
-    artifacts = appendArtifact(artifacts, { kind: "raw", path: input.rawPath });
-  }
-  if ("supplementalMaterials" in input.record && input.record.supplementalMaterials) {
-    for (const supplemental of input.record.supplementalMaterials) {
-      artifacts = appendArtifact(artifacts, {
-        kind: "raw",
-        path: toWorkspacePath({ workspaceDir: input.workspaceDir, filePath: supplemental.path }),
-        ...(supplemental.sha256 ? { sha256: supplemental.sha256 } : {}),
-        ...(supplemental.title ? { note: supplemental.title } : {})
-      });
+  for (const artifact of [
+    metadataArtifactFromRecordManifest({ workspaceDir: input.workspaceDir, manifest: input.record.webpage }),
+    metadataArtifactFromRecordManifest({ workspaceDir: input.workspaceDir, manifest: input.record.parse })
+  ]) {
+    if (artifact) {
+      artifacts = appendArtifact(artifacts, artifact);
     }
   }
   return artifacts;
@@ -1248,11 +1248,17 @@ export async function writePaperMetadataForRecord(input: {
     arxivId,
     articleUrl: input.record.articleUrl
   });
-  const pdfUrl = getRecordPdfUrl(input.record);
-  const downloadPath = getRecordDownloadPath(input.record);
-  const rawPath = downloadPath
-    ? toWorkspacePath({ workspaceDir: input.workspaceDir, filePath: downloadPath })
-    : existingProvenance?.rawPath;
+  const artifacts = buildPaperMetadataArtifacts({
+    workspaceDir: input.workspaceDir,
+    record: input.record,
+    existing
+  });
+  const metadataStatus: KnowledgeSourceMetadata["status"] =
+    missingFields.length > 0
+      ? "citation_incomplete"
+      : artifacts.length > 0
+        ? "ready"
+        : "missing_artifact";
   const resolvedFrom = missingFields.length === 0 && remoteMetadata
     ? remoteMetadata.resolvedFrom
     : missingFields.length === 0 && localParseMetadata
@@ -1265,7 +1271,7 @@ export async function writePaperMetadataForRecord(input: {
     sourceKind: "paper",
     sourceKey: paperKey,
     title: title ?? paperKey,
-    status: missingFields.length === 0 ? "ready" : "citation_incomplete",
+    status: metadataStatus,
     createdAt: existing?.createdAt ?? input.record.recordedAt,
     updatedAt: input.record.updatedAt ?? input.record.recordedAt,
     summaryPath: existing?.summaryPath ?? path.join(path.dirname(acquisitionPath), "summary.md"),
@@ -1285,36 +1291,12 @@ export async function writePaperMetadataForRecord(input: {
       ...(existing?.cslPath ? { cslPath: existing.cslPath } : {})
     },
     provenance: {
-      ...existingProvenance,
       url: input.record.articleUrl,
       ...(doi ? { doi } : {}),
       ...(arxivId ? { arxivId } : {}),
-      recordPath: acquisitionPath,
-      acquisitionPath,
-      source: input.record.source,
-      ...(getRecordCanonicalId(input.record) ? { canonicalId: getRecordCanonicalId(input.record) } : {}),
-      ...(rawPath ? { rawPath, downloadPath: rawPath } : {}),
-      ...(pdfUrl ? { pdfUrl } : {}),
-      downloadStatus: input.record.status,
-      recordedAt: input.record.recordedAt,
-      ...(input.record.reading?.status ? { readingStatus: input.record.reading.status } : {}),
-      ...(input.record.status === "preprint_fallback" ? {
-        preprintFallback: {
-          arxivId: input.record.preprint.canonicalId,
-          articleUrl: input.record.preprint.articleUrl,
-          pdfUrl: input.record.preprint.pdfUrl,
-          acquisitionPath: toWorkspacePath({ workspaceDir: input.workspaceDir, filePath: input.record.preprint.recordPath }),
-          downloadPath: toWorkspacePath({ workspaceDir: input.workspaceDir, filePath: input.record.preprint.downloadPath }),
-          status: input.record.preprint.status
-        }
-      } : {})
+      acquisitionPath
     },
-    artifacts: buildPaperMetadataArtifacts({
-      workspaceDir: input.workspaceDir,
-      record: input.record,
-      existing,
-      rawPath
-    }),
+    artifacts,
     tags: existing?.tags ?? [],
     relatedSourceKeys: existing?.relatedSourceKeys ?? [],
     synthesisPageKeys: existing?.synthesisPageKeys ?? []
@@ -1399,21 +1381,27 @@ function paperRecordFromKnowledgeSourceMetadata(input: {
   existing: ExistingPaperMetadata | undefined;
 }): PaperRecord {
   const existing = input.existing;
+  const provenance = existing?.provenance as (KnowledgeSourceMetadata["provenance"] & {
+    pdfUrl?: string;
+    downloadStatus?: PaperRecord["status"];
+    readingStatus?: PaperRecordReadingManifest["status"];
+    recordedAt?: string;
+  }) | undefined;
   const source = paperSourceFromKnowledgeSourceMetadata(existing);
-  const articleUrl = existing?.provenance?.url;
-  if (!source || !articleUrl) {
+  const articleUrl = provenance?.url;
+  if (!existing || !source || !articleUrl) {
     throw new Error("metadata.json must include sourceKind paper and provenance.url before citation metadata can be refreshed.");
   }
 
   const canonicalId =
-    existing.provenance?.canonicalId ??
+    provenance?.canonicalId ??
     existing.citation?.doi ??
     existing.citation?.arxivId ??
     deriveCanonicalIdFromArticleUrl(source, articleUrl);
-  const recordedAt = existing.provenance?.recordedAt ?? existing.createdAt ?? new Date().toISOString();
+  const recordedAt = provenance?.recordedAt ?? existing.createdAt ?? new Date().toISOString();
   const title = existing.title;
-  const pdfUrl = existing.provenance?.pdfUrl;
-  const downloadPath = existing.provenance?.rawPath ?? existing.provenance?.downloadPath;
+  const pdfUrl = provenance?.pdfUrl;
+  const downloadPath = provenance?.rawPath ?? provenance?.downloadPath;
   const updatedAt = existing.updatedAt ?? recordedAt;
 
   return {
@@ -1421,14 +1409,14 @@ function paperRecordFromKnowledgeSourceMetadata(input: {
     articleUrl,
     recordedAt,
     handlingMethod: "source_metadata_refresh",
-    status: existing.provenance?.downloadStatus ?? "external_opened",
+    status: provenance?.downloadStatus ?? "external_opened",
     ...(canonicalId ? { canonicalId } : {}),
     ...(title ? { title } : {}),
     ...(pdfUrl ? { pdfUrl } : {}),
     ...(downloadPath ? { downloadPath } : {}),
-    ...(existing.provenance?.readingStatus ? {
+    ...(provenance?.readingStatus ? {
       reading: {
-        status: existing.provenance.readingStatus,
+        status: provenance.readingStatus,
         updatedAt
       }
     } : {})

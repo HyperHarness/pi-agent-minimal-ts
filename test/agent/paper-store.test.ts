@@ -87,7 +87,7 @@ test("resolvePaperLibraryPaths exposes the current knowledge-base path contract"
   assert.equal(paths.sourcesRoot, path.join(workspaceDir, "knowledge-base", "sources"));
 });
 
-test("writePaperRecord persists publisher supplemental materials into source metadata", async () => {
+test("writePaperRecord keeps publisher supplemental materials out of source metadata artifacts", async () => {
   const workspaceDir = await mkdtemp(path.join(os.tmpdir(), "paper-store-supplemental-"));
   const supplementalPath = resolvePaperSupplementalPdfPath({
     workspaceDir,
@@ -628,7 +628,7 @@ test("writePaperMetadataForRecord falls back to Crossref bibliographic search fo
     assert.equal(metadata.citation.year, 2026);
     assert.equal(metadata.citation.venue, "Physical Review Applied");
     assert.equal(metadata.citation.citationStatus, "complete");
-    assert.equal(metadata.status, "ready");
+    assert.equal(metadata.status, "missing_artifact");
     assert.deepEqual(metadata.citation.missingFields, []);
     assert.equal(metadata.citation.resolvedFrom, "crossref_search");
   } finally {
