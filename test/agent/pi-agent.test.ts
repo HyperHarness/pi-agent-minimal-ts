@@ -118,6 +118,9 @@ test("default system prompt requires wiki evidence for scientific questions", ()
   assert.match(DEFAULT_SYSTEM_PROMPT, /wiki_health_fix/);
   assert.match(DEFAULT_SYSTEM_PROMPT, /source summaries/);
   assert.match(DEFAULT_SYSTEM_PROMPT, /design-agent outputs/);
+  assert.match(DEFAULT_SYSTEM_PROMPT, /fetch_paper_webpage/);
+  assert.match(DEFAULT_SYSTEM_PROMPT, /force=true/);
+  assert.match(DEFAULT_SYSTEM_PROMPT, /do not use download_paper/i);
   assert.doesNotMatch(DEFAULT_SYSTEM_PROMPT, /compile_latex/);
 });
 

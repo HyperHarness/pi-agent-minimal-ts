@@ -3066,6 +3066,7 @@ test("createToolsForBoundary exposes isolated wiki and worker tool surfaces", as
     assert.ok(wikiAgentTools.some((tool) => tool.name === "search_paper_wiki"));
     assert.ok(wikiAgentTools.some((tool) => tool.name === "search_papers"));
     assert.ok(wikiAgentTools.some((tool) => tool.name === "download_paper"));
+    assert.ok(wikiAgentTools.some((tool) => tool.name === "fetch_paper_webpage"));
     assert.ok(wikiAgentTools.some((tool) => tool.name === "list_local_papers"));
     assert.ok(wikiAgentTools.some((tool) => tool.name === "inspect_paper"));
     assert.ok(wikiAgentTools.some((tool) => tool.name === "read_paper_section"));

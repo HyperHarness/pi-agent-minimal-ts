@@ -108,6 +108,7 @@ export const TOOL_BOUNDARY_NAMES: Record<ToolBoundaryRole, readonly ToolName[]> 
     "read_file",
     "search_papers",
     "download_paper",
+    "fetch_paper_webpage",
     "inspect_paper",
     "read_paper_section",
     "search_paper_text",

@@ -284,7 +284,7 @@ export function createWebTools(input: {
     name: "fetch_paper_webpage",
     label: "Fetch Paper Webpage",
     description:
-      "Fetches a scientific paper article page, saves the full cleaned article markdown under knowledge-base/sources, and returns compact metadata, a markdown preview, and saved artifact paths. Prefer this over fetch_url when reading a publisher article webpage.",
+      "Fetches or re-fetches a scientific paper article webpage only, saves the full cleaned article markdown under knowledge-base/sources, and returns compact metadata, a markdown preview, and saved artifact paths. Use force=true when the user asks to refresh, re抓取, 重新抓取, reparse, 重新解析, or force-refresh an existing webpage parse. This tool does not download PDFs; prefer it over download_paper when the user specifically asks for webpage capture/refresh without PDF download.",
     parameters: fetchPaperWebpageParameters,
     execute: async (_toolCallId: string, args: FetchPaperWebpageParameters) => {
       try {
