@@ -447,6 +447,11 @@ test("writePaperWikiSource saves an LLM source summary and searchPaperWiki finds
     const seededMetadata = JSON.parse(await readFile(metadataPath, "utf8"));
     await writeJson(metadataPath, {
       ...seededMetadata,
+      pdfPath,
+      pdfSha256: "legacy-sha",
+      recordPath: "knowledge-base/sources/arxiv-2601.00003/acquisition.json",
+      source: "arxiv",
+      canonicalId: "2601.00003",
       artifacts: [
         {
           kind: "raw",
@@ -496,6 +501,9 @@ test("writePaperWikiSource saves an LLM source summary and searchPaperWiki finds
     );
     assert.ok(summaryParseArtifact);
     assert.equal(summaryParseArtifact.markdownPath, "knowledge-base/sources/arxiv-2601.00003/parses/plain-text-baseline/document.md");
+    for (const forbiddenField of ["pdfPath", "pdfSha256", "recordPath", "source", "canonicalId"]) {
+      assert.equal(forbiddenField in metadata, false);
+    }
     assert.equal("rawSha256" in metadata.provenance, false);
     assert.equal("rawPath" in metadata.provenance, false);
     assert.equal("recordPath" in metadata.provenance, false);

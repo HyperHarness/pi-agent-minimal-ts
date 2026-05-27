@@ -208,16 +208,30 @@ function inferArxivIdFromUrl(articleUrl: string | undefined): string | undefined
   return undefined;
 }
 
+function inferCanonicalIdFromSourceKey(input: {
+  source: PaperSource | undefined;
+  sourceKey: string;
+}): string | undefined {
+  if (!input.source || !input.sourceKey.startsWith(`${input.source}-`)) {
+    return undefined;
+  }
+  const keySuffix = input.sourceKey.slice(input.source.length + 1);
+  if (!keySuffix) {
+    return undefined;
+  }
+  if (input.source === "arxiv" || input.source === "nature") {
+    return keySuffix;
+  }
+  return undefined;
+}
+
 function resolveCanonicalIdFromProgressiveMetadata(input: {
   source: PaperSource | undefined;
+  sourceKey: string;
   articleUrl: string | undefined;
   citation: Record<string, unknown>;
   provenance: Record<string, unknown>;
 }): string | undefined {
-  const legacyCanonicalId = readOptionalString(input.provenance.canonicalId);
-  if (legacyCanonicalId) {
-    return legacyCanonicalId;
-  }
   const publisher = inferSupportedPublisher(input.source);
   if (publisher && input.articleUrl) {
     const canonicalId = resolvePublisherCanonicalIdFromArticleUrl({
@@ -228,12 +242,17 @@ function resolveCanonicalIdFromProgressiveMetadata(input: {
       return canonicalId;
     }
   }
+  const arxivId = readOptionalString(input.citation.arxivId) ?? readOptionalString(input.provenance.arxivId);
   return (
     readOptionalString(input.citation.doi) ??
     readOptionalString(input.provenance.doi) ??
-    readOptionalString(input.citation.arxivId) ??
-    readOptionalString(input.provenance.arxivId) ??
-    inferArxivIdFromUrl(input.articleUrl)
+    arxivId ??
+    inferArxivIdFromUrl(input.articleUrl) ??
+    inferCanonicalIdFromSourceKey({
+      source: input.source,
+      sourceKey: input.sourceKey
+    }) ??
+    readOptionalString(input.provenance.canonicalId)
   );
 }
 
@@ -400,11 +419,12 @@ function normalizeKnowledgeSourceMetadata(input: {
   const createdAt = readOptionalString(input.raw.createdAt) ?? new Date().toISOString();
   const articleUrl = readOptionalString(provenance.url);
   const source =
-    readOptionalString(provenance.source) ??
     inferPaperSourceFromSourceKey(paperKey) ??
-    inferPaperSourceFromArticleUrl(articleUrl);
+    inferPaperSourceFromArticleUrl(articleUrl) ??
+    readOptionalString(provenance.source);
   const canonicalId = resolveCanonicalIdFromProgressiveMetadata({
     source: source as PaperSource | undefined,
+    sourceKey: paperKey,
     articleUrl,
     citation,
     provenance

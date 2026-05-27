@@ -549,7 +549,6 @@ ${sectionList("Open Questions", input.openQuestions)}`;
     ? previousMetadataResult.metadata
     : undefined;
   const metadata: KnowledgeSourceMetadata = {
-    ...(previousMetadata ?? {}),
     schemaVersion: 1,
     sourceKind: "paper",
     sourceKey: input.paperKey,

@@ -155,7 +155,7 @@ test("listLocalPapers reads download details from acquisition when metadata is m
   }
 });
 
-test("listLocalPapers preserves provenance canonical id for metadata-only schema v1 entries", async () => {
+test("listLocalPapers prefers progressive metadata over stale legacy provenance", async () => {
   const workspaceDir = await createWorkspace();
   try {
     const paperKey = "nature-s41534-026-01234-y";
@@ -179,8 +179,8 @@ test("listLocalPapers preserves provenance canonical id for metadata-only schema
       },
       provenance: {
         url: "https://www.nature.com/articles/s41534-026-01234-y",
-        source: "nature",
-        canonicalId: "s41534-026-01234-y",
+        source: "science",
+        canonicalId: "10.1126/stale.legacy",
         recordPath: `knowledge-base/sources/${paperKey}/legacy-record.json`,
         rawPath: `knowledge-base/raw/pdfs/${paperKey}.pdf`,
         downloadPath: `knowledge-base/raw/pdfs/${paperKey}.pdf`
@@ -195,10 +195,55 @@ test("listLocalPapers preserves provenance canonical id for metadata-only schema
 
     assert.equal(result.total, 1);
     assert.equal(result.results[0]?.paperKey, paperKey);
+    assert.equal(result.results[0]?.source, "nature");
     assert.equal(result.results[0]?.canonicalId, "s41534-026-01234-y");
     assert.equal(result.results[0]?.recordPath, undefined);
     assert.equal(result.results[0]?.pdfPath, undefined);
     assert.equal(result.results[0]?.hasPdf, false);
+  } finally {
+    await rm(workspaceDir, { recursive: true, force: true });
+  }
+});
+
+test("listLocalPapers uses legacy provenance only when progressive identifiers are absent", async () => {
+  const workspaceDir = await createWorkspace();
+  try {
+    const paperKey = "metadata-only-legacy";
+    const sourceDir = path.join(workspaceDir, "knowledge-base", "sources", paperKey);
+    await writeJson(path.join(sourceDir, "metadata.json"), {
+      schemaVersion: 1,
+      sourceKind: "paper",
+      sourceKey: paperKey,
+      title: "Legacy Fallback Paper",
+      status: "citation_incomplete",
+      createdAt: "2026-05-27T00:00:00.000Z",
+      updatedAt: "2026-05-27T00:00:00.000Z",
+      summaryPath: `knowledge-base/sources/${paperKey}/summary.md`,
+      citation: {
+        citationStatus: "incomplete",
+        missingFields: ["stableIdentifier"],
+        authors: ["Grace Hopper"],
+        year: 2026,
+        venue: "Nature Quantum Information"
+      },
+      provenance: {
+        source: "nature",
+        canonicalId: "s41534-026-legacy-y"
+      },
+      artifacts: [],
+      tags: [],
+      relatedSourceKeys: [],
+      synthesisPageKeys: []
+    });
+
+    const result = await listLocalPapers({ workspaceDir, status: "all", maxResults: 10 });
+
+    assert.equal(result.total, 1);
+    assert.equal(result.results[0]?.paperKey, paperKey);
+    assert.equal(result.results[0]?.source, "nature");
+    assert.equal(result.results[0]?.canonicalId, "s41534-026-legacy-y");
+    assert.equal(result.results[0]?.recordPath, undefined);
+    assert.equal(result.results[0]?.pdfPath, undefined);
   } finally {
     await rm(workspaceDir, { recursive: true, force: true });
   }
