@@ -971,7 +971,8 @@ export function createPaperTools(input: {
         ...(args.title ? { title: args.title } : {}),
         ...(dependencies.downloadPaper === undefined && citationMetadataFetchImpl
           ? { citationMetadataFetchImpl }
-          : {})
+          : {}),
+        ...(dependencies.searchArxiv ? { searchArxivImpl: dependencies.searchArxiv } : {})
       });
       const supplementalMaterials = args.includeSupplementalMaterials === true
         ? await queueSupplementalMaterialDownload(rawResult)

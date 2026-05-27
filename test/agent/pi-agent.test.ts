@@ -437,7 +437,7 @@ test("runAgentTurn compacts oversized tool results only at the model boundary", 
 test("runAgentTurn default tools queue extension download jobs", async () => {
   const registration = registerFauxProvider();
   const workspace = await mkdtemp(path.join(tmpdir(), "pi-agent-extension-workspace-"));
-  const articleUrl = "https://example.com/research/paper.pdf";
+  const articleUrl = "https://example.com/research/paper";
   registration.setResponses([
     fauxAssistantMessage([fauxToolCall("download_paper", { url: articleUrl })], {
       stopReason: "toolUse"
@@ -553,8 +553,8 @@ test("runAgentTurn reuses the same tools across prompts in one context", async (
 
 test("runAgentTurn rebuilds built-in tools when the workspace changes", async () => {
   const registration = registerFauxProvider();
-  const articleUrlA = "https://example.com/workspace-a.pdf";
-  const articleUrlB = "https://example.com/workspace-b.pdf";
+  const articleUrlA = "https://example.com/workspace-a";
+  const articleUrlB = "https://example.com/workspace-b";
   registration.setResponses([
     fauxAssistantMessage([fauxToolCall("download_paper", { url: articleUrlA })], { stopReason: "toolUse" }),
     fauxAssistantMessage([fauxText("Queued the first workspace paper.")]),
@@ -615,7 +615,7 @@ test("runAgentTurn rebuilds built-in tools when the workspace changes", async ()
 
 test("runAgentTurn cleans up the prior tool set before replacing it on workspace switch", async () => {
   const registration = registerFauxProvider();
-  const articleUrl = "https://example.com/rebuilt-workspace.pdf";
+  const articleUrl = "https://example.com/rebuilt-workspace";
   registration.setResponses([
     fauxAssistantMessage([fauxToolCall("remember_counter", {})], { stopReason: "toolUse" }),
     fauxAssistantMessage([fauxText("Used the custom tool.")]),

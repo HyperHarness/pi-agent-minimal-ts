@@ -317,6 +317,8 @@ test("downloadPaper returns extension_unavailable without launching fallback whe
     const result = await downloadPaper({
       workspaceDir,
       url: articleUrl,
+      title: "Science extension unavailable smoke test",
+      searchArxivImpl: async () => [],
       downloadPublisherPaperImpl: async () => {
         fallbackCalls.push("download");
         throw new Error("Playwright fallback should not run without explicit opt-in");

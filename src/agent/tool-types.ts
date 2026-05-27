@@ -15,6 +15,7 @@ import type { paperWikiRelations } from "./wiki/relations.js";
 import type { generatePaperWikiSummary, PaperSummaryWorker } from "./wiki/summary.js";
 import type { checkWikiHealth, fixWikiHealth, PaperDownloadWorker } from "./wiki/health.js";
 import type { searchApsPapers } from "./paper/acquisition/aps-search.js";
+import type { searchArxiv } from "./paper/acquisition/arxiv.js";
 import type { fetchPaperWebPage } from "./paper/acquisition/paper-webpage-fetch.js";
 import type { listLocalPapers, searchLocalPapers } from "./paper/storage/local-paper-library.js";
 import type { fetchWebPage } from "./web-fetch.js";
@@ -197,6 +198,7 @@ export interface ToolDependencies {
   savePaperWebPageParse?: typeof savePaperWebPageParse;
   searchPapers?: typeof searchPapers;
   searchApsPapers?: typeof searchApsPapers;
+  searchArxiv?: typeof searchArxiv;
   downloadPaper?: typeof downloadPaper;
   registerManualPaperDownload?: typeof registerManualPaperDownload;
   parsePaper?: typeof parsePaper;

@@ -214,7 +214,7 @@ type SearchPapersTool = {
 type DownloadPaperTool = {
   execute: (
     toolCallId: string,
-    args: { id?: string; url?: string; includeSupplementalMaterials?: boolean },
+    args: { id?: string; url?: string; title?: string; includeSupplementalMaterials?: boolean },
     signal: undefined,
   ) => Promise<ToolResult>;
 };
@@ -4459,6 +4459,7 @@ test("download_paper uses the injected paper manager client for supported-publis
         throw new Error("browserSessionFactory should not be called");
       },
       usePlaywrightPaperFallback: true,
+      searchArxiv: async () => [],
       paperBrowserManagerClient: {
         async openArticle(request: { url: string }) {
           events.push(`openArticle:${request.url}`);
@@ -4488,7 +4489,10 @@ test("download_paper uses the injected paper manager client for supported-publis
 
     const result = await execute(
       "tool-call-12",
-      { url: "https://www.science.org/doi/10.1126/science.adz8659" },
+      {
+        url: "https://www.science.org/doi/10.1126/science.adz8659",
+        title: "Science manager fallback smoke test",
+      },
       undefined,
     );
 
@@ -4532,6 +4536,7 @@ test("download_paper opens manual fallback when the manager client download is n
 
     const tool = getDownloadPaperTool(workspace, {
       usePlaywrightPaperFallback: true,
+      searchArxiv: async () => [],
       paperBrowserManagerClient: {
         async openArticle(request: { url: string }) {
           events.push(`openArticle:${request.url}`);
@@ -4555,7 +4560,14 @@ test("download_paper opens manual fallback when the manager client download is n
       },
     } as unknown as CreateToolsDependencies);
 
-    const result = await tool.execute("tool-call-invalid-pdf", { url: articleUrl }, undefined);
+    const result = await tool.execute(
+      "tool-call-invalid-pdf",
+      {
+        url: articleUrl,
+        title: "Science invalid PDF fallback smoke test",
+      },
+      undefined,
+    );
 
     assert.deepEqual(result.details, {
       status: "manual_fallback_opened",
@@ -4588,6 +4600,7 @@ test("download_paper opens manual fallback when the manager client returns a cod
   try {
     const tool = getDownloadPaperTool(workspace, {
       usePlaywrightPaperFallback: true,
+      searchArxiv: async () => [],
       paperBrowserManagerClient: {
         async openArticle(request: { url: string }) {
           events.push(`openArticle:${request.url}`);
@@ -4608,7 +4621,14 @@ test("download_paper opens manual fallback when the manager client returns a cod
       },
     } as unknown as CreateToolsDependencies);
 
-    const result = await tool.execute("tool-call-remote-download-failed", { url: articleUrl }, undefined);
+    const result = await tool.execute(
+      "tool-call-remote-download-failed",
+      {
+        url: articleUrl,
+        title: "APS coded download failure smoke test",
+      },
+      undefined,
+    );
 
     assert.deepEqual(result.details, {
       status: "manual_fallback_opened",
@@ -4646,6 +4666,7 @@ test("download_paper opens manual fallback when canonicalId cannot be derived fr
 
     const tool = getDownloadPaperTool(workspace, {
       usePlaywrightPaperFallback: true,
+      searchArxiv: async () => [],
       paperBrowserManagerClient: {
         async openArticle(request: { url: string }) {
           events.push(`openArticle:${request.url}`);
@@ -4669,7 +4690,14 @@ test("download_paper opens manual fallback when canonicalId cannot be derived fr
       },
     } as unknown as CreateToolsDependencies);
 
-    const result = await tool.execute("tool-call-missing-canonical-id", { url: articleUrl }, undefined);
+    const result = await tool.execute(
+      "tool-call-missing-canonical-id",
+      {
+        url: articleUrl,
+        title: "Science canonical fallback smoke test",
+      },
+      undefined,
+    );
 
     assert.deepEqual(result.details, {
       status: "manual_fallback_opened",

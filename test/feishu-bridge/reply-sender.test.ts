@@ -29,6 +29,7 @@ test('sendReplyWithRetry retries the same reply request once for transient Feish
     messageId: 'om_source',
     msgType: 'text',
     content: JSON.stringify({ text: 'hello' }),
+    retryDelayMs: 0,
     reply: async (payload) => {
       payloads.push(payload);
       attempt += 1;
