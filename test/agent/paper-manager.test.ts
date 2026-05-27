@@ -1643,7 +1643,9 @@ test("downloadPaper still opens supported hosts for manual fallback when canonic
     const result = await downloadPaper({
       workspaceDir,
       url: articleUrl,
+      title: "Nature preview manual fallback",
       usePlaywrightFallback: true,
+      searchArxivImpl: async () => [],
       downloadPublisherPaperImpl: async () => {
         throw new PaperDownloadError(
           "manual_login_required",
@@ -1675,7 +1677,9 @@ test("downloadPaper keeps successful publisher downloads as downloaded when the 
     const result = await downloadPaper({
       workspaceDir,
       url: articleUrl,
+      title: "Nature preview resolved PDF",
       usePlaywrightFallback: true,
+      searchArxivImpl: async () => [],
       browserSessionFactory: async () => ({
         openArticlePage: async () => ({
           finalArticleUrl: articleUrl,

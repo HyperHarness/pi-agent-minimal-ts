@@ -439,11 +439,13 @@ test("downloadPaper returns extension_unavailable when the bridge fails and fall
     const result = await downloadPaper({
       workspaceDir,
       url: articleUrl,
+      title: "Nature bridge failure smoke test",
       extensionBridge: {
         async submitJob() {
           throw new Error("native host unavailable");
         }
       },
+      searchArxivImpl: async () => [],
       downloadPublisherPaperImpl: async () => {
         throw new Error("Playwright fallback should not run by default");
       },
@@ -517,12 +519,14 @@ test("downloadPaper runs legacy fallback when the bridge fails and fallback is e
     const result = await downloadPaper({
       workspaceDir,
       url: articleUrl,
+      title: "Nature legacy fallback smoke test",
       usePlaywrightFallback: true,
       extensionBridge: {
         async submitJob() {
           throw new Error("native host unavailable");
         }
       },
+      searchArxivImpl: async () => [],
       downloadPublisherPaperImpl: async () => {
         fallbackCalls.push("download");
         throw new PaperDownloadError("manual_login_required", "Nature requires manual sign-in.");

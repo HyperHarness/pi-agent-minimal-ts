@@ -2408,7 +2408,16 @@ test("fixWikiHealth skips user-authored or user-authorized repairs with explicit
 
     const result = await fixWikiHealth({
       workspaceDir: workspace,
-      issueKinds: ["needs_authorization", "summary_missing"]
+      issueKinds: ["needs_authorization", "summary_missing"],
+      downloadPaperImpl: async (options) => ({
+        status: "extension_unavailable",
+        source: "nature",
+        articleUrl: options.url as string,
+        failure: {
+          code: "extension_unavailable",
+          message: "Paper extension bridge is not configured for this test."
+        }
+      })
     });
 
     assert.equal(result.fixed, 0);
