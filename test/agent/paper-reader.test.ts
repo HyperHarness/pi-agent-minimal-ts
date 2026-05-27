@@ -448,7 +448,9 @@ test("writePaperWikiSource saves an LLM source summary and searchPaperWiki finds
     assert.equal(metadata.summaryPath, "knowledge-base/sources/arxiv-2601.00003/summary.md");
     assert.equal(metadata.artifacts[0]?.engine, "plain-text-baseline");
     assert.equal(metadata.artifacts[0]?.markdownPath, "knowledge-base/sources/arxiv-2601.00003/parses/plain-text-baseline/document.md");
-    assert.equal(metadata.provenance.rawSha256, parsed.pdfSha256);
+    assert.equal("rawSha256" in metadata.provenance, false);
+    assert.equal("rawPath" in metadata.provenance, false);
+    assert.equal("recordPath" in metadata.provenance, false);
     assert.deepEqual(metadata.tags, ["quantum-simulation"]);
     assert.deepEqual(metadata.relatedSourceKeys, []);
     await assert.rejects(

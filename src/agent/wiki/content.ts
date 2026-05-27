@@ -563,12 +563,20 @@ ${sectionList("Open Questions", input.openQuestions)}`;
       missingFields: []
     },
     provenance: {
-      ...(previousMetadata?.provenance ?? {}),
-      ...(source?.recordPath ? { recordPath: relativeToWorkspace(input.workspaceDir, source.recordPath) } : {}),
-      ...(source?.articleUrl ? { url: source.articleUrl } : {}),
-      ...(source?.canonicalId && source.source === "arxiv" ? { arxivId: source.canonicalId } : {}),
-      ...(source?.pdfPath ? { rawPath: relativeToWorkspace(input.workspaceDir, source.pdfPath) } : {}),
-      ...(document.pdfSha256 ? { rawSha256: document.pdfSha256 } : {})
+      ...(source?.articleUrl ?? previousMetadata?.provenance.url ? {
+        url: source?.articleUrl ?? previousMetadata?.provenance.url
+      } : {}),
+      ...(previousMetadata?.provenance.doi ? { doi: previousMetadata.provenance.doi } : {}),
+      ...(source?.canonicalId && source.source === "arxiv"
+        ? { arxivId: source.canonicalId }
+        : previousMetadata?.provenance.arxivId
+          ? { arxivId: previousMetadata.provenance.arxivId }
+          : {}),
+      ...(source?.recordPath
+        ? { acquisitionPath: relativeToWorkspace(input.workspaceDir, source.recordPath) }
+        : previousMetadata?.provenance.acquisitionPath
+          ? { acquisitionPath: previousMetadata.provenance.acquisitionPath }
+          : {})
     },
     artifacts: [
       ...(previousMetadata?.artifacts ?? []).filter((artifact) =>
