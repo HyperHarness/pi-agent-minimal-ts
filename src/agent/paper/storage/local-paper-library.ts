@@ -154,6 +154,89 @@ function readOptionalString(value: unknown): string | undefined {
   return typeof value === "string" && value.trim() ? value : undefined;
 }
 
+function inferPaperSourceFromSourceKey(sourceKey: string): PaperSource | undefined {
+  for (const source of ["arxiv", "science", "nature", "aps", "external"] satisfies PaperSource[]) {
+    if (sourceKey === source || sourceKey.startsWith(`${source}-`)) {
+      return source;
+    }
+  }
+  return undefined;
+}
+
+function inferPaperSourceFromArticleUrl(articleUrl: string | undefined): PaperSource | undefined {
+  if (!articleUrl) {
+    return undefined;
+  }
+  try {
+    const hostname = new URL(articleUrl).hostname.toLowerCase();
+    if (hostname === "arxiv.org" || hostname.endsWith(".arxiv.org")) {
+      return "arxiv";
+    }
+    if (hostname === "www.nature.com" || hostname === "nature.com" || hostname.endsWith(".nature.com")) {
+      return "nature";
+    }
+    if (hostname === "journals.aps.org" || hostname === "link.aps.org" || hostname.endsWith(".aps.org")) {
+      return "aps";
+    }
+    if (hostname === "www.science.org" || hostname === "science.org" || hostname.endsWith(".science.org")) {
+      return "science";
+    }
+  } catch {
+    return undefined;
+  }
+  return undefined;
+}
+
+function inferSupportedPublisher(source: PaperSource | undefined): SupportedPaperSource | undefined {
+  return source === "science" || source === "nature" || source === "aps" ? source : undefined;
+}
+
+function inferArxivIdFromUrl(articleUrl: string | undefined): string | undefined {
+  if (!articleUrl) {
+    return undefined;
+  }
+  try {
+    const parsed = new URL(articleUrl);
+    if (parsed.hostname.toLowerCase() !== "arxiv.org") {
+      return undefined;
+    }
+    const match = parsed.pathname.match(/^\/(?:abs|pdf)\/([^/?#]+?)(?:\.pdf)?$/i);
+    return match?.[1];
+  } catch {
+    return undefined;
+  }
+  return undefined;
+}
+
+function resolveCanonicalIdFromProgressiveMetadata(input: {
+  source: PaperSource | undefined;
+  articleUrl: string | undefined;
+  citation: Record<string, unknown>;
+  provenance: Record<string, unknown>;
+}): string | undefined {
+  const legacyCanonicalId = readOptionalString(input.provenance.canonicalId);
+  if (legacyCanonicalId) {
+    return legacyCanonicalId;
+  }
+  const publisher = inferSupportedPublisher(input.source);
+  if (publisher && input.articleUrl) {
+    const canonicalId = resolvePublisherCanonicalIdFromArticleUrl({
+      publisher,
+      articleUrl: input.articleUrl
+    });
+    if (canonicalId) {
+      return canonicalId;
+    }
+  }
+  return (
+    readOptionalString(input.citation.doi) ??
+    readOptionalString(input.provenance.doi) ??
+    readOptionalString(input.citation.arxivId) ??
+    readOptionalString(input.provenance.arxivId) ??
+    inferArxivIdFromUrl(input.articleUrl)
+  );
+}
+
 function normalizePortableFilePath(filePath: string): string {
   const drivePathMatch = filePath.match(/^([A-Za-z]):[\\/](.*)$/);
   if (drivePathMatch?.[1] && drivePathMatch[2]) {
@@ -315,12 +398,17 @@ function normalizeKnowledgeSourceMetadata(input: {
   const provenance = isRecord(input.raw.provenance) ? input.raw.provenance : {};
   const paperKey = readOptionalString(input.raw.sourceKey) ?? input.fallbackPaperKey;
   const createdAt = readOptionalString(input.raw.createdAt) ?? new Date().toISOString();
-  const source = readOptionalString(provenance.source);
-  const canonicalId =
-    readOptionalString(provenance.canonicalId) ??
-    readOptionalString(citation.doi) ??
-    readOptionalString(citation.arxivId);
   const articleUrl = readOptionalString(provenance.url);
+  const source =
+    readOptionalString(provenance.source) ??
+    inferPaperSourceFromSourceKey(paperKey) ??
+    inferPaperSourceFromArticleUrl(articleUrl);
+  const canonicalId = resolveCanonicalIdFromProgressiveMetadata({
+    source: source as PaperSource | undefined,
+    articleUrl,
+    citation,
+    provenance
+  });
   const recordPath = readOptionalString(provenance.acquisitionPath);
   const pdfPath = undefined;
 

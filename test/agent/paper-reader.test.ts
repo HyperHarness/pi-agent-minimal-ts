@@ -286,8 +286,17 @@ test("parsePaper writes reading artifacts and reuses a same-hash cache", async (
         url: "https://arxiv.org/abs/2406.06015",
         arxivId: "2406.06015",
         acquisitionPath: "knowledge-base/sources/arxiv-2406.06015/acquisition.json",
-        recordPath: "knowledge-base/sources/arxiv-2406.06015/acquisition.json"
+        recordPath: "knowledge-base/sources/arxiv-2406.06015/acquisition.json",
+        rawPath: "knowledge-base/raw/pdfs/arxiv-2406.06015.pdf",
+        downloadPath: "knowledge-base/raw/pdfs/arxiv-2406.06015.pdf",
+        source: "arxiv",
+        canonicalId: "2406.06015"
       },
+      pdfPath,
+      pdfSha256: "legacy-sha",
+      recordPath: "knowledge-base/sources/arxiv-2406.06015/acquisition.json",
+      source: "arxiv",
+      canonicalId: "2406.06015",
       artifacts: [],
       tags: [],
       relatedSourceKeys: [],
@@ -321,7 +330,20 @@ test("parsePaper writes reading artifacts and reuses a same-hash cache", async (
     const metadataJson = JSON.parse(await readFile(metadataPath, "utf8"));
     assert.deepEqual(metadataJson.citation.authors, ["Ada Lovelace"]);
     assert.equal(metadataJson.citation.citationStatus, "complete");
-    assert.equal(metadataJson.pdfSha256, first.pdfSha256);
+    for (const forbiddenField of ["pdfPath", "pdfSha256", "recordPath", "source", "canonicalId"]) {
+      assert.equal(forbiddenField in metadataJson, false);
+    }
+    for (const forbiddenProvenanceField of ["recordPath", "rawPath", "downloadPath", "source", "canonicalId"]) {
+      assert.equal(forbiddenProvenanceField in metadataJson.provenance, false);
+    }
+    const parseArtifact = metadataJson.artifacts.find((artifact: { kind?: string; engine?: string }) =>
+      artifact.kind === "parse" && artifact.engine === "plain-text-baseline"
+    );
+    assert.ok(parseArtifact);
+    assert.equal(parseArtifact.path, "knowledge-base/sources/arxiv-2406.06015/parses/plain-text-baseline/document.md");
+    assert.equal(parseArtifact.markdownPath, "knowledge-base/sources/arxiv-2406.06015/parses/plain-text-baseline/document.md");
+    assert.equal(parseArtifact.jsonPath, "knowledge-base/sources/arxiv-2406.06015/parses/plain-text-baseline/parse.json");
+    assert.equal(parseArtifact.qualityPath, "knowledge-base/sources/arxiv-2406.06015/parses/plain-text-baseline/quality.json");
   } finally {
     await rm(workspace, { recursive: true, force: true });
   }
@@ -421,6 +443,26 @@ test("writePaperWikiSource saves an LLM source summary and searchPaperWiki finds
       path: pdfPath,
       engine: "plain-text-baseline"
     });
+    const metadataPath = path.join(workspace, "knowledge-base", "sources", parsed.paperKey, "metadata.json");
+    const seededMetadata = JSON.parse(await readFile(metadataPath, "utf8"));
+    await writeJson(metadataPath, {
+      ...seededMetadata,
+      artifacts: [
+        {
+          kind: "raw",
+          path: "knowledge-base/raw/pdfs/arxiv-2601.00003.pdf",
+          sha256: "legacy-raw-sha"
+        },
+        {
+          kind: "parse",
+          path: "knowledge-base/sources/arxiv-2601.00003/parses/docling/document.md",
+          engine: "docling",
+          markdownPath: "knowledge-base/sources/arxiv-2601.00003/parses/docling/document.md",
+          jsonPath: "knowledge-base/sources/arxiv-2601.00003/parses/docling/parse.json",
+          qualityPath: "knowledge-base/sources/arxiv-2601.00003/parses/docling/quality.json"
+        }
+      ]
+    });
 
     const source = await writePaperWikiSource({
       workspaceDir: workspace,
@@ -446,8 +488,14 @@ test("writePaperWikiSource saves an LLM source summary and searchPaperWiki finds
     assert.equal(metadata.sourceKey, "arxiv-2601.00003");
     assert.equal(metadata.status, "ready");
     assert.equal(metadata.summaryPath, "knowledge-base/sources/arxiv-2601.00003/summary.md");
-    assert.equal(metadata.artifacts[0]?.engine, "plain-text-baseline");
-    assert.equal(metadata.artifacts[0]?.markdownPath, "knowledge-base/sources/arxiv-2601.00003/parses/plain-text-baseline/document.md");
+    assert.equal(metadata.artifacts.every((artifact: { kind?: string }) => artifact.kind === "parse"), true);
+    assert.equal(metadata.artifacts.some((artifact: { kind?: string }) => artifact.kind === "raw"), false);
+    assert.equal(metadata.artifacts.some((artifact: { engine?: string }) => artifact.engine === "docling"), true);
+    const summaryParseArtifact = metadata.artifacts.find((artifact: { engine?: string }) =>
+      artifact.engine === "plain-text-baseline"
+    );
+    assert.ok(summaryParseArtifact);
+    assert.equal(summaryParseArtifact.markdownPath, "knowledge-base/sources/arxiv-2601.00003/parses/plain-text-baseline/document.md");
     assert.equal("rawSha256" in metadata.provenance, false);
     assert.equal("rawPath" in metadata.provenance, false);
     assert.equal("recordPath" in metadata.provenance, false);

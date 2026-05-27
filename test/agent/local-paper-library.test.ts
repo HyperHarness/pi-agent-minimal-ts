@@ -346,8 +346,8 @@ test("listLocalPapers canonicalizes accepted APS webpage artifact directories fr
       },
       provenance: {
         url: "https://journals.aps.org/prapplied/accepted/10.1103/k3d5-v43c",
-        source: "aps",
-        canonicalId: "10.1103/k3d5-v43c"
+        doi: "10.1103/k3d5-v43c",
+        acquisitionPath: "knowledge-base/sources/aps-10.1103-k3d5-v43c/acquisition.json"
       },
       artifacts: [],
       tags: [],

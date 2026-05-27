@@ -143,6 +143,13 @@ function getRecordDownloadPath(record: PaperRecord): string | undefined {
   return record.status === "downloaded" ? record.downloadPath : undefined;
 }
 
+function relativeToWorkspace(workspaceDir: string, filePath: string): string {
+  const normalizedPath = path.isAbsolute(filePath)
+    ? path.relative(workspaceDir, filePath)
+    : filePath;
+  return normalizedPath.split(path.sep).join("/");
+}
+
 export async function resolvePaperSource(input: ResolvePaperInput): Promise<ResolvedPaperSource> {
   const locatorCount = Number(Boolean(input.path)) + Number(Boolean(input.recordPath));
   if (locatorCount !== 1) {
@@ -294,10 +301,13 @@ export async function writeParseArtifacts(input: {
     mkdir(path.dirname(artifacts.chunksPath), { recursive: true })
   ]);
   const existingMetadata = await readJsonFile<Record<string, unknown>>(metadataPath);
-  const source = {
-    ...existingMetadata,
-    ...input.source
-  };
+  const source = buildParseMetadata({
+    workspaceDir: input.workspaceDir,
+    source: input.source,
+    document: input.document,
+    artifacts,
+    existingMetadata
+  });
   await Promise.all([
     writeFile(metadataPath, `${JSON.stringify(source, null, 2)}\n`, "utf8"),
     writeFile(artifacts.parsePath, `${JSON.stringify(input.document, null, 2)}\n`, "utf8"),
@@ -310,6 +320,198 @@ export async function writeParseArtifacts(input: {
     )
   ]);
   return artifacts;
+}
+
+function isRecord(value: unknown): value is Record<string, unknown> {
+  return typeof value === "object" && value !== null && !Array.isArray(value);
+}
+
+function readOptionalString(value: unknown): string | undefined {
+  return typeof value === "string" && value.trim() ? value : undefined;
+}
+
+function sanitizeExistingPaperMetadata(metadata: Record<string, unknown> | undefined): Record<string, unknown> {
+  if (!metadata) {
+    return {};
+  }
+  const sanitized: Record<string, unknown> = { ...metadata };
+  for (const field of [
+    "paperKey",
+    "pdfPath",
+    "pdfSha256",
+    "recordPath",
+    "source",
+    "canonicalId",
+    "articleUrl",
+    "rawPath",
+    "downloadPath",
+    "rawSha256"
+  ]) {
+    delete sanitized[field];
+  }
+  return sanitized;
+}
+
+function sanitizeExistingProvenance(provenance: unknown): Record<string, unknown> {
+  if (!isRecord(provenance)) {
+    return {};
+  }
+  const sanitized = { ...provenance };
+  for (const field of ["recordPath", "rawPath", "downloadPath", "source", "canonicalId", "rawSha256", "pdfPath", "pdfSha256"]) {
+    delete sanitized[field];
+  }
+  return sanitized;
+}
+
+function arxivIdFromUrl(articleUrl: string | undefined): string | undefined {
+  if (!articleUrl) {
+    return undefined;
+  }
+  try {
+    const parsed = new URL(articleUrl);
+    if (!/(^|\.)arxiv\.org$/i.test(parsed.hostname)) {
+      return undefined;
+    }
+    const match = parsed.pathname.match(/^\/(?:abs|pdf)\/([^/?#]+?)(?:\.pdf)?$/i);
+    return match?.[1];
+  } catch {
+    return undefined;
+  }
+  return undefined;
+}
+
+function arxivIdFromSource(source: PaperReaderSource): string | undefined {
+  if (source.source === "arxiv" && source.canonicalId) {
+    return source.canonicalId;
+  }
+  if (source.paperKey.startsWith("arxiv-")) {
+    return source.canonicalId ?? source.paperKey.slice("arxiv-".length);
+  }
+  return arxivIdFromUrl(source.articleUrl);
+}
+
+function sourceFromSourceKey(sourceKey: string): string | undefined {
+  for (const source of ["arxiv", "science", "nature", "aps", "external"]) {
+    if (sourceKey === source || sourceKey.startsWith(`${source}-`)) {
+      return source;
+    }
+  }
+  return undefined;
+}
+
+function sourceFromUrl(articleUrl: string | undefined): string | undefined {
+  if (!articleUrl) {
+    return undefined;
+  }
+  try {
+    const hostname = new URL(articleUrl).hostname.toLowerCase();
+    if (hostname === "arxiv.org" || hostname.endsWith(".arxiv.org")) {
+      return "arxiv";
+    }
+    if (hostname === "www.nature.com" || hostname === "nature.com" || hostname.endsWith(".nature.com")) {
+      return "nature";
+    }
+    if (hostname === "journals.aps.org" || hostname === "link.aps.org" || hostname.endsWith(".aps.org")) {
+      return "aps";
+    }
+    if (hostname === "www.science.org" || hostname === "science.org" || hostname.endsWith(".science.org")) {
+      return "science";
+    }
+  } catch {
+    return undefined;
+  }
+  return undefined;
+}
+
+function publisherCanonicalIdFromUrl(source: string | undefined, articleUrl: string | undefined): string | undefined {
+  if (!source || !articleUrl) {
+    return undefined;
+  }
+  try {
+    const parsed = new URL(articleUrl);
+    if (source === "science") {
+      const match = decodeURIComponent(parsed.pathname).match(/^\/doi\/(?:abs\/|full\/|pdf\/|epdf\/)?(10\.\d{4,9}\/[^/?#]+)$/i);
+      return match?.[1];
+    }
+    if (source === "aps") {
+      const match = decodeURIComponent(parsed.pathname).match(/^\/[^/]+\/(?:abstract|accepted)\/(10\.1103)\/([^/?#]+)$/i);
+      return match?.[1] && match[2] ? `${match[1]}/${match[2]}` : undefined;
+    }
+    if (source === "nature") {
+      const match = parsed.pathname.match(/^\/articles\/(s\d{5}-\d{3}-\d{5}-[a-z0-9])$/i);
+      return match?.[1];
+    }
+  } catch {
+    return undefined;
+  }
+  return undefined;
+}
+
+function buildParseMetadata(input: {
+  workspaceDir: string;
+  source: PaperReaderSource;
+  document: ParsedPaperDocument;
+  artifacts: PaperParseArtifactPaths;
+  existingMetadata: Record<string, unknown> | undefined;
+}): Record<string, unknown> {
+  const existing = sanitizeExistingPaperMetadata(input.existingMetadata);
+  const existingProvenance = isRecord(input.existingMetadata?.provenance)
+    ? input.existingMetadata.provenance
+    : {};
+  const provenance = sanitizeExistingProvenance(existingProvenance);
+  const articleUrl = input.source.articleUrl ?? readOptionalString(provenance.url);
+  const arxivId = arxivIdFromSource(input.source) ?? readOptionalString(provenance.arxivId);
+  const acquisitionPath = input.source.recordPath
+    ? relativeToWorkspace(input.workspaceDir, input.source.recordPath)
+    : readOptionalString(provenance.acquisitionPath);
+  const previousArtifacts = Array.isArray(input.existingMetadata?.artifacts)
+    ? input.existingMetadata.artifacts.filter((artifact): artifact is Record<string, unknown> =>
+        isRecord(artifact) &&
+        artifact.kind === "parse" &&
+        artifact.engine !== input.document.engine
+      )
+    : [];
+  const parseArtifact = {
+    kind: "parse",
+    path: relativeToWorkspace(input.workspaceDir, input.artifacts.markdownPath),
+    engine: input.document.engine,
+    markdownPath: relativeToWorkspace(input.workspaceDir, input.artifacts.markdownPath),
+    jsonPath: relativeToWorkspace(input.workspaceDir, input.artifacts.parsePath),
+    qualityPath: relativeToWorkspace(input.workspaceDir, input.artifacts.qualityPath)
+  };
+  const now = input.document.createdAt;
+  const citation = isRecord(input.existingMetadata?.citation)
+    ? input.existingMetadata.citation
+    : {
+        citationStatus: "incomplete",
+        missingFields: []
+      };
+
+  return {
+    ...existing,
+    schemaVersion: 1,
+    sourceKind: "paper",
+    sourceKey: input.document.paperKey,
+    title: readOptionalString(input.existingMetadata?.title) ?? input.source.title ?? input.document.title ?? input.document.paperKey,
+    status: readOptionalString(input.existingMetadata?.status) ?? "ready",
+    createdAt: readOptionalString(input.existingMetadata?.createdAt) ?? input.source.createdAt ?? now,
+    updatedAt: now,
+    summaryPath: readOptionalString(input.existingMetadata?.summaryPath) ?? `knowledge-base/sources/${input.document.paperKey}/summary.md`,
+    citation,
+    provenance: {
+      ...provenance,
+      ...(articleUrl ? { url: articleUrl } : {}),
+      ...(arxivId ? { arxivId } : {}),
+      ...(acquisitionPath ? { acquisitionPath } : {})
+    },
+    artifacts: [
+      ...previousArtifacts,
+      parseArtifact
+    ],
+    tags: Array.isArray(input.existingMetadata?.tags) ? input.existingMetadata.tags : [],
+    relatedSourceKeys: Array.isArray(input.existingMetadata?.relatedSourceKeys) ? input.existingMetadata.relatedSourceKeys : [],
+    synthesisPageKeys: Array.isArray(input.existingMetadata?.synthesisPageKeys) ? input.existingMetadata.synthesisPageKeys : []
+  };
 }
 
 async function readJsonFile<T>(filePath: string): Promise<T | undefined> {
@@ -333,19 +535,33 @@ export async function readPaperSourceByKey(input: {
     const provenance = typeof metadata.provenance === "object" && metadata.provenance !== null
       ? metadata.provenance as Record<string, unknown>
       : {};
+    const sourceKey = typeof metadata.sourceKey === "string" ? metadata.sourceKey : input.paperKey;
+    const articleUrl = typeof provenance.url === "string" ? provenance.url : undefined;
+    const source = typeof provenance.source === "string"
+      ? provenance.source
+      : sourceFromSourceKey(sourceKey) ?? sourceFromUrl(articleUrl);
+    const canonicalId =
+      (typeof provenance.canonicalId === "string" ? provenance.canonicalId : undefined) ??
+      publisherCanonicalIdFromUrl(source, articleUrl) ??
+      (typeof citation.doi === "string" ? citation.doi : undefined) ??
+      (typeof provenance.doi === "string" ? provenance.doi : undefined) ??
+      (typeof citation.arxivId === "string" ? citation.arxivId : undefined) ??
+      (typeof provenance.arxivId === "string" ? provenance.arxivId : undefined) ??
+      arxivIdFromUrl(articleUrl);
     return {
       ...(metadata as unknown as PaperReaderSource),
-      paperKey: typeof metadata.sourceKey === "string" ? metadata.sourceKey : input.paperKey,
+      paperKey: sourceKey,
       createdAt: typeof metadata.createdAt === "string" ? metadata.createdAt : new Date().toISOString(),
       ...(typeof provenance.rawPath === "string" ? { pdfPath: provenance.rawPath } : {}),
-      ...(typeof provenance.recordPath === "string" ? { recordPath: provenance.recordPath } : {}),
-      ...(typeof provenance.source === "string" ? { source: provenance.source } : {}),
-      ...(typeof provenance.canonicalId === "string" ? { canonicalId: provenance.canonicalId } : {}),
-      ...(typeof provenance.url === "string" ? { articleUrl: provenance.url } : {}),
-      ...(typeof metadata.title === "string" ? { title: metadata.title } : {}),
-      ...(typeof citation.arxivId === "string" && typeof provenance.canonicalId !== "string"
-        ? { canonicalId: citation.arxivId }
-        : {})
+      ...(typeof provenance.recordPath === "string"
+        ? { recordPath: provenance.recordPath }
+        : typeof provenance.acquisitionPath === "string"
+          ? { recordPath: provenance.acquisitionPath }
+          : {}),
+      ...(source ? { source } : {}),
+      ...(canonicalId ? { canonicalId } : {}),
+      ...(articleUrl ? { articleUrl } : {}),
+      ...(typeof metadata.title === "string" ? { title: metadata.title } : {})
     };
   } catch {
     return undefined;

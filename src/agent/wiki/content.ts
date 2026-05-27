@@ -580,7 +580,7 @@ ${sectionList("Open Questions", input.openQuestions)}`;
     },
     artifacts: [
       ...(previousMetadata?.artifacts ?? []).filter((artifact) =>
-        !(artifact.kind === "parse" && artifact.engine === engine)
+        artifact.kind === "parse" && artifact.engine !== engine
       ),
       {
         kind: "parse",
