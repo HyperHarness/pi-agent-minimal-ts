@@ -1,0 +1,53 @@
+{
+  "schemaVersion": 1,
+  "sourceKind": "paper",
+  "sourceKey": "nature-nature14270",
+  "title": "State preservation by repetitive error detection in a superconducting quantum circuit",
+  "status": "missing_artifact",
+  "createdAt": "2026-05-27T01:31:12.848Z",
+  "updatedAt": "2026-05-27T01:31:27.136Z",
+  "summaryPath": "knowledge-base/sources/nature-nature14270/summary.md",
+  "citation": {
+    "citationStatus": "complete",
+    "missingFields": [],
+    "doi": "10.1038/nature14270",
+    "authors": [
+      "J. Kelly",
+      "R. Barends",
+      "A. G. Fowler",
+      "A. Megrant",
+      "E. Jeffrey",
+      "T. C. White",
+      "D. Sank",
+      "J. Y. Mutus",
+      "B. Campbell",
+      "Yu Chen",
+      "Z. Chen",
+      "B. Chiaro",
+      "A. Dunsworth",
+      "I.-C. Hoi",
+      "C. Neill",
+      "P. J. J. O’Malley",
+      "C. Quintana",
+      "P. Roushan",
+      "A. Vainsencher",
+      "J. Wenner",
+      "A. N. Cleland",
+      "John M. Martinis"
+    ],
+    "publisher": "Springer Nature",
+    "resolvedFrom": "crossref_api",
+    "sourceConfidence": "high",
+    "year": 2015,
+    "venue": "Nature"
+  },
+  "provenance": {
+    "url": "https://www.nature.com/articles/nature14270",
+    "doi": "10.1038/nature14270",
+    "acquisitionPath": "knowledge-base/sources/nature-nature14270/acquisition.json"
+  },
+  "artifacts": [],
+  "tags": [],
+  "relatedSourceKeys": [],
+  "synthesisPageKeys": []
+}

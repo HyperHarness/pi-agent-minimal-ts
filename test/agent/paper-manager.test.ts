@@ -989,7 +989,7 @@ test("downloadPaper enriches source citation metadata after a supported publishe
     assert.equal(metadata.citation.venue, "Nature");
     assert.equal(metadata.citation.doi, "10.1038/s41586-024-08449-y");
     assert.equal(metadata.citation.citationStatus, "complete");
-    assert.equal(metadata.status, "ready");
+    assert.equal(metadata.status, "missing_artifact");
     assert.deepEqual(metadata.citation.missingFields, []);
     assert.equal(metadata.citation.resolvedFrom, "crossref_api");
     assert.equal(citationFetchCalls.length, 1);

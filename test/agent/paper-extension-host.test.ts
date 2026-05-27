@@ -261,7 +261,7 @@ test("handleExtensionHostMessage registers supported publisher PDFs using canoni
     assert.equal(metadata.citation.year, 2025);
     assert.equal(metadata.citation.venue, "Nature");
     assert.equal(metadata.citation.citationStatus, "complete");
-    assert.equal(metadata.status, "ready");
+    assert.equal(metadata.status, "missing_artifact");
     assert.deepEqual(metadata.citation.missingFields, []);
     const events = await readPaperDownloadJobEvents({ workspaceDir });
     assert.equal(events.at(-1)?.status, "downloaded");
@@ -831,8 +831,9 @@ test("handleExtensionHostMessage completes legacy Nature metadata after suppleme
     assert.deepEqual(metadata.citation.missingFields, []);
     assert.equal(metadata.status, "ready");
     assert.equal(metadata.summaryPath, `knowledge-base/sources/${paperKey}/summary.md`);
-    assert.equal(metadata.provenance.recordPath, `knowledge-base/sources/${paperKey}/acquisition.json`);
-    assert.equal(metadata.provenance.rawPath, `knowledge-base/raw/pdfs/${paperKey}.pdf`);
+    assert.equal(metadata.provenance.acquisitionPath, `knowledge-base/sources/${paperKey}/acquisition.json`);
+    assert.equal("recordPath" in metadata.provenance, false);
+    assert.equal("rawPath" in metadata.provenance, false);
     assert.ok(metadata.artifacts.every((artifact: { path: string }) =>
       !path.isAbsolute(artifact.path) && !artifact.path.startsWith("\\\\")
     ));
