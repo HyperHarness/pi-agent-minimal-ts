@@ -343,6 +343,9 @@ function sanitizeExistingPaperMetadata(metadata: Record<string, unknown> | undef
     "source",
     "canonicalId",
     "articleUrl",
+    "pdfUrl",
+    "downloadStatus",
+    "readingStatus",
     "rawPath",
     "downloadPath",
     "rawSha256"
@@ -357,10 +360,30 @@ function sanitizeExistingProvenance(provenance: unknown): Record<string, unknown
     return {};
   }
   const sanitized = { ...provenance };
-  for (const field of ["recordPath", "rawPath", "downloadPath", "source", "canonicalId", "rawSha256", "pdfPath", "pdfSha256"]) {
+  for (const field of [
+    "recordPath",
+    "rawPath",
+    "downloadPath",
+    "source",
+    "canonicalId",
+    "rawSha256",
+    "pdfPath",
+    "pdfSha256",
+    "pdfUrl",
+    "downloadStatus",
+    "readingStatus"
+  ]) {
     delete sanitized[field];
   }
   return sanitized;
+}
+
+function deriveParseMetadataStatus(existingStatus: unknown): string {
+  const status = readOptionalString(existingStatus);
+  if (!status || status === "missing_artifact") {
+    return "ready";
+  }
+  return status;
 }
 
 function arxivIdFromUrl(articleUrl: string | undefined): string | undefined {
@@ -507,7 +530,7 @@ function buildParseMetadata(input: {
     sourceKind: "paper",
     sourceKey: input.document.paperKey,
     title: readOptionalString(input.existingMetadata?.title) ?? input.source.title ?? input.document.title ?? input.document.paperKey,
-    status: readOptionalString(input.existingMetadata?.status) ?? "ready",
+    status: deriveParseMetadataStatus(input.existingMetadata?.status),
     createdAt: readOptionalString(input.existingMetadata?.createdAt) ?? input.source.createdAt ?? now,
     updatedAt: now,
     summaryPath: readOptionalString(input.existingMetadata?.summaryPath) ?? `knowledge-base/sources/${input.document.paperKey}/summary.md`,

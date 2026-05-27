@@ -1359,6 +1359,74 @@ test("parsePaper resolves downloaded paper records", async () => {
   }
 });
 
+test("parsePaper sanitizes legacy runtime provenance when writing parse metadata", async () => {
+  const workspace = await createWorkspace();
+  try {
+    const paperKey = "arxiv-2401.09999";
+    const pdfPath = await writePdf(workspace, `${paperKey}.pdf`, "legacy progressive metadata cleanup");
+    const recordPath = path.join(workspace, "knowledge-base", "sources", paperKey, "acquisition.json");
+    await mkdir(path.dirname(recordPath), { recursive: true });
+    await writeFile(recordPath, `${JSON.stringify({
+      source: "arxiv",
+      articleUrl: "https://arxiv.org/abs/2401.09999",
+      recordedAt: "2026-05-27T00:00:00.000Z",
+      handlingMethod: "direct_http",
+      status: "downloaded",
+      canonicalId: "2401.09999",
+      pdfUrl: "https://arxiv.org/pdf/2401.09999.pdf",
+      downloadPath: pdfPath
+    }, null, 2)}\n`, "utf8");
+    await writeSourceMetadata(workspace, paperKey, {
+      status: "missing_artifact",
+      provenance: {
+        url: "https://arxiv.org/abs/2401.09999",
+        acquisitionPath: `knowledge-base/sources/${paperKey}/acquisition.json`,
+        source: "arxiv",
+        canonicalId: "2401.09999",
+        recordPath: `knowledge-base/sources/${paperKey}/legacy-record.json`,
+        pdfUrl: "https://arxiv.org/pdf/2401.09999.pdf",
+        downloadStatus: "downloaded",
+        readingStatus: "queued",
+        downloadPath: "knowledge-base/raw/pdfs/legacy.pdf",
+        rawPath: "knowledge-base/raw/pdfs/legacy.pdf",
+        rawSha256: "legacy-sha"
+      }
+    });
+
+    await parsePaper({
+      workspaceDir: workspace,
+      recordPath,
+      engine: "plain-text-baseline"
+    });
+
+    const metadata = JSON.parse(
+      await readFile(path.join(workspace, "knowledge-base", "sources", paperKey, "metadata.json"), "utf8")
+    ) as Record<string, unknown>;
+    const provenance = metadata.provenance as Record<string, unknown>;
+
+    assert.equal(metadata.status, "ready");
+    for (const field of [
+      "source",
+      "canonicalId",
+      "recordPath",
+      "pdfUrl",
+      "downloadStatus",
+      "readingStatus",
+      "downloadPath",
+      "rawPath",
+      "rawSha256"
+    ]) {
+      assert.equal(field in provenance, false, `${field} should not be preserved in paper metadata provenance`);
+    }
+    assert.equal(provenance.url, "https://arxiv.org/abs/2401.09999");
+    assert.equal(provenance.acquisitionPath, `knowledge-base/sources/${paperKey}/acquisition.json`);
+    assert.ok(Array.isArray(metadata.artifacts));
+    assert.equal((metadata.artifacts as unknown[]).length, 1);
+  } finally {
+    await rm(workspace, { recursive: true, force: true });
+  }
+});
+
 test("inspectPaper distinguishes webpage parses from downloaded PDFs", async () => {
   const workspace = await createWorkspace();
   try {
