@@ -131,7 +131,10 @@ test("writePaperRecord persists publisher supplemental materials into source met
     const acquisition = JSON.parse(await readFile(recordPath, "utf8"));
     assert.equal(acquisition.supplementalMaterials[0].filename, "SM.pdf");
     const metadata = JSON.parse(await readFile(path.join(path.dirname(recordPath), "metadata.json"), "utf8")) as KnowledgeSourceMetadata;
-    assert.equal(metadata.artifacts.some((artifact) => artifact.note === "Supplemental Material"), true);
+    assert.deepEqual(metadata.artifacts, []);
+    assert.equal(metadata.provenance.acquisitionPath, "knowledge-base/sources/aps-10.1103-PhysRevLett.111.080502/acquisition.json");
+    assert.equal("pdfUrl" in metadata.provenance, false);
+    assert.equal("downloadPath" in metadata.provenance, false);
   } finally {
     await rm(workspaceDir, { recursive: true, force: true });
   }
@@ -455,7 +458,7 @@ test("writePaperRecord writes citation metadata into metadata.json and omits leg
     });
     const metadata = JSON.parse(await readFile(metadataPath, "utf8")) as KnowledgeSourceMetadata & {
       citation: KnowledgeSourceMetadata["citation"] & { doi?: string; publisher?: string };
-      provenance: KnowledgeSourceMetadata["provenance"] & { acquisitionPath?: string; downloadStatus?: string };
+      provenance: KnowledgeSourceMetadata["provenance"] & { acquisitionPath?: string };
     };
 
     assert.equal(metadataPath, path.join(path.dirname(recordPath), "metadata.json"));
@@ -468,7 +471,10 @@ test("writePaperRecord writes citation metadata into metadata.json and omits leg
     assert.equal(metadata.provenance.url, "https://www.science.org/doi/10.1126/science.adz8659");
     assert.equal(metadata.citation.doi, "10.1126/science.adz8659");
     assert.equal(metadata.citation.publisher, "American Association for the Advancement of Science");
-    assert.equal(metadata.provenance.downloadStatus, "manual_fallback_opened");
+    assert.equal("downloadStatus" in metadata.provenance, false);
+    assert.equal("recordPath" in metadata.provenance, false);
+    assert.equal("source" in metadata.provenance, false);
+    assert.equal("canonicalId" in metadata.provenance, false);
     assert.equal(metadata.citation.citationStatus, "incomplete");
     assert.deepEqual(metadata.citation.missingFields, ["authors", "year", "venue"]);
     await assert.rejects(readFile(path.join(path.dirname(recordPath), "source.json"), "utf8"), { code: "ENOENT" });
@@ -529,9 +535,13 @@ test("paper source metadata derives arXiv ids and preserves manually enriched fi
     assert.equal(updated.title, "Preserved Title");
     assert.deepEqual(updated.citation.authors, ["Ada Lovelace"]);
     assert.equal(updated.citation.venue, "arXiv");
-    assert.equal(updated.provenance.readingStatus, "queued");
+    assert.equal("readingStatus" in updated.provenance, false);
+    assert.equal("downloadStatus" in updated.provenance, false);
+    assert.equal("pdfUrl" in updated.provenance, false);
+    assert.equal("downloadPath" in updated.provenance, false);
+    assert.deepEqual(updated.artifacts, []);
     assert.equal(updated.citation.citationStatus, "complete");
-    assert.equal(updated.status, "ready");
+    assert.equal(updated.status, "missing_artifact");
     assert.deepEqual(updated.citation.missingFields, []);
   } finally {
     await rm(workspaceDir, { recursive: true, force: true });
@@ -926,13 +936,17 @@ test("writePaperMetadataForRecord repairs legacy absolute metadata paths and sta
     const repaired = JSON.parse(await readFile(metadataPath, "utf8"));
     assert.equal(repaired.title, "Coherent Josephson Qubit Suitable for Scalable Quantum Integrated Circuits");
     assert.equal(repaired.summaryPath, `knowledge-base/sources/${paperKey}/summary.md`);
-    assert.equal(repaired.provenance.recordPath, `knowledge-base/sources/${paperKey}/acquisition.json`);
     assert.equal(repaired.provenance.acquisitionPath, `knowledge-base/sources/${paperKey}/acquisition.json`);
-    assert.equal(repaired.provenance.rawPath, `knowledge-base/raw/pdfs/${paperKey}.pdf`);
-    assert.equal(repaired.provenance.downloadPath, `knowledge-base/raw/pdfs/${paperKey}.pdf`);
-    assert.equal(repaired.artifacts.length, 2);
-    assert.equal(repaired.artifacts[0]?.path, `knowledge-base/raw/pdfs/${paperKey}-supplemental-Barends2013supp.pdf`);
-    assert.equal(repaired.artifacts[1]?.path, `knowledge-base/raw/pdfs/${paperKey}.pdf`);
+    assert.equal("recordPath" in repaired.provenance, false);
+    assert.equal("rawPath" in repaired.provenance, false);
+    assert.equal("downloadPath" in repaired.provenance, false);
+    assert.equal(repaired.artifacts.length, 1);
+    assert.equal(repaired.artifacts[0]?.kind, "parse");
+    assert.equal(repaired.artifacts[0]?.engine, "webpage");
+    assert.equal(repaired.artifacts[0]?.path, `knowledge-base/sources/${paperKey}/parses/webpage`);
+    assert.equal(repaired.artifacts[0]?.markdownPath, `knowledge-base/sources/${paperKey}/parses/webpage/document.md`);
+    assert.equal(repaired.artifacts[0]?.jsonPath, `knowledge-base/sources/${paperKey}/parses/webpage/parse.json`);
+    assert.equal(repaired.artifacts[0]?.qualityPath, `knowledge-base/sources/${paperKey}/parses/webpage/quality.json`);
   } finally {
     await rm(workspaceDir, { recursive: true, force: true });
   }
