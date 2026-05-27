@@ -212,6 +212,87 @@ function rewriteMarkdownImageLinks(
   );
 }
 
+function lookupHtmlAssetReplacement(value: string, replacements: Map<string, string>): string | undefined {
+  const trimmed = value.trim();
+  const exact = replacements.get(trimmed);
+  if (exact) {
+    return exact;
+  }
+
+  try {
+    const parsed = new URL(trimmed, "https://example.invalid/");
+    parsed.search = "";
+    parsed.hash = "";
+    const withoutQuery = trimmed.startsWith("//")
+      ? `//${parsed.host}${parsed.pathname}`
+      : parsed.toString();
+    return replacements.get(withoutQuery);
+  } catch {
+    const withoutQuery = trimmed.split(/[?#]/, 1)[0] ?? trimmed;
+    return replacements.get(withoutQuery);
+  }
+}
+
+function rewriteHtmlSrcset(value: string, replacements: Map<string, string>): string {
+  return value
+    .split(",")
+    .map((entry) => {
+      const trimmedEntry = entry.trim();
+      if (!trimmedEntry) {
+        return entry;
+      }
+      const parts = trimmedEntry.split(/\s+/);
+      const target = parts[0] ?? "";
+      const replacement = lookupHtmlAssetReplacement(target, replacements);
+      if (!replacement) {
+        return entry;
+      }
+      return [replacement, ...parts.slice(1)].join(" ");
+    })
+    .join(", ");
+}
+
+function mimeTypeFromAssetReference(value: string): string | undefined {
+  const filename = value.trim().split(/\s+/, 1)[0]?.split(/[?#]/, 1)[0]?.toLowerCase() ?? "";
+  if (filename.endsWith(".jpg") || filename.endsWith(".jpeg")) {
+    return "image/jpeg";
+  }
+  if (filename.endsWith(".png")) {
+    return "image/png";
+  }
+  if (filename.endsWith(".gif")) {
+    return "image/gif";
+  }
+  if (filename.endsWith(".webp")) {
+    return "image/webp";
+  }
+  if (filename.endsWith(".svg")) {
+    return "image/svg+xml";
+  }
+  return undefined;
+}
+
+function normalizeLocalSourceTypes(html: string): string {
+  return html.replace(/<source\b[^>]*>/gi, (tag) => {
+    const srcsetMatch = tag.match(/\bsrcset\s*=\s*("([^"]*)"|'([^']*)')/i);
+    const srcset = srcsetMatch?.[2] ?? srcsetMatch?.[3];
+    const firstCandidate = srcset?.split(",", 1)[0]?.trim();
+    if (!firstCandidate?.startsWith("assets/")) {
+      return tag;
+    }
+
+    const mimeType = mimeTypeFromAssetReference(firstCandidate);
+    if (!mimeType) {
+      return tag;
+    }
+
+    if (/\btype\s*=/.test(tag)) {
+      return tag.replace(/\btype\s*=\s*("([^"]*)"|'([^']*)')/i, `type="${mimeType}"`);
+    }
+    return tag.replace(/^<source\b/i, `<source type="${mimeType}"`);
+  });
+}
+
 function rewriteHtmlAssetReferences(
   html: string,
   replacements: Map<string, string>
@@ -220,11 +301,24 @@ function rewriteHtmlAssetReferences(
     return html;
   }
 
-  return html.replace(
+  const withSrcsets = html.replace(
+    /\b(srcset|data-srcset)=("([^"]*)"|'([^']*)')/gi,
+    (match, attribute: string, quotedValue: string, doubleQuoted?: string, singleQuoted?: string) => {
+      const value = doubleQuoted ?? singleQuoted ?? "";
+      const rewritten = rewriteHtmlSrcset(value, replacements);
+      if (rewritten === value) {
+        return match;
+      }
+      const quote = quotedValue.startsWith("'") ? "'" : "\"";
+      return `${attribute}=${quote}${rewritten}${quote}`;
+    }
+  );
+
+  return normalizeLocalSourceTypes(withSrcsets).replace(
     /\b(src|data-src|data-original|href)=("([^"]*)"|'([^']*)')/gi,
     (match, attribute: string, quotedValue: string, doubleQuoted?: string, singleQuoted?: string) => {
       const value = doubleQuoted ?? singleQuoted ?? "";
-      const replacement = replacements.get(value.trim());
+      const replacement = lookupHtmlAssetReplacement(value, replacements);
       if (!replacement) {
         return match;
       }

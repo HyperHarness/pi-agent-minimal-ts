@@ -1207,6 +1207,46 @@ test("Nature unedited manuscript webpage without body is not treated as full-qua
   }
 });
 
+test("Nature webpage parsing removes institution access entitlement messages", () => {
+  const extraction = parsePaperWebPageHtml({
+    url: "https://www.nature.com/articles/nature14270",
+    html: `
+      <html>
+        <head>
+          <meta name="citation_title" content="State preservation by repetitive error detection">
+          <meta name="citation_doi" content="10.1038/nature14270">
+        </head>
+        <body>
+          <main data-track-component="article body">
+            <h1>State preservation by repetitive error detection</h1>
+            <section>
+              <h2>Abstract</h2>
+              <p>Quantum computing becomes viable when a quantum state can be protected.</p>
+            </section>
+            <div class="c-nature-box c-nature-box--side" data-test="entitlement-box">
+              <p class="c-nature-box__text" data-test="access-message">
+                You have full access to this article via
+                <strong>University of Science and Technology of China</strong>.
+              </p>
+            </div>
+            <section>
+              <h2>Article Text</h2>
+              <p>The repetition code detects bit-flip errors through parity measurements.</p>
+            </section>
+          </main>
+        </body>
+      </html>
+    `
+  });
+
+  assert.match(extraction.markdown, /Quantum computing becomes viable/);
+  assert.match(extraction.markdown, /The repetition code detects bit-flip errors/);
+  assert.doesNotMatch(extraction.markdown, /You have full access to this article/i);
+  assert.doesNotMatch(extraction.markdown, /University of Science and Technology of China/i);
+  assert.doesNotMatch(extraction.snapshotHtml ?? "", /You have full access to this article/i);
+  assert.doesNotMatch(extraction.snapshotHtml ?? "", /data-test="entitlement-box"/i);
+});
+
 test("savePaperWebPageParse writes webpage artifacts under wiki sources", async () => {
   const workspace = await mkdtemp(path.join(tmpdir(), "pi-paper-webpage-"));
   try {
@@ -1461,6 +1501,63 @@ test("savePaperWebPageParse writes extension-captured webpage images as local as
     assert.equal(await readFile(assetPath, "utf8"), "png-bytes");
     const dataAssetPath = path.join(path.dirname(assetPath), "asset-002.svg");
     assert.equal(await readFile(dataAssetPath, "utf8"), "<svg></svg>");
+  } finally {
+    await rm(workspace, { recursive: true, force: true });
+  }
+});
+
+test("savePaperWebPageParse rewrites Nature picture sources to local image assets", async () => {
+  const workspace = await mkdtemp(path.join(tmpdir(), "pi-paper-webpage-picture-assets-"));
+  try {
+    const extraction = parsePaperWebPageHtml({
+      url: "https://www.nature.com/articles/nature14270",
+      html: `
+        <html>
+          <head><meta name="citation_title" content="Nature article"></head>
+          <body>
+            <main data-track-component="article body">
+              <h1>Nature article</h1>
+              <figure>
+                <picture>
+                  <source
+                    type="image/webp"
+                    srcset="//media.springernature.com/lw685/springer-static/image/art%3A10.1038%2Fnature14270/MediaObjects/41586_2015_BFnature14270_Fig1_HTML.jpg?as=webp"
+                  >
+                  <img
+                    src="//media.springernature.com/lw685/springer-static/image/art%3A10.1038%2Fnature14270/MediaObjects/41586_2015_BFnature14270_Fig1_HTML.jpg"
+                    alt="Figure 1"
+                  >
+                </picture>
+                <figcaption>Fig. 1 | Device schematic.</figcaption>
+              </figure>
+            </main>
+          </body>
+        </html>
+      `
+    });
+
+    const result = await savePaperWebPageParse({
+      workspaceDir: workspace,
+      extraction: {
+        ...extraction,
+        assets: [
+          {
+            url: "https://media.springernature.com/lw685/springer-static/image/art%3A10.1038%2Fnature14270/MediaObjects/41586_2015_BFnature14270_Fig1_HTML.jpg",
+            originalUrl: "//media.springernature.com/lw685/springer-static/image/art%3A10.1038%2Fnature14270/MediaObjects/41586_2015_BFnature14270_Fig1_HTML.jpg",
+            filename: "41586_2015_BFnature14270_Fig1_HTML.jpg",
+            mimeType: "image/jpeg",
+            dataBase64: Buffer.from("jpg-bytes").toString("base64"),
+            alt: "Figure 1"
+          }
+        ]
+      }
+    });
+
+    const html = await readFile(result.artifacts.sourcePath!, "utf8");
+    assert.match(html, /<img[^>]+src="assets\/41586_2015_BFnature14270_Fig1_HTML\.jpg"/);
+    assert.doesNotMatch(html, /srcset="\/\/media\.springernature\.com/);
+    assert.doesNotMatch(html, /srcset='\/\/media\.springernature\.com/);
+    assert.match(html, /<source\s+type="image\/jpeg"\s+srcset="assets\/41586_2015_BFnature14270_Fig1_HTML\.jpg"/);
   } finally {
     await rm(workspace, { recursive: true, force: true });
   }

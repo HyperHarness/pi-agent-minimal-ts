@@ -919,6 +919,8 @@ function removeKnownNoiseBlocks(html: string): { html: string; removed: number }
     /<img\b[^>]*(?:badge\.dimensions\.ai|__dimensions)[^>]*>/gi,
     /<a\b[^>]*(?:altmetric\.com|link-to-altmetric-details-tab)[^>]*>[\s\S]*?<\/a>/gi,
     /<div\b[^>]*class=["'][^"']*__db_[^"']*["'][^>]*>[\s\S]*?<\/div>/gi,
+    /<p\b[^>]*data-test=["']access-message["'][^>]*>\s*You have full access to this article via[\s\S]*?<\/p>/gi,
+    /<div\b[^>]*data-test=["']entitlement-box["'][^>]*>\s*<\/div>/gi,
     /<li\b[^>]*class=["'][^"']*\barticle-feature-tag\b[^"']*["'][^>]*>\s*Access by [\s\S]*?<\/li>/gi,
     /<p\b[^>]*>\s*(?:&copy;|\u00a9)\s*\d{4}\s+American Physical Society\s*<\/p>/gi
   ]) {
