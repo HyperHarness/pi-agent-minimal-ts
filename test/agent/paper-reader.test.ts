@@ -281,7 +281,7 @@ test("parsePaper writes reading artifacts and reuses a same-hash cache", async (
       provenance: {
         url: "https://arxiv.org/abs/2406.06015",
         arxivId: "2406.06015",
-        acquisitionPath: "knowledge-base/sources/arxiv-2406.06015/acquisition.json",
+        acquisitionPath: path.join(workspace, "knowledge-base", "sources", "arxiv-2406.06015", "acquisition.json"),
         recordPath: "knowledge-base/sources/arxiv-2406.06015/acquisition.json",
         rawPath: "knowledge-base/raw/pdfs/arxiv-2406.06015.pdf",
         downloadPath: "knowledge-base/raw/pdfs/arxiv-2406.06015.pdf",
@@ -332,6 +332,7 @@ test("parsePaper writes reading artifacts and reuses a same-hash cache", async (
     for (const forbiddenProvenanceField of ["recordPath", "rawPath", "downloadPath", "source", "canonicalId"]) {
       assert.equal(forbiddenProvenanceField in metadataJson.provenance, false);
     }
+    assert.equal(metadataJson.provenance.acquisitionPath, "knowledge-base/sources/arxiv-2406.06015/acquisition.json");
     const parseArtifact = metadataJson.artifacts.find((artifact: { kind?: string; engine?: string }) =>
       artifact.kind === "parse" && artifact.engine === "plain-text-baseline"
     );

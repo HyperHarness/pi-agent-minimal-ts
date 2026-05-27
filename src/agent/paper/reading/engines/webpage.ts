@@ -94,6 +94,10 @@ function hashWebpageExtraction(extraction: PaperWebPageExtraction): string {
   const hash = createHash("sha256");
   hash.update(extraction.url);
   hash.update("\0");
+  hash.update(extraction.html ?? "");
+  hash.update("\0");
+  hash.update(extraction.snapshotHtml ?? "");
+  hash.update("\0");
   hash.update(extraction.markdown);
   for (const asset of extraction.assets ?? []) {
     hash.update("\0asset\0");
@@ -204,6 +208,28 @@ function rewriteMarkdownImageLinks(
       const trimmedTarget = target.trim().replace(/^<|>$/g, "");
       const replacement = replacements.get(trimmedTarget);
       return replacement ? `![${alt}](${replacement})` : match;
+    }
+  );
+}
+
+function rewriteHtmlAssetReferences(
+  html: string,
+  replacements: Map<string, string>
+): string {
+  if (replacements.size === 0) {
+    return html;
+  }
+
+  return html.replace(
+    /\b(src|data-src|data-original|href)=("([^"]*)"|'([^']*)')/gi,
+    (match, attribute: string, quotedValue: string, doubleQuoted?: string, singleQuoted?: string) => {
+      const value = doubleQuoted ?? singleQuoted ?? "";
+      const replacement = replacements.get(value.trim());
+      if (!replacement) {
+        return match;
+      }
+      const quote = quotedValue.startsWith("'") ? "'" : "\"";
+      return `${attribute}=${quote}${replacement}${quote}`;
     }
   );
 }
@@ -434,10 +460,14 @@ async function materializeWebpageAssets(input: {
     assets: materializedAssets
   });
   markdown = stripPublisherHtmlMarkup(markdown, input.extraction.url);
+  const snapshotHtml = input.extraction.snapshotHtml
+    ? rewriteHtmlAssetReferences(input.extraction.snapshotHtml, replacements)
+    : input.extraction.snapshotHtml;
 
   return {
     ...input.extraction,
     markdown,
+    snapshotHtml,
     assets: materializedAssets
   };
 }
@@ -647,6 +677,29 @@ function applyArxivFigureCompletenessQualityWarning(input: {
   };
 }
 
+function applyUnresolvedMathJaxQualityWarning(input: {
+  quality: PaperParseQualityReport;
+  extraction: PaperWebPageExtraction;
+}): PaperParseQualityReport {
+  const html = input.extraction.snapshotHtml ?? input.extraction.html ?? "";
+  if (!/<mjx-lazy\b/i.test(html)) {
+    return input.quality;
+  }
+
+  const warning =
+    "Webpage snapshot still contains unresolved MathJax lazy placeholders; formulas may be missing.";
+  const score = Math.min(input.quality.score, 0.65);
+
+  return {
+    ...input.quality,
+    status: score >= 0.7 ? "good" : score >= 0.4 ? "needs_hybrid" : "poor",
+    score,
+    warnings: input.quality.warnings.includes(warning)
+      ? input.quality.warnings
+      : [warning, ...input.quality.warnings]
+  };
+}
+
 async function buildSource(input: {
   workspaceDir: string;
   paperKey: string;
@@ -716,9 +769,12 @@ export async function savePaperWebPageParse(
     extraction,
     sourceSha256
   });
-  const quality = applyArxivFigureCompletenessQualityWarning({
-    quality: applyWebpageAccessQualityWarning({
-      quality: evaluateParseQuality(document),
+  const quality = applyUnresolvedMathJaxQualityWarning({
+    quality: applyArxivFigureCompletenessQualityWarning({
+      quality: applyWebpageAccessQualityWarning({
+        quality: evaluateParseQuality(document),
+        extraction
+      }),
       extraction
     }),
     extraction
@@ -728,6 +784,7 @@ export async function savePaperWebPageParse(
     workspaceDir: options.workspaceDir,
     source,
     document,
+    ...(extraction.snapshotHtml ? { sourceHtml: extraction.snapshotHtml } : extraction.html ? { sourceHtml: extraction.html } : {}),
     markdown: extraction.markdown,
     quality,
     chunks

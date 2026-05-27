@@ -102,9 +102,10 @@ function getSourceAcquisitionRoot(workspaceDir: string): string {
 }
 
 function toWorkspacePath(input: { workspaceDir: string; filePath: string }): string {
+  const normalizedWorkspaceDir = normalizePortableFilePath(input.workspaceDir);
   const normalizedFilePath = normalizePortableFilePath(input.filePath);
   const resolvedFilePath = path.resolve(normalizedFilePath);
-  const resolvedWorkspaceDir = path.resolve(input.workspaceDir);
+  const resolvedWorkspaceDir = path.resolve(normalizedWorkspaceDir);
   return isPathInsideDirectory(resolvedWorkspaceDir, resolvedFilePath)
     ? path.relative(resolvedWorkspaceDir, resolvedFilePath)
     : normalizedFilePath;
@@ -112,7 +113,7 @@ function toWorkspacePath(input: { workspaceDir: string; filePath: string }): str
 
 function normalizePortableFilePath(filePath: string): string {
   const drivePathMatch = filePath.match(/^([A-Za-z]):[\\/](.*)$/);
-  if (drivePathMatch?.[1] && drivePathMatch[2]) {
+  if (process.platform !== "win32" && drivePathMatch?.[1] && drivePathMatch[2]) {
     return path.posix.join(
       "/mnt",
       drivePathMatch[1].toLowerCase(),
@@ -121,8 +122,12 @@ function normalizePortableFilePath(filePath: string): string {
   }
 
   const uncWslMatch = filePath.match(/^\\\\(?:wsl\.localhost|wsl\$)\\[^\\]+\\(.+)$/i);
-  if (uncWslMatch?.[1]) {
+  if (process.platform !== "win32" && uncWslMatch?.[1]) {
     return path.posix.join("/", ...uncWslMatch[1].split(/[\\/]+/).filter(Boolean));
+  }
+
+  if (process.platform === "win32") {
+    return filePath;
   }
 
   return filePath.includes("\\") ? filePath.replace(/\\/g, "/") : filePath;
@@ -1463,14 +1468,15 @@ async function writePaperRecordAndMetadata(input: {
 }
 
 function resolveInputRecordPath(input: { workspaceDir: string; recordPath: string }): string {
+  const normalizedWorkspaceDir = normalizePortableFilePath(input.workspaceDir);
   const normalizedRecordPath = normalizePortableFilePath(input.recordPath);
   return path.isAbsolute(normalizedRecordPath)
     ? path.resolve(normalizedRecordPath)
-    : path.resolve(input.workspaceDir, normalizedRecordPath);
+    : path.resolve(normalizedWorkspaceDir, normalizedRecordPath);
 }
 
 function assertRecordPathInsideAcquisitionStore(input: { workspaceDir: string; recordPath: string }): string {
-  const sourceArtifactsRoot = path.resolve(getSourceAcquisitionRoot(input.workspaceDir));
+  const sourceArtifactsRoot = path.resolve(getSourceAcquisitionRoot(normalizePortableFilePath(input.workspaceDir)));
   const recordPath = resolveInputRecordPath(input);
   const isSourceAcquisitionPath =
     path.basename(recordPath) === "acquisition.json" &&

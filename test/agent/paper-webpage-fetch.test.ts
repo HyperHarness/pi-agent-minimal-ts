@@ -94,6 +94,286 @@ test("parsePaperWebPageHtml extracts article text and filters navigation noise",
   assert.doesNotMatch(result.markdown, /Springer Nature/i);
 });
 
+test("parsePaperWebPageHtml preserves rendered MathJax formula text", () => {
+  const formula = "\\Gamma=\\Gamma_{1,D}/2+\\Gamma_{\\phi,D}+\\Gamma_{1,Q}/2+\\Gamma_{\\phi,Q}";
+  const extraction = parsePaperWebPageHtml({
+    url: "https://journals.aps.org/prl/abstract/10.1103/PhysRevLett.111.080502",
+    html: `
+      <html>
+        <head>
+          <meta name="citation_title" content="APS Formula Article">
+          <meta name="citation_doi" content="10.1103/PhysRevLett.111.080502">
+        </head>
+        <body>
+          <main data-track-component="article body">
+            <h1>APS Formula Article</h1>
+            <section>
+              <h2>Article Text</h2>
+              <p>
+                with detuning
+                <span class="inline-formula">
+                  <mjx-container>
+                    <mjx-assistive-mml>
+                      <math><semantics><annotation encoding="application/x-tex">\\Delta</annotation></semantics></math>
+                    </mjx-assistive-mml>
+                  </mjx-container>
+                </span>,
+                and
+                <span class="inline-formula">
+                  <mjx-container>
+                    <mjx-assistive-mml>
+                      <math><semantics><annotation encoding="application/x-tex">${formula}</annotation></semantics></math>
+                    </mjx-assistive-mml>
+                  </mjx-container>
+                </span>.
+              </p>
+            </section>
+          </main>
+        </body>
+      </html>
+    `
+  });
+
+  assert.match(extraction.markdown, /with detuning[\s\S]*\$\\Delta\$[\s\S]*and[\s\S]*\$\\Gamma=\\Gamma_\{1,D\}/);
+  assert.match(extraction.snapshotHtml ?? "", /<span class="math-formula" data-math-format="latex">\$\\Delta\$<\/span>/);
+  assert.match(extraction.snapshotHtml ?? "", /\\Gamma_\{\\phi,D\}/);
+  assert.match(extraction.snapshotHtml ?? "", /cdn\.jsdelivr\.net\/npm\/katex@/);
+  assert.match(extraction.snapshotHtml ?? "", /renderMathInElement\(document\.body/);
+  assert.doesNotMatch(extraction.snapshotHtml ?? "", /mjx-lazy/);
+});
+
+test("parsePaperWebPageHtml preserves APS MathJax semantic speech formulas", () => {
+  const extraction = parsePaperWebPageHtml({
+    url: "https://journals.aps.org/prl/abstract/10.1103/PhysRevLett.111.080502",
+    html: `
+      <html>
+        <head>
+          <meta name="citation_title" content="APS Semantic Formula Article">
+          <meta name="citation_doi" content="10.1103/PhysRevLett.111.080502">
+        </head>
+        <body>
+          <main data-track-component="article body">
+            <h1>APS Semantic Formula Article</h1>
+            <section>
+              <h2>Article Text</h2>
+              <p>
+                with detuning
+                <span class="inline-formula">
+                  <mjx-container class="MathJax" data-semantic-speech-none="Delta">
+                    <mjx-math><mjx-mi><mjx-c>𝛥</mjx-c></mjx-mi></mjx-math>
+                    <mjx-speech aria-label="Delta, math" role="img"></mjx-speech>
+                  </mjx-container>
+                </span>,
+                and
+                <span class="inline-formula">
+                  <mjx-container class="MathJax" data-semantic-speech-none="Gamma equals Gamma sub 1 comma D divided by 2 plus Gamma sub phi comma D plus Gamma sub 1 comma Q divided by 2 plus Gamma sub phi comma Q">
+                    <mjx-math><mjx-mi><mjx-c>𝛤</mjx-c></mjx-mi></mjx-math>
+                    <mjx-speech aria-label="Gamma equals Gamma sub 1 comma D divided by 2 plus Gamma sub phi comma D plus Gamma sub 1 comma Q divided by 2 plus Gamma sub phi comma Q, math" role="img"></mjx-speech>
+                  </mjx-container>
+                </span>.
+              </p>
+            </section>
+          </main>
+        </body>
+      </html>
+    `
+  });
+
+  assert.match(
+    extraction.markdown,
+    /with detuning[\s\S]*\$\\Delta\$[\s\S]*and[\s\S]*\$\\Gamma = \\Gamma_\{1,D\}\/2 \+ \\Gamma_\{\\phi,D\} \+ \\Gamma_\{1,Q\}\/2 \+ \\Gamma_\{\\phi,Q\}\$/
+  );
+  assert.doesNotMatch(extraction.markdown, /data-semantic|speech-attached|braille-attached/);
+  assert.match(
+    extraction.snapshotHtml ?? "",
+    /<span class="math-formula" data-math-format="latex" data-math-speech="Delta">\$\\Delta\$<\/span>/
+  );
+  assert.match(
+    extraction.snapshotHtml ?? "",
+    /\$\\Gamma = \\Gamma_\{1,D\}\/2 \+ \\Gamma_\{\\phi,D\} \+ \\Gamma_\{1,Q\}\/2 \+ \\Gamma_\{\\phi,Q\}\$/
+  );
+  assert.match(extraction.snapshotHtml ?? "", /data-math-speech="Gamma equals Gamma sub 1 comma D divided by 2/);
+});
+
+test("parsePaperWebPageHtml upgrades saved math-formula speech spans to LaTeX", () => {
+  const extraction = parsePaperWebPageHtml({
+    url: "https://journals.aps.org/prl/abstract/10.1103/PhysRevLett.111.080502",
+    html: `
+      <html>
+        <head><meta name="citation_title" content="APS Saved Formula Article"></head>
+        <body>
+          <main data-track-component="article body">
+            <h1>APS Saved Formula Article</h1>
+            <p>
+              with detuning
+              <span class="inline-formula"><span class="math-formula">triangle</span></span>,
+              and
+              <span class="inline-formula"><span class="math-formula">Gamma equals Gamma sub 1 comma D divided by 2 plus Gamma sub phi comma D plus Gamma sub 1 comma Q divided by 2 plus Gamma sub phi comma Q</span></span>.
+            </p>
+          </main>
+        </body>
+      </html>
+    `
+  });
+
+  assert.match(extraction.markdown, /\$\\Delta\$/);
+  assert.match(extraction.markdown, /\$\\Gamma = \\Gamma_\{1,D\}\/2 \+ \\Gamma_\{\\phi,D\}/);
+  assert.match(extraction.snapshotHtml ?? "", /data-math-speech="triangle"/);
+});
+
+test("parsePaperWebPageHtml converts MathML formulas before semantic speech fallback", () => {
+  const extraction = parsePaperWebPageHtml({
+    url: "https://journals.aps.org/prl/abstract/10.1103/PhysRevLett.111.080502",
+    html: `
+      <html>
+        <head><meta name="citation_title" content="APS MathML Formula Article"></head>
+        <body>
+          <main data-track-component="article body">
+            <h1>APS MathML Formula Article</h1>
+            <p>
+              The distribution is
+              <span class="inline-formula">
+                <mjx-container class="MathJax" data-semantic-speech-none="rho sub 0 the square root of 1 minus p squared divided by p sub max squared divided by p">
+                  <mjx-assistive-mml>
+                    <math xmlns="http://www.w3.org/1998/Math/MathML" display="inline">
+                      <mrow>
+                        <msub><mi>&#x3C1;</mi><mn>0</mn></msub>
+                        <mo>&#x2062;</mo>
+                        <msqrt>
+                          <mrow>
+                            <mn>1</mn>
+                            <mo>-</mo>
+                            <mrow>
+                              <msup><mi>p</mi><mn>2</mn></msup>
+                              <mo>/</mo>
+                              <msubsup>
+                                <mi>p</mi>
+                                <mrow><mi>max</mi><mo>&#x2061;</mo></mrow>
+                                <mn>2</mn>
+                              </msubsup>
+                            </mrow>
+                          </mrow>
+                        </msqrt>
+                      </mrow>
+                      <mo>/</mo>
+                      <mi>p</mi>
+                    </math>
+                  </mjx-assistive-mml>
+                </mjx-container>
+              </span>.
+            </p>
+          </main>
+        </body>
+      </html>
+    `
+  });
+
+  assert.match(extraction.markdown, /\$\\rho_\{0\} \\sqrt\{1 - p\^\{2\}\/p_\{max\}\^\{2\}\}\/p\$/);
+  assert.doesNotMatch(extraction.markdown, /rho sub 0 the square root/);
+  assert.match(extraction.snapshotHtml ?? "", /data-math-format="mathml"/);
+  assert.match(extraction.snapshotHtml ?? "", /<math\b/);
+});
+
+test("parsePaperWebPageHtml keeps MathML formulas renderable in HTML snapshots", () => {
+  const extraction = parsePaperWebPageHtml({
+    url: "https://journals.aps.org/prl/abstract/10.1103/PhysRevLett.111.080502",
+    html: `
+      <html>
+        <head><meta name="citation_title" content="APS Native MathML Article"></head>
+        <body>
+          <main data-track-component="article body">
+            <h1>APS Native MathML Article</h1>
+            <p>
+              Energy
+              <span class="inline-formula">
+                <mjx-container class="MathJax" data-semantic-speech-none="E equals B divided by the square root of x">
+                  <mjx-assistive-mml>
+                    <math xmlns="http://www.w3.org/1998/Math/MathML" display="inline">
+                      <mi>E</mi>
+                      <mo>=</mo>
+                      <mfrac>
+                        <mi>B</mi>
+                        <msqrt><mi>x</mi></msqrt>
+                      </mfrac>
+                    </math>
+                  </mjx-assistive-mml>
+                </mjx-container>
+              </span>
+            </p>
+          </main>
+        </body>
+      </html>
+    `
+  });
+
+  assert.match(extraction.markdown, /\$E\s*=\s*\\frac\{B\}\{\\sqrt\{x\}\}\$/);
+  assert.match(extraction.snapshotHtml ?? "", /<math\b[^>]*display="inline"/);
+  assert.match(extraction.snapshotHtml ?? "", /<mfrac>/);
+  assert.match(extraction.snapshotHtml ?? "", /data-math-format="mathml"/);
+  assert.match(extraction.snapshotHtml ?? "", /data-latex="\$E\s*=\s*\\frac\{B\}\{\\sqrt\{x\}\}\$"/);
+  assert.doesNotMatch(extraction.snapshotHtml ?? "", /<span class="math-formula" data-math-format="latex">\$E=\\frac/);
+});
+
+test("parsePaperWebPageHtml converts negative speech token to a minus sign", () => {
+  const extraction = parsePaperWebPageHtml({
+    url: "https://journals.aps.org/prl/abstract/10.1103/PhysRevLett.111.080502",
+    html: `
+      <html>
+        <head><meta name="citation_title" content="APS Negative Formula Article"></head>
+        <body>
+          <main data-track-component="article body">
+            <h1>APS Negative Formula Article</h1>
+            <p>
+              pulse
+              <span class="inline-formula">
+                <mjx-container class="MathJax" data-semantic-speech-none="X sub negative pi divided by 2"></mjx-container>
+              </span>
+            </p>
+          </main>
+        </body>
+      </html>
+    `
+  });
+
+  assert.match(extraction.markdown, /\$X_\{-\\pi\}\/2\$/);
+  assert.doesNotMatch(extraction.markdown, /negative/);
+});
+
+test("parsePaperWebPageHtml converts complex APS semantic speech formulas to LaTeX", () => {
+  const extraction = parsePaperWebPageHtml({
+    url: "https://journals.aps.org/prl/abstract/10.1103/PhysRevLett.111.080502",
+    html: `
+      <html>
+        <head><meta name="citation_title" content="APS Complex Speech Formula Article"></head>
+        <body>
+          <main data-track-component="article body">
+            <h1>APS Complex Speech Formula Article</h1>
+            <p>
+              distribution
+              <span class="inline-formula">
+                <mjx-container class="MathJax" data-semantic-speech-none="rho sub 0 the square root of 1 minus p squared divided by p sub max squared divided by p"></mjx-container>
+              </span>
+              and count
+              <span class="inline-formula">
+                <mjx-container class="MathJax" display="true" data-semantic-speech-none="N equals the double integral of rho sub 0 the fraction with numerator the square root of 1 minus p squared divided by p sub max squared and denominator p Theta times open bracket p times the absolute value of E of open paren r right arrow close paren minus g sub min close bracket d p d r right arrow comma"></mjx-container>
+              </span>.
+            </p>
+          </main>
+        </body>
+      </html>
+    `
+  });
+
+  assert.match(extraction.markdown, /\$\\rho_\{0\}\\sqrt\{1 - p\^2\/p_\{max\}\^2\}\/p\$/);
+  assert.match(
+    extraction.markdown,
+    /\$\$N = \\iint \\rho_\{0\}\\frac\{\\sqrt\{1 - p\^2\/p_\{max\}\^2\}\}\{p\}\\Theta\[p\|E\(\\vec\{r\}\)\| - g_\{min\}\]\\,dp\\,d\\vec\{r\},\$\$/
+  );
+  assert.doesNotMatch(extraction.markdown, /square root|double integral|right arrow/);
+  assert.match(extraction.snapshotHtml ?? "", /data-math-speech="rho sub 0 the square root/);
+  assert.match(extraction.snapshotHtml ?? "", /data-math-format="latex"/);
+});
+
 test("parsePaperWebPageHtmlWithPandoc converts filtered article HTML through pandoc", async () => {
   const workspace = await mkdtemp(path.join(tmpdir(), "pi-paper-webpage-pandoc-"));
   const pandocInputPath = path.join(workspace, "pandoc-input.html");
@@ -141,6 +421,51 @@ fs.writeFileSync(output, [
     assert.match(extraction.markdown, /citation link/);
     assert.doesNotMatch(extraction.markdown, /Related articles/);
     assert.doesNotMatch(await readFile(pandocInputPath, "utf8"), /Related articles|Skip to main content/);
+  } finally {
+    await rm(workspace, { recursive: true, force: true });
+  }
+});
+
+test("parsePaperWebPageHtmlWithPandoc restores math placeholders after pandoc conversion", async () => {
+  const workspace = await mkdtemp(path.join(tmpdir(), "pi-paper-webpage-pandoc-math-"));
+  const pandocInputPath = path.join(workspace, "pandoc-input.html");
+  try {
+    const pandocBin = await writeExecutableScript(workspace, "fake-pandoc", `#!/usr/bin/env node
+const fs = require("node:fs");
+const args = process.argv.slice(2);
+const output = args[args.indexOf("--output") + 1];
+const input = args[args.length - 1];
+const html = fs.readFileSync(input, "utf8");
+fs.writeFileSync(${JSON.stringify(pandocInputPath)}, html);
+fs.writeFileSync(output, "Formula PIAGENTMATH0 and PIAGENTMATH1.");
+`);
+    const extraction = await parsePaperWebPageHtmlWithPandoc({
+      url: "https://journals.aps.org/prl/abstract/10.1103/example",
+      html: `
+        <html>
+          <head><meta name="citation_title" content="Pandoc Math Article"></head>
+          <body>
+            <article>
+              <h1>Pandoc Math Article</h1>
+              <p>
+                Formula
+                <span class="math-formula" data-math-format="latex">$T_{2}^{*}$</span>
+                and
+                <span class="math-formula" data-math-format="latex">$\\rho_{0}\\sqrt{1 - p^2/p_{max}^2}/p$</span>.
+              </p>
+            </article>
+          </body>
+        </html>
+      `,
+      pandocBin
+    });
+
+    assert.match(await readFile(pandocInputPath, "utf8"), /PIAGENTMATH0/);
+    assert.doesNotMatch(await readFile(pandocInputPath, "utf8"), /\$T_\{2\}/);
+    assert.equal(
+      extraction.markdown,
+      "Formula $T_{2}^{*}$ and $\\rho_{0}\\sqrt{1 - p^2/p_{max}^2}/p$."
+    );
   } finally {
     await rm(workspace, { recursive: true, force: true });
   }
@@ -459,6 +784,65 @@ test("savePaperWebPageParse downgrades webpage markdown with substantial raw HTM
     assert.ok(
       result.quality.warnings.some((warning) =>
         warning.includes("substantial raw HTML markup")
+      )
+    );
+  } finally {
+    await rm(workspace, { recursive: true, force: true });
+  }
+});
+
+test("savePaperWebPageParse downgrades APS snapshots with unresolved lazy MathJax", async () => {
+  const workspace = await mkdtemp(path.join(tmpdir(), "pi-paper-webpage-aps-lazy-mathjax-"));
+  try {
+    const articleBody = "Superconducting qubit coherence and control are discussed with experimental evidence. ".repeat(180);
+    const result = await savePaperWebPageParse({
+      workspaceDir: workspace,
+      paperKey: "aps-10.1103-PhysRevLett.111.080502",
+      extraction: {
+        url: "https://journals.aps.org/prl/abstract/10.1103/PhysRevLett.111.080502#fulltext",
+        title: "Coherent Josephson Qubit Suitable for Scalable Quantum Integrated Circuits",
+        snapshotHtml: `
+          <main>
+            <h1>Coherent Josephson Qubit Suitable for Scalable Quantum Integrated Circuits</h1>
+            <section><h2>Article Text</h2><p>with detuning <mjx-container><mjx-lazy data-mjx-lazy="115"></mjx-lazy></mjx-container>, and <mjx-container><mjx-lazy data-mjx-lazy="116"></mjx-lazy></mjx-container>.</p></section>
+          </main>
+        `,
+        markdown: [
+          "# Coherent Josephson Qubit Suitable for Scalable Quantum Integrated Circuits",
+          "",
+          "## Article Text",
+          "",
+          articleBody,
+          "",
+          "with detuning, and. Hence, each uncorrelated defect adds a single Lorentzian.",
+          "",
+          "## References",
+          "",
+          "1. Reference."
+        ].join("\n"),
+        metadata: {
+          title: "Coherent Josephson Qubit Suitable for Scalable Quantum Integrated Circuits",
+          doi: "10.1103/PhysRevLett.111.080502",
+          authors: []
+        },
+        access: {
+          status: "full_text",
+          signals: []
+        },
+        stats: {
+          chars: articleBody.length,
+          wordsApprox: 1600,
+          navigationLinesRemoved: 0,
+          extractedFrom: "article"
+        }
+      }
+    });
+
+    assert.equal(result.quality.status, "needs_hybrid");
+    assert.ok(result.quality.score < 0.7);
+    assert.ok(
+      result.quality.warnings.some((warning) =>
+        warning.includes("unresolved MathJax lazy placeholders")
       )
     );
   } finally {
@@ -864,11 +1248,24 @@ test("savePaperWebPageParse writes webpage artifacts under wiki sources", async 
     assert.equal(result.paperKey, "nature-s41467-025-59778-z");
     assert.equal(result.engine, "webpage");
     assert.match(result.artifacts.markdownPath, /knowledge-base\/sources\/nature-s41467-025-59778-z\/parses\/webpage\/document\.md$/);
+    assert.match(result.artifacts.sourcePath ?? "", /knowledge-base\/sources\/nature-s41467-025-59778-z\/parses\/webpage\/document\.html$/);
     assert.match(result.artifacts.parsePath, /knowledge-base\/sources\/nature-s41467-025-59778-z\/parses\/webpage\/parse\.json$/);
     assert.match(result.artifacts.chunksPath, /knowledge-base\/sources\/nature-s41467-025-59778-z\/chunks\/webpage\.jsonl$/);
 
+    const html = await readFile(result.artifacts.sourcePath!, "utf8");
+    assert.match(html, /<main data-track-component="article body">/);
     const markdown = await readFile(result.artifacts.markdownPath, "utf8");
     assert.match(markdown, /## Methods/);
+    const metadata = JSON.parse(
+      await readFile(path.join(workspace, "knowledge-base/sources/nature-s41467-025-59778-z/metadata.json"), "utf8")
+    ) as {
+      artifacts: Array<{ kind: string; path: string; engine?: string }>;
+    };
+    assert.ok(metadata.artifacts.some((artifact) =>
+      artifact.kind === "snapshot" &&
+      artifact.engine === "webpage" &&
+      artifact.path === "knowledge-base/sources/nature-s41467-025-59778-z/parses/webpage/document.html"
+    ));
     const parseJson = JSON.parse(await readFile(result.artifacts.parsePath, "utf8")) as {
       engine: string;
       sections: Array<{ title: string }>;
@@ -903,6 +1300,84 @@ test("savePaperWebPageParse writes webpage artifacts under wiki sources", async 
       extraction
     });
     assert.equal(cached.status, "already_parsed");
+  } finally {
+    await rm(workspace, { recursive: true, force: true });
+  }
+});
+
+test("savePaperWebPageParse writes filtered article HTML snapshot", async () => {
+  const workspace = await mkdtemp(path.join(tmpdir(), "pi-paper-webpage-filtered-html-"));
+  try {
+    const extraction = parsePaperWebPageHtml({
+      url: "https://journals.aps.org/prl/abstract/10.1103/PhysRevLett.111.080502",
+      html: `
+        <!doctype html>
+        <html>
+          <head>
+            <title>Coherent Josephson Qubit Suitable for Scalable Quantum Integrated Circuits</title>
+            <script src="https://www.googletagmanager.com/gtm.js"></script>
+            <link rel="stylesheet" href="https://cdn.journals.aps.org/site.css">
+            <meta name="citation_title" content="Coherent Josephson Qubit Suitable for Scalable Quantum Integrated Circuits">
+            <meta name="citation_doi" content="10.1103/PhysRevLett.111.080502">
+          </head>
+          <body>
+            <nav>PDF Share Metrics</nav>
+            <main data-track-component="article body">
+              <div class="osano-cm-window">Cookie preferences</div>
+              <ul class="labels">
+                <li class="article-feature-tag">Access by University of Science &amp; Technology of China</li>
+              </ul>
+              <h1>Coherent Josephson Qubit Suitable for Scalable Quantum Integrated Circuits</h1>
+              <section>
+                <h2>Abstract</h2>
+                <p>We demonstrate a planar, tunable superconducting qubit.</p>
+              </section>
+              <aside class="article-sidebar">Picked up by 2 news outlets</aside>
+              <div class="altmetric-embed">Picked up by 2 news outlets</div>
+              <div class="dimensions-wrapper"><span>CITATIONS</span></div>
+              <img src="https://badge.dimensions.ai/badge?count=762" class="__dimensions_png" alt="762 total citations on Dimensions.">
+              <a class="link-to-altmetric-details-tab" href="https://www.altmetric.com/details.php">Blogged by 2</a>
+              <div class="share-toolbar">Share this paper</div>
+              <section>
+                <h2>Article Text</h2>
+                <p>The Xmon qubit combines connectivity, control, and long coherence.</p>
+                <figure>
+                  <img src="assets/figure-1.png" alt="Xmon qubit">
+                  <figcaption>Figure 1. Optical micrograph of the planar Xmon qubit.</figcaption>
+                </figure>
+              </section>
+              <section class="article-info" id="info-panel">
+                <p>&copy; 2013 American Physical Society</p>
+              </section>
+            </main>
+          </body>
+        </html>
+      `
+    });
+
+    const result = await savePaperWebPageParse({
+      workspaceDir: workspace,
+      extraction
+    });
+
+    const html = await readFile(result.artifacts.sourcePath!, "utf8");
+    assert.match(html, /<!doctype html>/i);
+    assert.match(html, /<main data-track-component="article body">/);
+    assert.match(html, /<h2>Article Text<\/h2>/);
+    assert.match(html, /<figure>/);
+    assert.doesNotMatch(html, /googletagmanager/i);
+    assert.doesNotMatch(html, /cdn\.journals\.aps\.org/i);
+    assert.doesNotMatch(html, /<script\b/i);
+    assert.doesNotMatch(html, /<link\b/i);
+    assert.doesNotMatch(html, /<nav\b/i);
+    assert.doesNotMatch(html, /osano/i);
+    assert.doesNotMatch(html, /altmetric/i);
+    assert.doesNotMatch(html, /dimensions/i);
+    assert.doesNotMatch(html, /CITATIONS/i);
+    assert.doesNotMatch(html, /article-sidebar/i);
+    assert.doesNotMatch(html, /share-toolbar/i);
+    assert.doesNotMatch(html, /Access by University of Science/i);
+    assert.doesNotMatch(html, /American Physical Society/i);
   } finally {
     await rm(workspace, { recursive: true, force: true });
   }
@@ -971,6 +1446,9 @@ test("savePaperWebPageParse writes extension-captured webpage images as local as
     const markdown = await readFile(result.artifacts.markdownPath, "utf8");
     assert.match(markdown, /!\[Figure 1]\(assets\/figure-1\.png\)/);
     assert.match(markdown, /!\[Inline icon]\(assets\/asset-002\.svg\)/);
+    const html = await readFile(result.artifacts.sourcePath!, "utf8");
+    assert.match(html, /<img src="assets\/figure-1\.png" alt="Figure 1">/);
+    assert.doesNotMatch(html, /\/cms\/asset\/figure-1\.png/);
     const assetPath = path.join(
       workspace,
       "knowledge-base", "sources",

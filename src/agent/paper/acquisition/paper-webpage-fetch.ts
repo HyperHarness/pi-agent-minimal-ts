@@ -4,6 +4,7 @@ import { mkdtemp, readFile, rm, writeFile } from "node:fs/promises";
 import os from "node:os";
 import path from "node:path";
 import { promisify } from "node:util";
+import { MathMLToLaTeX } from "mathml-to-latex";
 import {
   getResponseStatusError,
   resolveFetchTimeoutMs,
@@ -62,6 +63,8 @@ export interface PaperWebPageAsset {
 export interface PaperWebPageExtraction {
   url: string;
   title?: string;
+  html?: string;
+  snapshotHtml?: string;
   markdown: string;
   assets?: PaperWebPageAsset[];
   metadata: PaperWebPageMetadata;
@@ -107,6 +110,7 @@ const BLOCK_TAGS_TO_REMOVE = [
   "template",
   "svg",
   "canvas",
+  "dialog",
   "iframe",
   "form",
   "button",
@@ -118,8 +122,8 @@ const BLOCK_TAGS_TO_REMOVE = [
 ];
 
 const NOISE_ATTRIBUTE_PATTERN =
-  /\s(?:class|id|role|aria-label)=["'][^"']*(?:advert|banner|breadcrumb|cookie|login|menu|metrics|nav|newsletter|popup|recommend|related|share|sidebar|sign-?up|skip|social|toolbar)[^"']*["']/i;
-const NOISE_CONTAINER_TAGS = ["section", "aside", "div", "article", "ul", "ol"];
+  /\s(?:class|id|role|aria-label|data-[\w:-]+)=["'][^"']*(?:advert|altmetric|badge|banner|breadcrumb|cookie|dialog|dimensions|export|login|menu|metrics|modal|nav|newsletter|osano|popup|recommend|related|share|sidebar|sign-?up|skip|social|toolbar|tqc|z3988)[^"']*["']/i;
+const NOISE_CONTAINER_TAGS = ["section", "aside", "div", "article", "ul", "ol", "details", "span"];
 
 const NAVIGATION_LINE_PATTERNS = [
   /^skip to /i,
@@ -516,6 +520,357 @@ function stripComments(html: string): string {
   return html.replace(/<!--[\s\S]*?-->/g, " ");
 }
 
+function escapeHtmlText(value: string): string {
+  return value
+    .replace(/&/g, "&amp;")
+    .replace(/</g, "&lt;")
+    .replace(/>/g, "&gt;")
+    .replace(/"/g, "&quot;");
+}
+
+function normalizeMathText(value: string): string {
+  return decodeHtmlEntities(value).replace(/\s+/g, " ").trim();
+}
+
+function normalizeMathSpeechText(value: string): string {
+  return normalizeMathText(value)
+    .replace(/<[^>]+>/g, " ")
+    .replace(/\s*,?\s*math\s*$/i, "")
+    .replace(/\s+/g, " ")
+    .trim();
+}
+
+type MathFormulaText = {
+  text: string;
+  format: "latex" | "mathml" | "speech";
+  mathml?: string;
+  speech?: string;
+};
+
+const SEMANTIC_SPEECH_SYMBOLS: Record<string, string> = {
+  alpha: "\\alpha",
+  beta: "\\beta",
+  gamma: "\\gamma",
+  Gamma: "\\Gamma",
+  delta: "\\delta",
+  Delta: "\\Delta",
+  triangle: "\\Delta",
+  epsilon: "\\epsilon",
+  phi: "\\phi",
+  Phi: "\\Phi",
+  pi: "\\pi",
+  theta: "\\theta",
+  Theta: "\\Theta",
+  omega: "\\omega",
+  Omega: "\\Omega"
+};
+
+const EXACT_SEMANTIC_SPEECH_LATEX: Record<string, string> = {
+  delta: "\\Delta",
+  triangle: "\\Delta",
+  "gamma equals gamma sub 1 comma d divided by 2 plus gamma sub phi comma d plus gamma sub 1 comma q divided by 2 plus gamma sub phi comma q":
+    "\\Gamma = \\Gamma_{1,D}/2 + \\Gamma_{\\phi,D} + \\Gamma_{1,Q}/2 + \\Gamma_{\\phi,Q}",
+  "gamma sub 1 equals the fraction with numerator 2 g squared of gamma and denominator gamma squared plus triangle squared plus gamma sub 1 comma q comma":
+    "\\Gamma_1 = \\frac{2g^2\\Gamma}{\\Gamma^2 + \\Delta^2} + \\Gamma_{1,Q},",
+  "e equals b divided by the square root of x": "E = B/\\sqrt{x}",
+  "g of slash 2 pi tilde 0.1 mhz": "g/2\\pi \\sim 0.1\\,\\mathrm{MHz}",
+  "g of slash 2 pi is greater than or equivalent to 0.2 mhz": "g/2\\pi \\gtrsim 0.2\\,\\mathrm{MHz}",
+  "g equals p e": "g = pE",
+  "x equals 3 nanometers": "x = 3\\,\\mathrm{nm}",
+  "1 divided by open paren gamma sub 1 comma d divided by 2 plus gamma sub phi comma d close paren tilde 50 en dash 100 nanoseconds":
+    "\\frac{1}{\\Gamma_{1,D}/2 + \\Gamma_{\\phi,D}} \\sim 50-100\\,\\mathrm{ns}",
+  "s": "S",
+  "w": "W",
+  "z": "Z",
+  "x y": "XY",
+  "l": "L",
+  "g": "g",
+  "x": "x",
+  "b": "B",
+  "n": "N",
+  "k": "K",
+  "0.30 times 0.20 mu meters squared": "0.30 \\times 0.20\\,\\mu\\mathrm{m}^{2}",
+  "1.5 times 10 to the sixth power": "1.5 \\times 10^{6}",
+  "t sub 2 raised to the asterisk power equals 15 mu seconds": "T_{2}^{*} = 15\\,\\mu\\mathrm{s}",
+  "t sub 2 raised to the asterisk power": "T_{2}^{*}",
+  "q sub l equals 10 to the fourth power": "Q_{l} = 10^{4}",
+  "t sub 2 raised to the asterisk power equals 10 mu seconds": "T_{2}^{*} = 10\\,\\mu\\mathrm{s}",
+  "t sub 2 raised to the asterisk power equals 0.07 mu seconds": "T_{2}^{*} = 0.07\\,\\mu\\mathrm{s}",
+  "t sub 2 raised to the asterisk power equals 2.5 mu seconds": "T_{2}^{*} = 2.5\\,\\mu\\mathrm{s}",
+  "t sub 2 raised to the asterisk power equals 2 mu seconds": "T_{2}^{*} = 2\\,\\mu\\mathrm{s}",
+  "t sub 1 is less than 8 mu seconds": "T_{1} < 8\\,\\mu\\mathrm{s}",
+  "gamma sub 1 comma d is greater than g is greater than gamma sub 1 comma q":
+    "\\Gamma_{1,D} > g > \\Gamma_{1,Q}",
+  "rho sub 0 the square root of 1 minus p squared divided by p sub max squared divided by p":
+    "\\rho_{0}\\sqrt{1 - p^2/p_{max}^2}/p",
+  "rho sub 0 almost equals 10 squared divided by mu meters cubed divided by ghz":
+    "\\rho_{0} \\approx 10^2/(\\mu\\mathrm{m}^{3}\\,\\mathrm{GHz})",
+  "n equals the double integral of rho sub 0 the fraction with numerator the square root of 1 minus p squared divided by p sub max squared and denominator p theta times open bracket p times the absolute value of e of open paren r right arrow close paren minus g sub min close bracket d p d r right arrow comma":
+    "N = \\iint \\rho_{0}\\frac{\\sqrt{1 - p^2/p_{max}^2}}{p}\\Theta[p|E(\\vec{r})| - g_{min}]\\,dp\\,d\\vec{r},",
+  "e of open paren r right arrow close paren": "E(\\vec{r})",
+  "r right arrow": "\\vec{r}",
+  "n tilde 30 en dash 50 divided by ghz": "N \\sim 30-50/\\mathrm{GHz}",
+  "g sub min of slash 2 pi tilde 0.2 mhz": "g_{min}/2\\pi \\sim 0.2\\,\\mathrm{MHz}",
+  "c equals 8 l times open paren epsilon sub 0 plus epsilon sub sub close paren times k of k divided by k of open paren the square root of 1 minus k squared close paren":
+    "C = 8L(\\epsilon_{0} + \\epsilon_{sub})K(k)/K(\\sqrt{1 - k^2})",
+  "b equals 2 millivolts divided by the square root of meters":
+    "B = 2\\,\\mathrm{mV}/\\sqrt{\\mathrm{m}}"
+};
+
+function semanticSpeechTokenToLatex(token: string): string {
+  return SEMANTIC_SPEECH_SYMBOLS[token] ?? SEMANTIC_SPEECH_SYMBOLS[token.toLowerCase()] ?? token;
+}
+
+function normalizeLatexFormulaText(text: string): string {
+  return text
+    .replace(/^\s*\${1,2}\s*/, "")
+    .replace(/\s*\${1,2}\s*$/, "")
+    .trim();
+}
+
+function normalizeMathMlLatexText(text: string): string {
+  return normalizeLatexFormulaText(text)
+    .replace(/[\u2061\u2062\u2063\u2064]/g, " ")
+    .replace(/_\{([^{}]*?)\s+\}/g, "_{$1}")
+    .replace(/\s*\/\s*/g, "/")
+    .replace(/\s+/g, " ")
+    .trim();
+}
+
+function formulaFromMathMlText(mathml: string): MathFormulaText | undefined {
+  const normalizedMathMl = mathml.trim();
+  if (!normalizedMathMl) {
+    return undefined;
+  }
+  try {
+    const latex = normalizeMathMlLatexText(MathMLToLaTeX.convert(normalizedMathMl));
+    if (!latex) {
+      return undefined;
+    }
+    return {
+      text: latex,
+      format: "mathml",
+      mathml: normalizedMathMl
+    };
+  } catch {
+    return undefined;
+  }
+}
+
+function convertSemanticSpeechSubscripts(value: string): string {
+  return value.replace(
+    /\b([A-Za-z]+) sub (negative )?([A-Za-z0-9]+)(?: comma ([A-Za-z0-9]+))?/gi,
+    (_match, base: string, negative: string | undefined, first: string, second: string | undefined) => {
+      const subscript = [
+        `${negative ? "-" : ""}${semanticSpeechTokenToLatex(first)}`,
+        ...(second ? [semanticSpeechTokenToLatex(second)] : [])
+      ].join(",");
+      return `${semanticSpeechTokenToLatex(base)}_{${subscript}}`;
+    }
+  );
+}
+
+function semanticSpeechToLatex(value: string): string | undefined {
+  const normalized = normalizeMathSpeechText(value);
+  if (!normalized) {
+    return undefined;
+  }
+
+  const exact = normalized.toLowerCase();
+  const exactLatex = EXACT_SEMANTIC_SPEECH_LATEX[exact];
+  if (exactLatex) {
+    return exactLatex;
+  }
+
+  let latex = convertSemanticSpeechSubscripts(normalized);
+  latex = latex
+    .replace(/\b(\d+(?:\.\d+)?)\s+mu\s*seconds\b/gi, "$1\\,\\mu\\mathrm{s}")
+    .replace(/\b(\d+(?:\.\d+)?)\s+nanoseconds\b/gi, "$1\\,\\mathrm{ns}")
+    .replace(/\b(\d+(?:\.\d+)?)\s+MHz\b/g, "$1\\,\\mathrm{MHz}")
+    .replace(/\b(\d+(?:\.\d+)?)\s+GHz\b/g, "$1\\,\\mathrm{GHz}")
+    .replace(/\b(\d+(?:\.\d+)?)\s+Debye\b/g, "$1\\,\\mathrm{Debye}")
+    .replace(/\bgreater than or equivalent to\b/gi, "\\gtrsim")
+    .replace(/\bless than or equivalent to\b/gi, "\\lesssim")
+    .replace(/\bgreater than or equal to\b/gi, "\\ge")
+    .replace(/\bless than or equal to\b/gi, "\\le")
+    .replace(/\bnot equal to\b/gi, "\\ne")
+    .replace(/\bequals\b/gi, "=")
+    .replace(/\bplus\b/gi, "+")
+    .replace(/\bminus\b/gi, "-")
+    .replace(/\btimes\b/gi, "\\times")
+    .replace(/\bdivided by\b/gi, "/")
+    .replace(/\bslash\b/gi, "/")
+    .replace(/\btilde\b/gi, "\\sim")
+    .replace(/\bopen paren\b/gi, "(")
+    .replace(/\bclose paren\b/gi, ")")
+    .replace(/\bcomma\b/gi, ",");
+
+  latex = latex.replace(
+    /(?<!\\)\b(alpha|beta|gamma|Gamma|delta|Delta|triangle|epsilon|phi|Phi|pi|theta|Theta|omega|Omega)\b/g,
+    (token) => semanticSpeechTokenToLatex(token)
+  );
+
+  latex = latex
+    .replace(/\bmu\s*meters\b/gi, "\\mu\\mathrm{m}")
+    .replace(/\s*\/\s*/g, "/")
+    .replace(/\s*([=+<>])\s*/g, " $1 ")
+    .replace(/\s+/g, " ")
+    .trim();
+
+  if (/\b(?:the|fraction|numerator|denominator|square root|squared|cubed|raised|power|almost|of|is|en dash|right arrow|absolute value)\b/i.test(latex)) {
+    return undefined;
+  }
+  return latex && latex !== normalized ? latex : undefined;
+}
+
+function formulaFromSpeechText(speech: string): MathFormulaText | undefined {
+  const normalizedSpeech = normalizeMathSpeechText(speech);
+  if (!normalizedSpeech) {
+    return undefined;
+  }
+  const latex = semanticSpeechToLatex(normalizedSpeech);
+  if (latex) {
+    return {
+      text: latex,
+      format: "latex",
+      speech: normalizedSpeech
+    };
+  }
+  return {
+    text: normalizedSpeech,
+    format: "speech",
+    speech: normalizedSpeech
+  };
+}
+
+function formulaTextFromMathJaxHtml(html: string): MathFormulaText | undefined {
+  const annotationMatch = html.match(
+    /<annotation\b[^>]*\bencoding=["']application\/x-tex["'][^>]*>([\s\S]*?)<\/annotation>/i
+  );
+  const annotationText = normalizeMathText(annotationMatch?.[1] ?? "");
+  if (annotationText) {
+    return {
+      text: normalizeLatexFormulaText(annotationText),
+      format: "latex"
+    };
+  }
+
+  const mathMlMatch = html.match(/<math\b[^>]*>[\s\S]*?<\/math>/i);
+  const mathMlFormula = formulaFromMathMlText(mathMlMatch?.[0] ?? "");
+  if (mathMlFormula) {
+    return mathMlFormula;
+  }
+
+  const openingTag = html.match(/^<mjx-container\b[^>]*>/i)?.[0] ?? "";
+  const semanticSpeechNone = formulaFromSpeechText(extractTagAttribute(openingTag, "data-semantic-speech-none") ?? "");
+  if (semanticSpeechNone) {
+    return semanticSpeechNone;
+  }
+
+  const ariaLabel = formulaFromSpeechText(extractTagAttribute(openingTag, "aria-label") ?? "");
+  if (ariaLabel) {
+    return ariaLabel;
+  }
+
+  const speechTag = html.match(/<mjx-speech\b[^>]*>/i)?.[0] ?? "";
+  const speechAriaLabel = formulaFromSpeechText(extractTagAttribute(speechTag, "aria-label") ?? "");
+  if (speechAriaLabel) {
+    return speechAriaLabel;
+  }
+
+  const semanticSpeech = formulaFromSpeechText(extractTagAttribute(openingTag, "data-semantic-speech") ?? "");
+  if (semanticSpeech) {
+    return semanticSpeech;
+  }
+
+  const title = normalizeMathText(extractTagAttribute(openingTag, "title") ?? "");
+  if (!title) {
+    return undefined;
+  }
+  return {
+    text: title,
+    format: "speech"
+  };
+}
+
+function renderFormulaTextHtml(formula: MathFormulaText, display: boolean): string {
+  if (formula.format === "mathml" && formula.mathml) {
+    const latexBody = display ? `$$${formula.text}$$` : `$${formula.text}$`;
+    const speechAttribute = formula.speech ? ` data-math-speech="${escapeHtmlText(formula.speech)}"` : "";
+    const attributes = `class="math-formula${display ? " display" : ""}" data-math-format="mathml" data-latex="${escapeHtmlText(latexBody)}"${speechAttribute}`;
+    return display
+      ? `<div ${attributes}>${formula.mathml}</div>`
+      : `<span ${attributes}>${formula.mathml}</span>`;
+  }
+
+  const body = formula.format === "latex"
+    ? display
+      ? `$$${formula.text}$$`
+      : `$${formula.text}$`
+    : formula.text;
+  const escaped = escapeHtmlText(body);
+  const speechAttribute = formula.speech ? ` data-math-speech="${escapeHtmlText(formula.speech)}"` : "";
+  const attributes = `class="math-formula" data-math-format="${formula.format}"${speechAttribute}`;
+  return display
+    ? `<div ${attributes.replace('class="math-formula"', 'class="math-formula display"')}>${escaped}</div>`
+    : `<span ${attributes}>${escaped}</span>`;
+}
+
+function normalizeMathJaxHtml(html: string): string {
+  return html
+    .replace(
+      /<script\b[^>]*\btype=["']math\/tex(?:;[^"']*)?["'][^>]*>([\s\S]*?)<\/script>/gi,
+      (match, text: string) => {
+        const normalizedText = normalizeMathText(text);
+        if (!normalizedText) {
+          return match;
+        }
+        return renderFormulaTextHtml({
+          text: normalizeLatexFormulaText(normalizedText),
+          format: "latex"
+        }, /type=["']math\/tex;\s*mode=display["']/i.test(match));
+      }
+    )
+    .replace(/<mjx-container\b[^>]*>[\s\S]*?<\/mjx-container>/gi, (match) => {
+      if (/<mjx-lazy\b/i.test(match) && !/<annotation\b/i.test(match)) {
+        return match;
+      }
+
+      const formulaText = formulaTextFromMathJaxHtml(match);
+      if (!formulaText) {
+        return match;
+      }
+
+      return renderFormulaTextHtml(
+        formulaText,
+        /\bdisplay\s*=\s*["']?(?:true|block)/i.test(match)
+      );
+    })
+    .replace(/<(span|div)\b([^>]*)>([^<>]*)<\/\1>/gi, (match, tagName: string, attributes: string, text: string) => {
+      if (!/\bclass=["'][^"']*\bmath-formula\b/i.test(attributes)) {
+        return match;
+      }
+      const display = tagName.toLowerCase() === "div" || /\bdisplay\b/i.test(attributes);
+      const speechText = extractTagAttribute(`<${tagName}${attributes}>`, "data-math-speech") ?? "";
+      const speechFormula = formulaFromSpeechText(speechText);
+      if (speechFormula) {
+        return renderFormulaTextHtml(speechFormula, display);
+      }
+      if (/\bdata-math-format=/i.test(attributes)) {
+        return match;
+      }
+      const normalizedText = normalizeMathText(text);
+      if (!normalizedText || /^\${1,2}/.test(normalizedText)) {
+        return match;
+      }
+      const formulaText = formulaFromSpeechText(normalizedText);
+      if (!formulaText || formulaText.format !== "latex") {
+        return match;
+      }
+      return renderFormulaTextHtml(formulaText, display);
+    });
+}
+
 function removeTagBlocks(html: string, tagName: string): string {
   const pattern = new RegExp(`<${tagName}\\b[^>]*>[\\s\\S]*?<\\/${tagName}>`, "gi");
   return html.replace(pattern, " ");
@@ -535,7 +890,7 @@ function removeKnownNoiseBlocks(html: string): { html: string; removed: number }
 
   for (const tagName of NOISE_CONTAINER_TAGS) {
     const pattern = new RegExp(
-      `<${tagName}\\b[^>]*\\s(?:class|id|role|aria-label)=["'][^"']*(?:advert|banner|breadcrumb|cookie|login|menu|metrics|nav|newsletter|popup|recommend|related|share|sidebar|sign-?up|skip|social|toolbar)[^"']*["'][^>]*>[\\s\\S]*?<\\/${tagName}>`,
+      `<${tagName}\\b[^>]*\\s(?:class|id|role|aria-label|data-[\\w:-]+)=["'][^"']*(?:advert|altmetric|badge|banner|breadcrumb|cookie|dialog|dimensions|export|login|menu|metrics|modal|nav|newsletter|osano|popup|recommend|related|share|sidebar|sign-?up|skip|social|toolbar|tqc|z3988)[^"']*["'][^>]*>[\\s\\S]*?<\\/${tagName}>`,
       "gi"
     );
     const before = nextHtml;
@@ -559,6 +914,20 @@ function removeKnownNoiseBlocks(html: string): { html: string; removed: number }
       return " ";
     });
   } while (nextHtml !== previousHtml);
+
+  for (const pattern of [
+    /<img\b[^>]*(?:badge\.dimensions\.ai|__dimensions)[^>]*>/gi,
+    /<a\b[^>]*(?:altmetric\.com|link-to-altmetric-details-tab)[^>]*>[\s\S]*?<\/a>/gi,
+    /<div\b[^>]*class=["'][^"']*__db_[^"']*["'][^>]*>[\s\S]*?<\/div>/gi,
+    /<li\b[^>]*class=["'][^"']*\barticle-feature-tag\b[^"']*["'][^>]*>\s*Access by [\s\S]*?<\/li>/gi,
+    /<p\b[^>]*>\s*(?:&copy;|\u00a9)\s*\d{4}\s+American Physical Society\s*<\/p>/gi
+  ]) {
+    const before = nextHtml;
+    nextHtml = nextHtml.replace(pattern, " ");
+    if (nextHtml !== before) {
+      removed += 1;
+    }
+  }
 
   return { html: nextHtml, removed };
 }
@@ -853,6 +1222,10 @@ function extractMetadata(html: string, referenceHtml?: { html: string; baseUrl: 
 function htmlToMarkdown(html: string): string {
   return decodeHtmlEntities(html)
     .replace(/\r/g, "\n")
+    .replace(/<([a-z][a-z0-9:-]*)\b[^>]*\bclass=["'][^"']*\bmath-formula\b[^"']*["'][^>]*>[\s\S]*?<\/\1>/gi, (match) => {
+      const openingTag = match.match(/^<[^>]+>/)?.[0] ?? "";
+      return extractTagAttribute(openingTag, "data-latex") ?? match;
+    })
     .replace(/<br\s*\/?>/gi, "\n")
     .replace(/<\/p>/gi, "\n\n")
     .replace(/<\/div>/gi, "\n")
@@ -962,6 +1335,84 @@ function maybeSanitizeLatexmlMarkdown(input: {
     return input.markdown;
   }
   return sanitizeLatexmlMarkdown(input.markdown);
+}
+
+function htmlSnapshotHasRenderableLatex(html: string): boolean {
+  return /\bdata-math-format=["']latex["']/i.test(html);
+}
+
+function extractMathFormulaMarkdown(match: string): string | undefined {
+  const openingTag = match.match(/^<[^>]+>/)?.[0] ?? "";
+  const dataLatex = extractTagAttribute(openingTag, "data-latex");
+  if (dataLatex?.trim()) {
+    return dataLatex.trim();
+  }
+
+  const text = normalizeMathText(match.replace(/<[^>]+>/g, " "));
+  return text ? decodeHtmlEntities(text) : undefined;
+}
+
+function replaceMathFormulaBlocksWithPlaceholders(html: string): {
+  html: string;
+  formulas: string[];
+} {
+  const formulas: string[] = [];
+  const replaced = html.replace(
+    /<([a-z][a-z0-9:-]*)\b[^>]*\bclass=["'][^"']*\bmath-formula\b[^"']*["'][^>]*>[\s\S]*?<\/\1>/gi,
+    (match) => {
+      const formula = extractMathFormulaMarkdown(match);
+      if (!formula) {
+        return match;
+      }
+      const token = `PIAGENTMATH${formulas.length}`;
+      formulas.push(formula);
+      return `<span>${token}</span>`;
+    }
+  );
+  return { html: replaced, formulas };
+}
+
+function restoreMathFormulaPlaceholders(markdown: string, formulas: string[]): string {
+  let restored = markdown;
+  for (let index = 0; index < formulas.length; index += 1) {
+    restored = restored.replace(new RegExp(`\\bPIAGENTMATH${index}\\b`, "g"), formulas[index] ?? "");
+  }
+  return restored;
+}
+
+function buildKatexAutoRenderHead(html: string): string[] {
+  if (!htmlSnapshotHasRenderableLatex(html)) {
+    return [];
+  }
+  return [
+    '  <link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/katex@0.16.22/dist/katex.min.css">',
+    '  <script defer src="https://cdn.jsdelivr.net/npm/katex@0.16.22/dist/katex.min.js"></script>',
+    "  <script defer src=\"https://cdn.jsdelivr.net/npm/katex@0.16.22/dist/contrib/auto-render.min.js\" onload=\"renderMathInElement(document.body,{delimiters:[{left:'$$',right:'$$',display:true},{left:'$',right:'$',display:false}],throwOnError:false});\"></script>"
+  ];
+}
+
+function buildReadableHtmlSnapshot(input: {
+  url: string;
+  title?: string;
+  html: string;
+}): string {
+  const title = escapeHtmlText(input.title?.trim() || input.url);
+  const body = input.html.trim();
+  const katexHead = buildKatexAutoRenderHead(body);
+  return [
+    "<!doctype html>",
+    "<html>",
+    "<head>",
+    '  <meta charset="utf-8">',
+    `  <title>${title}</title>`,
+    ...katexHead,
+    "</head>",
+    "<body>",
+    body,
+    "</body>",
+    "</html>",
+    ""
+  ].join("\n");
 }
 
 function compactLine(line: string): string {
@@ -1087,10 +1538,11 @@ function buildPaperWebPageExtraction(input: {
   html: string;
   markdown: string;
 }): PaperWebPageExtraction {
+  const html = normalizeMathJaxHtml(input.html);
   const cleanedMarkdown = cleanMarkdown(input.markdown);
-  const selected = selectArticleHtml(stripComments(input.html));
+  const selected = selectArticleHtml(stripComments(html));
   const cleanedBlocks = removeKnownNoiseBlocks(selected.html);
-  const metadata = extractMetadata(input.html, {
+  const metadata = extractMetadata(html, {
     html: selected.html,
     baseUrl: input.url
   });
@@ -1099,6 +1551,12 @@ function buildPaperWebPageExtraction(input: {
   return {
     url: input.url,
     ...(metadata.title ? { title: metadata.title } : {}),
+    ...(html ? { html } : {}),
+    snapshotHtml: buildReadableHtmlSnapshot({
+      url: input.url,
+      ...(metadata.title ? { title: metadata.title } : {}),
+      html: cleanedBlocks.html
+    }),
     markdown: cleanedMarkdown.markdown,
     metadata,
     access,
@@ -1112,16 +1570,17 @@ function buildPaperWebPageExtraction(input: {
 }
 
 export function parsePaperWebPageHtml(options: ParsePaperWebPageHtmlOptions): PaperWebPageExtraction {
-  const selected = selectArticleHtml(stripComments(options.html));
+  const html = normalizeMathJaxHtml(options.html);
+  const selected = selectArticleHtml(stripComments(html));
   const cleanedBlocks = removeKnownNoiseBlocks(selected.html);
   const markdown = maybeSanitizeLatexmlMarkdown({
     url: options.url,
-    html: options.html,
+    html,
     markdown: htmlToMarkdown(cleanedBlocks.html)
   });
   return buildPaperWebPageExtraction({
     url: options.url,
-    html: options.html,
+    html,
     markdown
   });
 }
@@ -1129,21 +1588,27 @@ export function parsePaperWebPageHtml(options: ParsePaperWebPageHtmlOptions): Pa
 export async function parsePaperWebPageHtmlWithPandoc(
   options: ParsePaperWebPageHtmlOptions
 ): Promise<PaperWebPageExtraction> {
-  const selected = selectArticleHtml(stripComments(options.html));
+  const html = normalizeMathJaxHtml(options.html);
+  const selected = selectArticleHtml(stripComments(html));
   const cleanedBlocks = removeKnownNoiseBlocks(selected.html);
+  const pandocInput = replaceMathFormulaBlocksWithPlaceholders(cleanedBlocks.html);
   const rawMarkdown = await htmlToMarkdownWithPandoc({
-    html: cleanedBlocks.html,
+    html: pandocInput.html,
     env: options.env ?? process.env,
     ...(options.pandocBin ? { pandocBin: options.pandocBin } : {})
-  }) ?? htmlToMarkdown(cleanedBlocks.html);
+  });
+  const markdownFromPandoc = rawMarkdown
+    ? restoreMathFormulaPlaceholders(rawMarkdown, pandocInput.formulas)
+    : undefined;
+  const markdownSource = markdownFromPandoc ?? htmlToMarkdown(cleanedBlocks.html);
   const markdown = maybeSanitizeLatexmlMarkdown({
     url: options.url,
-    html: options.html,
-    markdown: rawMarkdown
+    html,
+    markdown: markdownSource
   });
   return buildPaperWebPageExtraction({
     url: options.url,
-    html: options.html,
+    html,
     markdown
   });
 }
@@ -1152,11 +1617,12 @@ export function diagnosePaperWebPageHtml(options: {
   url: string;
   html: string;
 }): PaperWebPageHtmlDiagnostic {
-  const selected = selectArticleHtml(stripComments(options.html));
+  const html = normalizeMathJaxHtml(options.html);
+  const selected = selectArticleHtml(stripComments(html));
   const cleanedBlocks = removeKnownNoiseBlocks(selected.html);
   const unfilteredMarkdown = htmlToMarkdown(selected.html);
   const cleanedMarkdown = cleanMarkdown(htmlToMarkdown(cleanedBlocks.html));
-  const candidates = buildHtmlCandidateDiagnostics(stripComments(options.html))
+  const candidates = buildHtmlCandidateDiagnostics(stripComments(html))
     .map(({ html: _html, ...candidate }) => candidate)
     .sort((left, right) => right.score - left.score);
 

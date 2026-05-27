@@ -43,6 +43,10 @@ function stripRecordManifest(record: Record<string, unknown>): Record<string, un
   return legacyRecord;
 }
 
+function toWslUncPath(filePath: string): string {
+  return `\\\\wsl.localhost\\Ubuntu-24.04\\${filePath.slice(1).split(path.sep).join("\\")}`;
+}
+
 const supportedSearchSource = {
   source: "science",
   canonicalId: "10.1126/science.adz8659",
@@ -1014,6 +1018,37 @@ test("updatePaperRecordReadingFailure preserves an existing ready webpage readin
     assert.equal(saved?.record.reading?.status, "ready");
     assert.equal(saved?.record.reading?.preferredSource, "webpage");
     assert.equal(saved?.record.reading?.paperKey, "nature-s41567-025-03102-5");
+  } finally {
+    await rm(workspaceDir, { recursive: true, force: true });
+  }
+});
+
+test("readPaperRecordByPath accepts WSL UNC workspace and record paths", async () => {
+  const workspaceDir = await mkdtemp(path.join(os.tmpdir(), "paper-store-"));
+
+  try {
+    const recordPath = await writePaperRecord({
+      workspaceDir,
+      record: {
+        source: "aps",
+        articleUrl: "https://journals.aps.org/prl/abstract/10.1103/PhysRevLett.111.080502",
+        recordedAt: "2026-05-27T09:51:10.000Z",
+        handlingMethod: "browser_session",
+        status: "downloaded",
+        canonicalId: "10.1103/PhysRevLett.111.080502",
+        pdfUrl: "https://journals.aps.org/prl/pdf/10.1103/PhysRevLett.111.080502",
+        downloadPath: path.join(workspaceDir, "knowledge-base", "raw", "pdfs", "aps.pdf")
+      },
+      enrichCitationMetadata: false
+    });
+
+    const saved = await readPaperRecordByPath({
+      workspaceDir: toWslUncPath(workspaceDir),
+      recordPath: toWslUncPath(recordPath)
+    });
+
+    assert.equal(saved?.record.canonicalId, "10.1103/PhysRevLett.111.080502");
+    assert.equal(saved?.recordPath, recordPath);
   } finally {
     await rm(workspaceDir, { recursive: true, force: true });
   }

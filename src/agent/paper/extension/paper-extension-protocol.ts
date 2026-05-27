@@ -24,6 +24,7 @@ export interface ExtensionPaperJobPayload {
   title?: string;
   autoClose?: boolean;
   purpose?: ExtensionJobPurpose;
+  recordPath?: string;
 }
 
 export interface ExtensionWebpageAsset {
@@ -86,6 +87,7 @@ export type ExtensionHostMessage =
       html: string;
       finalUrl?: string;
       title?: string;
+      recordPath?: string;
       webpageAssets?: ExtensionWebpageAsset[];
     }
   | {
@@ -282,7 +284,8 @@ function parseExtensionPaperJobPayload(value: unknown): ExtensionPaperJobPayload
     source: parsePaperSource(record, "source"),
     ...parseOptionalFields(record, ["title"]),
     ...parseOptionalBooleanField(record, "autoClose"),
-    ...parseOptionalJobPurposeField(record, "purpose")
+    ...parseOptionalJobPurposeField(record, "purpose"),
+    ...parseOptionalFields(record, ["recordPath"])
   };
 }
 
@@ -417,7 +420,7 @@ export function parseExtensionHostMessage(value: unknown): ExtensionHostMessage 
       articleUrl: parseRequiredString(record, "articleUrl"),
       source: parsePaperSource(record, "source"),
       html: parseRequiredString(record, "html"),
-      ...parseOptionalFields(record, ["title", "finalUrl"]),
+      ...parseOptionalFields(record, ["title", "finalUrl", "recordPath"]),
       ...parseOptionalExtensionWebpageAssetsField(record, "webpageAssets")
     };
   }

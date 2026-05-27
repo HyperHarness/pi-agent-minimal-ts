@@ -411,6 +411,1575 @@ test("runner keeps Cloudflare challenge pages in verification handoff", async ()
   assert.equal(sentMessages[0].pdfUrl, null);
 });
 
+test("runner waits for APS lazy MathJax formulas before sending the webpage snapshot", async () => {
+  const sentMessages = [];
+  const previousChrome = globalThis.chrome;
+  const previousDocument = globalThis.document;
+  const previousLocation = globalThis.location;
+  const previousSetTimeout = globalThis.setTimeout;
+  let formulasRendered = false;
+
+  globalThis.chrome = {
+    runtime: {
+      sendMessage(message) {
+        sentMessages.push(message);
+      }
+    }
+  };
+  globalThis.location = {
+    href: "https://journals.aps.org/prl/abstract/10.1103/PhysRevLett.111.080502#fulltext",
+    hostname: "journals.aps.org"
+  };
+  globalThis.setTimeout = (callback) => {
+    queueMicrotask(callback);
+    return 1;
+  };
+  const lazyFormula = {
+    scrollIntoView() {
+      formulasRendered = true;
+    },
+    closest() {
+      return this;
+    }
+  };
+  const body = {
+    innerText: `Article Text ${"superconducting qubit ".repeat(130)} References`,
+    get outerHTML() {
+      return formulasRendered
+        ? `<body><main><h1>APS paper</h1><p>with detuning <mjx-container><mjx-assistive-mml><math><semantics><annotation encoding="application/x-tex">\\Delta</annotation></semantics></math></mjx-assistive-mml></mjx-container>.</p><a href="/prl/pdf/10.1103/PhysRevLett.111.080502">PDF</a></main></body>`
+        : `<body><main><h1>APS paper</h1><p>with detuning <mjx-container><mjx-lazy data-mjx-lazy="1"></mjx-lazy></mjx-container>.</p><a href="/prl/pdf/10.1103/PhysRevLett.111.080502">PDF</a></main></body>`;
+    },
+    querySelectorAll(selector) {
+      if (selector === "img") {
+        return [];
+      }
+      if (selector === "mjx-lazy") {
+        return formulasRendered ? [] : [lazyFormula];
+      }
+      return [];
+    }
+  };
+  globalThis.document = {
+    title: "APS paper",
+    head: {
+      innerHTML: ""
+    },
+    body,
+    documentElement: {
+      innerHTML: body.outerHTML,
+      outerHTML: body.outerHTML
+    },
+    location: globalThis.location,
+    querySelector() {
+      return null;
+    },
+    querySelectorAll(selector) {
+      if (selector === "mjx-lazy") {
+        return body.querySelectorAll(selector);
+      }
+      if (selector === "a[href]") {
+        return [
+          {
+            textContent: "PDF",
+            getAttribute(name) {
+              return name === "href" ? "/prl/pdf/10.1103/PhysRevLett.111.080502" : null;
+            }
+          }
+        ];
+      }
+      if (selector === "a, button, [role='tab'], [role='button']") {
+        return [];
+      }
+      return body.querySelectorAll(selector);
+    }
+  };
+
+  try {
+    await import(
+      `${pathToFileURL(path.join(contentDir, "runner.js")).href}?case=${Date.now()}-${Math.random()}`
+    );
+    await flushAsyncWork();
+  } finally {
+    globalThis.chrome = previousChrome;
+    globalThis.document = previousDocument;
+    globalThis.location = previousLocation;
+    globalThis.setTimeout = previousSetTimeout;
+  }
+
+  assert.equal(sentMessages.length, 1);
+  assert.equal(formulasRendered, true);
+  assert.match(sentMessages[0].html, /application\/x-tex/);
+  assert.doesNotMatch(sentMessages[0].html, /mjx-lazy/);
+});
+
+test("runner waits for APS lazy MathJax even when the article text label is absent from visible text", async () => {
+  const sentMessages = [];
+  const previousChrome = globalThis.chrome;
+  const previousDocument = globalThis.document;
+  const previousLocation = globalThis.location;
+  const previousSetTimeout = globalThis.setTimeout;
+  let formulasRendered = false;
+
+  globalThis.chrome = {
+    runtime: {
+      sendMessage(message) {
+        sentMessages.push(message);
+      }
+    }
+  };
+  globalThis.location = {
+    href: "https://journals.aps.org/prl/abstract/10.1103/PhysRevLett.111.080502#fulltext",
+    hostname: "journals.aps.org"
+  };
+  globalThis.setTimeout = (callback) => {
+    queueMicrotask(callback);
+    return 1;
+  };
+  const lazyFormula = {
+    scrollIntoView() {
+      formulasRendered = true;
+    },
+    closest() {
+      return this;
+    }
+  };
+  const body = {
+    innerText: `${"superconducting qubit coherence control ".repeat(140)} References`,
+    get outerHTML() {
+      return formulasRendered
+        ? `<body><main><p>with detuning <mjx-container><mjx-assistive-mml><math><semantics><annotation encoding="application/x-tex">\\Delta</annotation></semantics></math></mjx-assistive-mml></mjx-container>.</p><a href="/prl/pdf/10.1103/PhysRevLett.111.080502">PDF</a></main></body>`
+        : `<body><main><p>with detuning <mjx-container><mjx-lazy data-mjx-lazy="1"></mjx-lazy></mjx-container>.</p><a href="/prl/pdf/10.1103/PhysRevLett.111.080502">PDF</a></main></body>`;
+    },
+    querySelectorAll(selector) {
+      if (selector === "img") {
+        return [];
+      }
+      if (selector === "mjx-lazy") {
+        return formulasRendered ? [] : [lazyFormula];
+      }
+      return [];
+    }
+  };
+  globalThis.document = {
+    title: "APS paper",
+    head: {
+      innerHTML: ""
+    },
+    body,
+    documentElement: {
+      innerHTML: body.outerHTML,
+      outerHTML: body.outerHTML
+    },
+    location: globalThis.location,
+    querySelector() {
+      return null;
+    },
+    querySelectorAll(selector) {
+      if (selector === "mjx-lazy") {
+        return body.querySelectorAll(selector);
+      }
+      if (selector === "a[href]") {
+        return [
+          {
+            textContent: "PDF",
+            getAttribute(name) {
+              return name === "href" ? "/prl/pdf/10.1103/PhysRevLett.111.080502" : null;
+            }
+          }
+        ];
+      }
+      if (selector === "a, button, [role='tab'], [role='button']") {
+        return [];
+      }
+      return body.querySelectorAll(selector);
+    }
+  };
+
+  try {
+    await import(
+      `${pathToFileURL(path.join(contentDir, "runner.js")).href}?case=${Date.now()}-${Math.random()}`
+    );
+    await flushAsyncWork();
+  } finally {
+    globalThis.chrome = previousChrome;
+    globalThis.document = previousDocument;
+    globalThis.location = previousLocation;
+    globalThis.setTimeout = previousSetTimeout;
+  }
+
+  assert.equal(sentMessages.length, 1);
+  assert.equal(formulasRendered, true);
+  assert.match(sentMessages[0].html, /application\/x-tex/);
+  assert.doesNotMatch(sentMessages[0].html, /mjx-lazy/);
+});
+
+test("runner scrolls APS lazy MathJax formulas one viewport at a time", async () => {
+  const sentMessages = [];
+  const previousChrome = globalThis.chrome;
+  const previousDocument = globalThis.document;
+  const previousLocation = globalThis.location;
+  const previousSetTimeout = globalThis.setTimeout;
+  const previousDateNow = Date.now;
+  const rendered = new Set();
+  let pendingRender = null;
+  let returnedTopBeforeComplete = false;
+  let now = 0;
+
+  globalThis.chrome = {
+    runtime: {
+      sendMessage(message) {
+        sentMessages.push(message);
+      }
+    }
+  };
+  globalThis.location = {
+    href: "https://journals.aps.org/prl/abstract/10.1103/PhysRevLett.111.080502#fulltext",
+    hostname: "journals.aps.org"
+  };
+  Date.now = () => now;
+  globalThis.setTimeout = (callback) => {
+    now += 500;
+    if (pendingRender) {
+      rendered.add(pendingRender);
+      pendingRender = null;
+    }
+    queueMicrotask(callback);
+    return 1;
+  };
+
+  function lazyFormula(id) {
+    return {
+      id,
+      scrollIntoView() {
+        pendingRender = id;
+      },
+      closest() {
+        return this;
+      }
+    };
+  }
+
+  const formulas = [lazyFormula("delta"), lazyFormula("gamma")];
+  const body = {
+    innerText: `Article Text ${"superconducting qubit coherence control ".repeat(140)} References`,
+    get outerHTML() {
+      const delta = rendered.has("delta")
+        ? `<mjx-container><mjx-assistive-mml><math><semantics><annotation encoding="application/x-tex">\\Delta</annotation></semantics></math></mjx-assistive-mml></mjx-container>`
+        : `<mjx-container><mjx-lazy data-mjx-lazy="delta"></mjx-lazy></mjx-container>`;
+      const gamma = rendered.has("gamma")
+        ? `<mjx-container><mjx-assistive-mml><math><semantics><annotation encoding="application/x-tex">\\Gamma</annotation></semantics></math></mjx-assistive-mml></mjx-container>`
+        : `<mjx-container><mjx-lazy data-mjx-lazy="gamma"></mjx-lazy></mjx-container>`;
+      return `<body><main><p>with detuning ${delta}, and ${gamma}.</p><a href="/prl/pdf/10.1103/PhysRevLett.111.080502">PDF</a></main></body>`;
+    },
+    querySelectorAll(selector) {
+      if (selector === "img") {
+        return [];
+      }
+      if (selector === "mjx-lazy") {
+        return formulas.filter((formula) => !rendered.has(formula.id));
+      }
+      return [];
+    }
+  };
+  globalThis.scrollTo = () => {
+    if (body.querySelectorAll("mjx-lazy").length > 0) {
+      returnedTopBeforeComplete = true;
+    }
+    pendingRender = null;
+  };
+  globalThis.document = {
+    title: "APS paper",
+    head: {
+      innerHTML: ""
+    },
+    body,
+    documentElement: {
+      innerHTML: body.outerHTML,
+      outerHTML: body.outerHTML
+    },
+    location: globalThis.location,
+    querySelector() {
+      return null;
+    },
+    querySelectorAll(selector) {
+      if (selector === "mjx-lazy") {
+        return body.querySelectorAll(selector);
+      }
+      if (selector === "a[href]") {
+        return [
+          {
+            textContent: "PDF",
+            getAttribute(name) {
+              return name === "href" ? "/prl/pdf/10.1103/PhysRevLett.111.080502" : null;
+            }
+          }
+        ];
+      }
+      if (selector === "a, button, [role='tab'], [role='button']") {
+        return [];
+      }
+      return body.querySelectorAll(selector);
+    }
+  };
+
+  try {
+    await import(
+      `${pathToFileURL(path.join(contentDir, "runner.js")).href}?case=${Date.now()}-${Math.random()}`
+    );
+    for (let index = 0; index < 40 && sentMessages.length === 0; index += 1) {
+      await flushAsyncWork();
+    }
+  } finally {
+    globalThis.chrome = previousChrome;
+    globalThis.document = previousDocument;
+    globalThis.location = previousLocation;
+    globalThis.setTimeout = previousSetTimeout;
+    Date.now = previousDateNow;
+  }
+
+  assert.equal(sentMessages.length, 1);
+  assert.equal(returnedTopBeforeComplete, false);
+  assert.match(sentMessages[0].html, /\\Delta/);
+  assert.match(sentMessages[0].html, /\\Gamma/);
+  assert.doesNotMatch(sentMessages[0].html, /mjx-lazy/);
+});
+
+test("runner uses window scrolling to trigger APS lazy MathJax rendering", async () => {
+  const sentMessages = [];
+  const previousChrome = globalThis.chrome;
+  const previousDocument = globalThis.document;
+  const previousLocation = globalThis.location;
+  const previousSetTimeout = globalThis.setTimeout;
+  const previousDateNow = Date.now;
+  const previousScrollTo = globalThis.scrollTo;
+  const rendered = new Set();
+  let now = 0;
+
+  globalThis.chrome = {
+    runtime: {
+      sendMessage(message) {
+        sentMessages.push(message);
+      }
+    }
+  };
+  globalThis.location = {
+    href: "https://journals.aps.org/prl/abstract/10.1103/PhysRevLett.111.080502#fulltext",
+    hostname: "journals.aps.org"
+  };
+  globalThis.innerHeight = 800;
+  globalThis.pageYOffset = 0;
+  Date.now = () => now;
+  globalThis.setTimeout = (callback) => {
+    now += 500;
+    queueMicrotask(callback);
+    return 1;
+  };
+
+  function lazyFormula(id, top) {
+    return {
+      id,
+      scrollIntoView() {
+        // APS' lazy rendering is driven by viewport scroll events in this regression.
+      },
+      closest() {
+        return this;
+      },
+      getBoundingClientRect() {
+        return { top: top - globalThis.pageYOffset };
+      }
+    };
+  }
+
+  const formulas = [lazyFormula("delta", 1800), lazyFormula("gamma", 2600)];
+  globalThis.scrollTo = (_x, y) => {
+    globalThis.pageYOffset = y;
+    for (const formula of formulas) {
+      if (Math.abs(formula.getBoundingClientRect().top - globalThis.innerHeight / 2) <= 20) {
+        rendered.add(formula.id);
+      }
+    }
+  };
+
+  const body = {
+    innerText: `Article Text ${"superconducting qubit coherence control ".repeat(140)} References`,
+    get outerHTML() {
+      const delta = rendered.has("delta")
+        ? `<mjx-container><mjx-assistive-mml><math><semantics><annotation encoding="application/x-tex">\\Delta</annotation></semantics></math></mjx-assistive-mml></mjx-container>`
+        : `<mjx-container><mjx-lazy data-mjx-lazy="delta"></mjx-lazy></mjx-container>`;
+      const gamma = rendered.has("gamma")
+        ? `<mjx-container><mjx-assistive-mml><math><semantics><annotation encoding="application/x-tex">\\Gamma</annotation></semantics></math></mjx-assistive-mml></mjx-container>`
+        : `<mjx-container><mjx-lazy data-mjx-lazy="gamma"></mjx-lazy></mjx-container>`;
+      return `<body><main><p>with detuning ${delta}, and ${gamma}.</p><a href="/prl/pdf/10.1103/PhysRevLett.111.080502">PDF</a></main></body>`;
+    },
+    querySelectorAll(selector) {
+      if (selector === "img") {
+        return [];
+      }
+      if (selector === "mjx-lazy") {
+        return formulas.filter((formula) => !rendered.has(formula.id));
+      }
+      return [];
+    }
+  };
+  globalThis.document = {
+    title: "APS paper",
+    head: {
+      innerHTML: ""
+    },
+    body,
+    documentElement: {
+      innerHTML: body.outerHTML,
+      outerHTML: body.outerHTML,
+      scrollHeight: 3200
+    },
+    scrollingElement: {
+      scrollHeight: 3200
+    },
+    location: globalThis.location,
+    querySelector() {
+      return null;
+    },
+    querySelectorAll(selector) {
+      if (selector === "mjx-lazy") {
+        return body.querySelectorAll(selector);
+      }
+      if (selector === "a[href]") {
+        return [
+          {
+            textContent: "PDF",
+            getAttribute(name) {
+              return name === "href" ? "/prl/pdf/10.1103/PhysRevLett.111.080502" : null;
+            }
+          }
+        ];
+      }
+      if (selector === "a, button, [role='tab'], [role='button']") {
+        return [];
+      }
+      return body.querySelectorAll(selector);
+    }
+  };
+
+  try {
+    await import(
+      `${pathToFileURL(path.join(contentDir, "runner.js")).href}?case=${Date.now()}-${Math.random()}`
+    );
+    for (let index = 0; index < 40 && sentMessages.length === 0; index += 1) {
+      await flushAsyncWork();
+    }
+  } finally {
+    globalThis.chrome = previousChrome;
+    globalThis.document = previousDocument;
+    globalThis.location = previousLocation;
+    globalThis.setTimeout = previousSetTimeout;
+    globalThis.scrollTo = previousScrollTo;
+    delete globalThis.innerHeight;
+    delete globalThis.pageYOffset;
+    Date.now = previousDateNow;
+  }
+
+  assert.equal(sentMessages.length, 1);
+  assert.match(sentMessages[0].html, /\\Delta/);
+  assert.match(sentMessages[0].html, /\\Gamma/);
+  assert.doesNotMatch(sentMessages[0].html, /mjx-lazy/);
+});
+
+test("runner scrolls the APS article container when the MathJax placeholder has no useful viewport target", async () => {
+  const sentMessages = [];
+  const previousChrome = globalThis.chrome;
+  const previousDocument = globalThis.document;
+  const previousLocation = globalThis.location;
+  const previousSetTimeout = globalThis.setTimeout;
+  const previousDateNow = Date.now;
+  const previousScrollTo = globalThis.scrollTo;
+  let now = 0;
+  let formulaRendered = false;
+
+  globalThis.chrome = {
+    runtime: {
+      sendMessage(message) {
+        sentMessages.push(message);
+      }
+    }
+  };
+  globalThis.location = {
+    href: "https://journals.aps.org/prl/abstract/10.1103/PhysRevLett.111.080502#fulltext",
+    hostname: "journals.aps.org"
+  };
+  globalThis.innerHeight = 800;
+  globalThis.pageYOffset = 0;
+  Date.now = () => now;
+  globalThis.setTimeout = (callback) => {
+    now += 5000;
+    queueMicrotask(callback);
+    return 1;
+  };
+  globalThis.scrollTo = (_x, y) => {
+    globalThis.pageYOffset = y;
+  };
+
+  const articleParagraph = {
+    scrollIntoView() {
+      formulaRendered = true;
+    },
+    getBoundingClientRect() {
+      return { top: 1800 - globalThis.pageYOffset };
+    }
+  };
+  const mathContainer = {
+    scrollIntoView() {
+      // The empty MathJax container itself does not trigger APS lazy rendering.
+    },
+    getBoundingClientRect() {
+      return { top: 0 };
+    }
+  };
+  const lazyFormula = {
+    closest(selector) {
+      if (selector === "mjx-container") {
+        return mathContainer;
+      }
+      if (String(selector).includes(".article-fulltext-paragraph")) {
+        return articleParagraph;
+      }
+      return null;
+    },
+    getBoundingClientRect() {
+      return { top: 0 };
+    }
+  };
+
+  const body = {
+    innerText: `Article Text ${"superconducting qubit coherence control ".repeat(140)} References`,
+    get outerHTML() {
+      const delta = formulaRendered
+        ? `<mjx-container><mjx-assistive-mml><math><semantics><annotation encoding="application/x-tex">\\Delta</annotation></semantics></math></mjx-assistive-mml></mjx-container>`
+        : `<mjx-container><mjx-lazy data-mjx-lazy="delta"></mjx-lazy></mjx-container>`;
+      return `<body><main><p class="article-fulltext-paragraph">with detuning ${delta}.</p><a href="/prl/pdf/10.1103/PhysRevLett.111.080502">PDF</a></main></body>`;
+    },
+    querySelectorAll(selector) {
+      if (selector === "img") {
+        return [];
+      }
+      if (selector === "mjx-lazy") {
+        return formulaRendered ? [] : [lazyFormula];
+      }
+      return [];
+    }
+  };
+  globalThis.document = {
+    title: "APS paper",
+    head: {
+      innerHTML: ""
+    },
+    body,
+    documentElement: {
+      innerHTML: body.outerHTML,
+      outerHTML: body.outerHTML,
+      scrollHeight: 3200
+    },
+    scrollingElement: {
+      scrollHeight: 3200
+    },
+    location: globalThis.location,
+    querySelector() {
+      return null;
+    },
+    querySelectorAll(selector) {
+      if (selector === "mjx-lazy") {
+        return body.querySelectorAll(selector);
+      }
+      if (selector === "a[href]") {
+        return [
+          {
+            textContent: "PDF",
+            getAttribute(name) {
+              return name === "href" ? "/prl/pdf/10.1103/PhysRevLett.111.080502" : null;
+            }
+          }
+        ];
+      }
+      if (selector === "a, button, [role='tab'], [role='button']") {
+        return [];
+      }
+      return body.querySelectorAll(selector);
+    }
+  };
+
+  try {
+    await import(
+      `${pathToFileURL(path.join(contentDir, "runner.js")).href}?case=${Date.now()}-${Math.random()}`
+    );
+    for (let index = 0; index < 40 && sentMessages.length === 0; index += 1) {
+      await flushAsyncWork();
+    }
+  } finally {
+    globalThis.chrome = previousChrome;
+    globalThis.document = previousDocument;
+    globalThis.location = previousLocation;
+    globalThis.setTimeout = previousSetTimeout;
+    globalThis.scrollTo = previousScrollTo;
+    delete globalThis.innerHeight;
+    delete globalThis.pageYOffset;
+    Date.now = previousDateNow;
+  }
+
+  assert.equal(sentMessages.length, 1);
+  assert.equal(formulaRendered, true);
+  assert.match(sentMessages[0].html, /\\Delta/);
+  assert.doesNotMatch(sentMessages[0].html, /mjx-lazy/);
+});
+
+test("runner recovers APS lazy MathJax formulas from the MathJax document before snapshotting", async () => {
+  const sentMessages = [];
+  const previousChrome = globalThis.chrome;
+  const previousDocument = globalThis.document;
+  const previousLocation = globalThis.location;
+  const previousSetTimeout = globalThis.setTimeout;
+  const previousDateNow = Date.now;
+  const previousMathJax = globalThis.MathJax;
+  let now = 0;
+  let formulaRecovered = false;
+
+  globalThis.chrome = {
+    runtime: {
+      sendMessage(message) {
+        sentMessages.push(message);
+      }
+    }
+  };
+  globalThis.location = {
+    href: "https://journals.aps.org/prl/abstract/10.1103/PhysRevLett.111.080502#fulltext",
+    hostname: "journals.aps.org"
+  };
+  Date.now = () => now;
+  globalThis.setTimeout = (callback) => {
+    now += 65000;
+    queueMicrotask(callback);
+    return 1;
+  };
+
+  const lazyFormula = {
+    closest() {
+      return mathContainer;
+    }
+  };
+  const replacementParent = {
+    replaceChild(replacement, node) {
+      assert.equal(node, mathContainer);
+      assert.equal(replacement.textContent, "\\Delta");
+      formulaRecovered = true;
+    }
+  };
+  const mathContainer = {
+    parentNode: replacementParent,
+    querySelector(selector) {
+      return selector === "mjx-lazy" && !formulaRecovered ? lazyFormula : null;
+    },
+    scrollIntoView() {
+      // This regression only succeeds when the MathJax document source is used.
+    },
+    getBoundingClientRect() {
+      return { top: 0 };
+    }
+  };
+  globalThis.MathJax = {
+    startup: {
+      document: {
+        math: [
+          {
+            math: "\\Delta",
+            display: false,
+            typesetRoot: mathContainer
+          }
+        ]
+      }
+    }
+  };
+
+  const body = {
+    innerText: `Article Text ${"superconducting qubit coherence control ".repeat(140)} References`,
+    get outerHTML() {
+      const delta = formulaRecovered
+        ? `<span class="math-formula">\\Delta</span>`
+        : `<mjx-container><mjx-lazy data-mjx-lazy="delta"></mjx-lazy></mjx-container>`;
+      return `<body><main><p class="article-fulltext-paragraph">with detuning ${delta}.</p><a href="/prl/pdf/10.1103/PhysRevLett.111.080502">PDF</a></main></body>`;
+    },
+    querySelectorAll(selector) {
+      if (selector === "img") {
+        return [];
+      }
+      if (selector === "mjx-lazy") {
+        return formulaRecovered ? [] : [lazyFormula];
+      }
+      return [];
+    }
+  };
+  globalThis.document = {
+    title: "APS paper",
+    head: {
+      innerHTML: ""
+    },
+    body,
+    documentElement: {
+      innerHTML: body.outerHTML,
+      outerHTML: body.outerHTML
+    },
+    location: globalThis.location,
+    createElement(tagName) {
+      return {
+        tagName,
+        className: "",
+        textContent: ""
+      };
+    },
+    querySelector() {
+      return null;
+    },
+    querySelectorAll(selector) {
+      if (selector === "mjx-lazy") {
+        return body.querySelectorAll(selector);
+      }
+      if (selector === "a[href]") {
+        return [
+          {
+            textContent: "PDF",
+            getAttribute(name) {
+              return name === "href" ? "/prl/pdf/10.1103/PhysRevLett.111.080502" : null;
+            }
+          }
+        ];
+      }
+      if (selector === "a, button, [role='tab'], [role='button']") {
+        return [];
+      }
+      return body.querySelectorAll(selector);
+    }
+  };
+
+  try {
+    await import(
+      `${pathToFileURL(path.join(contentDir, "runner.js")).href}?case=${Date.now()}-${Math.random()}`
+    );
+    for (let index = 0; index < 10 && sentMessages.length === 0; index += 1) {
+      await flushAsyncWork();
+    }
+  } finally {
+    globalThis.chrome = previousChrome;
+    globalThis.document = previousDocument;
+    globalThis.location = previousLocation;
+    globalThis.setTimeout = previousSetTimeout;
+    globalThis.MathJax = previousMathJax;
+    Date.now = previousDateNow;
+  }
+
+  assert.equal(sentMessages.length, 1);
+  assert.equal(formulaRecovered, true);
+  assert.match(sentMessages[0].html, /\\Delta/);
+  assert.doesNotMatch(sentMessages[0].html, /mjx-lazy/);
+});
+
+test("runner injects the APS MathJax bridge into the page world before snapshotting", async () => {
+  const sentMessages = [];
+  const previousChrome = globalThis.chrome;
+  const previousDocument = globalThis.document;
+  const previousLocation = globalThis.location;
+  const previousSetTimeout = globalThis.setTimeout;
+  const previousDateNow = Date.now;
+  const previousCustomEvent = globalThis.CustomEvent;
+  let now = 0;
+  let formulaRecovered = false;
+  let injectedScriptSrc = "";
+  const documentListeners = new Map();
+  const documentAttributes = new Map();
+
+  globalThis.chrome = {
+    runtime: {
+      getURL(pathname) {
+        return `chrome-extension://pi-agent/${pathname}`;
+      },
+      sendMessage(message) {
+        sentMessages.push(message);
+      }
+    }
+  };
+  globalThis.location = {
+    href: "https://journals.aps.org/prl/abstract/10.1103/PhysRevLett.111.080502#fulltext",
+    hostname: "journals.aps.org"
+  };
+  globalThis.CustomEvent = class CustomEvent {
+    constructor(type) {
+      this.type = type;
+    }
+  };
+  Date.now = () => now;
+  globalThis.setTimeout = (callback) => {
+    now += 65000;
+    queueMicrotask(callback);
+    return 1;
+  };
+
+  const lazyFormula = {
+    closest() {
+      return this;
+    }
+  };
+  const body = {
+    innerText: `Article Text ${"superconducting qubit coherence control ".repeat(140)} References`,
+    get outerHTML() {
+      const delta = formulaRecovered
+        ? `<span class="math-formula">\\Delta</span>`
+        : `<mjx-container><mjx-lazy data-mjx-lazy="delta"></mjx-lazy></mjx-container>`;
+      return `<body><main><p class="article-fulltext-paragraph">with detuning ${delta}.</p><a href="/prl/pdf/10.1103/PhysRevLett.111.080502">PDF</a></main></body>`;
+    },
+    querySelectorAll(selector) {
+      if (selector === "img") {
+        return [];
+      }
+      if (selector === "mjx-lazy") {
+        return formulaRecovered ? [] : [lazyFormula];
+      }
+      return [];
+    }
+  };
+  const documentElement = {
+    get innerHTML() {
+      return body.outerHTML;
+    },
+    get outerHTML() {
+      return body.outerHTML;
+    },
+    getAttribute(name) {
+      return documentAttributes.get(name) ?? null;
+    },
+    setAttribute(name, value) {
+      documentAttributes.set(name, value);
+    }
+  };
+  globalThis.document = {
+    title: "APS paper",
+    head: {
+      appendChild(script) {
+        injectedScriptSrc = script.src;
+        documentListeners.set("pi-agent-paper-recover-mathjax", () => {
+          formulaRecovered = true;
+        });
+        if (typeof script.onload === "function") {
+          script.onload();
+        }
+      }
+    },
+    body,
+    documentElement,
+    location: globalThis.location,
+    createElement(tagName) {
+      return {
+        tagName,
+        async: true,
+        parentNode: null,
+        src: "",
+        onload: null
+      };
+    },
+    dispatchEvent(event) {
+      const listener = documentListeners.get(event.type);
+      if (listener) {
+        listener(event);
+      }
+    },
+    querySelector() {
+      return null;
+    },
+    querySelectorAll(selector) {
+      if (selector === "mjx-lazy") {
+        return body.querySelectorAll(selector);
+      }
+      if (selector === "a[href]") {
+        return [
+          {
+            textContent: "PDF",
+            getAttribute(name) {
+              return name === "href" ? "/prl/pdf/10.1103/PhysRevLett.111.080502" : null;
+            }
+          }
+        ];
+      }
+      if (selector === "a, button, [role='tab'], [role='button']") {
+        return [];
+      }
+      return body.querySelectorAll(selector);
+    }
+  };
+
+  try {
+    await import(
+      `${pathToFileURL(path.join(contentDir, "runner.js")).href}?case=${Date.now()}-${Math.random()}`
+    );
+    for (let index = 0; index < 10 && sentMessages.length === 0; index += 1) {
+      await flushAsyncWork();
+    }
+  } finally {
+    globalThis.chrome = previousChrome;
+    globalThis.document = previousDocument;
+    globalThis.location = previousLocation;
+    globalThis.setTimeout = previousSetTimeout;
+    globalThis.CustomEvent = previousCustomEvent;
+    Date.now = previousDateNow;
+  }
+
+  assert.equal(sentMessages.length, 1);
+  assert.equal(injectedScriptSrc, "chrome-extension://pi-agent/content/mathjax-bridge.js");
+  assert.equal(documentAttributes.get("data-pi-agent-mathjax-bridge-injected"), "true");
+  assert.equal(formulaRecovered, true);
+  assert.match(sentMessages[0].html, /\\Delta/);
+  assert.doesNotMatch(sentMessages[0].html, /mjx-lazy/);
+});
+
+test("runner reports APS MathML presence diagnostics with the snapshot", async () => {
+  const sentMessages = [];
+  const previousChrome = globalThis.chrome;
+  const previousDocument = globalThis.document;
+  const previousLocation = globalThis.location;
+
+  globalThis.chrome = {
+    runtime: {
+      sendMessage(message) {
+        sentMessages.push(message);
+      }
+    }
+  };
+  globalThis.location = {
+    href: "https://journals.aps.org/prl/abstract/10.1103/PhysRevLett.111.080502#fulltext",
+    hostname: "journals.aps.org"
+  };
+
+  const mathElement = {};
+  const assistiveMath = {};
+  const mathContainer = {};
+  const body = {
+    innerText: `Article Text ${"superconducting qubit coherence control ".repeat(140)} References`,
+    outerHTML: `<body data-pi-agent-mathjax-items="7"><main><p class="article-fulltext-paragraph">with detuning <mjx-container><mjx-assistive-mml><math><mi>\\Delta</mi></math></mjx-assistive-mml></mjx-container>.</p><a href="/prl/pdf/10.1103/PhysRevLett.111.080502">PDF</a></main></body>`,
+    getAttribute(name) {
+      return name === "data-pi-agent-mathjax-items" ? "7" : null;
+    },
+    querySelectorAll(selector) {
+      if (selector === "img") {
+        return [];
+      }
+      if (selector === "math") {
+        return [mathElement];
+      }
+      if (selector === "mjx-assistive-mml") {
+        return [assistiveMath];
+      }
+      if (selector === "mjx-container") {
+        return [mathContainer];
+      }
+      if (selector === "mjx-lazy") {
+        return [];
+      }
+      return [];
+    }
+  };
+  globalThis.document = {
+    title: "APS paper",
+    head: {
+      innerHTML: ""
+    },
+    body,
+    documentElement: {
+      innerHTML: body.outerHTML,
+      outerHTML: body.outerHTML,
+      getAttribute() {
+        return null;
+      }
+    },
+    location: globalThis.location,
+    querySelector() {
+      return null;
+    },
+    querySelectorAll(selector) {
+      if (selector === "a[href]") {
+        return [
+          {
+            textContent: "PDF",
+            getAttribute(name) {
+              return name === "href" ? "/prl/pdf/10.1103/PhysRevLett.111.080502" : null;
+            }
+          }
+        ];
+      }
+      if (selector === "a, button, [role='tab'], [role='button']") {
+        return [];
+      }
+      return body.querySelectorAll(selector);
+    }
+  };
+
+  try {
+    await import(
+      `${pathToFileURL(path.join(contentDir, "runner.js")).href}?case=${Date.now()}-${Math.random()}`
+    );
+    await flushAsyncWork();
+  } finally {
+    globalThis.chrome = previousChrome;
+    globalThis.document = previousDocument;
+    globalThis.location = previousLocation;
+  }
+
+  assert.equal(sentMessages.length, 1);
+  assert.match(sentMessages[0].message, /math diagnostics:/);
+  assert.match(sentMessages[0].message, /dom math=1/);
+  assert.match(sentMessages[0].message, /dom assistive=1/);
+  assert.match(sentMessages[0].message, /snapshot math=1/);
+  assert.match(sentMessages[0].message, /bridge items=7/);
+});
+
+test("APS MathJax bridge falls back to document-order lazy formula recovery", async () => {
+  const previousWindow = globalThis.window;
+  const replaced = [];
+  const documentAttributes = new Map();
+
+  function lazyContainer(id) {
+    return {
+      id,
+      parentNode: {
+        replaceChild(replacement, node) {
+          assert.equal(node.id, id);
+          replaced.push({ id, className: replacement.className, textContent: replacement.textContent });
+        }
+      },
+      querySelector(selector) {
+        return selector === "mjx-lazy" ? { id: `${id}-lazy` } : null;
+      }
+    };
+  }
+
+  const deltaContainer = lazyContainer("delta-container");
+  const gammaContainer = lazyContainer("gamma-container");
+  const renderedContainer = {
+    querySelector() {
+      return null;
+    },
+    parentNode: {
+      replaceChild() {
+        throw new Error("rendered formulas must not be replaced");
+      }
+    }
+  };
+  const listeners = new Map();
+  const fakeWindow = {
+    __piAgentPaperMathJaxBridgeInstalled: false,
+    MathJax: {
+      startup: {
+        document: {
+          math: [
+            { math: "already rendered", display: false, typesetRoot: renderedContainer },
+            { math: "\\Delta", display: false },
+            { math: "\\Gamma = 1", display: true }
+          ]
+        }
+      }
+    },
+    setInterval() {
+      return 1;
+    },
+    clearInterval() {},
+    document: {
+      documentElement: {
+        setAttribute(name, value) {
+          documentAttributes.set(name, value);
+        }
+      },
+      createElement(tagName) {
+        return {
+          tagName,
+          className: "",
+          textContent: ""
+        };
+      },
+      querySelectorAll(selector) {
+        return selector === "mjx-container" ? [deltaContainer, gammaContainer] : [];
+      },
+      addEventListener(type, listener) {
+        listeners.set(type, listener);
+      }
+    }
+  };
+
+  try {
+    globalThis.window = fakeWindow;
+    await import(
+      `${pathToFileURL(path.join(contentDir, "mathjax-bridge.js")).href}?case=${Date.now()}-${Math.random()}`
+    );
+  } finally {
+    globalThis.window = previousWindow;
+  }
+
+  assert.deepEqual(replaced, [
+    { id: "delta-container", className: "math-formula", textContent: "\\Delta" },
+    { id: "gamma-container", className: "math-formula display", textContent: "\\Gamma = 1" }
+  ]);
+  assert.equal(documentAttributes.get("data-pi-agent-mathjax-recovered"), "2");
+  assert.equal(documentAttributes.get("data-pi-agent-mathjax-items"), "3");
+  assert.equal(documentAttributes.get("data-pi-agent-mathjax-pending"), "2");
+  assert.equal(documentAttributes.get("data-pi-agent-mathjax-lazy-containers"), "2");
+  assert.equal(documentAttributes.get("data-pi-agent-mathjax-bridge"), "ready");
+  assert.equal(typeof listeners.get("pi-agent-paper-recover-mathjax"), "function");
+});
+
+test("APS MathJax bridge keeps polling until MathJax sources become available", async () => {
+  const previousWindow = globalThis.window;
+  const replaced = [];
+  const intervalCallbacks = [];
+  let now = 0;
+  let mathItems = [];
+
+  function lazyContainer(id) {
+    return {
+      id,
+      parentNode: {
+        replaceChild(replacement, node) {
+          assert.equal(node.id, id);
+          replaced.push({ id, className: replacement.className, textContent: replacement.textContent });
+        }
+      },
+      querySelector(selector) {
+        return selector === "mjx-lazy" && replaced.every((entry) => entry.id !== id)
+          ? { id: `${id}-lazy` }
+          : null;
+      }
+    };
+  }
+
+  const deltaContainer = lazyContainer("delta-container");
+  const fakeWindow = {
+    __piAgentPaperMathJaxBridgeInstalled: false,
+    Date: globalThis.Date,
+    MathJax: {
+      startup: {
+        document: {
+          get math() {
+            return mathItems;
+          }
+        }
+      }
+    },
+    setInterval(callback) {
+      intervalCallbacks.push(callback);
+      return 1;
+    },
+    clearInterval() {},
+    document: {
+      documentElement: {
+        setAttribute() {}
+      },
+      body: {
+        setAttribute() {}
+      },
+      createElement(tagName) {
+        return {
+          tagName,
+          className: "",
+          textContent: ""
+        };
+      },
+      querySelectorAll(selector) {
+        return selector === "mjx-container" ? [deltaContainer] : [];
+      },
+      addEventListener() {}
+    }
+  };
+  const previousDateNow = Date.now;
+  Date.now = () => now;
+
+  try {
+    globalThis.window = fakeWindow;
+    await import(
+      `${pathToFileURL(path.join(contentDir, "mathjax-bridge.js")).href}?case=${Date.now()}-${Math.random()}`
+    );
+    assert.deepEqual(replaced, []);
+    mathItems = [{ math: "\\Delta", display: false }];
+    now += 500;
+    intervalCallbacks[0]();
+  } finally {
+    globalThis.window = previousWindow;
+    Date.now = previousDateNow;
+  }
+
+  assert.deepEqual(replaced, [
+    { id: "delta-container", className: "math-formula", textContent: "\\Delta" }
+  ]);
+});
+
+test("runner sweeps the APS page when lazy MathJax node coordinates are not useful", async () => {
+  const sentMessages = [];
+  const previousChrome = globalThis.chrome;
+  const previousDocument = globalThis.document;
+  const previousLocation = globalThis.location;
+  const previousSetTimeout = globalThis.setTimeout;
+  const previousDateNow = Date.now;
+  const previousScrollTo = globalThis.scrollTo;
+  const rendered = new Set();
+  let now = 0;
+
+  globalThis.chrome = {
+    runtime: {
+      sendMessage(message) {
+        sentMessages.push(message);
+      }
+    }
+  };
+  globalThis.location = {
+    href: "https://journals.aps.org/prl/abstract/10.1103/PhysRevLett.111.080502#fulltext",
+    hostname: "journals.aps.org"
+  };
+  globalThis.innerHeight = 800;
+  globalThis.pageYOffset = 0;
+  Date.now = () => now;
+  globalThis.setTimeout = (callback) => {
+    now += 500;
+    queueMicrotask(callback);
+    return 1;
+  };
+
+  function lazyFormula(id) {
+    return {
+      id,
+      scrollIntoView() {
+        // The browser reports an unusable rectangle for these placeholders.
+      },
+      closest() {
+        return this;
+      },
+      getBoundingClientRect() {
+        return { top: 0 };
+      }
+    };
+  }
+
+  const formulas = [lazyFormula("delta"), lazyFormula("gamma")];
+  globalThis.scrollTo = (_x, y) => {
+    globalThis.pageYOffset = y;
+    if (y >= 1200) {
+      rendered.add("delta");
+    }
+    if (y >= 1800) {
+      rendered.add("gamma");
+    }
+  };
+
+  const body = {
+    innerText: `Article Text ${"superconducting qubit coherence control ".repeat(140)} References`,
+    get outerHTML() {
+      const delta = rendered.has("delta")
+        ? `<mjx-container><mjx-assistive-mml><math><semantics><annotation encoding="application/x-tex">\\Delta</annotation></semantics></math></mjx-assistive-mml></mjx-container>`
+        : `<mjx-container><mjx-lazy data-mjx-lazy="delta"></mjx-lazy></mjx-container>`;
+      const gamma = rendered.has("gamma")
+        ? `<mjx-container><mjx-assistive-mml><math><semantics><annotation encoding="application/x-tex">\\Gamma</annotation></semantics></math></mjx-assistive-mml></mjx-container>`
+        : `<mjx-container><mjx-lazy data-mjx-lazy="gamma"></mjx-lazy></mjx-container>`;
+      return `<body><main><p>with detuning ${delta}, and ${gamma}.</p><a href="/prl/pdf/10.1103/PhysRevLett.111.080502">PDF</a></main></body>`;
+    },
+    querySelectorAll(selector) {
+      if (selector === "img") {
+        return [];
+      }
+      if (selector === "mjx-lazy") {
+        return formulas.filter((formula) => !rendered.has(formula.id));
+      }
+      return [];
+    }
+  };
+  globalThis.document = {
+    title: "APS paper",
+    head: {
+      innerHTML: ""
+    },
+    body,
+    documentElement: {
+      innerHTML: body.outerHTML,
+      outerHTML: body.outerHTML,
+      scrollHeight: 3200
+    },
+    scrollingElement: {
+      scrollHeight: 3200
+    },
+    location: globalThis.location,
+    querySelector() {
+      return null;
+    },
+    querySelectorAll(selector) {
+      if (selector === "mjx-lazy") {
+        return body.querySelectorAll(selector);
+      }
+      if (selector === "a[href]") {
+        return [
+          {
+            textContent: "PDF",
+            getAttribute(name) {
+              return name === "href" ? "/prl/pdf/10.1103/PhysRevLett.111.080502" : null;
+            }
+          }
+        ];
+      }
+      if (selector === "a, button, [role='tab'], [role='button']") {
+        return [];
+      }
+      return body.querySelectorAll(selector);
+    }
+  };
+
+  try {
+    await import(
+      `${pathToFileURL(path.join(contentDir, "runner.js")).href}?case=${Date.now()}-${Math.random()}`
+    );
+    for (let index = 0; index < 40 && sentMessages.length === 0; index += 1) {
+      await flushAsyncWork();
+    }
+  } finally {
+    globalThis.chrome = previousChrome;
+    globalThis.document = previousDocument;
+    globalThis.location = previousLocation;
+    globalThis.setTimeout = previousSetTimeout;
+    globalThis.scrollTo = previousScrollTo;
+    delete globalThis.innerHeight;
+    delete globalThis.pageYOffset;
+    Date.now = previousDateNow;
+  }
+
+  assert.equal(sentMessages.length, 1);
+  assert.match(sentMessages[0].html, /\\Delta/);
+  assert.match(sentMessages[0].html, /\\Gamma/);
+  assert.doesNotMatch(sentMessages[0].html, /mjx-lazy/);
+});
+
+test("runner gives APS MathJax a fresh wait window after article text loads", async () => {
+  const sentMessages = [];
+  const previousChrome = globalThis.chrome;
+  const previousDocument = globalThis.document;
+  const previousLocation = globalThis.location;
+  const previousSetTimeout = globalThis.setTimeout;
+  const previousDateNow = Date.now;
+  let articleLoaded = false;
+  let formulasRendered = false;
+  let now = 0;
+  let timeoutCount = 0;
+
+  globalThis.chrome = {
+    runtime: {
+      sendMessage(message) {
+        sentMessages.push(message);
+      }
+    }
+  };
+  globalThis.location = {
+    href: "https://journals.aps.org/prl/abstract/10.1103/PhysRevLett.111.080502",
+    hostname: "journals.aps.org"
+  };
+  Date.now = () => now;
+  globalThis.setTimeout = (callback) => {
+    timeoutCount += 1;
+    now += timeoutCount === 1 ? 15100 : 500;
+    queueMicrotask(callback);
+    return 1;
+  };
+  const lazyFormula = {
+    scrollIntoView() {
+      formulasRendered = true;
+    },
+    closest() {
+      return this;
+    }
+  };
+  const body = {
+    get innerText() {
+      return articleLoaded
+        ? `Article Text ${"superconducting qubit coherence ".repeat(130)} References`
+        : "Article Text Abstract References";
+    },
+    get outerHTML() {
+      return formulasRendered
+        ? `<body><main><p>with detuning <mjx-container><mjx-assistive-mml><math><semantics><annotation encoding="application/x-tex">\\Delta</annotation></semantics></math></mjx-assistive-mml></mjx-container>.</p><a href="/prl/pdf/10.1103/PhysRevLett.111.080502">PDF</a></main></body>`
+        : `<body><main><p>with detuning <mjx-container><mjx-lazy data-mjx-lazy="1"></mjx-lazy></mjx-container>.</p><a href="/prl/pdf/10.1103/PhysRevLett.111.080502">PDF</a></main></body>`;
+    },
+    querySelectorAll(selector) {
+      if (selector === "img") {
+        return [];
+      }
+      if (selector === "mjx-lazy") {
+        return formulasRendered ? [] : [lazyFormula];
+      }
+      return [];
+    }
+  };
+  globalThis.document = {
+    title: "APS paper",
+    head: {
+      innerHTML: ""
+    },
+    body,
+    documentElement: {
+      innerHTML: body.outerHTML,
+      outerHTML: body.outerHTML
+    },
+    location: globalThis.location,
+    querySelector() {
+      return null;
+    },
+    querySelectorAll(selector) {
+      if (selector === "mjx-lazy") {
+        return body.querySelectorAll(selector);
+      }
+      if (selector === "a[href]") {
+        return [
+          {
+            textContent: "PDF",
+            getAttribute(name) {
+              return name === "href" ? "/prl/pdf/10.1103/PhysRevLett.111.080502" : null;
+            }
+          }
+        ];
+      }
+      if (selector === "a, button, [role='tab'], [role='button']") {
+        return [
+          {
+            textContent: "Article Text",
+            getAttribute() {
+              return null;
+            },
+            click() {
+              articleLoaded = true;
+            }
+          }
+        ];
+      }
+      return body.querySelectorAll(selector);
+    }
+  };
+
+  try {
+    await import(
+      `${pathToFileURL(path.join(contentDir, "runner.js")).href}?case=${Date.now()}-${Math.random()}`
+    );
+    await flushAsyncWork();
+  } finally {
+    globalThis.chrome = previousChrome;
+    globalThis.document = previousDocument;
+    globalThis.location = previousLocation;
+    globalThis.setTimeout = previousSetTimeout;
+    Date.now = previousDateNow;
+  }
+
+  assert.equal(sentMessages.length, 1);
+  assert.equal(articleLoaded, true);
+  assert.equal(formulasRendered, true);
+  assert.match(sentMessages[0].html, /application\/x-tex/);
+  assert.doesNotMatch(sentMessages[0].html, /mjx-lazy/);
+});
+
+test("runner prioritizes APS article figure images over page chrome images", async () => {
+  const sentMessages = [];
+  const previousChrome = globalThis.chrome;
+  const previousDocument = globalThis.document;
+  const previousLocation = globalThis.location;
+
+  globalThis.chrome = {
+    runtime: {
+      sendMessage(message) {
+        sentMessages.push(message);
+      }
+    }
+  };
+  globalThis.location = {
+    href: "https://journals.aps.org/prl/abstract/10.1103/PhysRevLett.111.080502#fulltext",
+    hostname: "journals.aps.org"
+  };
+
+  const image = (src, alt, className = "") => ({
+    currentSrc: src,
+    getAttribute(name) {
+      if (name === "src") {
+        return src;
+      }
+      if (name === "alt") {
+        return alt;
+      }
+      if (name === "class") {
+        return className;
+      }
+      return null;
+    }
+  });
+  const chromeImages = Array.from({ length: 45 }, (_value, index) =>
+    image(`/assets/badge-${index}.png`, `Badge ${index}`, "site-badge")
+  );
+  const figureImage = image(
+    "/prl/article/10.1103/PhysRevLett.111.080502/figures/1/medium",
+    "Fig. 1. Xmon qubit",
+    "lazy-fulltext"
+  );
+  const body = {
+    innerText: `Article Text ${"superconducting qubit ".repeat(130)} References`,
+    outerHTML: `<body><main><figure><img src="/prl/article/10.1103/PhysRevLett.111.080502/figures/1/medium" class="lazy-fulltext" alt="Fig. 1. Xmon qubit"></figure><a href="/prl/pdf/10.1103/PhysRevLett.111.080502">PDF</a></main></body>`,
+    querySelectorAll(selector) {
+      if (selector === "img") {
+        return [...chromeImages, figureImage];
+      }
+      if (selector === "mjx-lazy") {
+        return [];
+      }
+      return [];
+    }
+  };
+  globalThis.document = {
+    title: "APS paper",
+    head: {
+      innerHTML: ""
+    },
+    body,
+    documentElement: {
+      innerHTML: body.outerHTML,
+      outerHTML: body.outerHTML
+    },
+    location: globalThis.location,
+    baseURI: globalThis.location.href,
+    querySelector() {
+      return null;
+    },
+    querySelectorAll(selector) {
+      if (selector === "a[href]") {
+        return [
+          {
+            textContent: "PDF",
+            getAttribute(name) {
+              return name === "href" ? "/prl/pdf/10.1103/PhysRevLett.111.080502" : null;
+            }
+          }
+        ];
+      }
+      if (selector === "a, button, [role='tab'], [role='button']") {
+        return [];
+      }
+      return body.querySelectorAll(selector);
+    }
+  };
+
+  try {
+    await import(
+      `${pathToFileURL(path.join(contentDir, "runner.js")).href}?case=${Date.now()}-${Math.random()}`
+    );
+  } finally {
+    globalThis.chrome = previousChrome;
+    globalThis.document = previousDocument;
+    globalThis.location = previousLocation;
+  }
+
+  assert.equal(sentMessages.length, 1);
+  assert.ok(sentMessages[0].webpageAssets.some((asset) =>
+    asset.url === "https://journals.aps.org/prl/article/10.1103/PhysRevLett.111.080502/figures/1/medium"
+  ));
+});
+
 test("publisher helpers extract Nature, Science, and APS PDF candidates", () => {
   assert.equal(
     findNaturePdfCandidate({
@@ -490,7 +2059,7 @@ test("manifest declares required MV3 extension shell fields", async () => {
 
   assert.equal(manifest.manifest_version, 3);
   assert.equal(manifest.name, "Pi Agent Paper Downloader");
-  assert.equal(manifest.version, "0.1.21");
+  assert.equal(manifest.version, "0.1.27");
 
   for (const permission of [
     "activeTab",
@@ -528,10 +2097,16 @@ test("manifest declares required MV3 extension shell fields", async () => {
     "content/aps.js",
     "content/runner.js"
   ]);
+  assert.deepEqual(manifest.web_accessible_resources, [
+    {
+      resources: ["content/mathjax-bridge.js"],
+      matches: ["https://journals.aps.org/*", "https://aps.org/*"]
+    }
+  ]);
 });
 
 test("manifest content scripts do not use import or export syntax", async () => {
-  for (const fileName of ["common.js", "nature.js", "science.js", "aps.js", "runner.js"]) {
+  for (const fileName of ["common.js", "nature.js", "science.js", "aps.js", "runner.js", "mathjax-bridge.js"]) {
     const source = await readFile(path.join(contentDir, fileName), "utf8");
     assert.doesNotMatch(source, /^\s*import\s/m, fileName);
     assert.doesNotMatch(source, /^\s*export\s/m, fileName);
@@ -596,7 +2171,8 @@ test("background fetches webpage image assets with browser credentials before na
       articleUrl: "https://www.nature.com/articles/s41567-022-01591-2",
       source: "nature",
       title: "Nature webpage",
-      purpose: "webpage"
+      purpose: "webpage",
+      recordPath: "knowledge-base/sources/nature-s41567-022-01591-2/acquisition.json"
     };
     const fakeChrome = createFakeChrome({
       jobs: [job],
@@ -645,6 +2221,12 @@ test("background fetches webpage image assets with browser credentials before na
             originalUrl: "data:image/svg+xml;base64,PHN2Zz48L3N2Zz4=",
             filename: "svg+xml;base64,PHN2Zz48L3N2Zz4=.svg",
             alt: "Inline icon"
+          },
+          {
+            url: "https://journals.aps.org/prl/article/10.1103/PhysRevLett.111.080502/figures/1/medium",
+            originalUrl: "/prl/article/10.1103/PhysRevLett.111.080502/figures/1/medium",
+            filename: "medium",
+            alt: "Fig. 1"
           }
         ]
       },
@@ -656,10 +2238,15 @@ test("background fetches webpage image assets with browser credentials before na
       {
         url: "https://www.nature.com/assets/fig1.png",
         init: { credentials: "include" }
+      },
+      {
+        url: "https://journals.aps.org/prl/article/10.1103/PhysRevLett.111.080502/figures/1/medium",
+        init: { credentials: "include" }
       }
     ]);
     const registerMessage = messagesOf(fakeChrome, "register_webpage_snapshot")[0];
-    assert.equal(registerMessage.webpageAssets.length, 2);
+    assert.equal(registerMessage.recordPath, "knowledge-base/sources/nature-s41567-022-01591-2/acquisition.json");
+    assert.equal(registerMessage.webpageAssets.length, 3);
     assert.deepEqual(registerMessage.webpageAssets[0], {
       url: "https://www.nature.com/assets/fig1.png",
       originalUrl: "/assets/fig1.png",
@@ -675,6 +2262,14 @@ test("background fetches webpage image assets with browser credentials before na
       mimeType: "image/svg+xml",
       dataBase64: "PHN2Zz48L3N2Zz4=",
       alt: "Inline icon"
+    });
+    assert.deepEqual(registerMessage.webpageAssets[2], {
+      url: "https://journals.aps.org/prl/article/10.1103/PhysRevLett.111.080502/figures/1/medium",
+      originalUrl: "/prl/article/10.1103/PhysRevLett.111.080502/figures/1/medium",
+      filename: "medium.png",
+      mimeType: "image/png",
+      dataBase64: Buffer.from("image-bytes").toString("base64"),
+      alt: "Fig. 1"
     });
     assert.equal(statusMessagesOf(fakeChrome, "webpage_snapshot_ready").length, 1);
     assert.deepEqual(fakeChrome.removedTabs, [100]);

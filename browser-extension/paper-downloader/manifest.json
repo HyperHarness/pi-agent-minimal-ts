@@ -1,7 +1,7 @@
 {
   "manifest_version": 3,
   "name": "Pi Agent Paper Downloader",
-  "version": "0.1.21",
+  "version": "0.1.27",
   "description": "Downloads publisher PDFs through the user's browser session for Pi Agent.",
   "permissions": [
     "activeTab",
@@ -44,6 +44,17 @@
         "content/runner.js"
       ],
       "run_at": "document_idle"
+    }
+  ],
+  "web_accessible_resources": [
+    {
+      "resources": [
+        "content/mathjax-bridge.js"
+      ],
+      "matches": [
+        "https://journals.aps.org/*",
+        "https://aps.org/*"
+      ]
     }
   ],
   "action": {

@@ -281,26 +281,6 @@ function isSupportedWebpageAssetContentType(contentType) {
 }
 
 function defaultWebpageAssetFilename(candidate, contentType) {
-  var explicit = sanitizeFilenamePart(candidate.filename || "");
-  if (
-    explicit &&
-    explicit !== "paper" &&
-    explicit.length <= 120 &&
-    explicit.toLowerCase().indexOf("base64") === -1
-  ) {
-    return explicit;
-  }
-
-  var basename = sanitizeFilenamePart(basenameFromPathOrUrl(candidate.url));
-  if (
-    basename &&
-    basename !== "paper" &&
-    basename.length <= 120 &&
-    basename.toLowerCase().indexOf("base64") === -1
-  ) {
-    return basename;
-  }
-
   var mediaType = String(contentType || "").split(";", 1)[0].trim().toLowerCase();
   var ext = ".bin";
   if (mediaType === "image/jpeg") {
@@ -316,6 +296,27 @@ function defaultWebpageAssetFilename(candidate, contentType) {
   } else if (mediaType === "application/pdf") {
     ext = ".pdf";
   }
+
+  var explicit = sanitizeFilenamePart(candidate.filename || "");
+  if (
+    explicit &&
+    explicit !== "paper" &&
+    explicit.length <= 120 &&
+    explicit.toLowerCase().indexOf("base64") === -1
+  ) {
+    return /\.[a-z0-9]{2,5}$/i.test(explicit) || ext === ".bin" ? explicit : explicit + ext;
+  }
+
+  var basename = sanitizeFilenamePart(basenameFromPathOrUrl(candidate.url));
+  if (
+    basename &&
+    basename !== "paper" &&
+    basename.length <= 120 &&
+    basename.toLowerCase().indexOf("base64") === -1
+  ) {
+    return /\.[a-z0-9]{2,5}$/i.test(basename) || ext === ".bin" ? basename : basename + ext;
+  }
+
   return "asset" + ext;
 }
 
@@ -812,6 +813,7 @@ async function handlePaperPageClassified(message, sender) {
           html: message.html,
           ...(message.finalUrl ? { finalUrl: message.finalUrl } : {}),
           ...(message.title ? { title: message.title } : job.title ? { title: job.title } : {}),
+          ...(job.recordPath ? { recordPath: job.recordPath } : {}),
           ...(webpageAssets.length > 0 ? { webpageAssets } : {})
         });
 

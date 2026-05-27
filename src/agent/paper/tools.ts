@@ -818,7 +818,8 @@ export function createPaperTools(input: {
               articleUrl: result.articleUrl,
               source: result.source,
               purpose: "webpage",
-              autoClose: true
+              autoClose: true,
+              recordPath: result.recordPath
             })
           );
           await updatePaperRecordQueuedReading({

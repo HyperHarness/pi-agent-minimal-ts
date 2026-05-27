@@ -1145,6 +1145,130 @@ test("handleExtensionHostMessage registers webpage snapshots as parsed wiki arti
   }
 });
 
+test("handleExtensionHostMessage updates the queued recordPath for standalone webpage snapshots", async () => {
+  const workspaceDir = await createWorkspaceDir();
+  const articleUrl = "https://journals.aps.org/prl/abstract/10.1103/PhysRevLett.111.080502";
+  const driftedArticleUrl = "https://journals.aps.org/prl/abstract/10.1103/PhysRevLett.999.999999";
+  const canonicalId = "10.1103/PhysRevLett.111.080502";
+  const downloadPath = path.join(workspaceDir, "knowledge-base", "raw", "pdfs", "aps.pdf");
+
+  try {
+    await writePdf(downloadPath);
+    const recordPath = await writePaperRecord({
+      workspaceDir,
+      record: {
+        source: "aps",
+        articleUrl,
+        recordedAt: "2026-05-27T09:00:00.000Z",
+        handlingMethod: "browser_session",
+        status: "downloaded",
+        canonicalId,
+        pdfUrl: "https://journals.aps.org/prl/pdf/10.1103/PhysRevLett.111.080502",
+        downloadPath
+      },
+      enrichCitationMetadata: false
+    });
+
+    const response = await handleExtensionHostMessage({
+      workspaceDir,
+      now: () => new Date("2026-05-27T09:18:13.000Z"),
+      message: {
+        type: "register_webpage_snapshot",
+        jobId: "job-aps-webpage-record-path",
+        articleUrl: driftedArticleUrl,
+        finalUrl: `${articleUrl}#fulltext`,
+        source: "aps",
+        title: "APS webpage",
+        recordPath,
+        html: `
+          <html>
+            <head>
+              <meta name="citation_title" content="Coherent Josephson Qubit Suitable for Scalable Quantum Integrated Circuits">
+              <meta name="citation_doi" content="10.1103/PhysRevLett.111.080502">
+            </head>
+            <body>
+              <main>
+                <h1>Coherent Josephson Qubit Suitable for Scalable Quantum Integrated Circuits</h1>
+                <section><h2>Article Text</h2><p>${"Superconducting qubit coherence and control. ".repeat(140)}</p></section>
+                <section><h2>References</h2><p>1. Reference.</p></section>
+              </main>
+            </body>
+          </html>
+        `
+      }
+    });
+
+    assert.equal(response.type, "webpage_registered");
+    const savedRecord = JSON.parse(await readFile(recordPath, "utf8"));
+    assert.equal(savedRecord.reading?.status, "ready");
+    assert.equal(savedRecord.reading?.preferredSource, "webpage");
+    assert.match(savedRecord.webpage?.markdownPath ?? "", /knowledge-base\/sources\/aps-10\.1103-PhysRevLett\.111\.080502\/parses\/webpage\/document\.md$/);
+  } finally {
+    await rm(workspaceDir, { recursive: true, force: true });
+  }
+});
+
+test("handleExtensionHostMessage falls back when queued recordPath is not portable to the host workspace", async () => {
+  const workspaceDir = await createWorkspaceDir();
+  const articleUrl = "https://journals.aps.org/prl/abstract/10.1103/PhysRevLett.111.080502";
+  const canonicalId = "10.1103/PhysRevLett.111.080502";
+  const downloadPath = path.join(workspaceDir, "knowledge-base", "raw", "pdfs", "aps.pdf");
+
+  try {
+    await writePdf(downloadPath);
+    const recordPath = await writePaperRecord({
+      workspaceDir,
+      record: {
+        source: "aps",
+        articleUrl,
+        recordedAt: "2026-05-27T09:00:00.000Z",
+        handlingMethod: "browser_session",
+        status: "downloaded",
+        canonicalId,
+        pdfUrl: "https://journals.aps.org/prl/pdf/10.1103/PhysRevLett.111.080502",
+        downloadPath
+      },
+      enrichCitationMetadata: false
+    });
+
+    const response = await handleExtensionHostMessage({
+      workspaceDir,
+      now: () => new Date("2026-05-27T09:36:32.000Z"),
+      message: {
+        type: "register_webpage_snapshot",
+        jobId: "job-aps-webpage-nonportable-record-path",
+        articleUrl,
+        finalUrl: `${articleUrl}#fulltext`,
+        source: "aps",
+        title: "APS webpage",
+        recordPath: "/home/ququan2/pi-agent-minimal-ts/knowledge-base/sources/aps-10.1103-PhysRevLett.111.080502/acquisition.json",
+        html: `
+          <html>
+            <head>
+              <meta name="citation_title" content="Coherent Josephson Qubit Suitable for Scalable Quantum Integrated Circuits">
+              <meta name="citation_doi" content="10.1103/PhysRevLett.111.080502">
+            </head>
+            <body>
+              <main>
+                <h1>Coherent Josephson Qubit Suitable for Scalable Quantum Integrated Circuits</h1>
+                <section><h2>Article Text</h2><p>${"Superconducting qubit coherence and control. ".repeat(140)}</p></section>
+                <section><h2>References</h2><p>1. Reference.</p></section>
+              </main>
+            </body>
+          </html>
+        `
+      }
+    });
+
+    assert.equal(response.type, "webpage_registered");
+    const savedRecord = JSON.parse(await readFile(recordPath, "utf8"));
+    assert.equal(savedRecord.reading?.status, "ready");
+    assert.equal(savedRecord.reading?.preferredSource, "webpage");
+  } finally {
+    await rm(workspaceDir, { recursive: true, force: true });
+  }
+});
+
 test("handleExtensionHostMessage poll_jobs returns latest queued jobs with sources", async () => {
   const workspaceDir = await createWorkspaceDir();
 
@@ -1159,7 +1283,8 @@ test("handleExtensionHostMessage poll_jobs returns latest queued jobs with sourc
         source: "nature",
         title: "Queued Nature",
         autoClose: true,
-        purpose: "webpage"
+        purpose: "webpage",
+        recordPath: "knowledge-base/sources/nature-s41586-019-1666-5/acquisition.json"
       }
     });
     await appendPaperDownloadJobEvent({
@@ -1208,7 +1333,8 @@ test("handleExtensionHostMessage poll_jobs returns latest queued jobs with sourc
             source: "nature",
             title: "Queued Nature",
             autoClose: true,
-            purpose: "webpage"
+            purpose: "webpage",
+            recordPath: "knowledge-base/sources/nature-s41586-019-1666-5/acquisition.json"
           }
         ]
       }

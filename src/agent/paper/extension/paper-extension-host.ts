@@ -17,6 +17,7 @@ import { savePaperWebPageParse } from "../reading/engines/webpage.js";
 import { parsePaper } from "../reading/paper-reader.js";
 import type { PaperParseResult } from "../reading/types.js";
 import {
+  readPaperRecordByPath,
   readPaperRecord,
   resolveExternalPaperPdfPath,
   resolvePaperPdfPath,
@@ -92,7 +93,8 @@ export async function handleExtensionHostMessage(options: {
         source: job.source as NonNullable<typeof job.source>,
         ...(job.purpose === undefined ? {} : { purpose: job.purpose }),
         ...(job.title ? { title: job.title } : {}),
-        ...(job.autoClose === undefined ? {} : { autoClose: job.autoClose })
+        ...(job.autoClose === undefined ? {} : { autoClose: job.autoClose }),
+        ...(job.recordPath ? { recordPath: job.recordPath } : {})
       }));
 
     return {
@@ -439,6 +441,22 @@ async function resolveRecordForExtensionMessage(input: {
   workspaceDir: string;
   message: Extract<ExtensionHostMessage, { type: "register_webpage_snapshot" }>;
 }): Promise<{ record: PaperRecord; recordPath: string } | null> {
+  if (input.message.recordPath) {
+    try {
+      const saved = await readPaperRecordByPath({
+        workspaceDir: input.workspaceDir,
+        recordPath: input.message.recordPath
+      });
+      if (saved) {
+        return saved;
+      }
+    } catch {
+      // A queued job may carry a path from a different host view, such as
+      // WSL /home/... while the native host runs under a Windows UNC workspace.
+      // Fall back to publisher identity instead of rejecting a valid snapshot.
+    }
+  }
+
   if (input.message.source === "external") {
     return readPaperRecord({
       workspaceDir: input.workspaceDir,

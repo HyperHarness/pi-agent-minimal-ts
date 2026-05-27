@@ -143,11 +143,39 @@ function getRecordDownloadPath(record: PaperRecord): string | undefined {
   return record.status === "downloaded" ? record.downloadPath : undefined;
 }
 
+function normalizePortableFilePath(filePath: string): string {
+  const drivePathMatch = filePath.match(/^([A-Za-z]):[\\/](.*)$/);
+  if (drivePathMatch?.[1] && drivePathMatch[2]) {
+    return path.posix.join(
+      "/mnt",
+      drivePathMatch[1].toLowerCase(),
+      ...drivePathMatch[2].split(/[\\/]+/).filter(Boolean)
+    );
+  }
+
+  const uncWslMatch = filePath.match(/^\\\\(?:wsl\.localhost|wsl\$)\\[^\\]+\\(.+)$/i);
+  if (uncWslMatch?.[1]) {
+    return path.posix.join("/", ...uncWslMatch[1].split(/[\\/]+/).filter(Boolean));
+  }
+
+  if (filePath.startsWith("\\") && !filePath.startsWith("\\\\")) {
+    return path.posix.join("/", ...filePath.split(/[\\/]+/).filter(Boolean));
+  }
+
+  return filePath.includes("\\") ? filePath.replace(/\\/g, "/") : filePath;
+}
+
 function relativeToWorkspace(workspaceDir: string, filePath: string): string {
-  const normalizedPath = path.isAbsolute(filePath)
-    ? path.relative(workspaceDir, filePath)
-    : filePath;
-  return normalizedPath.split(path.sep).join("/");
+  const normalizedWorkspaceDir = normalizePortableFilePath(workspaceDir);
+  const normalizedFilePath = normalizePortableFilePath(filePath);
+  const normalizedPath = path.isAbsolute(normalizedFilePath)
+    ? path.relative(normalizedWorkspaceDir, normalizedFilePath)
+    : normalizedFilePath;
+  return normalizedPath.split(/[\\/]+/).join("/");
+}
+
+function optionalRelativeToWorkspace(workspaceDir: string, value: unknown): string | undefined {
+  return typeof value === "string" ? relativeToWorkspace(workspaceDir, value) : undefined;
 }
 
 export async function resolvePaperSource(input: ResolvePaperInput): Promise<ResolvedPaperSource> {
@@ -285,21 +313,32 @@ export async function writeParseArtifacts(input: {
   workspaceDir: string;
   source: PaperReaderSource;
   document: ParsedPaperDocument;
+  sourceHtml?: string;
   markdown: string;
   quality: PaperParseQualityReport;
   chunks: PaperChunk[];
 }): Promise<PaperParseArtifactPaths> {
-  const artifacts = getPaperParseArtifactPaths({
+  const baseArtifacts = getPaperParseArtifactPaths({
     workspaceDir: input.workspaceDir,
     paperKey: input.document.paperKey,
     engine: input.document.engine
   });
+  const artifacts: PaperParseArtifactPaths = {
+    ...baseArtifacts,
+    ...(input.sourceHtml
+      ? { sourcePath: path.join(getParseDir(input.workspaceDir, input.document.paperKey, input.document.engine), "document.html") }
+      : {})
+  };
   const metadataPath = artifacts.metadataPath ?? path.join(getPaperReadingDir(input.workspaceDir, input.document.paperKey), "metadata.json");
-  await Promise.all([
+  const writes = [
     mkdir(path.dirname(metadataPath), { recursive: true }),
     mkdir(path.dirname(artifacts.parsePath), { recursive: true }),
     mkdir(path.dirname(artifacts.chunksPath), { recursive: true })
-  ]);
+  ];
+  if (artifacts.sourcePath) {
+    writes.push(mkdir(path.dirname(artifacts.sourcePath), { recursive: true }));
+  }
+  await Promise.all(writes);
   const existingMetadata = await readJsonFile<Record<string, unknown>>(metadataPath);
   const source = buildParseMetadata({
     workspaceDir: input.workspaceDir,
@@ -310,6 +349,9 @@ export async function writeParseArtifacts(input: {
   });
   await Promise.all([
     writeFile(metadataPath, `${JSON.stringify(source, null, 2)}\n`, "utf8"),
+    ...(artifacts.sourcePath && input.sourceHtml
+      ? [writeFile(artifacts.sourcePath, input.sourceHtml, "utf8")]
+      : []),
     writeFile(artifacts.parsePath, `${JSON.stringify(input.document, null, 2)}\n`, "utf8"),
     writeFile(artifacts.markdownPath, `${input.markdown.trimEnd()}\n`, "utf8"),
     writeFile(artifacts.qualityPath, `${JSON.stringify(input.quality, null, 2)}\n`, "utf8"),
@@ -500,13 +542,19 @@ function buildParseMetadata(input: {
   const arxivId = arxivIdFromSource(input.source) ?? readOptionalString(provenance.arxivId);
   const acquisitionPath = input.source.recordPath
     ? relativeToWorkspace(input.workspaceDir, input.source.recordPath)
-    : readOptionalString(provenance.acquisitionPath);
+    : optionalRelativeToWorkspace(input.workspaceDir, provenance.acquisitionPath);
   const previousArtifacts = Array.isArray(input.existingMetadata?.artifacts)
     ? input.existingMetadata.artifacts.filter((artifact): artifact is Record<string, unknown> =>
         isRecord(artifact) &&
         artifact.kind === "parse" &&
         artifact.engine !== input.document.engine
-      )
+      ).map((artifact) => ({
+        ...artifact,
+        ...(typeof artifact.path === "string" ? { path: relativeToWorkspace(input.workspaceDir, artifact.path) } : {}),
+        ...(typeof artifact.markdownPath === "string" ? { markdownPath: relativeToWorkspace(input.workspaceDir, artifact.markdownPath) } : {}),
+        ...(typeof artifact.jsonPath === "string" ? { jsonPath: relativeToWorkspace(input.workspaceDir, artifact.jsonPath) } : {}),
+        ...(typeof artifact.qualityPath === "string" ? { qualityPath: relativeToWorkspace(input.workspaceDir, artifact.qualityPath) } : {})
+      }))
     : [];
   const parseArtifact = {
     kind: "parse",
@@ -516,6 +564,14 @@ function buildParseMetadata(input: {
     jsonPath: relativeToWorkspace(input.workspaceDir, input.artifacts.parsePath),
     qualityPath: relativeToWorkspace(input.workspaceDir, input.artifacts.qualityPath)
   };
+  const snapshotArtifact = input.artifacts.sourcePath
+    ? {
+        kind: "snapshot",
+        path: relativeToWorkspace(input.workspaceDir, input.artifacts.sourcePath),
+        engine: input.document.engine,
+        note: "Raw HTML snapshot used for webpage parse."
+      }
+    : undefined;
   const now = input.document.createdAt;
   const citation = isRecord(input.existingMetadata?.citation)
     ? input.existingMetadata.citation
@@ -533,7 +589,7 @@ function buildParseMetadata(input: {
     status: deriveParseMetadataStatus(input.existingMetadata?.status),
     createdAt: readOptionalString(input.existingMetadata?.createdAt) ?? input.source.createdAt ?? now,
     updatedAt: now,
-    summaryPath: readOptionalString(input.existingMetadata?.summaryPath) ?? `knowledge-base/sources/${input.document.paperKey}/summary.md`,
+    summaryPath: optionalRelativeToWorkspace(input.workspaceDir, input.existingMetadata?.summaryPath) ?? `knowledge-base/sources/${input.document.paperKey}/summary.md`,
     citation,
     provenance: {
       ...provenance,
@@ -543,7 +599,8 @@ function buildParseMetadata(input: {
     },
     artifacts: [
       ...previousArtifacts,
-      parseArtifact
+      parseArtifact,
+      ...(snapshotArtifact ? [snapshotArtifact] : [])
     ],
     tags: Array.isArray(input.existingMetadata?.tags) ? input.existingMetadata.tags : [],
     relatedSourceKeys: Array.isArray(input.existingMetadata?.relatedSourceKeys) ? input.existingMetadata.relatedSourceKeys : [],

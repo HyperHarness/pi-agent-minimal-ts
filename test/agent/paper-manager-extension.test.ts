@@ -815,13 +815,21 @@ test("downloadPaper skips a provided bridge for existing downloaded external rec
 test("createQueuedPaperExtensionBridge appends queued job events", async () => {
   const workspaceDir = await mkdtemp(path.join(os.tmpdir(), "paper-manager-extension-"));
   const articleUrl = "https://journals.aps.org/prl/abstract/10.1103/PhysRevLett.135.030801";
+  const recordPath = path.join(
+    workspaceDir,
+    "knowledge-base",
+    "sources",
+    "aps-10.1103-PhysRevLett.135.030801",
+    "acquisition.json"
+  );
 
   try {
     const job = createPaperExtensionJob({
       articleUrl,
       source: "aps",
       title: "APS paper",
-      autoClose: true
+      autoClose: true,
+      recordPath
     });
     const bridge = createQueuedPaperExtensionBridge({
       workspaceDir,
@@ -849,6 +857,7 @@ test("createQueuedPaperExtensionBridge appends queued job events", async () => {
         source: "aps",
         title: "APS paper",
         autoClose: true,
+        recordPath: "knowledge-base/sources/aps-10.1103-PhysRevLett.135.030801/acquisition.json",
         message: "Paper download job queued for the browser extension."
       })}\n`
     );

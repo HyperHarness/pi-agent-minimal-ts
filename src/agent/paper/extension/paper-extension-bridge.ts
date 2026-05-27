@@ -1,5 +1,7 @@
 import { createHash } from "node:crypto";
+import path from "node:path";
 import { appendPaperDownloadJobEvent } from "./paper-download-jobs.js";
+import { isPathInsideDirectory } from "../../knowledge-base.js";
 import type { ExtensionJobPurpose } from "./paper-extension-protocol.js";
 import type { ExtensionPaperJobResult, SupportedPaperSource } from "../types.js";
 
@@ -12,6 +14,7 @@ export interface ExtensionPaperJob {
   title?: string;
   autoClose?: boolean;
   purpose?: ExtensionJobPurpose;
+  recordPath?: string;
 }
 
 export type ExtensionBridgeSubmitResult = ExtensionPaperJobResult;
@@ -22,12 +25,27 @@ export interface PaperExtensionBridge {
 
 let queuedJobSequence = 0;
 
+function normalizeQueuedRecordPath(workspaceDir: string, recordPath: string): string {
+  const resolvedWorkspaceDir = path.resolve(workspaceDir);
+  const normalizedRecordPath = recordPath.includes("\\") ? recordPath.replace(/\\/g, "/") : recordPath;
+  const resolvedRecordPath = path.isAbsolute(normalizedRecordPath)
+    ? path.resolve(normalizedRecordPath)
+    : path.resolve(resolvedWorkspaceDir, normalizedRecordPath);
+
+  if (isPathInsideDirectory(resolvedWorkspaceDir, resolvedRecordPath)) {
+    return path.relative(resolvedWorkspaceDir, resolvedRecordPath).split(path.sep).join("/");
+  }
+
+  return normalizedRecordPath;
+}
+
 export function createPaperExtensionJob(options: {
   articleUrl: string;
   source: ExtensionPaperSource;
   title?: string;
   autoClose?: boolean;
   purpose?: ExtensionJobPurpose;
+  recordPath?: string;
 }): ExtensionPaperJob {
   const hash = createHash("sha1")
     .update(`${options.source}:${options.articleUrl}`)
@@ -39,7 +57,8 @@ export function createPaperExtensionJob(options: {
     source: options.source,
     ...(options.title ? { title: options.title } : {}),
     ...(options.autoClose === undefined ? {} : { autoClose: options.autoClose }),
-    ...(options.purpose === undefined ? {} : { purpose: options.purpose })
+    ...(options.purpose === undefined ? {} : { purpose: options.purpose }),
+    ...(options.recordPath ? { recordPath: options.recordPath } : {})
   };
 }
 
@@ -70,6 +89,7 @@ export function createQueuedPaperExtensionBridge(options: {
           ...(job.purpose === undefined ? {} : { purpose: job.purpose }),
           ...(job.title ? { title: job.title } : {}),
           ...(job.autoClose === undefined ? {} : { autoClose: job.autoClose }),
+          ...(job.recordPath ? { recordPath: normalizeQueuedRecordPath(options.workspaceDir, job.recordPath) } : {}),
           message
         }
       });
