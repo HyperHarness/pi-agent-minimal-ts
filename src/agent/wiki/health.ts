@@ -1170,6 +1170,12 @@ function parseQualityIsAcceptable(result: PaperParseResult, threshold: number): 
   return result.quality.status === "good" && result.quality.score >= threshold;
 }
 
+function issueHasMissingMainParseArtifact(issue: WikiHealthIssue): boolean {
+  return (issue.paths ?? []).some((artifactPath) =>
+    /(?:^|[\\/])parses[\\/][^\\/]+[\\/](?:document\.md|parse\.json|quality\.json|chunks\.jsonl)$/.test(artifactPath)
+  );
+}
+
 async function updateRecordWithParseResult(input: {
   workspaceDir: string;
   recordPath: string;
@@ -1915,6 +1921,22 @@ export async function fixWikiHealth(options: WikiHealthFixOptions): Promise<Wiki
       continue;
     }
     if (issue.kind === "missing_artifact") {
+      if (issueHasMissingMainParseArtifact(issue)) {
+        if (parseAttempted.has(identity)) {
+          results.push(skippedFix(issue, "Skipped duplicate parse repair for the same paper."));
+          continue;
+        }
+        parseAttempted.add(identity);
+        results.push(await fixByParsing({
+          workspaceDir,
+          issue,
+          force: true,
+          threshold,
+          parsePaperImpl: options.parsePaperImpl ?? parsePaper,
+          dryRun: options.dryRun === true
+        }));
+        continue;
+      }
       results.push(skippedFix(issue, "Missing artifacts require regenerating the owning download, parse, or summary artifact; rerun targeted repair after inspecting the missing paths."));
       continue;
     }

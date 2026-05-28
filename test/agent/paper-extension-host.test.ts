@@ -704,6 +704,84 @@ test("handleExtensionHostMessage registers APS supplemental material on the publ
   }
 });
 
+test("handleExtensionHostMessage preserves supplemental materials when the main Nature PDF is registered later", async () => {
+  const workspaceDir = await createWorkspaceDir();
+  const articleUrl = "https://www.nature.com/articles/nature14270";
+  const materialUrl =
+    "https://static-content.springer.com/esm/art%3A10.1038%2Fnature14270/MediaObjects/41586_2015_BFnature14270_MOESM299_ESM.pdf";
+  const supplementalPdf = `%PDF-1.7\n${"nature supplement\n".repeat(80)}%%EOF\n`;
+
+  try {
+    const supplementalResponse = await handleExtensionHostMessage({
+      workspaceDir,
+      now: () => new Date("2026-05-28T03:22:45.433Z"),
+      supplementalPdfParser: async (input) => ({
+        document: {
+          paperKey: input.paperKey,
+          engine: "opendataloader-local",
+          pdfSha256: input.pdfSha256,
+          createdAt: input.createdAt,
+          title: "Supplementary information",
+          pages: 1,
+          elements: [{
+            id: "el-00001",
+            type: "paragraph",
+            text: "Nature supplementary information.",
+            page: 1
+          }],
+          sections: []
+        },
+        markdown: "# Supplementary information\n\nNature supplementary information."
+      }),
+      message: {
+        type: "register_supplemental_material",
+        jobId: "job-nature-supplement-first",
+        articleUrl,
+        source: "nature",
+        materialUrl,
+        materialBase64: Buffer.from(supplementalPdf).toString("base64"),
+        filename: "41586_2015_BFnature14270_MOESM299_ESM.pdf",
+        mimeType: "application/pdf",
+        title: "Supplementary information"
+      }
+    });
+    assert.equal(supplementalResponse.type, "supplemental_registered");
+
+    const mainResponse = await handleExtensionHostMessage({
+      workspaceDir,
+      now: () => new Date("2026-05-28T03:22:51.083Z"),
+      message: {
+        type: "register_download_bytes",
+        jobId: "job-nature-supplement-first",
+        articleUrl,
+        source: "nature",
+        pdfUrl: "https://www.nature.com/articles/nature14270.pdf",
+        pdfBase64: Buffer.from("%PDF-1.7\nmain nature pdf\n").toString("base64")
+      }
+    });
+    assert.equal(mainResponse.type, "registered");
+
+    const recordPath = resolvePaperRecordPath({
+      workspaceDir,
+      source: "nature",
+      canonicalId: "nature14270",
+      articleUrl
+    });
+    const record = JSON.parse(await readFile(recordPath, "utf8"));
+    assert.equal(record.supplementalMaterials.length, 1);
+    assert.equal(record.supplementalMaterials[0].url, materialUrl);
+    assert.equal(record.supplementalMaterials[0].title, "Supplementary information");
+
+    const metadata = JSON.parse(await readFile(path.join(path.dirname(recordPath), "metadata.json"), "utf8"));
+    assert.ok(metadata.artifacts.some((artifact: { markdownPath?: string; note?: string }) =>
+      artifact.markdownPath === "knowledge-base/sources/nature-nature14270/parses/opendataloader-local/supplement.md" &&
+      artifact.note === "Parsed supplemental material PDF."
+    ));
+  } finally {
+    await rm(workspaceDir, { recursive: true, force: true });
+  }
+});
+
 test("handleExtensionHostMessage completes legacy Nature metadata after supplemental material is registered first", async () => {
   const workspaceDir = await createWorkspaceDir();
   const articleUrl = "https://www.nature.com/articles/nature14270";

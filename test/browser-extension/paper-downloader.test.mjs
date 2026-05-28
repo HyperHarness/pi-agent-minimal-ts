@@ -14,7 +14,7 @@ await import(pathToFileURL(path.join(contentDir, "science.js")).href);
 await import(pathToFileURL(path.join(contentDir, "aps.js")).href);
 
 const { classifyPage, findPdfCandidate, findSupplementalMaterialCandidates } = globalThis.PiAgentPaperCommon;
-const { findNaturePdfCandidate } = globalThis.PiAgentPaperNature;
+const { findNaturePdfCandidate, findNatureSupplementalMaterialCandidates } = globalThis.PiAgentPaperNature;
 const { findSciencePdfCandidate } = globalThis.PiAgentPaperScience;
 const { findApsPdfCandidate, findApsSupplementalMaterialCandidates } = globalThis.PiAgentPaperAps;
 
@@ -249,6 +249,7 @@ test("helper globals are installed by content helper scripts", () => {
   assert.equal(typeof findPdfCandidate, "function");
   assert.equal(typeof findSupplementalMaterialCandidates, "function");
   assert.equal(typeof findNaturePdfCandidate, "function");
+  assert.equal(typeof findNatureSupplementalMaterialCandidates, "function");
   assert.equal(typeof findSciencePdfCandidate, "function");
   assert.equal(typeof findApsPdfCandidate, "function");
   assert.equal(typeof findApsSupplementalMaterialCandidates, "function");
@@ -359,6 +360,68 @@ test("runner sends pdfUrl even when article body contains generic login navigati
     html: "",
     webpageAssets: []
   });
+});
+
+test("runner uses Nature ESM supplemental links instead of the main article PDF", async () => {
+  const sentMessages = [];
+  const previousChrome = globalThis.chrome;
+  const previousDocument = globalThis.document;
+  const previousLocation = globalThis.location;
+  const supplementUrl =
+    "https://static-content.springer.com/esm/art%3A10.1038%2Fnature14270/MediaObjects/41586_2015_BFnature14270_MOESM299_ESM.pdf";
+
+  globalThis.chrome = {
+    runtime: {
+      sendMessage(message) {
+        sentMessages.push(message);
+      }
+    }
+  };
+  globalThis.location = {
+    href: "https://www.nature.com/articles/nature14270",
+    hostname: "www.nature.com"
+  };
+  globalThis.document = {
+    title: "Nature article",
+    body: {
+      innerText: "Full article text."
+    },
+    querySelectorAll(selector) {
+      assert.equal(selector, "a[href]");
+      return [
+        {
+          textContent: "Supplementary information",
+          getAttribute(name) {
+            return name === "href" ? "/articles/nature14270.pdf" : null;
+          }
+        },
+        {
+          textContent: "Supplementary information",
+          getAttribute(name) {
+            return name === "href" ? supplementUrl : null;
+          }
+        }
+      ];
+    }
+  };
+
+  try {
+    await import(
+      `${pathToFileURL(path.join(contentDir, "runner.js")).href}?case=${Date.now()}-${Math.random()}`
+    );
+  } finally {
+    globalThis.chrome = previousChrome;
+    globalThis.document = previousDocument;
+    globalThis.location = previousLocation;
+  }
+
+  assert.deepEqual(sentMessages[0].supplementalMaterials, [
+    {
+      url: supplementUrl,
+      title: "Supplementary information"
+    }
+  ]);
+  assert.equal(sentMessages[0].pdfUrl, "https://www.nature.com/articles/nature14270.pdf");
 });
 
 test("runner keeps Cloudflare challenge pages in verification handoff", async () => {
@@ -2054,12 +2117,30 @@ test("publisher helpers extract supplemental material candidates", () => {
   );
 });
 
+test("Nature helper extracts Springer ESM supplemental PDFs and ignores the main article PDF", () => {
+  assert.deepEqual(
+    findNatureSupplementalMaterialCandidates({
+      document: doc(`
+        <a href="/articles/nature14270.pdf">Supplementary information</a>
+        <a href="https://static-content.springer.com/esm/art%3A10.1038%2Fnature14270/MediaObjects/41586_2015_BFnature14270_MOESM299_ESM.pdf">Supplementary information</a>
+      `),
+      baseUrl: "https://www.nature.com/articles/nature14270"
+    }),
+    [
+      {
+        url: "https://static-content.springer.com/esm/art%3A10.1038%2Fnature14270/MediaObjects/41586_2015_BFnature14270_MOESM299_ESM.pdf",
+        title: "Supplementary information"
+      }
+    ]
+  );
+});
+
 test("manifest declares required MV3 extension shell fields", async () => {
   const manifest = JSON.parse(await readFile(path.join(extensionDir, "manifest.json"), "utf8"));
 
   assert.equal(manifest.manifest_version, 3);
   assert.equal(manifest.name, "Pi Agent Paper Downloader");
-  assert.equal(manifest.version, "0.1.27");
+  assert.equal(manifest.version, "0.1.28");
 
   for (const permission of [
     "activeTab",
@@ -2077,6 +2158,7 @@ test("manifest declares required MV3 extension shell fields", async () => {
     "https://www.nature.com/*",
     "https://nature.com/*",
     "https://media.springernature.com/*",
+    "https://static-content.springer.com/*",
     "https://www.science.org/*",
     "https://science.org/*",
     "https://journals.aps.org/*",

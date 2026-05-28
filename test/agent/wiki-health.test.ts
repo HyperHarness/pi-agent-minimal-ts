@@ -810,6 +810,85 @@ test("checkWikiHealth reports source_metadata_artifact_missing for metadata path
   }
 });
 
+test("checkWikiHealth ignores supplement-only parse engine directories when checking main parse artifacts", async () => {
+  const workspace = await createWorkspace();
+
+  try {
+    const paperKey = "aps-10.1103-PhysRevLett.111.080502";
+    const pdfPath = `knowledge-base/raw/pdfs/${paperKey}.pdf`;
+    await writeText(path.join(workspace, pdfPath), "%PDF-1.7\narticle pdf\n");
+    await writeJson(path.join(workspace, "knowledge-base", "sources", paperKey, "acquisition.json"), {
+      source: "aps",
+      articleUrl: "https://journals.aps.org/prl/abstract/10.1103/PhysRevLett.111.080502",
+      recordedAt: "2026-05-28T00:00:00.000Z",
+      handlingMethod: "browser_session",
+      status: "downloaded",
+      canonicalId: "10.1103/PhysRevLett.111.080502",
+      downloadPath: pdfPath
+    });
+    await writePaperMetadata(path.join(workspace, "knowledge-base", "sources", paperKey, "metadata.json"), {
+      paperKey,
+      title: "Coherent Josephson Qubit Suitable for Scalable Quantum Integrated Circuits",
+      source: "aps",
+      canonicalId: "10.1103/PhysRevLett.111.080502",
+      articleUrl: "https://journals.aps.org/prl/abstract/10.1103/PhysRevLett.111.080502",
+      acquisitionPath: `knowledge-base/sources/${paperKey}/acquisition.json`,
+      pdfPath,
+      doi: "10.1103/PhysRevLett.111.080502",
+      authors: ["R. Barends"],
+      year: 2013,
+      venue: "Phys. Rev. Lett."
+    });
+    await writeText(path.join(workspace, "knowledge-base", "sources", paperKey, "summary.md"), "# Summary\n");
+    await writeText(
+      path.join(workspace, "knowledge-base", "sources", paperKey, "parses", "webpage", "document.md"),
+      "# Main webpage parse\n\nArticle text."
+    );
+    await writeJson(path.join(workspace, "knowledge-base", "sources", paperKey, "parses", "webpage", "parse.json"), {
+      paperKey,
+      engine: "webpage",
+      pdfSha256: "webpage",
+      pages: 1,
+      elements: [],
+      sections: []
+    });
+    await writeJson(path.join(workspace, "knowledge-base", "sources", paperKey, "parses", "webpage", "quality.json"), {
+      status: "good",
+      score: 1,
+      pages: 1,
+      totalTextLength: 2000,
+      warnings: []
+    });
+    await writeText(path.join(workspace, "knowledge-base", "sources", paperKey, "parses", "webpage", "chunks.jsonl"), "");
+    await writeText(
+      path.join(workspace, "knowledge-base", "sources", paperKey, "parses", "opendataloader-local", "supplement.md"),
+      "# Supplemental Material\n\nSupplement text."
+    );
+    await writeJson(
+      path.join(workspace, "knowledge-base", "sources", paperKey, "parses", "opendataloader-local", "supplement.parse.json"),
+      { paperKey, engine: "opendataloader-local", pdfSha256: "supplement", pages: 1, elements: [], sections: [] }
+    );
+    await writeJson(
+      path.join(workspace, "knowledge-base", "sources", paperKey, "parses", "opendataloader-local", "supplement.quality.json"),
+      { status: "good", score: 1, pages: 1, totalTextLength: 5000, warnings: [] }
+    );
+    await writeText(
+      path.join(workspace, "knowledge-base", "sources", paperKey, "parses", "opendataloader-local", "supplement.chunks.jsonl"),
+      ""
+    );
+
+    const result = await checkWikiHealth({ workspaceDir: workspace });
+
+    assert.equal(result.summary.missing_artifact, 0);
+    assert.ok(!result.issues.some((issue) =>
+      issue.kind === "missing_artifact" &&
+      issue.paths?.some((issuePath) => issuePath.includes("parses/opendataloader-local/document.md"))
+    ));
+  } finally {
+    await rm(workspace, { recursive: true, force: true });
+  }
+});
+
 test("checkWikiHealth does not report source_metadata_artifact_missing for a missing planned summary", async () => {
   const workspace = await createWorkspace();
 
@@ -2118,6 +2197,78 @@ test("fixWikiHealth parses missing downloaded records and updates the record man
       updatedRecord.parse?.markdownPath,
       "knowledge-base/sources/arxiv-2401.00004/parses/plain-text-baseline/document.md"
     );
+  } finally {
+    await rm(workspace, { recursive: true, force: true });
+  }
+});
+
+test("fixWikiHealth re-parses downloaded records when indexed main parse artifacts are missing", async () => {
+  const workspace = await createWorkspace();
+
+  try {
+    const paperKey = "arxiv-2401.00014";
+    const pdfPath = path.join(workspace, "knowledge-base", "raw", "pdfs", `${paperKey}.pdf`);
+    const recordPath = path.join(workspace, "knowledge-base", "sources", paperKey, "acquisition.json");
+    const artifactRoot = path.join(workspace, "knowledge-base", "sources", paperKey, "parses", "plain-text-baseline");
+    await writeText(pdfPath, "%PDF-1.4\nexample\n%%EOF\n");
+    await writeJson(recordPath, {
+      source: "arxiv",
+      articleUrl: "https://arxiv.org/abs/2401.00014",
+      recordedAt: "2026-04-28T04:00:00.000Z",
+      handlingMethod: "direct_http",
+      status: "downloaded",
+      canonicalId: "2401.00014",
+      pdfUrl: "https://arxiv.org/pdf/2401.00014.pdf",
+      downloadPath: pdfPath
+    });
+    await writeJson(path.join(artifactRoot, "quality.json"), {
+      status: "good",
+      score: 0.95,
+      pages: 1,
+      totalTextLength: 1200,
+      warnings: []
+    });
+
+    const parseResult: PaperParseResult = {
+      status: "parsed",
+      paperKey,
+      engine: "plain-text-baseline",
+      pdfSha256: "sha-reparsed",
+      artifacts: {
+        metadataPath: path.join(workspace, "knowledge-base", "sources", paperKey, "metadata.json"),
+        parsePath: path.join(artifactRoot, "parse.json"),
+        markdownPath: path.join(artifactRoot, "document.md"),
+        qualityPath: path.join(artifactRoot, "quality.json"),
+        chunksPath: path.join(artifactRoot, "chunks.jsonl")
+      },
+      quality: {
+        status: "good",
+        score: 0.98,
+        pages: 1,
+        totalTextLength: 1400,
+        emptyPageCount: 0,
+        headingCount: 2,
+        tableCount: 0,
+        figureOrCaptionCount: 0,
+        warnings: []
+      },
+      sections: []
+    };
+
+    const result = await fixWikiHealth({
+      workspaceDir: workspace,
+      issueKinds: ["missing_artifact"],
+      parsePaperImpl: async (options) => {
+        assert.equal(options.recordPath, "knowledge-base/sources/arxiv-2401.00014/acquisition.json");
+        assert.equal(options.force, true);
+        return parseResult;
+      }
+    });
+
+    assert.equal(result.attempted, 1);
+    assert.equal(result.fixed, 1);
+    assert.equal(result.results[0]?.action, "parse");
+    assert.match(result.results[0]?.message ?? "", /Parsed arxiv-2401\.00014/);
   } finally {
     await rm(workspace, { recursive: true, force: true });
   }

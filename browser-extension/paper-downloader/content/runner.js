@@ -23,6 +23,9 @@
 
   function chooseSupplementalMaterialHelper(hostname) {
     var normalizedHostname = String(hostname || "").toLowerCase();
+    if (normalizedHostname === "www.nature.com" || normalizedHostname === "nature.com") {
+      return root.PiAgentPaperNature.findNatureSupplementalMaterialCandidates;
+    }
     if (normalizedHostname === "journals.aps.org" || normalizedHostname === "aps.org") {
       return root.PiAgentPaperAps.findApsSupplementalMaterialCandidates;
     }

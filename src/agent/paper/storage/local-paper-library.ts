@@ -538,17 +538,29 @@ async function collectParses(workspaceDir: string, entries: Map<string, LocalPap
       }
       const engine = parseDir.name as ConcretePaperParseEngine;
       const parseRoot = path.join(parsesDir, parseDir.name);
+      const markdownPath = path.join(parseRoot, "document.md");
+      const parsePath = path.join(parseRoot, "parse.json");
       const qualityPath = path.join(parseRoot, "quality.json");
+      const chunksPath = path.join(parseRoot, "chunks.jsonl");
+      const mainArtifactPresence = await Promise.all([
+        pathExists(markdownPath),
+        pathExists(parsePath),
+        pathExists(qualityPath),
+        pathExists(chunksPath)
+      ]);
+      if (!mainArtifactPresence.some(Boolean)) {
+        continue;
+      }
       const quality = await readJsonFile<PaperParseQualityReport>(qualityPath);
       parses.push({
         engine,
         ...(quality?.status ? { status: quality.status } : {}),
         ...(typeof quality?.score === "number" ? { score: quality.score } : {}),
         ...(typeof quality?.totalTextLength === "number" ? { totalTextLength: quality.totalTextLength } : {}),
-        markdownPath: relativeToWorkspace(workspaceDir, path.join(parseRoot, "document.md")),
-        parsePath: relativeToWorkspace(workspaceDir, path.join(parseRoot, "parse.json")),
+        markdownPath: relativeToWorkspace(workspaceDir, markdownPath),
+        parsePath: relativeToWorkspace(workspaceDir, parsePath),
         qualityPath: relativeToWorkspace(workspaceDir, qualityPath),
-        chunksPath: relativeToWorkspace(workspaceDir, path.join(parseRoot, "chunks.jsonl")),
+        chunksPath: relativeToWorkspace(workspaceDir, chunksPath),
         warnings: quality?.warnings ?? []
       });
     }

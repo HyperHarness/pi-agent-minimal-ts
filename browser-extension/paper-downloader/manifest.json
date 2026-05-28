@@ -1,7 +1,7 @@
 {
   "manifest_version": 3,
   "name": "Pi Agent Paper Downloader",
-  "version": "0.1.27",
+  "version": "0.1.28",
   "description": "Downloads publisher PDFs through the user's browser session for Pi Agent.",
   "permissions": [
     "activeTab",
@@ -16,6 +16,7 @@
     "https://www.nature.com/*",
     "https://nature.com/*",
     "https://media.springernature.com/*",
+    "https://static-content.springer.com/*",
     "https://www.science.org/*",
     "https://science.org/*",
     "https://journals.aps.org/*",

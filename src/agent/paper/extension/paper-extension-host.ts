@@ -830,7 +830,7 @@ async function registerSupportedPublisherDownload(options: {
 
   const fileSha256 = createHash("sha256").update(options.pdfBytes).digest("hex");
   const title = normalizeOptionalString(options.message.title);
-  const existingReadingArtifacts = preserveExistingReadingArtifacts(existingRecord?.record);
+  const existingRecordArtifacts = preserveExistingRecordArtifacts(existingRecord?.record);
   const recordPath = await writePaperRecord({
     workspaceDir: options.workspaceDir,
     ...(options.citationMetadataFetchImpl
@@ -845,7 +845,7 @@ async function registerSupportedPublisherDownload(options: {
       canonicalId,
       pdfUrl,
       downloadPath,
-      ...existingReadingArtifacts
+      ...existingRecordArtifacts
     }
   });
   await restoreWebpageReadingManifestFromJob({
@@ -882,14 +882,21 @@ async function registerSupportedPublisherDownload(options: {
   };
 }
 
-function preserveExistingReadingArtifacts(record: PaperRecord | undefined): Pick<PaperRecord, "webpage" | "reading"> | {} {
+function preserveExistingRecordArtifacts(record: PaperRecord | undefined): {
+  webpage?: PaperRecord["webpage"];
+  reading?: PaperRecord["reading"];
+  supplementalMaterials?: PaperSupplementalMaterial[];
+} {
   if (!record) {
     return {};
   }
 
   return {
     ...(record.webpage ? { webpage: record.webpage } : {}),
-    ...(record.reading?.status === "ready" ? { reading: record.reading } : {})
+    ...(record.reading?.status === "ready" ? { reading: record.reading } : {}),
+    ...("supplementalMaterials" in record && Array.isArray(record.supplementalMaterials)
+      ? { supplementalMaterials: record.supplementalMaterials }
+      : {})
   };
 }
 
