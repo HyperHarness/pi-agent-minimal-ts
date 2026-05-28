@@ -145,7 +145,7 @@ test("checkWikiHealth reports records that need download, authorization, parsing
       warnings: ["Very little text was extracted."]
     });
     await writeText(
-      path.join(workspace, "knowledge-base", "sources", "arxiv-2401.00002", "chunks", "plain-text-baseline.jsonl"),
+      path.join(parsedDir, "chunks.jsonl"),
       "{\"id\":\"chunk-1\"}\n"
     );
 
@@ -205,7 +205,7 @@ test("checkWikiHealth excludes publisher news pages from paper parse health", as
         warnings: ["No main body sections were detected."]
       });
       await writeText(
-        path.join(sourceDir, "chunks", "webpage.jsonl"),
+        path.join(parsedDir, "chunks.jsonl"),
         "{\"id\":\"chunk-1\"}\n"
       );
     }
@@ -251,7 +251,7 @@ test("wiki_health_fix quarantines APS institution site license non-paper sources
       totalTextLength: 3000,
       warnings: []
     });
-    await writeText(path.join(sourceDir, "chunks", "webpage.jsonl"), "{\"id\":\"chunk-1\"}\n");
+    await writeText(path.join(parseDir, "chunks.jsonl"), "{\"id\":\"chunk-1\"}\n");
     await writeText(path.join(sourceDir, "summary.md"), "---\ntype: \"paper-source-summary\"\n---\n\nPolicy summary.\n");
 
     const checked = await checkWikiHealth({ workspaceDir: workspace });
@@ -316,7 +316,7 @@ test("checkWikiHealth ignores stale queued webpage work when PDF reading is read
     const paperKey = "nature-s41586-026-10644-y";
     const pdfPath = path.join(workspace, "knowledge-base", "raw", "pdfs", `${paperKey}.pdf`);
     const parseRoot = path.join(workspace, "knowledge-base", "sources", paperKey, "parses", "opendataloader-local");
-    const chunksPath = path.join(workspace, "knowledge-base", "sources", paperKey, "chunks", "opendataloader-local.jsonl");
+    const chunksPath = path.join(parseRoot, "chunks.jsonl");
     await writeText(pdfPath, "%PDF-1.4\nexample\n%%EOF\n");
     await writeText(path.join(parseRoot, "document.md"), "# Introduction\n\nA complete PDF parse.");
     await writeJson(path.join(parseRoot, "parse.json"), {
@@ -361,7 +361,7 @@ test("checkWikiHealth ignores stale queued webpage work when PDF reading is read
         markdownPath: `knowledge-base/sources/${paperKey}/parses/opendataloader-local/document.md`,
         parsePath: `knowledge-base/sources/${paperKey}/parses/opendataloader-local/parse.json`,
         qualityPath: `knowledge-base/sources/${paperKey}/parses/opendataloader-local/quality.json`,
-        chunksPath: `knowledge-base/sources/${paperKey}/chunks/opendataloader-local.jsonl`,
+        chunksPath: `knowledge-base/sources/${paperKey}/parses/opendataloader-local/chunks.jsonl`,
         quality: {
           status: "good",
           score: 1,
@@ -1204,7 +1204,7 @@ test("checkWikiHealth accepts ready webpage reading when PDF parsing failed late
     const pdfPath = path.join(workspace, "knowledge-base", "raw", "pdfs", `${paperKey}.pdf`);
     const sourceDir = path.join(workspace, "knowledge-base", "sources", paperKey);
     const parseDir = path.join(sourceDir, "parses", "webpage");
-    const chunksPath = path.join(sourceDir, "chunks", "webpage.jsonl");
+    const chunksPath = path.join(parseDir, "chunks.jsonl");
     const markdownPath = path.join(parseDir, "document.md");
     const parsePath = path.join(parseDir, "parse.json");
     const qualityPath = path.join(parseDir, "quality.json");
@@ -1313,7 +1313,7 @@ test("checkWikiHealth reports publisher webpage-only parses as not PDF-downloade
       figureOrCaptionCount: 10,
       warnings: []
     });
-    await writeText(path.join(paperDir, "chunks", "webpage.jsonl"), "{\"id\":\"chunk-1\"}\n");
+    await writeText(path.join(parseDir, "chunks.jsonl"), "{\"id\":\"chunk-1\"}\n");
 
     const result = await checkWikiHealth({ workspaceDir: workspace });
 
@@ -1360,7 +1360,7 @@ test("checkWikiHealth preserves Science license failures from extension history 
       figureOrCaptionCount: 5,
       warnings: []
     });
-    await writeText(path.join(paperDir, "chunks", "webpage.jsonl"), "{\"id\":\"chunk-1\"}\n");
+    await writeText(path.join(parseDir, "chunks.jsonl"), "{\"id\":\"chunk-1\"}\n");
     await appendPaperDownloadJobEvent({
       workspaceDir: workspace,
       event: {
@@ -1432,7 +1432,7 @@ test("checkWikiHealth treats APS automatic PDF fetch as queued instead of author
       figureOrCaptionCount: 4,
       warnings: []
     });
-    await writeText(path.join(paperDir, "chunks", "webpage.jsonl"), "{\"id\":\"chunk-1\"}\n");
+    await writeText(path.join(parseDir, "chunks.jsonl"), "{\"id\":\"chunk-1\"}\n");
     await appendPaperDownloadJobEvent({
       workspaceDir: workspace,
       event: {
@@ -1487,7 +1487,7 @@ test("checkWikiHealth downgrades blocklisted download issues without hiding summ
       figureOrCaptionCount: 5,
       warnings: []
     });
-    await writeText(path.join(paperDir, "chunks", "webpage.jsonl"), "{\"id\":\"chunk-1\"}\n");
+    await writeText(path.join(parseDir, "chunks.jsonl"), "{\"id\":\"chunk-1\"}\n");
     await appendPaperDownloadJobEvent({
       workspaceDir: workspace,
       event: {
@@ -2054,11 +2054,8 @@ test("fixWikiHealth parses missing downloaded records and updates the record man
       "plain-text-baseline"
     );
     const chunksPath = path.join(
-      workspace,
-      "knowledge-base", "sources",
-      "arxiv-2401.00004",
-      "chunks",
-      "plain-text-baseline.jsonl"
+      artifactRoot,
+      "chunks.jsonl"
     );
     const parseResult: PaperParseResult = {
       status: "parsed",
@@ -2402,7 +2399,7 @@ test("fixWikiHealth skips user-authored or user-authorized repairs with explicit
       warnings: []
     });
     await writeText(
-      path.join(workspace, "knowledge-base", "sources", "arxiv-2401.00006", "chunks", "plain-text-baseline.jsonl"),
+      path.join(workspace, "knowledge-base", "sources", "arxiv-2401.00006", "parses", "plain-text-baseline", "chunks.jsonl"),
       "{\"id\":\"chunk-1\"}\n"
     );
 
@@ -2521,7 +2518,7 @@ test("fixWikiHealth generates missing summaries when a summary worker is availab
       warnings: []
     });
     await writeText(
-      path.join(workspace, "knowledge-base", "sources", "arxiv-2401.00007", "chunks", "plain-text-baseline.jsonl"),
+      path.join(workspace, "knowledge-base", "sources", "arxiv-2401.00007", "parses", "plain-text-baseline", "chunks.jsonl"),
       "{\"id\":\"chunk-1\"}\n"
     );
 
@@ -2599,7 +2596,7 @@ test("fixWikiHealth selects requested issue kinds beyond the health page cap", a
         warnings: []
       });
       await writeText(
-        path.join(workspace, "knowledge-base", "sources", paperKey, "chunks", "plain-text-baseline.jsonl"),
+        path.join(workspace, "knowledge-base", "sources", paperKey, "parses", "plain-text-baseline", "chunks.jsonl"),
         "{\"id\":\"chunk-1\"}\n"
       );
     }

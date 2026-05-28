@@ -245,7 +245,7 @@ test("parseExtensionHostResponse accepts webpage_registered responses", () => {
     markdownPath: "knowledge-base/sources/science-10.1126-science.adz8659/parses/webpage/document.md",
     parsePath: "knowledge-base/sources/science-10.1126-science.adz8659/parses/webpage/parse.json",
     qualityPath: "knowledge-base/sources/science-10.1126-science.adz8659/parses/webpage/quality.json",
-    chunksPath: "knowledge-base/sources/science-10.1126-science.adz8659/chunks/webpage.jsonl",
+    chunksPath: "knowledge-base/sources/science-10.1126-science.adz8659/parses/webpage/chunks.jsonl",
     quality: {
       status: "good",
       score: 1,
@@ -264,7 +264,7 @@ test("parseExtensionHostResponse accepts webpage_registered responses", () => {
     markdownPath: "knowledge-base/sources/science-10.1126-science.adz8659/parses/webpage/document.md",
     parsePath: "knowledge-base/sources/science-10.1126-science.adz8659/parses/webpage/parse.json",
     qualityPath: "knowledge-base/sources/science-10.1126-science.adz8659/parses/webpage/quality.json",
-    chunksPath: "knowledge-base/sources/science-10.1126-science.adz8659/chunks/webpage.jsonl",
+    chunksPath: "knowledge-base/sources/science-10.1126-science.adz8659/parses/webpage/chunks.jsonl",
     quality: {
       status: "good",
       score: 1,

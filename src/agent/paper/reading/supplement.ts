@@ -12,9 +12,19 @@ import {
 } from "./paper-reader-store.js";
 import { evaluateParseQualityWithMarkdown } from "./quality.js";
 import type {
+  ConcretePaperParseEngine,
   PaperParseQualityReport,
   ParsedPaperDocument
 } from "./types.js";
+
+const SUPPLEMENT_PDF_PARSE_ENGINES = [
+  "opendataloader-local",
+  "opendataloader-hybrid",
+  "docling",
+  "plain-text-baseline"
+] as const satisfies readonly ConcretePaperParseEngine[];
+
+export type SupplementPdfParseEngine = typeof SUPPLEMENT_PDF_PARSE_ENGINES[number];
 
 export interface SupplementalParseArtifacts {
   markdownPath: string;
@@ -26,6 +36,7 @@ export interface SupplementalParseArtifacts {
 export interface SupplementalParseResult {
   status: "parsed" | "already_parsed";
   paperKey: string;
+  engine: SupplementPdfParseEngine;
   pdfSha256: string;
   artifacts: SupplementalParseArtifacts;
   quality: PaperParseQualityReport;
@@ -70,8 +81,9 @@ function relativeToWorkspace(workspaceDir: string, filePath: string): string {
 function getSupplementArtifacts(input: {
   workspaceDir: string;
   paperKey: string;
+  engine: SupplementPdfParseEngine;
 }): SupplementalParseArtifacts {
-  const parseDir = getParseDir(input.workspaceDir, input.paperKey, "webpage");
+  const parseDir = getParseDir(input.workspaceDir, input.paperKey, input.engine);
   return {
     markdownPath: path.join(parseDir, "supplement.md"),
     parsePath: path.join(parseDir, "supplement.parse.json"),
@@ -80,24 +92,40 @@ function getSupplementArtifacts(input: {
   };
 }
 
+function isSupplementPdfParseEngine(engine: ConcretePaperParseEngine): engine is SupplementPdfParseEngine {
+  return SUPPLEMENT_PDF_PARSE_ENGINES.includes(engine as SupplementPdfParseEngine);
+}
+
 async function readCachedSupplement(input: {
-  artifacts: SupplementalParseArtifacts;
+  workspaceDir: string;
+  paperKey: string;
   pdfSha256: string;
 }): Promise<{
   document: ParsedPaperDocument;
   quality: PaperParseQualityReport;
+  artifacts: SupplementalParseArtifacts;
 } | null> {
-  try {
-    const [documentText, qualityText] = await Promise.all([
-      readFile(input.artifacts.parsePath, "utf8"),
-      readFile(input.artifacts.qualityPath, "utf8")
-    ]);
-    const document = JSON.parse(documentText) as ParsedPaperDocument;
-    const quality = JSON.parse(qualityText) as PaperParseQualityReport;
-    return document.pdfSha256 === input.pdfSha256 ? { document, quality } : null;
-  } catch {
-    return null;
+  for (const engine of SUPPLEMENT_PDF_PARSE_ENGINES) {
+    const artifacts = getSupplementArtifacts({
+      workspaceDir: input.workspaceDir,
+      paperKey: input.paperKey,
+      engine
+    });
+    try {
+      const [documentText, qualityText] = await Promise.all([
+        readFile(artifacts.parsePath, "utf8"),
+        readFile(artifacts.qualityPath, "utf8")
+      ]);
+      const document = JSON.parse(documentText) as ParsedPaperDocument;
+      const quality = JSON.parse(qualityText) as PaperParseQualityReport;
+      if (document.pdfSha256 === input.pdfSha256 && document.engine === engine) {
+        return { document, quality, artifacts };
+      }
+    } catch {
+      continue;
+    }
   }
+  return null;
 }
 
 function normalizeSupplementDocument(input: {
@@ -126,11 +154,13 @@ function normalizeSupplementDocument(input: {
     id: elementIdMap.get(element.id) ?? `supplement-${String(index + 1).padStart(5, "0")}`,
     ...(element.sectionId ? { sectionId: sectionIdMap.get(element.sectionId) ?? element.sectionId } : {})
   }));
+  if (!isSupplementPdfParseEngine(input.document.engine)) {
+    throw new Error(`Supplement PDF parser returned unsupported engine: ${input.document.engine}`);
+  }
 
   return {
     ...input.document,
     paperKey: input.paperKey,
-    engine: "webpage",
     pdfSha256: input.pdfSha256,
     createdAt: input.createdAt,
     ...(input.title ? { title: input.title } : {}),
@@ -202,6 +232,7 @@ async function updateMetadataArtifacts(input: {
   workspaceDir: string;
   paperKey: string;
   artifacts: SupplementalParseArtifacts;
+  engine: SupplementPdfParseEngine;
   pdfSha256: string;
   updatedAt: string;
 }): Promise<void> {
@@ -214,9 +245,7 @@ async function updateMetadataArtifacts(input: {
   }
   const existingArtifacts = Array.isArray(metadata.artifacts)
     ? metadata.artifacts.filter((artifact) =>
-      typeof artifact !== "object" ||
-      artifact === null ||
-      (artifact as { markdownPath?: unknown }).markdownPath !== relativeToWorkspace(input.workspaceDir, input.artifacts.markdownPath)
+      !isStaleSupplementArtifact(artifact)
     )
     : [];
   metadata.artifacts = [
@@ -224,7 +253,7 @@ async function updateMetadataArtifacts(input: {
     {
       kind: "parse",
       path: relativeToWorkspace(input.workspaceDir, input.artifacts.markdownPath),
-      engine: "webpage",
+      engine: input.engine,
       markdownPath: relativeToWorkspace(input.workspaceDir, input.artifacts.markdownPath),
       jsonPath: relativeToWorkspace(input.workspaceDir, input.artifacts.parsePath),
       qualityPath: relativeToWorkspace(input.workspaceDir, input.artifacts.qualityPath),
@@ -236,7 +265,19 @@ async function updateMetadataArtifacts(input: {
   await writeFile(metadataPath, `${JSON.stringify(metadata, null, 2)}\n`, "utf8");
 }
 
-export async function parseSupplementPdfIntoWebpage(input: {
+function isStaleSupplementArtifact(artifact: unknown): boolean {
+  if (typeof artifact !== "object" || artifact === null) {
+    return false;
+  }
+  const record = artifact as { markdownPath?: unknown; path?: unknown; note?: unknown };
+  return (
+    record.note === "Parsed supplemental material PDF." ||
+    (typeof record.markdownPath === "string" && /\/supplement\.md$/.test(record.markdownPath)) ||
+    (typeof record.path === "string" && /\/supplement\.md$/.test(record.path))
+  );
+}
+
+export async function parseSupplementPdf(input: {
   workspaceDir: string;
   paperKey: string;
   pdfPath: string;
@@ -249,19 +290,20 @@ export async function parseSupplementPdfIntoWebpage(input: {
     workspaceDir: input.workspaceDir,
     pdfPath: input.pdfPath
   });
-  const artifacts = getSupplementArtifacts({
-    workspaceDir: input.workspaceDir,
-    paperKey: input.paperKey
-  });
   const cached = input.force === true
     ? null
-    : await readCachedSupplement({ artifacts, pdfSha256: resolved.sha256 });
+    : await readCachedSupplement({
+      workspaceDir: input.workspaceDir,
+      paperKey: input.paperKey,
+      pdfSha256: resolved.sha256
+    });
   if (cached) {
     return {
       status: "already_parsed",
       paperKey: input.paperKey,
+      engine: cached.document.engine as SupplementPdfParseEngine,
       pdfSha256: resolved.sha256,
-      artifacts,
+      artifacts: cached.artifacts,
       quality: cached.quality
     };
   }
@@ -282,6 +324,15 @@ export async function parseSupplementPdfIntoWebpage(input: {
     pdfSha256: resolved.sha256,
     ...(input.title ? { title: input.title } : {}),
     createdAt
+  });
+  const engine = parsed.document.engine;
+  if (!isSupplementPdfParseEngine(engine)) {
+    throw new Error(`Supplement PDF parser returned unsupported engine: ${engine}`);
+  }
+  const artifacts = getSupplementArtifacts({
+    workspaceDir: input.workspaceDir,
+    paperKey: input.paperKey,
+    engine
   });
   const quality = evaluateParseQualityWithMarkdown(document, parsed.markdown);
   const chunks = createPaperChunks(document);
@@ -304,6 +355,7 @@ export async function parseSupplementPdfIntoWebpage(input: {
     workspaceDir: input.workspaceDir,
     paperKey: input.paperKey,
     artifacts,
+    engine,
     pdfSha256: resolved.sha256,
     updatedAt: createdAt
   });
@@ -312,6 +364,7 @@ export async function parseSupplementPdfIntoWebpage(input: {
   return {
     status: "parsed",
     paperKey: input.paperKey,
+    engine,
     pdfSha256: resolved.sha256,
     artifacts,
     quality

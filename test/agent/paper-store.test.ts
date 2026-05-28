@@ -677,7 +677,7 @@ test("updatePaperRecordParseManifest records ready markdown artifacts in the pap
         markdownPath: path.join(workspaceDir, "knowledge-base/sources/arxiv-2401.01234/parses/webpage/document.md"),
         parsePath: path.join(workspaceDir, "knowledge-base/sources/arxiv-2401.01234/parses/webpage/parse.json"),
         qualityPath: path.join(workspaceDir, "knowledge-base/sources/arxiv-2401.01234/parses/webpage/quality.json"),
-        chunksPath: path.join(workspaceDir, "knowledge-base/sources/arxiv-2401.01234/chunks/webpage.jsonl")
+        chunksPath: path.join(workspaceDir, "knowledge-base/sources/arxiv-2401.01234/parses/webpage/chunks.jsonl")
       },
       quality: {
         status: "good",
@@ -778,7 +778,7 @@ test("updatePaperRecordParseManifest backfills citation metadata from local pars
         markdownPath: path.join(workspaceDir, "knowledge-base/sources/aps-10.1103-PhysRevA.111.012619/parses/webpage/document.md"),
         parsePath,
         qualityPath: path.join(workspaceDir, "knowledge-base/sources/aps-10.1103-PhysRevA.111.012619/parses/webpage/quality.json"),
-        chunksPath: path.join(workspaceDir, "knowledge-base/sources/aps-10.1103-PhysRevA.111.012619/chunks/webpage.jsonl")
+        chunksPath: path.join(workspaceDir, "knowledge-base/sources/aps-10.1103-PhysRevA.111.012619/parses/webpage/chunks.jsonl")
       },
       quality: {
         status: "good",
@@ -897,7 +897,7 @@ test("writePaperMetadataForRecord repairs legacy absolute metadata paths and sta
         markdownPath: path.join(workspaceDir, "knowledge-base", "sources", paperKey, "parses", "webpage", "document.md"),
         parsePath,
         qualityPath: path.join(workspaceDir, "knowledge-base", "sources", paperKey, "parses", "webpage", "quality.json"),
-        chunksPath: path.join(workspaceDir, "knowledge-base", "sources", paperKey, "chunks", "webpage.jsonl")
+        chunksPath: path.join(workspaceDir, "knowledge-base", "sources", paperKey, "parses", "webpage", "chunks.jsonl")
       },
       quality: {
         status: "good",
@@ -993,7 +993,7 @@ test("updatePaperRecordReadingFailure preserves an existing ready webpage readin
         markdownPath: path.join(workspaceDir, "knowledge-base/sources/nature-s41567-025-03102-5/parses/webpage/document.md"),
         parsePath: path.join(workspaceDir, "knowledge-base/sources/nature-s41567-025-03102-5/parses/webpage/parse.json"),
         qualityPath: path.join(workspaceDir, "knowledge-base/sources/nature-s41567-025-03102-5/parses/webpage/quality.json"),
-        chunksPath: path.join(workspaceDir, "knowledge-base/sources/nature-s41567-025-03102-5/chunks/webpage.jsonl")
+        chunksPath: path.join(workspaceDir, "knowledge-base/sources/nature-s41567-025-03102-5/parses/webpage/chunks.jsonl")
       },
       quality: {
         status: "good",

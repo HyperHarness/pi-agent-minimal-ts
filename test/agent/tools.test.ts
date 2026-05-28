@@ -3378,7 +3378,7 @@ test("fetch_paper_webpage saves full article text but returns compact JSON for m
             parsePath: path.join(workspace, "knowledge-base/sources/example-paper/parses/webpage/parse.json"),
             markdownPath: path.join(workspace, "knowledge-base/sources/example-paper/parses/webpage/document.md"),
             qualityPath: path.join(workspace, "knowledge-base/sources/example-paper/parses/webpage/quality.json"),
-            chunksPath: path.join(workspace, "knowledge-base/sources/example-paper/chunks/webpage.jsonl"),
+            chunksPath: path.join(workspace, "knowledge-base/sources/example-paper/parses/webpage/chunks.jsonl"),
           },
           quality: {
             status: "good",
@@ -3438,7 +3438,7 @@ test("fetch_paper_webpage saves full article text but returns compact JSON for m
           parsePath: path.join(workspace, "knowledge-base/sources/example-paper/parses/webpage/parse.json"),
           markdownPath: path.join(workspace, "knowledge-base/sources/example-paper/parses/webpage/document.md"),
           qualityPath: path.join(workspace, "knowledge-base/sources/example-paper/parses/webpage/quality.json"),
-          chunksPath: path.join(workspace, "knowledge-base/sources/example-paper/chunks/webpage.jsonl"),
+          chunksPath: path.join(workspace, "knowledge-base/sources/example-paper/parses/webpage/chunks.jsonl"),
         },
         quality: {
           status: "good",
@@ -3721,7 +3721,7 @@ test("download_paper prefers arXiv HTML webpage markdown before TeX source and P
             parsePath: path.join(workspace, "knowledge-base/sources/arxiv-2601.00425/parses/webpage/parse.json"),
             markdownPath: path.join(workspace, "knowledge-base/sources/arxiv-2601.00425/parses/webpage/document.md"),
             qualityPath: path.join(workspace, "knowledge-base/sources/arxiv-2601.00425/parses/webpage/quality.json"),
-            chunksPath: path.join(workspace, "knowledge-base/sources/arxiv-2601.00425/chunks/webpage.jsonl"),
+            chunksPath: path.join(workspace, "knowledge-base/sources/arxiv-2601.00425/parses/webpage/chunks.jsonl"),
           },
           quality: {
             status: "good",
@@ -3802,7 +3802,7 @@ test("download_paper refreshes arXiv webpage parsing when only a PDF parse exist
         markdownPath: path.join(workspace, "knowledge-base/sources/arxiv-2603.11188/parses/opendataloader-local/document.md"),
         parsePath: path.join(workspace, "knowledge-base/sources/arxiv-2603.11188/parses/opendataloader-local/parse.json"),
         qualityPath: path.join(workspace, "knowledge-base/sources/arxiv-2603.11188/parses/opendataloader-local/quality.json"),
-        chunksPath: path.join(workspace, "knowledge-base/sources/arxiv-2603.11188/chunks/opendataloader-local.jsonl"),
+        chunksPath: path.join(workspace, "knowledge-base/sources/arxiv-2603.11188/parses/opendataloader-local/chunks.jsonl"),
       },
       quality: {
         status: "good",
@@ -3849,7 +3849,7 @@ test("download_paper refreshes arXiv webpage parsing when only a PDF parse exist
             parsePath: path.join(workspace, "knowledge-base/sources/arxiv-2603.11188/parses/webpage/parse.json"),
             markdownPath: path.join(workspace, "knowledge-base/sources/arxiv-2603.11188/parses/webpage/document.md"),
             qualityPath: path.join(workspace, "knowledge-base/sources/arxiv-2603.11188/parses/webpage/quality.json"),
-            chunksPath: path.join(workspace, "knowledge-base/sources/arxiv-2603.11188/chunks/webpage.jsonl"),
+            chunksPath: path.join(workspace, "knowledge-base/sources/arxiv-2603.11188/parses/webpage/chunks.jsonl"),
           },
           quality: {
             status: "good",
@@ -3943,7 +3943,7 @@ test("download_paper falls back from arxiv.org HTML to ar5iv labs HTML before Te
             parsePath: path.join(workspace, "knowledge-base/sources/arxiv-2601.00425/parses/webpage/parse.json"),
             markdownPath: path.join(workspace, "knowledge-base/sources/arxiv-2601.00425/parses/webpage/document.md"),
             qualityPath: path.join(workspace, "knowledge-base/sources/arxiv-2601.00425/parses/webpage/quality.json"),
-            chunksPath: path.join(workspace, "knowledge-base/sources/arxiv-2601.00425/chunks/webpage.jsonl"),
+            chunksPath: path.join(workspace, "knowledge-base/sources/arxiv-2601.00425/parses/webpage/chunks.jsonl"),
           },
           quality: {
             status: "good",
@@ -4018,7 +4018,7 @@ test("download_paper falls back to arXiv TeX source before PDF parsing when HTML
             parsePath: path.join(workspace, "knowledge-base/sources/arxiv-2601.00425/parses/tex-source/parse.json"),
             markdownPath: path.join(workspace, "knowledge-base/sources/arxiv-2601.00425/parses/tex-source/document.md"),
             qualityPath: path.join(workspace, "knowledge-base/sources/arxiv-2601.00425/parses/tex-source/quality.json"),
-            chunksPath: path.join(workspace, "knowledge-base/sources/arxiv-2601.00425/chunks/tex-source-chunks.jsonl"),
+            chunksPath: path.join(workspace, "knowledge-base/sources/arxiv-2601.00425/parses/tex-source/chunks.jsonl"),
           },
           quality: {
             status: "good",
@@ -4091,7 +4091,7 @@ test("download_paper reuses ready record manifests without re-fetching publisher
         markdownPath: path.join(workspace, "knowledge-base/sources/nature-s41586-019-1666-5/parses/webpage/document.md"),
         parsePath: path.join(workspace, "knowledge-base/sources/nature-s41586-019-1666-5/parses/webpage/parse.json"),
         qualityPath: path.join(workspace, "knowledge-base/sources/nature-s41586-019-1666-5/parses/webpage/quality.json"),
-        chunksPath: path.join(workspace, "knowledge-base/sources/nature-s41586-019-1666-5/chunks/webpage.jsonl")
+        chunksPath: path.join(workspace, "knowledge-base/sources/nature-s41586-019-1666-5/parses/webpage/chunks.jsonl")
       },
       quality: {
         status: "good",
@@ -4278,7 +4278,7 @@ test("download_paper parses downloaded Nature PDFs instead of queueing webpage c
             parsePath: path.join(workspace, "knowledge-base/sources/nature-s41586-026-10652-y/parses/opendataloader-local/parse.json"),
             markdownPath: path.join(workspace, "knowledge-base/sources/nature-s41586-026-10652-y/parses/opendataloader-local/document.md"),
             qualityPath: path.join(workspace, "knowledge-base/sources/nature-s41586-026-10652-y/parses/opendataloader-local/quality.json"),
-            chunksPath: path.join(workspace, "knowledge-base/sources/nature-s41586-026-10652-y/chunks/opendataloader-local.jsonl")
+            chunksPath: path.join(workspace, "knowledge-base/sources/nature-s41586-026-10652-y/parses/opendataloader-local/chunks.jsonl")
           },
           quality: {
             status: "good" as const,
@@ -4867,7 +4867,7 @@ test("parse_paper delegates to the injected paper reader dependency and returns 
           parsePath: path.join(options.workspaceDir, "knowledge-base/sources/arxiv-2406.06015/parses/plain-text-baseline/parse.json"),
           markdownPath: path.join(options.workspaceDir, "knowledge-base/sources/arxiv-2406.06015/parses/plain-text-baseline/document.md"),
           qualityPath: path.join(options.workspaceDir, "knowledge-base/sources/arxiv-2406.06015/parses/plain-text-baseline/quality.json"),
-          chunksPath: path.join(options.workspaceDir, "knowledge-base/sources/arxiv-2406.06015/chunks/plain-text-baseline.jsonl"),
+          chunksPath: path.join(options.workspaceDir, "knowledge-base/sources/arxiv-2406.06015/parses/plain-text-baseline/chunks.jsonl"),
         },
         quality: {
           status: "good" as const,
@@ -5978,7 +5978,7 @@ test("answer_research_question can download, parse, summarize, and refresh wiki 
           parsePath: path.join(workspace, "knowledge-base/sources/arxiv-2601.00425/parses/tex-source/parse.json"),
           markdownPath: path.join(workspace, "knowledge-base/sources/arxiv-2601.00425/parses/tex-source/document.md"),
           qualityPath: path.join(workspace, "knowledge-base/sources/arxiv-2601.00425/parses/tex-source/quality.json"),
-          chunksPath: path.join(workspace, "knowledge-base/sources/arxiv-2601.00425/chunks/tex-source-chunks.jsonl"),
+          chunksPath: path.join(workspace, "knowledge-base/sources/arxiv-2601.00425/parses/tex-source/chunks.jsonl"),
         },
         quality: {
           status: "good" as const,
@@ -6637,7 +6637,8 @@ test("build_wiki_page sends evidence pack with raw chunks, provenance, and contr
   try {
     const sourceKey = "arxiv-2601.01010";
     const sourceDir = path.join(workspace, "knowledge-base/sources", sourceKey);
-    await mkdir(path.join(sourceDir, "chunks"), { recursive: true });
+    const parseDir = path.join(sourceDir, "parses", "webpage");
+    await mkdir(parseDir, { recursive: true });
     await writeFile(path.join(sourceDir, "summary.md"), [
       "---",
       `title: "qLDPC Hardware Evidence"`,
@@ -6653,7 +6654,7 @@ test("build_wiki_page sends evidence pack with raw chunks, provenance, and contr
       "  - Quote: \"non-local couplers dominate the hardware routing overhead\"",
       "  - Locator: paper=arxiv-2601.01010; section=hardware; page=7; chunk=chunk-0002"
     ].join("\n"), "utf8");
-    await writeFile(path.join(sourceDir, "chunks", "webpage.jsonl"), [
+    await writeFile(path.join(parseDir, "chunks.jsonl"), [
       JSON.stringify({
         id: "chunk-0001",
         paperKey: sourceKey,

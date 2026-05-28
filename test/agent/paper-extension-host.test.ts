@@ -332,7 +332,7 @@ test("handleExtensionHostMessage restores prior webpage reading artifacts when P
   const markdownPath = path.join(sourceRoot, "parses", "webpage", "document.md");
   const parsePath = path.join(sourceRoot, "parses", "webpage", "parse.json");
   const qualityPath = path.join(sourceRoot, "parses", "webpage", "quality.json");
-  const chunksPath = path.join(sourceRoot, "chunks", "webpage.jsonl");
+  const chunksPath = path.join(sourceRoot, "parses", "webpage", "chunks.jsonl");
   const pdfText = "%PDF-1.7\nshort pdf\n";
 
   try {
@@ -665,9 +665,9 @@ test("handleExtensionHostMessage registers APS supplemental material on the publ
     assert.equal(response.articleUrl, articleUrl);
     assert.equal(response.materialUrl, materialUrl);
     assert.equal(response.path, expectedSupplementalPath);
-    assert.match(response.supplementMarkdownPath ?? "", /parses\/webpage\/supplement\.md$/);
-    assert.match(response.supplementParsePath ?? "", /parses\/webpage\/supplement\.parse\.json$/);
-    assert.match(response.supplementQualityPath ?? "", /parses\/webpage\/supplement\.quality\.json$/);
+    assert.match(response.supplementMarkdownPath ?? "", /parses\/opendataloader-local\/supplement\.md$/);
+    assert.match(response.supplementParsePath ?? "", /parses\/opendataloader-local\/supplement\.parse\.json$/);
+    assert.match(response.supplementQualityPath ?? "", /parses\/opendataloader-local\/supplement\.quality\.json$/);
 
     const recordPath = resolvePaperRecordPath({
       workspaceDir,
@@ -686,18 +686,19 @@ test("handleExtensionHostMessage registers APS supplemental material on the publ
     );
     const supplementParse = JSON.parse(await readFile(response.supplementParsePath ?? "", "utf8"));
     assert.equal(supplementParse.paperKey, "aps-10.1103-PhysRevLett.111.080502");
-    assert.equal(supplementParse.engine, "webpage");
+    assert.equal(supplementParse.engine, "opendataloader-local");
     assert.equal(supplementParse.elements[1].id, "supplement-00002");
     const metadata = JSON.parse(await readFile(path.join(workspaceDir, "knowledge-base", "sources", "aps-10.1103-PhysRevLett.111.080502", "metadata.json"), "utf8"));
-    assert.ok(metadata.artifacts.some((artifact: { markdownPath?: string; note?: string }) =>
-      artifact.markdownPath === "knowledge-base/sources/aps-10.1103-PhysRevLett.111.080502/parses/webpage/supplement.md" &&
+    assert.ok(metadata.artifacts.some((artifact: { markdownPath?: string; engine?: string; note?: string }) =>
+      artifact.markdownPath === "knowledge-base/sources/aps-10.1103-PhysRevLett.111.080502/parses/opendataloader-local/supplement.md" &&
+      artifact.engine === "opendataloader-local" &&
       artifact.note === "Parsed supplemental material PDF."
     ));
 
     const events = await readPaperDownloadJobEvents({ workspaceDir });
     assert.equal(events.at(-1)?.status, "supplemental_material_downloaded");
     assert.equal(events.at(-1)?.downloadPath, response.path);
-    assert.match(events.at(-1)?.supplementMarkdownPath ?? "", /parses\/webpage\/supplement\.md$/);
+    assert.match(events.at(-1)?.supplementMarkdownPath ?? "", /parses\/opendataloader-local\/supplement\.md$/);
   } finally {
     await rm(workspaceDir, { recursive: true, force: true });
   }
@@ -710,7 +711,7 @@ test("handleExtensionHostMessage completes legacy Nature metadata after suppleme
   const jobId = "job-nature-legacy";
   const sourceDir = path.join(workspaceDir, "knowledge-base", "sources", paperKey);
   const parseDir = path.join(sourceDir, "parses", "webpage");
-  const chunksPath = path.join(sourceDir, "chunks", "webpage.jsonl");
+  const chunksPath = path.join(parseDir, "chunks.jsonl");
   const parsePath = path.join(parseDir, "parse.json");
   const qualityPath = path.join(parseDir, "quality.json");
   const markdownPath = path.join(parseDir, "document.md");
@@ -1185,7 +1186,7 @@ test("handleExtensionHostMessage registers webpage snapshots as parsed wiki arti
     assert.match(response.markdownPath, /knowledge-base\/sources\/science-10\.1126-science\.adz8659\/parses\/webpage\/document\.md$/);
     assert.match(response.parsePath, /knowledge-base\/sources\/science-10\.1126-science\.adz8659\/parses\/webpage\/parse\.json$/);
     assert.match(response.qualityPath, /knowledge-base\/sources\/science-10\.1126-science\.adz8659\/parses\/webpage\/quality\.json$/);
-    assert.match(response.chunksPath, /knowledge-base\/sources\/science-10\.1126-science\.adz8659\/chunks\/webpage\.jsonl$/);
+    assert.match(response.chunksPath, /knowledge-base\/sources\/science-10\.1126-science\.adz8659\/parses\/webpage\/chunks\.jsonl$/);
     assert.ok(response.quality);
     assert.equal(response.quality.status, "poor");
     assert.ok(response.quality.score < 0.7);

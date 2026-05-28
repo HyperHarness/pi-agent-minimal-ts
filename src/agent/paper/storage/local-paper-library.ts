@@ -548,7 +548,7 @@ async function collectParses(workspaceDir: string, entries: Map<string, LocalPap
         markdownPath: relativeToWorkspace(workspaceDir, path.join(parseRoot, "document.md")),
         parsePath: relativeToWorkspace(workspaceDir, path.join(parseRoot, "parse.json")),
         qualityPath: relativeToWorkspace(workspaceDir, qualityPath),
-        chunksPath: relativeToWorkspace(workspaceDir, path.join(paperDir, "chunks", `${engine}.jsonl`)),
+        chunksPath: relativeToWorkspace(workspaceDir, path.join(parseRoot, "chunks.jsonl")),
         warnings: quality?.warnings ?? []
       });
     }

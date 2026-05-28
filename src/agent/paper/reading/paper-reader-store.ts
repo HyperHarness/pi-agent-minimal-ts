@@ -260,7 +260,7 @@ export function getPaperParseArtifactPaths(input: {
     parsePath: path.join(parseDir, "parse.json"),
     markdownPath: path.join(parseDir, "document.md"),
     qualityPath: path.join(parseDir, "quality.json"),
-    chunksPath: path.join(paperDir, "chunks", `${input.engine}.jsonl`)
+    chunksPath: path.join(parseDir, "chunks.jsonl")
   };
 }
 

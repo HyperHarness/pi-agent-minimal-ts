@@ -17,7 +17,7 @@ import { savePaperWebPageParse } from "../reading/engines/webpage.js";
 import { parsePaper } from "../reading/paper-reader.js";
 import type { PaperParseResult } from "../reading/types.js";
 import {
-  parseSupplementPdfIntoWebpage,
+  parseSupplementPdf,
   type SupplementalPdfParser,
   type SupplementalParseResult
 } from "../reading/supplement.js";
@@ -431,7 +431,7 @@ async function tryParseSupplementalMaterial(input: {
   }
 
   try {
-    return await parseSupplementPdfIntoWebpage({
+    return await parseSupplementPdf({
       workspaceDir: input.workspaceDir,
       paperKey: input.paperKey,
       pdfPath: input.pdfPath,

@@ -1290,7 +1290,7 @@ test("savePaperWebPageParse writes webpage artifacts under wiki sources", async 
     assert.match(result.artifacts.markdownPath, /knowledge-base\/sources\/nature-s41467-025-59778-z\/parses\/webpage\/document\.md$/);
     assert.match(result.artifacts.sourcePath ?? "", /knowledge-base\/sources\/nature-s41467-025-59778-z\/parses\/webpage\/document\.html$/);
     assert.match(result.artifacts.parsePath, /knowledge-base\/sources\/nature-s41467-025-59778-z\/parses\/webpage\/parse\.json$/);
-    assert.match(result.artifacts.chunksPath, /knowledge-base\/sources\/nature-s41467-025-59778-z\/chunks\/webpage\.jsonl$/);
+    assert.match(result.artifacts.chunksPath, /knowledge-base\/sources\/nature-s41467-025-59778-z\/parses\/webpage\/chunks\.jsonl$/);
 
     const html = await readFile(result.artifacts.sourcePath!, "utf8");
     assert.match(html, /<main data-track-component="article body">/);

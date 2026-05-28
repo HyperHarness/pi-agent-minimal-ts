@@ -1509,7 +1509,7 @@ test("runSessionPrompt routes summary backfill through a configured wiki evidenc
       warnings: []
     });
     await writeText(
-      path.join(workspace, "knowledge-base", "sources", paperKey, "chunks", "opendataloader-local.jsonl"),
+      path.join(parseDir, "chunks.jsonl"),
       "{\"id\":\"chunk-1\"}\n"
     );
 
