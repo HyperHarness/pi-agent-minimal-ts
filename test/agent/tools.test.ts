@@ -2788,21 +2788,62 @@ test("delete_file rejects directories, binary-looking files, and .git paths", as
   }
 });
 
-test("read_file rejects absolute paths outside the workspace", async () => {
-  const workspace = await mkdtemp(path.join(tmpdir(), "pi-agent-tools-"));
+test("read_file accepts absolute paths in same-user sibling projects", async () => {
+  const baseDir = await mkdtemp(path.join(tmpdir(), "pi-agent-tools-base-"));
+  const workspace = path.join(baseDir, "pi-agent-minimal-ts");
+  const sibling = path.join(baseDir, "gdsql");
+  const absolutePath = path.join(sibling, "docs", "reading-list.md");
+  await mkdir(workspace);
+  await mkdir(path.dirname(absolutePath), { recursive: true });
+  await writeFile(absolutePath, "sibling markdown list", "utf8");
+
+  try {
+    const readFileTool = getReadFileTool(workspace);
+    const result = await readFileTool.execute("call-3b", { path: absolutePath }, undefined);
+    assert.equal(result.content?.[0]?.text, "sibling markdown list");
+    assert.equal((result.details as { path?: string }).path, absolutePath);
+  } finally {
+    await rm(baseDir, { recursive: true, force: true });
+  }
+});
+
+test("read_file rejects absolute paths above the readable workspace family", async () => {
+  const baseDir = await mkdtemp(path.join(tmpdir(), "pi-agent-tools-base-"));
+  const workspace = path.join(baseDir, "workspace");
   const outside = await mkdtemp(path.join(tmpdir(), "pi-agent-tools-outside-"));
   const absolutePath = path.join(outside, "secret.txt");
+  await mkdir(workspace);
   await writeFile(absolutePath, "outside secret", "utf8");
 
   try {
     const readFileTool = getReadFileTool(workspace);
     await assert.rejects(
-      () => readFileTool.execute("call-3b", { path: absolutePath }, undefined),
-      /outside the workspace/i,
+      () => readFileTool.execute("call-3c", { path: absolutePath }, undefined),
+      /outside the readable workspace roots/i,
     );
   } finally {
-    await rm(workspace, { recursive: true, force: true });
+    await rm(baseDir, { recursive: true, force: true });
     await rm(outside, { recursive: true, force: true });
+  }
+});
+
+test("read_file rejects hidden sibling project paths", async () => {
+  const baseDir = await mkdtemp(path.join(tmpdir(), "pi-agent-tools-base-"));
+  const workspace = path.join(baseDir, "workspace");
+  const hidden = path.join(baseDir, ".ssh");
+  const absolutePath = path.join(hidden, "config");
+  await mkdir(workspace);
+  await mkdir(hidden);
+  await writeFile(absolutePath, "Host secret\n", "utf8");
+
+  try {
+    const readFileTool = getReadFileTool(workspace);
+    await assert.rejects(
+      () => readFileTool.execute("call-3d", { path: absolutePath }, undefined),
+      /outside the readable workspace roots/i,
+    );
+  } finally {
+    await rm(baseDir, { recursive: true, force: true });
   }
 });
 
@@ -2834,6 +2875,36 @@ test("list_files lists workspace directories from an absolute path", async () =>
     ]);
   } finally {
     await rm(workspace, { recursive: true, force: true });
+  }
+});
+
+test("list_files returns reusable absolute paths for same-user sibling projects", async () => {
+  const baseDir = await mkdtemp(path.join(tmpdir(), "pi-agent-tools-base-"));
+  const workspace = path.join(baseDir, "pi-agent-minimal-ts");
+  const siblingDocs = path.join(baseDir, "gdsql", "docs");
+  const readingList = path.join(siblingDocs, "superconducting-chip-design-roadmap.md");
+  await mkdir(workspace);
+  await mkdir(siblingDocs, { recursive: true });
+  await writeFile(readingList, "# Reading List\n", "utf8");
+
+  try {
+    const listFilesTool = getListFilesTool(workspace);
+    const result = await listFilesTool.execute(
+      "call-list-sibling",
+      { path: siblingDocs, maxDepth: 1 },
+      undefined,
+    );
+    const details = result.details as {
+      entries: Array<{ path: string; type: string }>;
+      truncated: boolean;
+    };
+
+    assert.equal(details.truncated, false);
+    assert.deepEqual(details.entries, [
+      { path: readingList, type: "file" },
+    ]);
+  } finally {
+    await rm(baseDir, { recursive: true, force: true });
   }
 });
 
@@ -3093,6 +3164,8 @@ test("createToolsForBoundary exposes isolated wiki and worker tool surfaces", as
 
     const downloadTools = createToolsForBoundary(workspace, "paper-download-subagent");
     assert.deepEqual(downloadTools.map((tool) => tool.name), getToolBoundaryToolNames("paper-download-subagent"));
+    assert.ok(downloadTools.some((tool) => tool.name === "list_files"));
+    assert.ok(downloadTools.some((tool) => tool.name === "read_file"));
     assert.ok(downloadTools.some((tool) => tool.name === "get_time"));
     assert.ok(downloadTools.some((tool) => tool.name === "download_paper"));
     assert.ok(downloadTools.some((tool) => tool.name === "parse_paper"));

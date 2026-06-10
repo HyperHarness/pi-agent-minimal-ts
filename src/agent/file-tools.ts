@@ -310,6 +310,50 @@ function assertPathInsideDirectory(rootDir: string, candidatePath: string): void
   }
 }
 
+function assertReadablePathAllowed(input: {
+  requestedPath: string;
+  realWorkspaceDir: string;
+  realResolvedPath: string;
+}): void {
+  const workspaceRelative = path.relative(input.realWorkspaceDir, input.realResolvedPath);
+  if (
+    workspaceRelative === "" ||
+    (!workspaceRelative.startsWith(`..${path.sep}`) && !path.isAbsolute(workspaceRelative))
+  ) {
+    return;
+  }
+
+  if (!path.isAbsolute(input.requestedPath)) {
+    throw new Error("Requested path is outside the workspace.");
+  }
+
+  const readableRoot = path.dirname(input.realWorkspaceDir);
+  const readableRelative = path.relative(readableRoot, input.realResolvedPath);
+  if (
+    readableRelative === ".." ||
+    readableRelative.startsWith(`..${path.sep}`) ||
+    path.isAbsolute(readableRelative)
+  ) {
+    throw new Error("Requested path is outside the readable workspace roots.");
+  }
+
+  const parts = readableRelative.split(path.sep).filter(Boolean);
+  if (parts.length < 2 || parts.some((part) => part.startsWith("."))) {
+    throw new Error("Requested path is outside the readable workspace roots.");
+  }
+}
+
+function readableDisplayPath(workspaceDir: string, filePath: string): string {
+  const relativePath = path.relative(workspaceDir, filePath);
+  if (
+    relativePath === "" ||
+    (!relativePath.startsWith(`..${path.sep}`) && !path.isAbsolute(relativePath))
+  ) {
+    return relativePath.split(path.sep).join("/");
+  }
+  return filePath;
+}
+
 export async function resolveWorkspacePath(workspaceDir: string, requestedPath: string): Promise<string> {
   if (!requestedPath.trim()) {
     throw new Error("Path is required.");
@@ -326,6 +370,32 @@ export async function resolveWorkspacePath(workspaceDir: string, requestedPath: 
     realpath(resolvedPath)
   ]);
   assertPathInsideDirectory(realWorkspaceDir, realResolvedPath);
+
+  return realResolvedPath;
+}
+
+export async function resolveWorkspaceReadablePath(workspaceDir: string, requestedPath: string): Promise<string> {
+  if (!requestedPath.trim()) {
+    throw new Error("Path is required.");
+  }
+
+  const resolvedWorkspaceDir = path.resolve(workspaceDir);
+  const resolvedPath = path.isAbsolute(requestedPath)
+    ? path.resolve(requestedPath)
+    : path.resolve(resolvedWorkspaceDir, requestedPath);
+  if (!path.isAbsolute(requestedPath)) {
+    assertPathInsideDirectory(resolvedWorkspaceDir, resolvedPath);
+  }
+
+  const [realWorkspaceDir, realResolvedPath] = await Promise.all([
+    realpath(resolvedWorkspaceDir),
+    realpath(resolvedPath)
+  ]);
+  assertReadablePathAllowed({
+    requestedPath,
+    realWorkspaceDir,
+    realResolvedPath
+  });
 
   return realResolvedPath;
 }
@@ -1761,7 +1831,7 @@ async function listWorkspaceFiles(input: {
   maxEntries: number;
 }): Promise<ListFilesDetails> {
   const resolvedWorkspaceDir = path.resolve(input.workspaceDir);
-  const resolvedPath = await resolveWorkspacePath(resolvedWorkspaceDir, input.requestedPath);
+  const resolvedPath = await resolveWorkspaceReadablePath(resolvedWorkspaceDir, input.requestedPath);
   const rootStats = await stat(resolvedPath);
   const entries: ListFilesEntry[] = [];
   let truncated = false;
@@ -1773,7 +1843,7 @@ async function listWorkspaceFiles(input: {
     }
 
     entries.push({
-      path: path.relative(resolvedWorkspaceDir, entryPath).split(path.sep).join("/"),
+      path: readableDisplayPath(resolvedWorkspaceDir, entryPath),
       type
     });
     return true;
@@ -2102,7 +2172,7 @@ export function createFileTools(input: {
     parameters: readFileParameters,
     executionMode: "sequential",
     execute: async (_toolCallId: string, args: ReadFileParameters) => {
-      const resolvedPath = await resolveWorkspacePath(resolvedWorkspaceDir, args.path);
+      const resolvedPath = await resolveWorkspaceReadablePath(resolvedWorkspaceDir, args.path);
       const result = await readWorkspaceTextFileRange({
         resolvedPath,
         requestedPath: args.path,

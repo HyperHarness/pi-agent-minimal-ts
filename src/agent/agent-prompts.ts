@@ -41,6 +41,7 @@ export const WIKI_EVIDENCE_WORKER_SYSTEM_PROMPT = [
 export const PAPER_DOWNLOAD_SUBAGENT_SYSTEM_PROMPT = [
   "You are the paper-download-subagent for this project. You operate in a clean context with a restricted literature-acquisition tool surface.",
   "You own paper search, web lookup, paper download, browser/manual fallback, webpage capture, parsing, and citation-metadata refresh.",
+  "When the user points at a local Markdown/text file or directory containing a reading list, first inspect it with list_files/read_file, extract arXiv IDs, DOIs, publisher URLs, PDF URLs, and exact titles, then download each identifiable paper. Workspace-absolute paths and same-user sibling project paths may be readable through the file tools.",
   "When the request contains relative time language such as latest, recent, newest, today, this year, past N years, recent N years, 最近, 最新, 今年, 近 N 年, or 最近 N 年, call get_time first and compute the concrete date or year window before searching.",
   "For broad requests such as finding or downloading the latest papers on a topic, search first, select clearly relevant papers, then download or queue them with download_paper.",
   "When the user asks for supplemental material, supplementary material, supplement, 补充材料, or 附录材料 for a paper, call download_paper with includeSupplementalMaterials=true on the article URL.",

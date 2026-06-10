@@ -1386,6 +1386,96 @@ test("runSessionPrompt paper download worker queues browser extension jobs", asy
   }
 });
 
+test("runSessionPrompt paper download worker reads sibling Markdown reading lists before downloading", async () => {
+  const runSessionPrompt = (
+    piAgent as {
+      runSessionPrompt?: (options: {
+        model: Model<Api>;
+        workspaceDir: string;
+        context: AgentContext;
+        prompt: string;
+        onEvent?: (event: AgentEvent) => void;
+      }) => Promise<{ action: "stop" | "continue"; newMessages: AgentMessage[] }>;
+    }
+  ).runSessionPrompt;
+  assert.equal(typeof runSessionPrompt, "function");
+
+  const registration = registerFauxProvider();
+  const baseDir = await mkdtemp(path.join(tmpdir(), "pi-agent-reading-list-"));
+  const workspace = path.join(baseDir, "pi-agent-minimal-ts");
+  const listPath = path.join(baseDir, "gdsql", "docs", "superconducting-chip-design-roadmap.md");
+  await mkdir(path.dirname(listPath), { recursive: true });
+  await mkdir(workspace);
+  await writeFile(
+    listPath,
+    [
+      "# Reading list",
+      "",
+      "- Krantz et al., [arXiv:1904.06560](https://arxiv.org/abs/1904.06560)",
+      "- Publisher page: https://example.com/research/krantz-superconducting-qubits",
+      ""
+    ].join("\n"),
+    "utf8"
+  );
+  registration.setResponses([
+    fauxAssistantMessage([fauxToolCall("read_file", { path: listPath })], {
+      stopReason: "toolUse"
+    }),
+    fauxAssistantMessage([fauxToolCall("download_paper", { url: "https://example.com/research/krantz-superconducting-qubits" })], {
+      stopReason: "toolUse"
+    }),
+    fauxAssistantMessage([fauxText("Downloaded papers from the Markdown reading list.")])
+  ]);
+
+  const context: AgentContext = {
+    systemPrompt: DEFAULT_SYSTEM_PROMPT,
+    messages: [],
+    tools: []
+  };
+  const observedEvents: AgentEvent[] = [];
+
+  try {
+    const result = await runSessionPrompt!({
+      model: registration.getModel(),
+      workspaceDir: workspace,
+      context,
+      prompt: `请你下载'${listPath}'中提到的所有论文`,
+      onEvent: (event) => {
+        observedEvents.push(event);
+      }
+    });
+
+    assert.equal(result.action, "continue");
+    assert.ok(
+      observedEvents.some(
+        (event): event is ToolExecutionEndEvent =>
+          event.type === "tool_execution_end" &&
+          event.toolName === "read_file" &&
+          !event.isError &&
+          String(event.result.content?.[0]?.text ?? "").includes("arXiv:1904.06560")
+      )
+    );
+    assert.ok(
+      observedEvents.some(
+        (event): event is ToolExecutionEndEvent =>
+          event.type === "tool_execution_end" &&
+          event.toolName === "download_paper" &&
+          !event.isError
+      )
+    );
+
+    const handoff = parseWorkerHandoff(result.newMessages[1] as AssistantMessage) as {
+      role?: string;
+      toolsUsed?: string[];
+    };
+    assert.equal(handoff.role, "paper-download-subagent");
+    assert.deepEqual(handoff.toolsUsed, ["read_file", "download_paper"]);
+  } finally {
+    registration.unregister();
+    await rm(baseDir, { recursive: true, force: true });
+  }
+});
+
 test("runSessionPrompt routes summary backfill through a configured wiki evidence summary worker", async () => {
   const runSessionPrompt = (
     piAgent as {

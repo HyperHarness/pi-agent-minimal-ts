@@ -130,6 +130,8 @@ export const TOOL_BOUNDARY_NAMES: Record<ToolBoundaryRole, readonly ToolName[]> 
     "wiki_apply_structure_plan"
   ],
   "paper-download-subagent": [
+    "list_files",
+    "read_file",
     "get_time",
     "web_search",
     "fetch_url",
