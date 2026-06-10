@@ -66,6 +66,22 @@ function paperKeyFromUrl(url: string): string | undefined {
   }
 }
 
+function paperKeyFromPublisherMetadata(input: {
+  url: string;
+  doi?: string;
+}): string | undefined {
+  if (!input.doi) {
+    return undefined;
+  }
+
+  try {
+    const adapter = getPublisherAdapter(input.url);
+    return sanitizePaperKey(`${adapter.id}-${input.doi}`);
+  } catch {
+    return undefined;
+  }
+}
+
 function paperKeyFromDoi(doi: string | undefined): string | undefined {
   return doi ? sanitizePaperKey(`doi-${doi}`) : undefined;
 }
@@ -85,6 +101,10 @@ function resolvePaperKey(input: {
 
   return (
     paperKeyFromUrl(input.extraction.url) ??
+    paperKeyFromPublisherMetadata({
+      url: input.extraction.url,
+      doi: input.extraction.metadata.doi
+    }) ??
     paperKeyFromDoi(input.extraction.metadata.doi) ??
     paperKeyFromFallbackUrl(input.extraction.url)
   );
@@ -805,13 +825,14 @@ async function buildSource(input: {
     paperKey: input.paperKey
   });
   const publisher = resolvePublisherMetadata(input.extraction.url);
+  const canonicalId = publisher.canonicalId ?? input.extraction.metadata.doi;
   return {
     ...(existing ?? {}),
     paperKey: input.paperKey,
     createdAt: existing?.createdAt ?? new Date().toISOString(),
     articleUrl: input.extraction.url,
     ...(publisher.source ? { source: existing?.source ?? publisher.source } : {}),
-    ...(publisher.canonicalId ? { canonicalId: existing?.canonicalId ?? publisher.canonicalId } : {}),
+    ...(canonicalId ? { canonicalId: existing?.canonicalId ?? canonicalId } : {}),
     ...(input.extraction.title ? { title: existing?.title ?? input.extraction.title } : {}),
     ...(existing?.pdfPath ? { pdfPath: existing.pdfPath } : {}),
     ...(existing?.pdfSha256 ? { pdfSha256: existing.pdfSha256 } : {})

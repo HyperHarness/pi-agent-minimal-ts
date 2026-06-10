@@ -364,6 +364,114 @@ test("runner sends pdfUrl even when article body contains generic login navigati
   });
 });
 
+test("AIP helper derives PDF URL from citation DOI metadata on article slug pages", () => {
+  const document = {
+    querySelectorAll(selector) {
+      if (selector === "a[href]") {
+        return [];
+      }
+      if (selector === "meta[name='citation_doi']") {
+        return [
+          {
+            textContent: "",
+            getAttribute(name) {
+              return name === "content" ? "10.1063/1.5089550" : null;
+            }
+          }
+        ];
+      }
+      return [];
+    }
+  };
+
+  assert.equal(
+    findAipPdfCandidate({
+      document,
+      baseUrl:
+        "https://pubs.aip.org/aip/apr/article/6/2/021318/570326/A-quantum-engineer-s-guide-to-superconducting"
+    }),
+    "https://pubs.aip.org/doi/pdf/10.1063/1.5089550"
+  );
+});
+
+test("AIP helper prefers DOI metadata over misleading article HTML download links", () => {
+  const document = {
+    querySelectorAll(selector) {
+      if (selector === "a[href]") {
+        return [
+          {
+            textContent: "Download PDF",
+            getAttribute(name) {
+              return name === "href"
+                ? "/aip/apl/article/118/6/064002/40060/Simplified-Josephson-junction-fabrication-process?download=true"
+                : null;
+            }
+          }
+        ];
+      }
+      if (selector === "meta[name='citation_doi']") {
+        return [
+          {
+            textContent: "",
+            getAttribute(name) {
+              return name === "content" ? "10.1063/5.0037093" : null;
+            }
+          }
+        ];
+      }
+      return [];
+    }
+  };
+
+  assert.equal(
+    findAipPdfCandidate({
+      document,
+      baseUrl:
+        "https://pubs.aip.org/aip/apl/article/118/6/064002/40060/Simplified-Josephson-junction-fabrication-process"
+    }),
+    "https://pubs.aip.org/doi/pdf/10.1063/5.0037093"
+  );
+});
+
+test("AIP helper uses citation PDF URL metadata before anchor scanning", () => {
+  const document = {
+    querySelectorAll(selector) {
+      if (selector === "a[href]") {
+        return [
+          {
+            textContent: "Download PDF",
+            getAttribute(name) {
+              return name === "href"
+                ? "/aip/apl/article/118/6/064002/40060/Simplified-Josephson-junction-fabrication-process?download=true"
+                : null;
+            }
+          }
+        ];
+      }
+      if (selector === "meta[name='citation_pdf_url']") {
+        return [
+          {
+            textContent: "",
+            getAttribute(name) {
+              return name === "content" ? "/doi/pdf/10.1063/5.0037093?download=true" : null;
+            }
+          }
+        ];
+      }
+      return [];
+    }
+  };
+
+  assert.equal(
+    findAipPdfCandidate({
+      document,
+      baseUrl:
+        "https://pubs.aip.org/aip/apl/article/118/6/064002/40060/Simplified-Josephson-junction-fabrication-process"
+    }),
+    "https://pubs.aip.org/doi/pdf/10.1063/5.0037093"
+  );
+});
+
 test("runner uses Nature ESM supplemental links instead of the main article PDF", async () => {
   const sentMessages = [];
   const previousChrome = globalThis.chrome;

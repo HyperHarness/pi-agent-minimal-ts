@@ -361,6 +361,52 @@ test("downloadPaperPdf derives AIP DOI PDF URLs from article pages", async () =>
   assert.equal(downloadedUrl, result.finalPdfUrl);
 });
 
+test("downloadPaperPdf derives AIP PDF URLs from article slug citation DOI metadata", async () => {
+  const workspaceDir = await mkdtemp(path.join(os.tmpdir(), "paper-download-"));
+  let downloadedUrl: string | undefined;
+
+  const result = await downloadPaperPdf({
+    workspaceDir,
+    url: "https://pubs.aip.org/aip/apl/article/118/6/064002/40060/Simplified-Josephson-junction-fabrication-process",
+    browserSession: {
+      openArticlePage: async () => ({
+        finalArticleUrl:
+          "https://pubs.aip.org/aip/apl/article/118/6/064002/40060/Simplified-Josephson-junction-fabrication-process",
+        html: `
+          <html>
+            <head>
+              <meta name="citation_doi" content="10.1063/5.0037093">
+            </head>
+            <body>
+              <a href="/aip/apl/article/118/6/064002/40060/Simplified-Josephson-junction-fabrication-process?download=true">Download PDF</a>
+            </body>
+          </html>
+        `,
+        authorized: true
+      }),
+      openPageForManualLogin: async (url: string) => ({
+        openedUrl: url
+      }),
+      downloadPdf: async (url) => {
+        downloadedUrl = url;
+      }
+    }
+  });
+
+  assert.equal(result.finalPdfUrl, "https://pubs.aip.org/doi/pdf/10.1063/5.0037093");
+  assert.equal(
+    result.path,
+    path.join(
+      workspaceDir,
+      "knowledge-base",
+      "raw",
+      "pdfs",
+      "aip-10.1063-5.0037093.pdf"
+    )
+  );
+  assert.equal(downloadedUrl, result.finalPdfUrl);
+});
+
 test("downloadPaperPdf formats Nature output filenames from the article identifier", async () => {
   const workspaceDir = await mkdtemp(path.join(os.tmpdir(), "paper-download-"));
   let downloadedPath: string | undefined;

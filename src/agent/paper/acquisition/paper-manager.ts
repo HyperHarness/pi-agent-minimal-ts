@@ -214,6 +214,7 @@ type SearchCandidate = {
   summary: string;
   sources: RankedSearchSource[];
   order: number;
+  relevance: number;
 };
 
 const SUPPORTED_SOURCE_PRIORITY: Record<SupportedPaperSource, number> = {
@@ -264,6 +265,45 @@ function getCompactTitleKey(title: string): string {
   return normalizeTitle(title).replace(/\s+/g, "");
 }
 
+function getTitleTokens(title: string): string[] {
+  return normalizeTitle(title)
+    .split(/\s+/)
+    .filter((token) => token.length > 0);
+}
+
+function scoreTitleRelevance(title: string, query: string): number {
+  const normalizedTitle = normalizeTitle(title);
+  const normalizedQuery = normalizeTitle(query);
+  if (!normalizedTitle || !normalizedQuery) {
+    return 0;
+  }
+
+  if (normalizedTitle === normalizedQuery) {
+    return 1;
+  }
+
+  const compactTitle = getCompactTitleKey(title);
+  const compactQuery = getCompactTitleKey(query);
+  if (compactTitle === compactQuery) {
+    return 0.98;
+  }
+
+  if (normalizedTitle.includes(normalizedQuery) || normalizedQuery.includes(normalizedTitle)) {
+    return 0.92;
+  }
+
+  const titleTokens = new Set(getTitleTokens(title));
+  const queryTokens = getTitleTokens(query).filter((token) => token.length > 2);
+  if (queryTokens.length === 0) {
+    return 0;
+  }
+
+  const matched = queryTokens.filter((token) => titleTokens.has(token)).length;
+  const recall = matched / queryTokens.length;
+  const precision = matched / Math.max(titleTokens.size, 1);
+  return (recall * 0.75) + (precision * 0.25);
+}
+
 function sortSearchSource(left: RankedSearchSource, right: RankedSearchSource): number {
   if (left.rank !== right.rank) {
     return left.rank - right.rank;
@@ -273,6 +313,10 @@ function sortSearchSource(left: RankedSearchSource, right: RankedSearchSource): 
 }
 
 function sortCandidate(left: SearchCandidate, right: SearchCandidate): number {
+  if (left.relevance !== right.relevance) {
+    return right.relevance - left.relevance;
+  }
+
   const leftBestRank = left.sources[0]?.rank ?? Number.POSITIVE_INFINITY;
   const rightBestRank = right.sources[0]?.rank ?? Number.POSITIVE_INFINITY;
   if (leftBestRank !== rightBestRank) {
@@ -689,7 +733,8 @@ function addCandidate(
       authors: candidate.authors,
       summary: candidate.summary,
       sources: [rankedSource],
-      order: candidate.order
+      order: candidate.order,
+      relevance: candidate.relevance
     });
     return;
   }
@@ -717,6 +762,8 @@ function addCandidate(
     existing.summary = candidate.summary;
     existing.order = candidate.order;
   }
+
+  existing.relevance = Math.max(existing.relevance, candidate.relevance);
 }
 
 function toPaperSearchResult(candidate: SearchCandidate): PaperSearchResult {
@@ -882,6 +929,10 @@ async function findPriorExtensionDownloadFailure(options: {
       job.status === "automatic_download_failed"
     );
     if (!matchingJob) {
+      return null;
+    }
+
+    if (matchingJob.source === "aip" && matchingJob.failureCode === "canonical_id_not_found") {
       return null;
     }
 
@@ -2209,6 +2260,7 @@ export async function searchPapers(options: SearchPapersOptions): Promise<PaperS
       authors: result.authors,
       summary: result.summary,
       order,
+      relevance: scoreTitleRelevance(result.title, query),
       source: classifyArxivSearchResult(result, order)
     });
     order += 1;
@@ -2221,6 +2273,7 @@ export async function searchPapers(options: SearchPapersOptions): Promise<PaperS
         authors: result.authors,
         summary: result.summary,
         order,
+        relevance: scoreTitleRelevance(result.title, query),
         source: rankPaperSearchSource(source, order)
       });
     }
@@ -2239,6 +2292,7 @@ export async function searchPapers(options: SearchPapersOptions): Promise<PaperS
       authors: [],
       summary: result.snippet,
       order,
+      relevance: scoreTitleRelevance(result.title, query),
       source
     });
     order += 1;

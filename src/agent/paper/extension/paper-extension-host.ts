@@ -791,7 +791,12 @@ async function registerSupportedPublisherDownload(options: {
         publisher: options.source,
         url: derivedPdfUrl
       })
-      : null);
+      : null) ??
+    await resolvePublisherCanonicalIdFromWebpageSnapshot({
+      workspaceDir: options.workspaceDir,
+      message: options.message,
+      source: options.source
+    });
   if (!canonicalId) {
     return registrationError({
       jobId: options.message.jobId,
@@ -826,7 +831,12 @@ async function registerSupportedPublisherDownload(options: {
       canonicalId,
       articleUrl: options.message.articleUrl
     }) ??
-    derivedPdfUrl;
+    derivedPdfUrl ??
+    derivePublisherPdfUrlFromCanonicalId({
+      source: options.source,
+      articleUrl: options.message.articleUrl,
+      canonicalId
+    });
   if (!pdfUrl) {
     return registrationError({
       jobId: options.message.jobId,
@@ -1128,6 +1138,68 @@ function derivePublisherPdfUrl(options: {
   parsedUrl.search = "";
   parsedUrl.hash = "";
   return parsedUrl.toString();
+}
+
+function derivePublisherPdfUrlFromCanonicalId(options: {
+  source: SupportedPaperSource;
+  articleUrl: string;
+  canonicalId: string;
+}): string | undefined {
+  if (options.source !== "aip") {
+    return undefined;
+  }
+
+  try {
+    const parsedUrl = new URL(options.articleUrl);
+    parsedUrl.pathname = `/doi/pdf/${options.canonicalId}`;
+    parsedUrl.search = "";
+    parsedUrl.hash = "";
+    return parsedUrl.toString();
+  } catch {
+    return `https://pubs.aip.org/doi/pdf/${options.canonicalId}`;
+  }
+}
+
+async function resolvePublisherCanonicalIdFromWebpageSnapshot(input: {
+  workspaceDir: string;
+  message: Extract<ExtensionHostMessage, { type: "register_download" | "register_download_bytes" }>;
+  source: SupportedPaperSource;
+}): Promise<string | null> {
+  if (input.source !== "aip") {
+    return null;
+  }
+
+  const events = await readPaperDownloadJobEvents({ workspaceDir: input.workspaceDir }).catch(() => []);
+  const webpageEvent = events
+    .slice()
+    .reverse()
+    .find((event) =>
+      event.jobId === input.message.jobId &&
+      event.status === "webpage_snapshot_ready" &&
+      event.source === input.source &&
+      event.articleUrl === input.message.articleUrl &&
+      Boolean(event.paperKey)
+    );
+  if (!webpageEvent?.paperKey) {
+    return null;
+  }
+
+  const metadataPath = path.join(input.workspaceDir, "knowledge-base", "sources", webpageEvent.paperKey, "metadata.json");
+  try {
+    const metadata = await readJsonFromPortablePath(metadataPath);
+    const citation = typeof metadata.citation === "object" && metadata.citation !== null
+      ? metadata.citation as Record<string, unknown>
+      : {};
+    const provenance = typeof metadata.provenance === "object" && metadata.provenance !== null
+      ? metadata.provenance as Record<string, unknown>
+      : {};
+    const doi = readOptionalString(citation, "doi") ??
+      readOptionalString(provenance, "canonicalId") ??
+      readOptionalString(provenance, "doi");
+    return doi?.startsWith("10.1063/") ? doi : null;
+  } catch {
+    return null;
+  }
 }
 
 async function appendDownloadedJobEvent(options: {

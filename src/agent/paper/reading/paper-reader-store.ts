@@ -548,6 +548,7 @@ function buildParseMetadata(input: {
   const provenance = sanitizeExistingProvenance(existingProvenance);
   const articleUrl = input.source.articleUrl ?? readOptionalString(provenance.url);
   const arxivId = arxivIdFromSource(input.source) ?? readOptionalString(provenance.arxivId);
+  const canonicalId = input.source.canonicalId ?? readOptionalString(provenance.canonicalId);
   const acquisitionPath = input.source.recordPath
     ? relativeToWorkspace(input.workspaceDir, input.source.recordPath)
     : optionalRelativeToWorkspace(input.workspaceDir, provenance.acquisitionPath);
@@ -581,12 +582,18 @@ function buildParseMetadata(input: {
       }
     : undefined;
   const now = input.document.createdAt;
-  const citation = isRecord(input.existingMetadata?.citation)
+  const existingCitation = isRecord(input.existingMetadata?.citation)
     ? input.existingMetadata.citation
     : {
         citationStatus: "incomplete",
         missingFields: []
       };
+  const citation = {
+    ...existingCitation,
+    ...(canonicalId?.startsWith("10.") && readOptionalString(existingCitation.doi) === undefined
+      ? { doi: canonicalId }
+      : {})
+  };
 
   return {
     ...existing,

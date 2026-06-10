@@ -35,6 +35,22 @@ export interface DownloadArxivPdfResult {
 const MODERN_ARXIV_ID = /^\d{4}\.\d{4,5}(?:v\d+)?$/;
 const LEGACY_ARXIV_ID = /^[a-z-]+(?:\.[A-Z]{2})?\/\d{7}(?:v\d+)?$/i;
 const PROBABLY_MANGLED_QUERY = /^[?\uFFFD\s]+$/;
+const ARXIV_SEARCH_STOPWORDS = new Set([
+  "a",
+  "an",
+  "and",
+  "are",
+  "based",
+  "for",
+  "from",
+  "in",
+  "of",
+  "on",
+  "or",
+  "the",
+  "to",
+  "with"
+]);
 
 function decodeXml(text: string): string {
   return text
@@ -184,25 +200,50 @@ function assertQueryWasNotMangled(query: string): void {
   );
 }
 
-export async function searchArxiv(
-  options: SearchArxivOptions
-): Promise<ArxivSearchResult[]> {
-  const query = options.query.trim();
-  if (!query) {
-    throw new Error("arXiv query is required.");
-  }
-  assertQueryWasNotMangled(query);
+function extractSearchTokens(query: string): string[] {
+  const seen = new Set<string>();
+  return query
+    .normalize("NFKD")
+    .replace(/[^\p{L}\p{N}]+/gu, " ")
+    .split(/\s+/)
+    .map((token) => token.trim())
+    .filter((token) => token.length > 0)
+    .filter((token) => token.length > 2 || /^[A-Z0-9]{2,}$/u.test(token))
+    .filter((token) => !ARXIV_SEARCH_STOPWORDS.has(token.toLowerCase()))
+    .filter((token) => {
+      const key = token.toLowerCase();
+      if (seen.has(key)) {
+        return false;
+      }
+      seen.add(key);
+      return true;
+    });
+}
 
-  const maxResults = options.maxResults ?? 5;
-  if (!Number.isInteger(maxResults) || maxResults <= 0) {
-    throw new Error("maxResults must be a positive integer.");
+function buildArxivSearchExpressions(query: string): string[] {
+  const expressions = [`all:${query}`];
+  const tokens = extractSearchTokens(query).slice(0, 10);
+
+  if (tokens.length >= 2) {
+    expressions.push(tokens.map((token) => `ti:${token}`).join(" AND "));
   }
 
-  const fetchImpl = options.fetchImpl ?? globalThis.fetch.bind(globalThis);
+  if (tokens.length >= 4) {
+    expressions.push(tokens.slice(0, 8).map((token) => `all:${token}`).join(" AND "));
+  }
+
+  return Array.from(new Set(expressions));
+}
+
+async function fetchArxivSearchResults(input: {
+  expression: string;
+  maxResults: number;
+  fetchImpl: typeof fetch;
+}): Promise<ArxivSearchResult[]> {
   const endpoint = new URL("https://export.arxiv.org/api/query");
-  endpoint.search = `search_query=${encodeURIComponent(`all:${query}`)}&start=0&max_results=${maxResults}`;
+  endpoint.search = `search_query=${encodeURIComponent(input.expression)}&start=0&max_results=${input.maxResults}`;
 
-  const response = await fetchImpl(endpoint);
+  const response = await input.fetchImpl(endpoint);
   if (!response.ok) {
     throw new Error(`arXiv search failed with HTTP ${response.status}.`);
   }
@@ -221,4 +262,45 @@ export async function searchArxiv(
       pdfUrl: buildArxivPdfUrl(id)
     };
   });
+}
+
+export async function searchArxiv(
+  options: SearchArxivOptions
+): Promise<ArxivSearchResult[]> {
+  const query = options.query.trim();
+  if (!query) {
+    throw new Error("arXiv query is required.");
+  }
+  assertQueryWasNotMangled(query);
+
+  const maxResults = options.maxResults ?? 5;
+  if (!Number.isInteger(maxResults) || maxResults <= 0) {
+    throw new Error("maxResults must be a positive integer.");
+  }
+
+  const fetchImpl = options.fetchImpl ?? globalThis.fetch.bind(globalThis);
+  const results = new Map<string, ArxivSearchResult>();
+  let firstError: Error | undefined;
+
+  for (const expression of buildArxivSearchExpressions(query)) {
+    try {
+      const searchResults = await fetchArxivSearchResults({ expression, maxResults, fetchImpl });
+      for (const result of searchResults) {
+        if (!results.has(result.id)) {
+          results.set(result.id, result);
+        }
+      }
+      if (results.size >= maxResults) {
+        break;
+      }
+    } catch (error) {
+      firstError ??= error instanceof Error ? error : new Error(String(error));
+    }
+  }
+
+  if (results.size === 0 && firstError) {
+    throw firstError;
+  }
+
+  return Array.from(results.values()).slice(0, maxResults);
 }

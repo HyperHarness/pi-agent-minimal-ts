@@ -319,6 +319,46 @@ test("searchPapers includes latest APS metadata results as downloadable paper so
   ]);
 });
 
+test("searchPapers ranks exact arXiv title matches above low-relevance latest APS results", async () => {
+  const results = await searchPapers({
+    query: "SQuADDS: A Validated Design Database and Simulation Workflow for Superconducting Qubit Design",
+    maxResults: 3,
+    searchArxivImpl: async () => [
+      createArxivResult({
+        id: "2312.13483",
+        title: "SQuADDS: A Validated Design Database and Simulation Workflow for Superconducting Qubit Design",
+        authors: ["N. G. T. Example"],
+        summary: "A validated superconducting qubit design database.",
+        absUrl: "https://arxiv.org/abs/2312.13483",
+        pdfUrl: "https://arxiv.org/pdf/2312.13483.pdf"
+      })
+    ],
+    searchApsPapersImpl: async () => [
+      {
+        title: "Surface optimization of superconducting aluminum resonators for robust quantum device fabrication",
+        authors: ["Grace Hopper"],
+        summary: "Published today in Physical Review Applied.",
+        primarySource: "aps",
+        primaryAction: "authorized_download",
+        sources: [
+          {
+            source: "aps",
+            action: "authorized_download",
+            canonicalId: "10.1103/mwsd-q1zm",
+            articleUrl: "https://journals.aps.org/prapplied/accepted/10.1103/mwsd-q1zm"
+          }
+        ]
+      }
+    ],
+    searchWebImpl: async () => []
+  });
+
+  assert.equal(results[0]?.title, "SQuADDS: A Validated Design Database and Simulation Workflow for Superconducting Qubit Design");
+  assert.equal(results[0]?.primarySource, "arxiv");
+  assert.equal(results[0]?.sources[0]?.source, "arxiv");
+  assert.equal(results[0]?.sources[0]?.canonicalId, "2312.13483");
+});
+
 test("searchPapers prefers original supported web URLs over generated APS metadata URLs", async () => {
   const generatedUrl = "https://journals.aps.org/prapplied/abstract/10.1103/k3d5-v43c";
   const originalUrl = "https://journals.aps.org/prapplied/abstract/10.1103/PhysRevApplied.24.034057";

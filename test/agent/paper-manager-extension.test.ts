@@ -560,6 +560,64 @@ test("downloadPaper preserves prior publisher license-denied failures from exten
   }
 });
 
+test("downloadPaper retries AIP article URLs after stale canonical-id extension failures", async () => {
+  const workspaceDir = await mkdtemp(path.join(os.tmpdir(), "paper-manager-extension-"));
+  const articleUrl = "https://pubs.aip.org/aip/apr/article/6/2/021318/570326/A-quantum-engineer-s-guide-to-superconducting";
+  const submittedJobs: unknown[] = [];
+
+  try {
+    await appendPaperDownloadJobEvent({
+      workspaceDir,
+      event: {
+        jobId: "job-aip-stale-canonical-failure",
+        recordedAt: "2026-04-25T10:00:00.000Z",
+        status: "automatic_download_failed",
+        articleUrl,
+        source: "aip",
+        failureCode: "canonical_id_not_found",
+        message: "Unable to derive a canonical paper identifier from the article URL."
+      }
+    });
+
+    const result = await downloadPaper({
+      workspaceDir,
+      url: articleUrl,
+      extensionBridge: {
+        async submitJob(job) {
+          submittedJobs.push(job);
+          return {
+            status: "extension_job_queued",
+            source: job.source,
+            articleUrl: job.articleUrl,
+            jobId: job.jobId,
+            message: "Paper download and webpage snapshot job queued for the browser extension."
+          };
+        }
+      },
+      downloadPublisherPaperImpl: async () => {
+        throw new Error("Playwright fallback should not run by default");
+      },
+      openPageInSystemChromeImpl: async () => {
+        throw new Error("system browser fallback should not run by default");
+      }
+    });
+
+    assert.deepEqual(submittedJobs, [
+      {
+        jobId: expectedJobId("aip", articleUrl),
+        articleUrl,
+        source: "aip",
+        purpose: "download_and_webpage"
+      }
+    ]);
+    assert.equal(result.status, "extension_job_queued");
+    assert.equal(result.source, "aip");
+    assert.equal(result.articleUrl, articleUrl);
+  } finally {
+    await rm(workspaceDir, { recursive: true, force: true });
+  }
+});
+
 test("downloadPaper runs legacy fallback when the bridge fails and fallback is explicit", async () => {
   const workspaceDir = await mkdtemp(path.join(os.tmpdir(), "paper-manager-extension-"));
   const articleUrl = "https://www.nature.com/articles/s41586-024-12345-6";

@@ -86,6 +86,7 @@ const blockPaperDownloadParameters = Type.Object({
       Type.Literal("science"),
       Type.Literal("nature"),
       Type.Literal("aps"),
+      Type.Literal("aip"),
       Type.Literal("external")
     ], { description: "Optional paper source." })
   ),

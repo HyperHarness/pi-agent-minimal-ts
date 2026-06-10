@@ -332,6 +332,85 @@ test("handleExtensionHostMessage derives AIP canonical records from extension PD
   }
 });
 
+test("handleExtensionHostMessage derives AIP canonical records from same-job webpage metadata", async () => {
+  const workspaceDir = await createWorkspaceDir();
+  const articleUrl = "https://pubs.aip.org/aip/apr/article/6/2/021318/570326/A-quantum-engineer-s-guide-to-superconducting";
+  const paperKey = "aip-10.1063-1.5089550";
+  const pdfText = "%PDF-1.7\naip bytes without pdf url\n";
+
+  try {
+    await mkdir(path.join(workspaceDir, "knowledge-base", "sources", paperKey), { recursive: true });
+    await writeFile(
+      path.join(workspaceDir, "knowledge-base", "sources", paperKey, "metadata.json"),
+      `${JSON.stringify({
+        schemaVersion: 1,
+        sourceKind: "paper",
+        sourceKey: paperKey,
+        title: "A quantum engineer's guide to superconducting qubits",
+        citation: {
+          doi: "10.1063/1.5089550"
+        },
+        provenance: {
+          url: articleUrl
+        }
+      }, null, 2)}\n`,
+      "utf8"
+    );
+    await appendPaperDownloadJobEvent({
+      workspaceDir,
+      event: {
+        jobId: "job-aip-webpage-first",
+        recordedAt: "2026-04-25T10:29:00.000Z",
+        status: "webpage_snapshot_ready",
+        articleUrl,
+        source: "aip",
+        purpose: "webpage",
+        paperKey,
+        markdownPath: `knowledge-base/sources/${paperKey}/parses/webpage/document.md`,
+        parsePath: `knowledge-base/sources/${paperKey}/parses/webpage/parse.json`,
+        qualityPath: `knowledge-base/sources/${paperKey}/parses/webpage/quality.json`,
+        chunksPath: `knowledge-base/sources/${paperKey}/parses/webpage/chunks.jsonl`
+      }
+    });
+
+    const response = await handleExtensionHostMessage({
+      workspaceDir,
+      now: () => new Date("2026-04-25T10:30:30.000Z"),
+      message: {
+        type: "register_download_bytes",
+        jobId: "job-aip-webpage-first",
+        articleUrl,
+        source: "aip",
+        pdfFileName: "aip-paper.pdf",
+        pdfBase64: Buffer.from(pdfText, "utf8").toString("base64"),
+        title: "A quantum engineer's guide to superconducting qubits"
+      }
+    });
+
+    const expectedDownloadPath = resolvePaperPdfPath({
+      workspaceDir,
+      source: "aip",
+      canonicalId: "10.1063/1.5089550"
+    });
+    const expectedRecordPath = resolvePaperRecordPath({
+      workspaceDir,
+      source: "aip",
+      canonicalId: "10.1063/1.5089550",
+      articleUrl
+    });
+    assert.equal(response.type, "registered");
+    assert.equal(response.downloadPath, expectedDownloadPath);
+    assert.equal(response.recordPath, expectedRecordPath);
+
+    const savedRecord = JSON.parse(await readFile(expectedRecordPath, "utf8"));
+    assert.equal(savedRecord.canonicalId, "10.1063/1.5089550");
+    assert.equal(savedRecord.pdfUrl, "https://pubs.aip.org/doi/pdf/10.1063/1.5089550");
+    assert.equal(await readFile(expectedDownloadPath, "utf8"), pdfText);
+  } finally {
+    await rm(workspaceDir, { recursive: true, force: true });
+  }
+});
+
 test("handleExtensionHostMessage registers PDF bytes fetched by the extension background worker", async () => {
   const workspaceDir = await createWorkspaceDir();
   const articleUrl = "https://www.nature.com/articles/s41586-019-1666-5";

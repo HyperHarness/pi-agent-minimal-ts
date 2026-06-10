@@ -1345,6 +1345,48 @@ test("savePaperWebPageParse writes webpage artifacts under wiki sources", async 
   }
 });
 
+test("savePaperWebPageParse uses AIP source keys for AIP article slug pages with citation DOI metadata", async () => {
+  const workspace = await mkdtemp(path.join(tmpdir(), "pi-paper-aip-webpage-"));
+
+  try {
+    const extraction = parsePaperWebPageHtml({
+      url: "https://pubs.aip.org/aip/apr/article/6/2/021318/570326/A-quantum-engineer-s-guide-to-superconducting",
+      html: `
+        <html>
+          <head>
+            <meta name="citation_title" content="A quantum engineer's guide to superconducting qubits">
+            <meta name="citation_doi" content="10.1063/1.5089550">
+            <meta name="citation_journal_title" content="Applied Physics Reviews">
+          </head>
+          <body>
+            <main>
+              <h1>A quantum engineer's guide to superconducting qubits</h1>
+              <h2>Abstract</h2>
+              <p>The aim of this review is to provide quantum engineers with an introductory guide.</p>
+              <h2>Introduction</h2>
+              <p>${"Superconducting quantum circuits provide engineered artificial atoms. ".repeat(400)}</p>
+            </main>
+          </body>
+        </html>
+      `
+    });
+
+    const result = await savePaperWebPageParse({
+      workspaceDir: workspace,
+      extraction
+    });
+
+    assert.equal(result.paperKey, "aip-10.1063-1.5089550");
+    assert.match(result.artifacts.markdownPath, /knowledge-base\/sources\/aip-10\.1063-1\.5089550\/parses\/webpage\/document\.md$/);
+    await assert.rejects(
+      () => readFile(path.join(workspace, "knowledge-base", "sources", "doi-10.1063-1.5089550", "metadata.json"), "utf8"),
+      /ENOENT/
+    );
+  } finally {
+    await rm(workspace, { recursive: true, force: true });
+  }
+});
+
 test("savePaperWebPageParse writes filtered article HTML snapshot", async () => {
   const workspace = await mkdtemp(path.join(tmpdir(), "pi-paper-webpage-filtered-html-"));
   try {

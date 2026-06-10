@@ -22,13 +22,13 @@ const sampleFeed = `<?xml version="1.0" encoding="UTF-8"?>
 </feed>`;
 
 test("searchArxiv parses the Atom response into compact result objects", async () => {
-  let observedUrl = "";
+  const observedUrls: string[] = [];
 
   const results = await searchArxiv({
     query: "agent memory",
     maxResults: 2,
     fetchImpl: async (input: RequestInfo | URL) => {
-      observedUrl = String(input);
+      observedUrls.push(String(input));
       return new Response(sampleFeed, {
         status: 200,
         headers: { "content-type": "application/atom+xml" }
@@ -36,9 +36,9 @@ test("searchArxiv parses the Atom response into compact result objects", async (
     }
   });
 
-  assert.match(observedUrl, /export\.arxiv\.org\/api\/query/);
-  assert.match(observedUrl, /search_query=all%3Aagent%20memory/);
-  assert.match(observedUrl, /max_results=2/);
+  assert.match(observedUrls[0] ?? "", /export\.arxiv\.org\/api\/query/);
+  assert.match(observedUrls[0] ?? "", /search_query=all%3Aagent%20memory/);
+  assert.match(observedUrls[0] ?? "", /max_results=2/);
   assert.deepEqual(results, [
     {
       id: "2501.01234",
@@ -47,6 +47,51 @@ test("searchArxiv parses the Atom response into compact result objects", async (
       summary: "Example summary text.",
       absUrl: "https://arxiv.org/abs/2501.01234",
       pdfUrl: "https://arxiv.org/pdf/2501.01234.pdf"
+    }
+  ]);
+});
+
+test("searchArxiv falls back to title token queries for long exact titles", async () => {
+  const observedQueries: string[] = [];
+
+  const results = await searchArxiv({
+    query: "SQuADDS: A Validated Design Database and Simulation Workflow for Superconducting Qubit Design",
+    maxResults: 3,
+    fetchImpl: async (input: RequestInfo | URL) => {
+      const url = new URL(String(input));
+      observedQueries.push(url.searchParams.get("search_query") ?? "");
+      if (observedQueries.length === 1) {
+        return new Response("<feed></feed>", {
+          status: 200,
+          headers: { "content-type": "application/atom+xml" }
+        });
+      }
+
+      return new Response(`<?xml version="1.0" encoding="UTF-8"?>
+<feed xmlns="http://www.w3.org/2005/Atom">
+  <entry>
+    <id>http://arxiv.org/abs/2312.13483v1</id>
+    <title>SQuADDS: A Validated Design Database and Simulation Workflow for Superconducting Qubit Design</title>
+    <summary>Superconducting qubit design database.</summary>
+    <author><name>Alice Example</name></author>
+  </entry>
+</feed>`, {
+        status: 200,
+        headers: { "content-type": "application/atom+xml" }
+      });
+    }
+  });
+
+  assert.equal(observedQueries[0], "all:SQuADDS: A Validated Design Database and Simulation Workflow for Superconducting Qubit Design");
+  assert.match(observedQueries[1] ?? "", /^ti:SQuADDS AND ti:Validated AND ti:Design/);
+  assert.deepEqual(results, [
+    {
+      id: "2312.13483",
+      title: "SQuADDS: A Validated Design Database and Simulation Workflow for Superconducting Qubit Design",
+      authors: ["Alice Example"],
+      summary: "Superconducting qubit design database.",
+      absUrl: "https://arxiv.org/abs/2312.13483",
+      pdfUrl: "https://arxiv.org/pdf/2312.13483.pdf"
     }
   ]);
 });
