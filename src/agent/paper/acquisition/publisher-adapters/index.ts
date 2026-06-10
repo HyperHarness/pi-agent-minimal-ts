@@ -1,9 +1,11 @@
 import { scienceAdapter } from "./science.js";
 import { natureAdapter } from "./nature.js";
 import { apsAdapter } from "./aps.js";
+import { aipAdapter } from "./aip.js";
 import type { PublisherAdapter } from "./types.js";
+import type { SupportedPaperSource } from "../../types.js";
 
-const adapters = [scienceAdapter, natureAdapter, apsAdapter] as const;
+const adapters = [scienceAdapter, natureAdapter, apsAdapter, aipAdapter] as const;
 
 export function getPublisherAdapter(input: string): PublisherAdapter {
   const url = new URL(input);
@@ -16,7 +18,7 @@ export function getPublisherAdapter(input: string): PublisherAdapter {
 }
 
 export function resolvePdfPathFromHtml(
-  publisherId: "science" | "nature" | "aps",
+  publisherId: SupportedPaperSource,
   html: string
 ): string | null {
   const adapter = adapters.find((candidate) => candidate.id === publisherId);

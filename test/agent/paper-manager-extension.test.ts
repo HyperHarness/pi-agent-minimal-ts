@@ -80,6 +80,55 @@ test("downloadPaper routes supported publisher URLs through the extension bridge
   }
 });
 
+test("downloadPaper routes AIP publisher URLs through the extension bridge", async () => {
+  const workspaceDir = await mkdtemp(path.join(os.tmpdir(), "paper-manager-extension-"));
+  const articleUrl = "https://pubs.aip.org/doi/10.1063/1.5089550";
+  const submittedJobs: unknown[] = [];
+
+  try {
+    const result = await downloadPaper({
+      workspaceDir,
+      url: articleUrl,
+      extensionBridge: {
+        async submitJob(job) {
+          submittedJobs.push(job);
+          return {
+            status: "extension_job_queued",
+            source: job.source,
+            articleUrl: job.articleUrl,
+            jobId: job.jobId,
+            message: "Paper download and webpage snapshot job queued for the browser extension."
+          };
+        }
+      },
+      downloadPublisherPaperImpl: async () => {
+        throw new Error("Playwright fallback should not run by default");
+      },
+      openPageInSystemChromeImpl: async () => {
+        throw new Error("system browser fallback should not run by default");
+      }
+    });
+
+    assert.deepEqual(submittedJobs, [
+      {
+        jobId: expectedJobId("aip", articleUrl),
+        articleUrl,
+        source: "aip",
+        purpose: "download_and_webpage"
+      }
+    ]);
+    assert.deepEqual(result, {
+      status: "extension_job_queued",
+      source: "aip",
+      articleUrl,
+      jobId: expectedJobId("aip", articleUrl),
+      message: "Paper download and webpage snapshot job queued for the browser extension."
+    });
+  } finally {
+    await rm(workspaceDir, { recursive: true, force: true });
+  }
+});
+
 test("downloadPaper derives publisher title and falls back to exact arXiv preprint when publisher download is restricted", async () => {
   const workspaceDir = await mkdtemp(path.join(os.tmpdir(), "paper-manager-extension-"));
   const articleUrl = "https://www.science.org/doi/10.1126/science.abb2823";

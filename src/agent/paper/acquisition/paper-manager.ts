@@ -219,13 +219,15 @@ type SearchCandidate = {
 const SUPPORTED_SOURCE_PRIORITY: Record<SupportedPaperSource, number> = {
   science: 0,
   nature: 0,
-  aps: 0
+  aps: 0,
+  aip: 0
 };
 
 const PAPER_SOURCE_PRIORITY: Record<PaperSource, number> = {
   science: 0,
   nature: 0,
   aps: 0,
+  aip: 0,
   arxiv: 1,
   external: 2
 };
@@ -417,6 +419,19 @@ function classifySupportedSource(url: URL): Extract<
       source: "aps",
       action: "authorized_download",
       articleUrl,
+      ...(canonicalId ? { canonicalId } : {})
+    };
+  }
+
+  if (url.hostname === "pubs.aip.org" || url.hostname.endsWith(".pubs.aip.org")) {
+    const canonicalId = resolvePublisherCanonicalId({
+      publisher: "aip",
+      url: url.toString()
+    });
+    return {
+      source: "aip",
+      action: "authorized_download",
+      articleUrl: url.toString(),
       ...(canonicalId ? { canonicalId } : {})
     };
   }
@@ -1110,6 +1125,25 @@ function resolveDirectPublisherPdfUrl(
 ): string | undefined {
   const directArticleUrl = new URL(classification.articleUrl);
   if (directArticleUrl.pathname.toLowerCase().endsWith(".pdf")) {
+    directArticleUrl.search = "";
+    directArticleUrl.hash = "";
+    return directArticleUrl.toString();
+  }
+
+  if (classification.source === "aip") {
+    const doiPdfPathMatch = directArticleUrl.pathname.match(/^\/doi\/pdf\/(.+)$/i);
+    if (doiPdfPathMatch?.[1]) {
+      directArticleUrl.search = "";
+      directArticleUrl.hash = "";
+      return directArticleUrl.toString();
+    }
+
+    const doiPathMatch = directArticleUrl.pathname.match(/^\/doi\/(.+)$/i);
+    if (!doiPathMatch?.[1]) {
+      return undefined;
+    }
+
+    directArticleUrl.pathname = `/doi/pdf/${doiPathMatch[1]}`;
     directArticleUrl.search = "";
     directArticleUrl.hash = "";
     return directArticleUrl.toString();

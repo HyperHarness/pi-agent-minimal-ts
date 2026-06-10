@@ -394,7 +394,7 @@ async function updateRecordWithParseResult(input: {
 }
 
 function isWebpageFirstPublisher(source: string): source is SupportedPaperSource {
-  return source === "aps" || source === "nature" || source === "science";
+  return source === "aps" || source === "nature" || source === "science" || source === "aip";
 }
 
 function shouldPreferDownloadedPdfOverPublisherWebpage(input: {

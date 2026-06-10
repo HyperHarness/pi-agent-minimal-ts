@@ -50,7 +50,7 @@ const VALID_JOB_STATUSES = new Set<ExtensionJobStatus>([
   "supplemental_material_failed"
 ]);
 
-const VALID_PAPER_SOURCES = new Set<PaperSource>(["arxiv", "science", "nature", "aps", "external"]);
+const VALID_PAPER_SOURCES = new Set<PaperSource>(["arxiv", "science", "nature", "aps", "aip", "external"]);
 const VALID_JOB_PURPOSES = new Set<ExtensionJobPurpose>([
   "download",
   "webpage",

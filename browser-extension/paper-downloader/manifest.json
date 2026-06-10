@@ -20,7 +20,8 @@
     "https://www.science.org/*",
     "https://science.org/*",
     "https://journals.aps.org/*",
-    "https://aps.org/*"
+    "https://aps.org/*",
+    "https://pubs.aip.org/*"
   ],
   "background": {
     "service_worker": "background.js",
@@ -35,13 +36,15 @@
         "https://www.science.org/*",
         "https://science.org/*",
         "https://journals.aps.org/*",
-        "https://aps.org/*"
+        "https://aps.org/*",
+        "https://pubs.aip.org/*"
       ],
       "js": [
         "content/common.js",
         "content/nature.js",
         "content/science.js",
         "content/aps.js",
+        "content/aip.js",
         "content/runner.js"
       ],
       "run_at": "document_idle"

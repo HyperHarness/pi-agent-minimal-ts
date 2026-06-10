@@ -1,9 +1,9 @@
 import type { KnowledgeSourceMetadata } from "../wiki/source-metadata-store.js";
 
-export type PaperSource = "arxiv" | "science" | "nature" | "aps" | "external";
+export type PaperSource = "arxiv" | "science" | "nature" | "aps" | "aip" | "external";
 
 export type PaperAction = "direct_download" | "authorized_download" | "open_url_only";
-export type SupportedPaperSource = "science" | "nature" | "aps";
+export type SupportedPaperSource = "science" | "nature" | "aps" | "aip";
 export type DownloadablePaperSource = "arxiv" | SupportedPaperSource;
 
 export interface PaperFailure {
@@ -326,7 +326,7 @@ export type AlreadyDownloadedPaperResult =
 
 export interface ManualFallbackPaperResult {
   status: "manual_fallback_opened";
-  source: "science" | "nature" | "aps";
+  source: SupportedPaperSource;
   canonicalId: string;
   articleUrl: string;
   fallbackUrl: string;

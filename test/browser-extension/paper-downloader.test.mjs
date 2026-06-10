@@ -12,11 +12,13 @@ await import(pathToFileURL(path.join(contentDir, "common.js")).href);
 await import(pathToFileURL(path.join(contentDir, "nature.js")).href);
 await import(pathToFileURL(path.join(contentDir, "science.js")).href);
 await import(pathToFileURL(path.join(contentDir, "aps.js")).href);
+await import(pathToFileURL(path.join(contentDir, "aip.js")).href);
 
 const { classifyPage, findPdfCandidate, findSupplementalMaterialCandidates } = globalThis.PiAgentPaperCommon;
 const { findNaturePdfCandidate, findNatureSupplementalMaterialCandidates } = globalThis.PiAgentPaperNature;
 const { findSciencePdfCandidate } = globalThis.PiAgentPaperScience;
 const { findApsPdfCandidate, findApsSupplementalMaterialCandidates } = globalThis.PiAgentPaperAps;
+const { findAipPdfCandidate } = globalThis.PiAgentPaperAip;
 
 const flushAsyncWork = () => new Promise((resolve) => setTimeout(resolve, 0));
 
@@ -2043,7 +2045,7 @@ test("runner prioritizes APS article figure images over page chrome images", asy
   ));
 });
 
-test("publisher helpers extract Nature, Science, and APS PDF candidates", () => {
+test("publisher helpers extract Nature, Science, APS, and AIP PDF candidates", () => {
   assert.equal(
     findNaturePdfCandidate({
       document: doc(
@@ -2086,6 +2088,14 @@ test("publisher helpers extract Nature, Science, and APS PDF candidates", () => 
       baseUrl: "https://journals.aps.org/doi/10.1103/k3d5-v43c"
     }),
     "https://journals.aps.org/doi/pdf/10.1103/k3d5-v43c"
+  );
+
+  assert.equal(
+    findAipPdfCandidate({
+      document: doc("<main>No PDF link</main>"),
+      baseUrl: "https://pubs.aip.org/doi/10.1063/1.5089550"
+    }),
+    "https://pubs.aip.org/doi/pdf/10.1063/1.5089550"
   );
 });
 
@@ -2162,7 +2172,8 @@ test("manifest declares required MV3 extension shell fields", async () => {
     "https://www.science.org/*",
     "https://science.org/*",
     "https://journals.aps.org/*",
-    "https://aps.org/*"
+    "https://aps.org/*",
+    "https://pubs.aip.org/*"
   ]) {
     assert.ok(manifest.host_permissions.includes(host), host);
   }
@@ -2177,6 +2188,7 @@ test("manifest declares required MV3 extension shell fields", async () => {
     "content/nature.js",
     "content/science.js",
     "content/aps.js",
+    "content/aip.js",
     "content/runner.js"
   ]);
   assert.deepEqual(manifest.web_accessible_resources, [
@@ -2188,7 +2200,7 @@ test("manifest declares required MV3 extension shell fields", async () => {
 });
 
 test("manifest content scripts do not use import or export syntax", async () => {
-  for (const fileName of ["common.js", "nature.js", "science.js", "aps.js", "runner.js", "mathjax-bridge.js"]) {
+  for (const fileName of ["common.js", "nature.js", "science.js", "aps.js", "aip.js", "runner.js", "mathjax-bridge.js"]) {
     const source = await readFile(path.join(contentDir, fileName), "utf8");
     assert.doesNotMatch(source, /^\s*import\s/m, fileName);
     assert.doesNotMatch(source, /^\s*export\s/m, fileName);

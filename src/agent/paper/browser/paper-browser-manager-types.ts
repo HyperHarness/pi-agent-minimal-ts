@@ -1,3 +1,5 @@
+import type { SupportedPaperSource } from "../types.js";
+
 export interface PaperBrowserManagerMetadata {
   pid: number;
   startedAt: string;
@@ -27,7 +29,7 @@ export interface DownloadPdfRequest {
 export interface DownloadPdfResponse {
   status: "downloaded";
   path: string;
-  publisher: "science" | "nature" | "aps";
+  publisher: SupportedPaperSource;
   articleUrl: string;
   finalArticleUrl: string;
   finalPdfUrl: string;

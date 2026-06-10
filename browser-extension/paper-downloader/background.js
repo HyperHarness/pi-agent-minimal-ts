@@ -604,6 +604,13 @@ function canonicalPartFromPublisherUrl(source, articleUrl, pdfUrl) {
           return decodeURIComponent(apsJournalMatch[1]).replace(/\.pdf$/i, "");
         }
       }
+
+      if (source === "aip") {
+        var aipMatch = parsed.pathname.match(/^\/doi\/(?:pdf\/)?(.+)$/i);
+        if (aipMatch && aipMatch[1]) {
+          return decodeURIComponent(aipMatch[1]).replace(/\.pdf$/i, "");
+        }
+      }
     } catch (error) {
       // Fall back to URL basename below.
     }

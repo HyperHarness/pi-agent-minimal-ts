@@ -49,6 +49,16 @@ function extractScienceDoi(urlString: string): string | null {
   return match?.[1] ? decodePublisherPathSegment(match[1]).replace(/\.pdf$/i, "") : null;
 }
 
+function extractAipDoi(urlString: string): string | null {
+  const path = new URL(urlString).pathname;
+  const doiMatch = path.match(/^\/doi\/(?:pdf\/)?(.+)$/i);
+  if (doiMatch?.[1]) {
+    return decodePublisherPathSegment(doiMatch[1]).replace(/\.pdf$/i, "");
+  }
+
+  return null;
+}
+
 const APS_CANONICAL_DOI_PREFIXES = new Map<string, string>([
   ["physreva", "PhysRevA"],
   ["physrevb", "PhysRevB"],
@@ -101,6 +111,10 @@ export function resolvePublisherCanonicalId(options: {
     return extractScienceDoi(options.url);
   }
 
+  if (options.publisher === "aip") {
+    return extractAipDoi(options.url);
+  }
+
   return extractApsDoi(options.url);
 }
 
@@ -115,7 +129,7 @@ export function resolvePublisherCanonicalIdFromArticleUrl(options: {
 }
 
 function resolveFormattedPaperFilename(input: {
-  publisherId: "science" | "nature" | "aps";
+  publisherId: SupportedPaperSource;
   finalArticleUrl: string;
   finalPdfUrl: string;
 }): string | null {
@@ -124,7 +138,9 @@ function resolveFormattedPaperFilename(input: {
       ? extractNatureArticleId(input.finalArticleUrl) ?? extractNatureArticleId(input.finalPdfUrl)
       : input.publisherId === "science"
         ? extractScienceDoi(input.finalArticleUrl) ?? extractScienceDoi(input.finalPdfUrl)
-        : extractApsDoi(input.finalArticleUrl) ?? extractApsDoi(input.finalPdfUrl);
+        : input.publisherId === "aip"
+          ? extractAipDoi(input.finalArticleUrl) ?? extractAipDoi(input.finalPdfUrl)
+          : extractApsDoi(input.finalArticleUrl) ?? extractApsDoi(input.finalPdfUrl);
   const sanitizedIdentifier = identifier ? sanitizeFilenameComponent(identifier) : "";
   if (!sanitizedIdentifier) {
     return null;
@@ -145,12 +161,17 @@ function resolveOriginalPdfFilename(finalPdfUrl: string): string | null {
 }
 
 function resolveFallbackPdfPath(input: {
-  publisherId: "science" | "nature" | "aps";
+  publisherId: SupportedPaperSource;
   finalArticleUrl: string;
 }): string | null {
   if (input.publisherId === "science") {
     const doi = extractScienceDoi(input.finalArticleUrl);
     return doi ? `/doi/pdf/${doi}?download=true` : null;
+  }
+
+  if (input.publisherId === "aip") {
+    const doi = extractAipDoi(input.finalArticleUrl);
+    return doi ? `/doi/pdf/${doi}` : null;
   }
 
   if (input.publisherId !== "aps") {

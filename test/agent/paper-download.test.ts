@@ -324,6 +324,43 @@ test("downloadPaperPdf derives APS DOI resolver PDF URLs for routed DOI pages", 
   assert.equal(downloadedUrl, result.finalPdfUrl);
 });
 
+test("downloadPaperPdf derives AIP DOI PDF URLs from article pages", async () => {
+  const workspaceDir = await mkdtemp(path.join(os.tmpdir(), "paper-download-"));
+  let downloadedUrl: string | undefined;
+
+  const result = await downloadPaperPdf({
+    workspaceDir,
+    url: "https://pubs.aip.org/aip/apr/article/6/2/021318/570326/A-quantum-engineer-s-guide-to-superconducting",
+    browserSession: {
+      openArticlePage: async () => ({
+        finalArticleUrl: "https://pubs.aip.org/doi/10.1063/1.5089550",
+        html: "<html><body>No direct PDF link in the article HTML.</body></html>",
+        authorized: true
+      }),
+      openPageForManualLogin: async (url: string) => ({
+        openedUrl: url
+      }),
+      downloadPdf: async (url) => {
+        downloadedUrl = url;
+      }
+    }
+  });
+
+  assert.equal(result.finalPdfUrl, "https://pubs.aip.org/doi/pdf/10.1063/1.5089550");
+  assert.equal(result.publisher, "aip");
+  assert.equal(
+    result.path,
+    path.join(
+      workspaceDir,
+      "knowledge-base",
+      "raw",
+      "pdfs",
+      "aip-10.1063-1.5089550.pdf"
+    )
+  );
+  assert.equal(downloadedUrl, result.finalPdfUrl);
+});
+
 test("downloadPaperPdf formats Nature output filenames from the article identifier", async () => {
   const workspaceDir = await mkdtemp(path.join(os.tmpdir(), "paper-download-"));
   let downloadedPath: string | undefined;
@@ -386,4 +423,22 @@ test("resolvePublisherCanonicalId restores APS PhysRev DOI casing from lowercase
   });
 
   assert.equal(canonicalId, "10.1103/PhysRevResearch.4.023079");
+});
+
+test("resolvePublisherCanonicalId derives AIP DOI from canonical and article URLs", () => {
+  assert.equal(
+    resolvePublisherCanonicalId({
+      publisher: "aip",
+      url: "https://pubs.aip.org/doi/10.1063/1.5089550"
+    }),
+    "10.1063/1.5089550"
+  );
+
+  assert.equal(
+    resolvePublisherCanonicalId({
+      publisher: "aip",
+      url: "https://pubs.aip.org/aip/apr/article/6/2/021318/570326/A-quantum-engineer-s-guide-to-superconducting"
+    }),
+    null
+  );
 });

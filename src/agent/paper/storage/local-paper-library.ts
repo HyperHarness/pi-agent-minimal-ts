@@ -130,7 +130,7 @@ function sanitizePaperKey(value: string): string {
 }
 
 function sourceIsSupportedPublisher(source: PaperReaderSource): source is PaperReaderSource & { source: SupportedPaperSource } {
-  return source.source === "science" || source.source === "nature" || source.source === "aps";
+  return source.source === "science" || source.source === "nature" || source.source === "aps" || source.source === "aip";
 }
 
 function paperKeyFromSourceDirectory(sourceDirName: string, source: PaperReaderSource | undefined): string {
@@ -155,7 +155,7 @@ function readOptionalString(value: unknown): string | undefined {
 }
 
 function inferPaperSourceFromSourceKey(sourceKey: string): PaperSource | undefined {
-  for (const source of ["arxiv", "science", "nature", "aps", "external"] satisfies PaperSource[]) {
+  for (const source of ["arxiv", "science", "nature", "aps", "aip", "external"] satisfies PaperSource[]) {
     if (sourceKey === source || sourceKey.startsWith(`${source}-`)) {
       return source;
     }
@@ -181,6 +181,9 @@ function inferPaperSourceFromArticleUrl(articleUrl: string | undefined): PaperSo
     if (hostname === "www.science.org" || hostname === "science.org" || hostname.endsWith(".science.org")) {
       return "science";
     }
+    if (hostname === "pubs.aip.org" || hostname.endsWith(".pubs.aip.org")) {
+      return "aip";
+    }
   } catch {
     return undefined;
   }
@@ -188,7 +191,7 @@ function inferPaperSourceFromArticleUrl(articleUrl: string | undefined): PaperSo
 }
 
 function inferSupportedPublisher(source: PaperSource | undefined): SupportedPaperSource | undefined {
-  return source === "science" || source === "nature" || source === "aps" ? source : undefined;
+  return source === "science" || source === "nature" || source === "aps" || source === "aip" ? source : undefined;
 }
 
 function inferArxivIdFromUrl(articleUrl: string | undefined): string | undefined {

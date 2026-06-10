@@ -32,7 +32,10 @@ import {
   updatePaperRecordReadingFailure,
   writePaperRecord
 } from "../storage/paper-store.js";
-import { resolvePublisherCanonicalIdFromArticleUrl } from "../acquisition/paper-download.js";
+import {
+  resolvePublisherCanonicalId,
+  resolvePublisherCanonicalIdFromArticleUrl
+} from "../acquisition/paper-download.js";
 import type { PaperRecord, PaperSupplementalMaterial, SupportedPaperSource } from "../types.js";
 
 const NATIVE_HOST_NAME = "com.pi_agent.paper_downloader";
@@ -41,7 +44,8 @@ const PDF_SIGNATURE = Buffer.from("%PDF-");
 const SUPPORTED_PUBLISHER_SOURCES = new Set<SupportedPaperSource>([
   "nature",
   "science",
-  "aps"
+  "aps",
+  "aip"
 ]);
 
 export function encodeNativeMessage(message: ExtensionHostResponse): Buffer {
@@ -770,10 +774,24 @@ async function registerSupportedPublisherDownload(options: {
   pdfBytes: Buffer;
   citationMetadataFetchImpl?: typeof fetch;
 }): Promise<ExtensionHostResponse> {
-  const canonicalId = resolvePublisherCanonicalIdFromArticleUrl({
+  const initialCanonicalId = resolvePublisherCanonicalIdFromArticleUrl({
     publisher: options.source,
     articleUrl: options.message.articleUrl
   });
+  const messagePdfUrl = normalizeOptionalString(options.message.pdfUrl);
+  const derivedPdfUrl = messagePdfUrl ??
+    derivePublisherPdfUrl({
+      source: options.source,
+      articleUrl: options.message.articleUrl
+    });
+  const canonicalId =
+    initialCanonicalId ??
+    (derivedPdfUrl
+      ? resolvePublisherCanonicalId({
+        publisher: options.source,
+        url: derivedPdfUrl
+      })
+      : null);
   if (!canonicalId) {
     return registrationError({
       jobId: options.message.jobId,
@@ -801,17 +819,14 @@ async function registerSupportedPublisherDownload(options: {
   }
 
   const pdfUrl =
-    normalizeOptionalString(options.message.pdfUrl) ??
+    messagePdfUrl ??
     getExistingDownloadedPdfUrl({
       existingRecord: existingRecord?.record,
       source: options.source,
       canonicalId,
       articleUrl: options.message.articleUrl
     }) ??
-    derivePublisherPdfUrl({
-      source: options.source,
-      articleUrl: options.message.articleUrl
-    });
+    derivedPdfUrl;
   if (!pdfUrl) {
     return registrationError({
       jobId: options.message.jobId,
@@ -1070,6 +1085,25 @@ function derivePublisherPdfUrl(options: {
     return parsedUrl.toString();
   }
 
+  if (options.source === "aip") {
+    const doiPdfPathMatch = parsedUrl.pathname.match(/^\/doi\/pdf\/(.+)$/i);
+    if (doiPdfPathMatch?.[1]) {
+      parsedUrl.search = "";
+      parsedUrl.hash = "";
+      return parsedUrl.toString();
+    }
+
+    const doiPathMatch = parsedUrl.pathname.match(/^\/doi\/(.+)$/i);
+    if (!doiPathMatch?.[1]) {
+      return undefined;
+    }
+
+    parsedUrl.pathname = `/doi/pdf/${doiPathMatch[1]}`;
+    parsedUrl.search = "";
+    parsedUrl.hash = "";
+    return parsedUrl.toString();
+  }
+
   const doiPdfPathMatch = parsedUrl.pathname.match(/^\/doi\/pdf\/(.+)$/i);
   if (doiPdfPathMatch?.[1]) {
     parsedUrl.search = "";
@@ -1263,6 +1297,9 @@ function formatPublisherSource(source: string): string {
   }
   if (source === "nature") {
     return "Nature";
+  }
+  if (source === "aip") {
+    return "AIP";
   }
   return "The publisher";
 }

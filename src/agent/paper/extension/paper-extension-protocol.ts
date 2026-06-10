@@ -152,7 +152,7 @@ export type ExtensionHostResponse =
       message: string;
     };
 
-const VALID_PAPER_SOURCES = new Set<PaperSource>(["arxiv", "science", "nature", "aps", "external"]);
+const VALID_PAPER_SOURCES = new Set<PaperSource>(["arxiv", "science", "nature", "aps", "aip", "external"]);
 
 const VALID_JOB_STATUSES = new Set<ExtensionJobStatus>([
   "queued",

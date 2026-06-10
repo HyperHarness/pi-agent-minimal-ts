@@ -17,6 +17,9 @@
     if (normalizedHostname === "journals.aps.org" || normalizedHostname === "aps.org") {
       return root.PiAgentPaperAps.findApsPdfCandidate;
     }
+    if (normalizedHostname === "pubs.aip.org" || normalizedHostname.endsWith(".pubs.aip.org")) {
+      return root.PiAgentPaperAip.findAipPdfCandidate;
+    }
 
     return root.PiAgentPaperCommon.findPdfCandidate;
   }

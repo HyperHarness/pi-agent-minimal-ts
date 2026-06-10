@@ -498,6 +498,14 @@ function publisherCanonicalIdFromUrl(source: string | undefined, articleUrl: str
       const match = decodeURIComponent(parsed.pathname).match(/^\/doi\/(?:abs\/|full\/|pdf\/|epdf\/)?(10\.\d{4,9}\/[^/?#]+)$/i);
       return match?.[1];
     }
+    if (source === "aip") {
+      const doiMatch = decodeURIComponent(parsed.pathname).match(/^\/doi\/(?:pdf\/)?(10\.\d{4,9}\/[^/?#]+)$/i);
+      if (doiMatch?.[1]) {
+        return doiMatch[1];
+      }
+      const articleMatch = decodeURIComponent(parsed.pathname).match(/^\/[^/]+\/[^/]+\/article\/[^/]+\/[^/]+\/[^/]+\/[^/]+\/(10\.\d{4,9}\/[^/?#]+)$/i);
+      return articleMatch?.[1];
+    }
     if (source === "aps") {
       const match = decodeURIComponent(parsed.pathname).match(/^\/[^/]+\/(?:abstract|accepted)\/(10\.1103)\/([^/?#]+)$/i);
       return match?.[1] && match[2] ? `${match[1]}/${match[2]}` : undefined;
