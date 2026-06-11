@@ -3,7 +3,7 @@ import assert from "node:assert/strict";
 import { mkdir, mkdtemp, readFile, rm, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import path from "node:path";
-import { checkWikiHealth, fixWikiHealth } from "../../src/agent/wiki/health.js";
+import { checkWikiHealth, classifyPaperSourceEvidence, fixWikiHealth } from "../../src/agent/wiki/health.js";
 import { appendPaperDownloadJobEvent } from "../../src/agent/paper/extension/paper-download-jobs.js";
 import { blockPaperDownload } from "../../src/agent/paper/acquisition/paper-blocklist.js";
 import type { PaperParseResult } from "../../src/agent/paper/reading/types.js";
@@ -160,6 +160,12 @@ test("checkWikiHealth reports records that need download, authorization, parsing
     assert.ok(result.issues.some((issue) => issue.kind === "needs_authorization" && issue.paperKey === "nature-s41586-024-00001-y"));
     assert.ok(result.issues.some((issue) => issue.kind === "missing_artifact" && issue.paperKey === "arxiv-2401.00001"));
     assert.ok(result.issues.some((issue) => issue.kind === "low_quality" && issue.quality?.engine === "plain-text-baseline"));
+    assert.ok(result.issues.some((issue) =>
+      issue.kind === "low_quality" &&
+      issue.paperKey === "arxiv-2401.00002" &&
+      issue.blockedIssueKinds?.includes("summary_missing") &&
+      issue.reason.includes("summary_missing stays hidden")
+    ));
     assert.ok(result.actions.some((action) => action.includes("Open/login")));
   } finally {
     await rm(workspace, { recursive: true, force: true });
@@ -2915,6 +2921,90 @@ test("fixWikiHealth selects requested issue kinds beyond the health page cap", a
     assert.equal(result.fixed, 1);
     assert.equal(result.checked.summary.summary_missing, 2);
     assert.equal(result.results[0]?.issue.kind, "summary_missing");
+  } finally {
+    await rm(workspace, { recursive: true, force: true });
+  }
+});
+
+test("classifyPaperSourceEvidence distinguishes acquisition, parse-quality, and summary states", async () => {
+  const workspace = await createWorkspace();
+
+  try {
+    const writePaperFixture = async (paperKey: string, options: {
+      parseStatus?: "good" | "poor";
+      parseScore?: number;
+      withParse?: boolean;
+      withSummary?: boolean;
+    }) => {
+      const canonicalId = paperKey.replace("arxiv-", "");
+      const pdfPath = path.join(workspace, "knowledge-base", "raw", "pdfs", `${paperKey}.pdf`);
+      await writeText(pdfPath, "%PDF-1.4\nexample\n%%EOF\n");
+      await writeJson(path.join(workspace, "knowledge-base", "sources", paperKey, "acquisition.json"), {
+        source: "arxiv",
+        articleUrl: `https://arxiv.org/abs/${canonicalId}`,
+        recordedAt: "2026-06-01T00:00:00.000Z",
+        handlingMethod: "direct_http",
+        status: "downloaded",
+        canonicalId,
+        pdfUrl: `https://arxiv.org/pdf/${canonicalId}.pdf`,
+        downloadPath: pdfPath
+      });
+      await writePaperMetadata(path.join(workspace, "knowledge-base", "sources", paperKey, "metadata.json"), {
+        paperKey,
+        source: "arxiv",
+        canonicalId,
+        articleUrl: `https://arxiv.org/abs/${canonicalId}`,
+        pdfPath
+      });
+      if (options.withParse !== false) {
+        const parsedDir = path.join(workspace, "knowledge-base", "sources", paperKey, "parses", "plain-text-baseline");
+        await writeText(path.join(parsedDir, "document.md"), "Parsed text for classification test.");
+        await writeJson(path.join(parsedDir, "parse.json"), { paperKey, engine: "plain-text-baseline" });
+        await writeJson(path.join(parsedDir, "quality.json"), {
+          status: options.parseStatus ?? "good",
+          score: options.parseScore ?? 0.95,
+          pages: 1,
+          totalTextLength: 500,
+          emptyPageCount: 0,
+          headingCount: 2,
+          tableCount: 0,
+          figureOrCaptionCount: 0,
+          warnings: []
+        });
+        await writeText(path.join(parsedDir, "chunks.jsonl"), "{\"id\":\"chunk-1\"}\n");
+      }
+      if (options.withSummary) {
+        await writeText(
+          path.join(workspace, "knowledge-base", "sources", paperKey, "summary.md"),
+          "# Summary\n\nGrounded summary."
+        );
+      }
+    };
+
+    await writePaperFixture("arxiv-3001.00001", { parseStatus: "poor", parseScore: 0.2 });
+    await writePaperFixture("arxiv-3001.00002", { parseStatus: "good" });
+    await writePaperFixture("arxiv-3001.00003", { parseStatus: "good", withSummary: true });
+    await writePaperFixture("arxiv-3001.00005", { withParse: false });
+
+    const classifications = await classifyPaperSourceEvidence({
+      workspaceDir: workspace,
+      paperKeys: [
+        "arxiv-3001.00001",
+        "arxiv-3001.00002",
+        "arxiv-3001.00003",
+        "arxiv-3001.00004",
+        "arxiv-3001.00005"
+      ]
+    });
+    const byKey = new Map(classifications.map((item) => [item.paperKey, item]));
+
+    assert.equal(byKey.get("arxiv-3001.00001")?.state, "parsed_low_quality");
+    assert.match(byKey.get("arxiv-3001.00001")?.detail ?? "", /low_quality/);
+    assert.equal(byKey.get("arxiv-3001.00002")?.state, "parsed_unsummarized");
+    assert.match(byKey.get("arxiv-3001.00002")?.detail ?? "", /summary_missing/);
+    assert.equal(byKey.get("arxiv-3001.00003")?.state, "summarized");
+    assert.equal(byKey.get("arxiv-3001.00004")?.state, "not_acquired");
+    assert.equal(byKey.get("arxiv-3001.00005")?.state, "downloaded_unparsed");
   } finally {
     await rm(workspace, { recursive: true, force: true });
   }

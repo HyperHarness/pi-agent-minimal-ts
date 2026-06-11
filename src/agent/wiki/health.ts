@@ -90,6 +90,7 @@ export interface WikiHealthIssue {
     score?: number;
     warnings: string[];
   };
+  blockedIssueKinds?: WikiHealthIssueKind[];
 }
 
 export interface WikiHealthOptions {
@@ -897,7 +898,7 @@ function summarizeActions(issues: WikiHealthIssue[]): string[] {
     ["needs_download", "Retry or manually import papers that have no usable downloaded artifact."],
     ["queued", "Process queued browser-extension jobs before judging download or parse health."],
     ["parse_failed", "Re-run parsing or switch parser engines for failed acquisitions."],
-    ["low_quality", "Inspect low-quality parses and prefer webpage/TeX/Docling alternatives where available."],
+    ["low_quality", "Inspect low-quality parses and prefer webpage/TeX/Docling alternatives where available; repairing them can surface blocked summary_missing issues."],
     ["parse_missing", "Parse downloaded papers that do not yet have reading artifacts."],
     ["summary_missing", "Write wiki source summaries for parsed papers without a summary page."],
     ["non_paper_source", "Quarantine non-paper publisher pages that were accidentally registered as paper sources."],
@@ -949,6 +950,73 @@ async function interruptedWikiOperationIssues(workspaceDir: string): Promise<Wik
     });
   }
   return issues;
+}
+
+export type PaperSourceEvidenceState =
+  | "not_acquired"
+  | "downloaded_unparsed"
+  | "parsed_low_quality"
+  | "parsed_unsummarized"
+  | "summarized";
+
+export interface PaperSourceEvidenceClassification {
+  paperKey: string;
+  state: PaperSourceEvidenceState;
+  detail: string;
+}
+
+export async function classifyPaperSourceEvidence(options: {
+  workspaceDir: string;
+  paperKeys: string[];
+  lowQualityScoreThreshold?: number;
+}): Promise<PaperSourceEvidenceClassification[]> {
+  const workspaceDir = path.resolve(options.workspaceDir);
+  const threshold = options.lowQualityScoreThreshold ?? DEFAULT_LOW_QUALITY_SCORE_THRESHOLD;
+  const localPapers = await listLocalPapers({
+    workspaceDir,
+    status: "all",
+    maxResults: Number.MAX_SAFE_INTEGER
+  });
+  const entriesByPaperKey = new Map(localPapers.results.map((entry) => [entry.paperKey.trim().toLowerCase(), entry]));
+  return options.paperKeys.map((paperKey) => {
+    const entry = entriesByPaperKey.get(paperKey.trim().toLowerCase());
+    if (!entry) {
+      return {
+        paperKey,
+        state: "not_acquired" as const,
+        detail: "No local acquisition record exists; acquire the paper (download_paper) before requiring it."
+      };
+    }
+    if (entry.hasWikiSummary) {
+      return {
+        paperKey,
+        state: "summarized" as const,
+        detail: "A wiki source summary exists but could not be loaded as evidence; inspect the summary file."
+      };
+    }
+    if (entryHasUsableParsedReading(entry, threshold)) {
+      return {
+        paperKey,
+        state: "parsed_unsummarized" as const,
+        detail: "Parsed with usable quality but has no wiki source summary; run wiki_health_fix with issueKinds [\"summary_missing\"]."
+      };
+    }
+    if (entry.parses.length > 0) {
+      const parseDetails = entry.parses
+        .map((parse) => `${parse.engine}: ${parse.status ?? "unknown"}${typeof parse.score === "number" ? ` (score ${parse.score})` : ""}`)
+        .join("; ");
+      return {
+        paperKey,
+        state: "parsed_low_quality" as const,
+        detail: `Downloaded but every parse is below quality threshold (${parseDetails}); run wiki_health_fix with issueKinds ["low_quality"] first, then ["summary_missing"].`
+      };
+    }
+    return {
+      paperKey,
+      state: "downloaded_unparsed" as const,
+      detail: "Downloaded but has no parsed reading artifacts; repair parsing (wiki_health_fix) before summarizing."
+    };
+  });
 }
 
 export async function checkWikiHealth(options: WikiHealthOptions): Promise<WikiHealthResult> {
@@ -1090,6 +1158,17 @@ export async function checkWikiHealth(options: WikiHealthOptions): Promise<WikiH
 
     if (!usesPreprintFallback && !isPublisherPending && hasUsableParsedReading && !entry.hasWikiSummary) {
       entryIssues.push(baseIssue(entry, "summary_missing", "low", "Parsed paper has no wiki source summary."));
+    }
+
+    if (!usesPreprintFallback && !isPublisherPending && !hasUsableParsedReading && !entry.hasWikiSummary) {
+      for (const issue of entryIssues) {
+        if (issue.kind !== "low_quality" && issue.kind !== "parse_missing" && issue.kind !== "parse_failed") {
+          continue;
+        }
+        issue.blockedIssueKinds = [...new Set([...(issue.blockedIssueKinds ?? []), "summary_missing" as const])];
+        issue.reason +=
+          " This paper also has no wiki source summary, but summary_missing stays hidden until this parse issue is repaired; fix this first, then rerun wiki_health.";
+      }
     }
 
     if (!usesPreprintFallback && !isPublisherPending && !needsAuthorization) {

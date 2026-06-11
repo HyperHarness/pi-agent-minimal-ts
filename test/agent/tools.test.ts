@@ -8035,10 +8035,119 @@ test("build_wiki_page still reports requiredSourceKeys without local summaries",
       requiredSourceKeys: ["paper-absent"],
       forbidExternalEvidence: true,
     }, undefined);
-    const details = result.details as { status?: string; message?: string };
+    const details = result.details as {
+      status?: string;
+      message?: string;
+      requiredSourceDiagnostics?: Array<{ paperKey?: string; state?: string; detail?: string }>;
+    };
 
     assert.equal(details.status, "needs_evidence");
     assert.match(details.message ?? "", /paper-absent/);
+    assert.match(details.message ?? "", /not_acquired/);
+    assert.equal(details.requiredSourceDiagnostics?.[0]?.paperKey, "paper-absent");
+    assert.equal(details.requiredSourceDiagnostics?.[0]?.state, "not_acquired");
+  } finally {
+    await rm(workspace, { recursive: true, force: true });
+  }
+});
+
+test("build_wiki_page auto-summarizes requiredSourceKeys that are missing only a summary", async () => {
+  const workspace = await mkdtemp(path.join(tmpdir(), "pi-agent-tools-"));
+
+  try {
+    const tool = getBuildWikiPageTool(workspace, {
+      searchPaperWiki: async (options) => ({
+        query: options.query,
+        results: [
+          {
+            paperKey: "paper-a",
+            title: "Evidence A",
+            path: "knowledge-base/sources/paper-a/summary.md",
+            snippet: "source A",
+          },
+        ],
+      }),
+      generatePaperWikiSummary: async (options) => {
+        const sourceDir = path.join(workspace, "knowledge-base/sources", options.paperKey);
+        await mkdir(sourceDir, { recursive: true });
+        await writeFile(
+          path.join(sourceDir, "summary.md"),
+          "# Repaired Evidence\n\nSummary written by the required-source auto-repair pass.",
+          "utf8",
+        );
+        return {
+          status: "written",
+          paperKey: options.paperKey,
+          engine: "tex-source",
+          message: "Wrote wiki source summary.",
+          evidence: {
+            paperKey: options.paperKey,
+            engine: "tex-source",
+            pdfSha256: "pdf-hash",
+            paths: {
+              parseMarkdown: "document.md",
+              parseJson: "parse.json",
+              qualityJson: "quality.json",
+            },
+            sections: [],
+            totalMarkdownChars: 7,
+            truncated: false,
+            markdownPreview: "preview",
+          },
+          source: {
+            paperKey: options.paperKey,
+            title: "Repaired Evidence",
+            sourcePath: `knowledge-base/sources/${options.paperKey}/summary.md`,
+            metadataPath: `knowledge-base/sources/${options.paperKey}/metadata.json`,
+            operationId: "write_source_summary-test",
+            operationJournalPath: "knowledge-base/state/wiki-operations.jsonl",
+            indexPath: "knowledge-base/index.md",
+            logPath: "knowledge-base/log.md",
+          },
+        };
+      },
+      paperSummaryWorker: async () => ({
+        summaryMarkdown: "summary",
+        confidence: "high",
+      }),
+      paperWikiPageWorker: async () => ({
+        title: "Auto-Repaired Evidence Page",
+        pageMarkdown: [
+          "## Overview",
+          "",
+          "Synthesis grounded in auto-repaired evidence [paper-repairable].",
+          "",
+          "## Key Concepts",
+          "",
+          "Required sources missing only a summary are repaired before the evidence check.",
+          "",
+          "## Evidence",
+          "",
+          "Evidence A and the repaired summary support the synthesis.",
+        ].join("\n"),
+        confidence: "high",
+      }),
+    });
+
+    const result = await tool.execute("build-page-auto-repair", {
+      topic: "auto repaired evidence page",
+      pageKey: "auto-repaired-evidence-page",
+      requiredSourceKeys: ["paper-repairable"],
+      evidenceContract: "paper-backed",
+      forbidExternalEvidence: true,
+    }, undefined);
+    const details = result.details as {
+      status?: string;
+      message?: string;
+      requiredSummaryRepairs?: Array<{ paperKey?: string; status?: string }>;
+    };
+
+    assert.equal(details.status, "written", details.message);
+    assert.equal(details.requiredSummaryRepairs?.length, 1);
+    assert.equal(details.requiredSummaryRepairs?.[0]?.paperKey, "paper-repairable");
+    assert.equal(details.requiredSummaryRepairs?.[0]?.status, "written");
+    const page = await readFile(path.join(workspace, "knowledge-base/pages/auto-repaired-evidence-page.md"), "utf8");
+    assert.match(page, /paper_key: "paper-repairable"/);
   } finally {
     await rm(workspace, { recursive: true, force: true });
   }

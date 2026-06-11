@@ -24,6 +24,7 @@ import {
 } from "./summary.js";
 import { paperWikiRelations } from "./relations.js";
 import { readWikiEvidenceItem } from "./retrieval-contract.js";
+import { classifyPaperSourceEvidence, type PaperSourceEvidenceClassification } from "./health.js";
 import { buildWikiPageEvidencePack } from "./evidence-pack.js";
 import { applyWikiStructurePlan } from "./structure-apply.js";
 import { planWikiStructure } from "./structure-plan.js";
@@ -583,6 +584,11 @@ type ResearchWrittenSummary = {
   sourcePath?: string;
   message: string;
 };
+type RequiredSourceSummaryRepair = {
+  paperKey: string;
+  status: Awaited<ReturnType<typeof generatePaperWikiSummary>>["status"] | "failed";
+  message: string;
+};
 type ResearchBlockedItem = {
   stage: "local_summary" | "external_search" | "download" | "parse" | "summary" | "user_action";
   title?: string;
@@ -627,6 +633,8 @@ type BuildWikiPageDetails = {
   research?: AnswerResearchQuestionDetails;
   status: "drafted" | "written" | "needs_evidence" | "needs_worker" | "skipped";
   message: string;
+  requiredSummaryRepairs?: RequiredSourceSummaryRepair[];
+  requiredSourceDiagnostics?: PaperSourceEvidenceClassification[];
   draft?: PaperWikiPageWorkerOutput;
   evidencePack?: Awaited<ReturnType<typeof buildWikiPageEvidencePack>>;
   page?: Awaited<ReturnType<typeof writePaperWikiPage>>;
@@ -1101,6 +1109,8 @@ function compactBuildWikiPageResult(result: BuildWikiPageDetails): Record<string
     mode: result.mode,
     status: result.status,
     message: result.message,
+    ...(result.requiredSummaryRepairs ? { requiredSummaryRepairs: result.requiredSummaryRepairs } : {}),
+    ...(result.requiredSourceDiagnostics ? { requiredSourceDiagnostics: result.requiredSourceDiagnostics } : {}),
     coordination: {
       intent: result.coordination.intent,
       decision: result.coordination.decision,
@@ -2114,7 +2124,7 @@ export function createWikiTools(input: {
     name: "build_wiki_page",
     label: "Build Wiki Page",
     description:
-      "Builds a higher-level synthesis page under knowledge-base/pages/ from evidence-first research results. Use this when the user wants the agent to organize accumulated paper evidence into a durable topic wiki page. Do not use this for standalone source-summary backfill or summary_missing health repair.",
+      "Builds a higher-level synthesis page under knowledge-base/pages/ from evidence-first research results. Use this when the user wants the agent to organize accumulated paper evidence into a durable topic wiki page. requiredSourceKeys that are downloaded and parsed but missing a wiki source summary are auto-summarized before the evidence check (unless autoSummarize is false); a needs_evidence failure reports each missing key's local state and repair path. Do not use this for standalone source-summary backfill or summary_missing health repair.",
     parameters: buildWikiPageParameters,
     executionMode: "sequential",
     execute: async (
@@ -2228,17 +2238,14 @@ export function createWikiTools(input: {
       sourceEvidence = uniqueSourceEvidenceByPaperKey(sourceEvidence);
       sourceEvidence = uniqueSourceEvidenceByTitle(sourceEvidence);
       const surfacedSourceKeys = new Set(sourceEvidence.map((item) => normalizePaperEvidenceKey(item.paperKey)));
-      for (const requiredKey of args.requiredSourceKeys ?? []) {
-        if (surfacedSourceKeys.has(normalizePaperEvidenceKey(requiredKey))) {
-          continue;
-        }
+      const pinRequiredSourceKey = async (requiredKey: string): Promise<boolean> => {
         const pinned = await readWikiEvidenceItem({
           workspaceDir: resolvedWorkspaceDir,
           kind: "source",
           key: requiredKey
         });
         if (pinned.status !== "ready" || !pinned.item || pinned.item.kind !== "source") {
-          continue;
+          return false;
         }
         sourceEvidence.push({
           kind: "source",
@@ -2252,6 +2259,52 @@ export function createWikiTools(input: {
           ...(pinned.item.tags.length > 0 ? { tags: pinned.item.tags } : {})
         });
         surfacedSourceKeys.add(normalizePaperEvidenceKey(requiredKey));
+        return true;
+      };
+      const unpinnedRequiredKeys: string[] = [];
+      for (const requiredKey of args.requiredSourceKeys ?? []) {
+        if (surfacedSourceKeys.has(normalizePaperEvidenceKey(requiredKey))) {
+          continue;
+        }
+        if (!(await pinRequiredSourceKey(requiredKey))) {
+          unpinnedRequiredKeys.push(requiredKey);
+        }
+      }
+      const requiredSummaryRepairs: RequiredSourceSummaryRepair[] = [];
+      if (unpinnedRequiredKeys.length > 0 && (args.autoSummarize ?? true) && dependencies.paperSummaryWorker) {
+        for (const [index, requiredKey] of unpinnedRequiredKeys.entries()) {
+          try {
+            const summary = await generatePaperWikiSummaryImpl({
+              workspaceDir: resolvedWorkspaceDir,
+              paperKey: requiredKey,
+              mode: "write",
+              summaryWorker: dependencies.paperSummaryWorker,
+              onProgress: (summaryProgress) => emitToolProgress(onUpdate, {
+                stage: "summary_progress",
+                query,
+                paperKey: requiredKey,
+                index: index + 1,
+                total: unpinnedRequiredKeys.length,
+                message: `Required-source summary ${index + 1}/${unpinnedRequiredKeys.length}: ${summaryProgress.message}`,
+                summaryProgress
+              })
+            });
+            requiredSummaryRepairs.push({
+              paperKey: requiredKey,
+              status: summary.status,
+              message: summary.message
+            });
+            if (summary.status === "written") {
+              await pinRequiredSourceKey(requiredKey);
+            }
+          } catch (error) {
+            requiredSummaryRepairs.push({
+              paperKey: requiredKey,
+              status: "failed",
+              message: error instanceof Error ? error.message : String(error)
+            });
+          }
+        }
       }
       evidence = [
         ...sourceEvidence,
@@ -2339,12 +2392,37 @@ export function createWikiTools(input: {
         };
       }
       if (mode !== "draft" && missingRequiredSourceKeys.length > 0) {
+        let requiredSourceDiagnostics: PaperSourceEvidenceClassification[] = [];
+        try {
+          requiredSourceDiagnostics = await classifyPaperSourceEvidence({
+            workspaceDir: resolvedWorkspaceDir,
+            paperKeys: missingRequiredSourceKeys
+          });
+        } catch {
+          requiredSourceDiagnostics = missingRequiredSourceKeys.map((paperKey) => ({
+            paperKey,
+            state: "not_acquired" as const,
+            detail: "Local source state could not be inspected."
+          }));
+        }
+        const repairsByKey = new Map(requiredSummaryRepairs.map((repair) => [normalizePaperEvidenceKey(repair.paperKey), repair]));
+        const diagnosticLines = requiredSourceDiagnostics.map((diagnostic) => {
+          const repair = repairsByKey.get(normalizePaperEvidenceKey(diagnostic.paperKey));
+          const repairNote = repair && repair.status !== "written"
+            ? ` An automatic summary attempt did not succeed (${repair.status}: ${repair.message})`
+            : "";
+          return `${diagnostic.paperKey} [${diagnostic.state}]: ${diagnostic.detail}${repairNote}`;
+        });
+        const message =
+          `Cannot write a wiki page because required source keys are not citable. ${diagnosticLines.join(" | ")}`;
         const coordination = await buildCoordination({
           selectedEvidenceCount: evidence.length,
           hasBlockedAcquisition: (research?.blocked.length ?? bootstrap.blocked.length) > 0,
-          insufficientReason: `Required source keys have no local source summaries: ${missingRequiredSourceKeys.join(", ")}.`,
+          insufficientReason: message,
           handoff: {
-            missingRequiredSourceKeys
+            missingRequiredSourceKeys,
+            requiredSourceDiagnostics,
+            ...(requiredSummaryRepairs.length > 0 ? { requiredSummaryRepairs } : {})
           }
         });
         const result: BuildWikiPageDetails = {
@@ -2355,7 +2433,9 @@ export function createWikiTools(input: {
           bootstrap,
           ...(research ? { research } : {}),
           status: "needs_evidence",
-          message: `Cannot write a wiki page because required source keys have no local source summaries: ${missingRequiredSourceKeys.join(", ")}.`,
+          message,
+          ...(requiredSummaryRepairs.length > 0 ? { requiredSummaryRepairs } : {}),
+          requiredSourceDiagnostics,
           evidence
         };
         return {
@@ -2516,6 +2596,7 @@ export function createWikiTools(input: {
         ...(research ? { research } : {}),
         status: "written",
         message: `Wrote wiki page ${page.pagePath}.`,
+        ...(requiredSummaryRepairs.length > 0 ? { requiredSummaryRepairs } : {}),
         draft,
         evidencePack,
         page,
