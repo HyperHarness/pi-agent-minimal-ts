@@ -225,6 +225,10 @@ function normalizeUrl(url: string): URL {
   return parsedUrl;
 }
 
+function isArxivHost(url: URL): boolean {
+  return /(^|\.)arxiv\.org$/i.test(url.hostname);
+}
+
 function normalizeUserAgent(env: FetchPaperWebPageEnvironment): string {
   const userAgent = env.PI_FETCH_USER_AGENT?.trim();
   return userAgent || DEFAULT_USER_AGENT;
@@ -347,7 +351,7 @@ function collectImageAssetCandidates(html: string, baseUrl: string): Array<{
 }
 
 function resolveArticleAssetBaseUrl(url: URL): string {
-  if (/(^|\.)arxiv\.org$/i.test(url.hostname) && /^\/html\/[^/]+$/i.test(url.pathname)) {
+  if (isArxivHost(url) && /^\/html\/[^/]+$/i.test(url.pathname)) {
     const withSlash = new URL(url.toString());
     withSlash.pathname = `${withSlash.pathname}/`;
     return withSlash.toString();
@@ -358,7 +362,7 @@ function resolveArticleAssetBaseUrl(url: URL): string {
 function parseArxivIdFromUrl(url: string): string | undefined {
   try {
     const parsed = new URL(url);
-    if (!/(^|\.)arxiv\.org$/i.test(parsed.hostname)) {
+    if (!isArxivHost(parsed)) {
       return undefined;
     }
     const match = parsed.pathname.match(/^\/(?:abs|html|pdf)\/([^/?#]+?)(?:\.pdf)?\/?$/i);
@@ -366,6 +370,40 @@ function parseArxivIdFromUrl(url: string): string | undefined {
   } catch {
     return undefined;
   }
+}
+
+function extractArxivHtmlArticleUrl(input: { absUrl: string; absHtml: string }): string | undefined {
+  let parsedAbsUrl: URL;
+  try {
+    parsedAbsUrl = new URL(input.absUrl);
+  } catch {
+    return undefined;
+  }
+  if (!isArxivHost(parsedAbsUrl) || !/^\/abs\/[^/]+$/i.test(parsedAbsUrl.pathname)) {
+    return undefined;
+  }
+
+  for (const match of input.absHtml.matchAll(/<a\b[^>]*>[\s\S]*?<\/a>/gi)) {
+    const tag = match[0];
+    const href = extractTagAttribute(tag, "href");
+    if (!href) {
+      continue;
+    }
+    let candidate: URL;
+    try {
+      candidate = new URL(href, parsedAbsUrl);
+    } catch {
+      continue;
+    }
+    if (!isArxivHost(candidate) || !/^\/html\/[^/]+$/i.test(candidate.pathname)) {
+      continue;
+    }
+    if (/latexml-download-link/i.test(tag) || /HTML\s*\(experimental\)/i.test(stripHtmlToText(tag))) {
+      return candidate.toString();
+    }
+  }
+
+  return undefined;
 }
 
 function parseExpectedFigureCountFromComments(comments: string): number | undefined {
@@ -1649,7 +1687,7 @@ export async function fetchPaperWebPage(
   const userAgent = normalizeUserAgent(env);
 
   try {
-    const response = await fetchImpl(endpoint, {
+    let response = await fetchImpl(endpoint, {
       headers: new Headers({
         "user-agent": userAgent
       }),
@@ -1666,8 +1704,30 @@ export async function fetchPaperWebPage(
       throw new Error("Expected text/html content-type.");
     }
 
-    const html = await response.text();
-    const finalUrl = response.url || endpoint.toString();
+    let html = await response.text();
+    let finalUrl = response.url || endpoint.toString();
+    const arxivHtmlArticleUrl = extractArxivHtmlArticleUrl({
+      absUrl: finalUrl,
+      absHtml: html
+    });
+    if (arxivHtmlArticleUrl) {
+      response = await fetchImpl(arxivHtmlArticleUrl, {
+        headers: new Headers({
+          "user-agent": userAgent
+        }),
+        signal: timeout.signal
+      });
+      if (!response.ok) {
+        throw getResponseStatusError(response, "arXiv HTML article fetch");
+      }
+      const arxivHtmlContentType = response.headers.get("content-type")?.toLowerCase() ?? "";
+      const arxivHtmlMediaType = arxivHtmlContentType.split(";", 1)[0]?.trim();
+      if (arxivHtmlMediaType !== "text/html") {
+        throw new Error("Expected text/html content-type for arXiv HTML article.");
+      }
+      html = await response.text();
+      finalUrl = response.url || arxivHtmlArticleUrl;
+    }
     const extraction = await parsePaperWebPageHtmlWithPandoc({
       url: finalUrl,
       html,

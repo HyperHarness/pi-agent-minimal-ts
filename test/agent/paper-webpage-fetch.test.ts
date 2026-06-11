@@ -611,6 +611,80 @@ test("fetchPaperWebPage downloads direct HTML image assets", async () => {
   }
 });
 
+test("fetchPaperWebPage follows arXiv abs HTML links before downloading article figures", async () => {
+  const requestedUrls: string[] = [];
+  const extraction = await fetchPaperWebPage({
+    url: "https://arxiv.org/abs/2505.04337",
+    fetchImpl: async (input) => {
+      const url = input.toString();
+      requestedUrls.push(url);
+      if (url === "https://arxiv.org/abs/2505.04337") {
+        return createHtmlResponse(
+          200,
+          `
+            <html>
+              <head><meta name="citation_title" content="3D-Integrated Superconducting qubits"></head>
+              <body>
+                <main>
+                  <h1>3D-Integrated Superconducting qubits</h1>
+                  <a href="/pdf/2505.04337">View PDF</a>
+                  <a href="https://arxiv.org/html/2505.04337v3" id="latexml-download-link">HTML (experimental)</a>
+                  <td class="tablecell comments">8 pages, 5 figures</td>
+                  <div class="bookmarks">
+                    <img src="assets/bibsonomy.png" alt="BibSonomy">
+                    <img src="assets/reddit.png" alt="Reddit">
+                  </div>
+                </main>
+              </body>
+            </html>
+          `
+        );
+      }
+      if (url === "https://arxiv.org/html/2505.04337v3") {
+        return createHtmlResponse(
+          200,
+          `
+            <html>
+              <head><meta name="citation_title" content="3D-Integrated Superconducting qubits"></head>
+              <body>
+                <article class="ltx_document">
+                  <h1>3D-Integrated Superconducting qubits</h1>
+                  <p>${"Article body. ".repeat(200)}</p>
+                  ${Array.from({ length: 5 }, (_value, index) => `
+                    <figure class="ltx_figure">
+                      <img class="ltx_graphics" src="x${index + 1}.png" alt="Figure ${index + 1}">
+                      <figcaption>Figure ${index + 1}: Article figure.</figcaption>
+                    </figure>
+                  `).join("\n")}
+                </article>
+              </body>
+            </html>
+          `
+        );
+      }
+      const imageMatch = url.match(/^https:\/\/arxiv\.org\/html\/2505\.04337v3\/x([1-5])\.png$/);
+      if (imageMatch?.[1]) {
+        return new Response(Buffer.from(`png-${imageMatch[1]}`), {
+          status: 200,
+          headers: { "content-type": "image/png" }
+        });
+      }
+      throw new Error(`Unexpected fetch: ${url}`);
+    }
+  });
+
+  assert.equal(extraction.url, "https://arxiv.org/html/2505.04337v3");
+  assert.equal(extraction.metadata.comments, "8 pages, 5 figures");
+  assert.equal(extraction.metadata.expectedFigureCount, 5);
+  assert.deepEqual(
+    extraction.assets?.map((asset) => asset.filename),
+    ["x1.png", "x2.png", "x3.png", "x4.png", "x5.png"]
+  );
+  assert.ok(requestedUrls.includes("https://arxiv.org/abs/2505.04337"));
+  assert.ok(requestedUrls.includes("https://arxiv.org/html/2505.04337v3"));
+  assert.doesNotMatch(requestedUrls.join("\n"), /bibsonomy|reddit/);
+});
+
 test("savePaperWebPageParse rewrites root-relative arXiv asset links to local assets", async () => {
   const workspace = await mkdtemp(path.join(tmpdir(), "pi-paper-webpage-arxiv-root-assets-"));
   try {
