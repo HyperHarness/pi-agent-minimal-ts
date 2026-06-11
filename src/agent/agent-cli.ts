@@ -95,6 +95,7 @@ const ROUTED_AGENT_TOOL_NAMES = [
   "wiki_lint",
   "wiki_structure_plan",
   "wiki_apply_structure_plan",
+  "wiki_delete_page",
   "wiki_health_fix"
 ] as const;
 

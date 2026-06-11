@@ -165,6 +165,22 @@ export interface PaperWikiPageResult {
   sourceCount: number;
 }
 
+export interface PaperWikiPageDeleteInput {
+  workspaceDir: string;
+  pageKey: string;
+  reason?: string;
+}
+
+export interface PaperWikiPageDeleteResult {
+  pageKey: string;
+  title: string;
+  pagePath: string;
+  operationId: string;
+  operationJournalPath: string;
+  indexPath: string;
+  logPath: string;
+}
+
 export interface PaperWikiAliasInput {
   alias: string;
   canonical: string;

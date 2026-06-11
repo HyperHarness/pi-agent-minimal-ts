@@ -63,7 +63,7 @@ test("wiki and library health tool factories expose named default groups for reg
     );
     assert.deepEqual(
       wikiTools.defaultToolGroups.lintTools.map((tool) => tool.name),
-      ["wiki_lint", "wiki_structure_plan", "wiki_apply_structure_plan"]
+      ["wiki_lint", "wiki_structure_plan", "wiki_apply_structure_plan", "wiki_delete_page"]
     );
     assert.deepEqual(
       libraryHealthTools.defaultToolGroups.searchTools.map((tool) => tool.name),

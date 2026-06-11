@@ -3,6 +3,7 @@ import { Type, type Static } from "@mariozechner/pi-ai";
 import type { AgentTool, AgentToolUpdateCallback } from "@mariozechner/pi-agent-core";
 import type { ToolDependencies } from "../tool-types.js";
 import {
+  deletePaperWikiPage,
   mergePaperWikiAliases,
   searchPaperWiki,
   writePaperWikiPage,
@@ -276,6 +277,15 @@ const wikiApplyStructurePlanParameters = Type.Object({
   runVerification: Type.Optional(Type.Boolean({ description: "Run wiki_lint before and after the operation. Defaults to true." }))
 });
 
+const wikiDeletePageParameters = Type.Object({
+  pageKey: Type.String({
+    description: "Wiki page key under knowledge-base/pages without .md, for example superconducting-qubit-architecture-coverage."
+  }),
+  reason: Type.Optional(Type.String({
+    description: "Short user-confirmed reason to record in the human wiki log."
+  }))
+});
+
 const answerPaperWikiQuestionParameters = Type.Object({
   query: Type.String({
     description:
@@ -479,6 +489,7 @@ type WikiReviewPageParameters = Static<typeof wikiReviewPageParameters>;
 type WikiLintParameters = Static<typeof wikiLintParameters>;
 type WikiStructurePlanParameters = Static<typeof wikiStructurePlanParameters>;
 type WikiApplyStructurePlanParameters = Static<typeof wikiApplyStructurePlanParameters>;
+type WikiDeletePageParameters = Static<typeof wikiDeletePageParameters>;
 type AnswerPaperWikiQuestionParameters = Static<typeof answerPaperWikiQuestionParameters>;
 type AnswerResearchQuestionParameters = Static<typeof answerResearchQuestionParameters>;
 type BootstrapWikiPageEvidenceParameters = Static<typeof bootstrapWikiPageEvidenceParameters>;
@@ -519,6 +530,10 @@ type WikiStructurePlanTool = AgentTool<
 type WikiApplyStructurePlanTool = AgentTool<
   typeof wikiApplyStructurePlanParameters,
   Awaited<ReturnType<typeof applyWikiStructurePlan>>
+>;
+type WikiDeletePageTool = AgentTool<
+  typeof wikiDeletePageParameters,
+  Awaited<ReturnType<typeof deletePaperWikiPage>>
 >;
 type AnswerPaperWikiQuestionDetails = {
   query: string;
@@ -1380,6 +1395,7 @@ export function createWikiTools(input: {
   const dependencies = input.dependencies;
   const writePaperWikiSourceImpl = dependencies.writePaperWikiSource ?? writePaperWikiSource;
   const writePaperWikiPageImpl = dependencies.writePaperWikiPage ?? writePaperWikiPage;
+  const deletePaperWikiPageImpl = dependencies.deletePaperWikiPage ?? deletePaperWikiPage;
   const generatePaperWikiSummaryImpl = dependencies.generatePaperWikiSummary ?? generatePaperWikiSummary;
   const paperWikiRelationsImpl = dependencies.paperWikiRelations ?? paperWikiRelations;
   const bootstrapPaperWikiPageEvidenceImpl = dependencies.bootstrapPaperWikiPageEvidence ?? bootstrapPaperWikiPageEvidence;
@@ -1697,6 +1713,26 @@ export function createWikiTools(input: {
         ...(args.requireLowRisk !== undefined ? { requireLowRisk: args.requireLowRisk } : {}),
         ...(args.maxActions !== undefined ? { maxActions: args.maxActions } : {}),
         ...(args.runVerification !== undefined ? { runVerification: args.runVerification } : {})
+      });
+
+      return {
+        content: [{ type: "text", text: JSON.stringify(result) }],
+        details: result
+      };
+    }
+  };
+
+  const wikiDeletePageTool: WikiDeletePageTool = {
+    name: "wiki_delete_page",
+    label: "Delete Wiki Page",
+    description:
+      "Deletes a user-confirmed synthesis page under knowledge-base/pages/, rebuilds the wiki index, appends a human log entry, and preserves the operation journal audit trail. Use this instead of delete_file for rejected or unwanted wiki pages.",
+    parameters: wikiDeletePageParameters,
+    execute: async (_toolCallId: string, args: WikiDeletePageParameters) => {
+      const result = await deletePaperWikiPageImpl({
+        workspaceDir: resolvedWorkspaceDir,
+        pageKey: args.pageKey,
+        ...(args.reason !== undefined ? { reason: args.reason } : {})
       });
 
       return {
@@ -2807,7 +2843,7 @@ export function createWikiTools(input: {
     expandResearchTopicTool,
     wikiReviewPageTool
   ];
-  const lintTools = [wikiLintTool, wikiStructurePlanTool, wikiApplyStructurePlanTool];
+  const lintTools = [wikiLintTool, wikiStructurePlanTool, wikiApplyStructurePlanTool, wikiDeletePageTool];
 
   return {
     defaultTools: [

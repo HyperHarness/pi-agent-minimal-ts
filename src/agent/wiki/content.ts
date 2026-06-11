@@ -1,4 +1,4 @@
-import { appendFile, lstat, mkdir, readFile, realpath, writeFile } from "node:fs/promises";
+import { appendFile, lstat, mkdir, readFile, realpath, unlink, writeFile } from "node:fs/promises";
 import path from "node:path";
 import {
   listPaperParseEngines,
@@ -37,6 +37,8 @@ import {
 } from "./journal.js";
 import type {
   PaperWikiPageInput,
+  PaperWikiPageDeleteInput,
+  PaperWikiPageDeleteResult,
   PaperWikiPageResult,
   PaperWikiAliasMergeInput,
   PaperWikiAliasMergeItem,
@@ -772,6 +774,100 @@ ${input.sourceCitations.map((source) =>
     indexPath: indexPathRelative,
     logPath: logPathRelative,
     sourceCount: input.sourceCitations.length
+  };
+}
+
+export async function deletePaperWikiPage(input: PaperWikiPageDeleteInput): Promise<PaperWikiPageDeleteResult> {
+  const normalizedPageKey = sanitizeWikiFilename(input.pageKey);
+  if (normalizedPageKey !== input.pageKey.trim().replace(/\.[Mm][Dd]$/, "")) {
+    throw new Error("pageKey must be a valid wiki page key, not a path.");
+  }
+
+  const pagePath = getPaperWikiPagePath(input.workspaceDir, normalizedPageKey);
+  const indexPath = getPaperWikiIndexPath(input.workspaceDir);
+  const logPath = getPaperWikiLogPath(input.workspaceDir);
+  const pagePathRelative = relativeToWorkspace(input.workspaceDir, pagePath);
+  const indexPathRelative = relativeToWorkspace(input.workspaceDir, indexPath);
+  const logPathRelative = relativeToWorkspace(input.workspaceDir, logPath);
+
+  await ensurePaperWikiScaffold(input.workspaceDir);
+  await assertSafePaperWikiWriteTarget({
+    workspaceDir: input.workspaceDir,
+    filePath: pagePath,
+    allowedRoot: getPaperWikiPagesDir(input.workspaceDir),
+    label: "wiki page"
+  });
+  await assertSafePaperWikiWriteTarget({
+    workspaceDir: input.workspaceDir,
+    filePath: indexPath,
+    allowedRoot: getPaperWikiDir(input.workspaceDir),
+    label: "wiki index"
+  });
+  await assertSafePaperWikiWriteTarget({
+    workspaceDir: input.workspaceDir,
+    filePath: logPath,
+    allowedRoot: getPaperWikiDir(input.workspaceDir),
+    label: "wiki log"
+  });
+
+  const pageStat = await lstat(pagePath).catch((error: unknown) => {
+    if ((error as NodeJS.ErrnoException).code === "ENOENT") {
+      return undefined;
+    }
+    throw error;
+  });
+  if (!pageStat) {
+    throw new Error(`Wiki page ${normalizedPageKey} does not exist.`);
+  }
+  if (!pageStat.isFile()) {
+    throw new Error(`Wiki page ${normalizedPageKey} is not a file.`);
+  }
+
+  const pageMarkdown = await readFile(pagePath, "utf8");
+  const title = extractTitle(pageMarkdown, normalizedPageKey);
+  const operation = await beginWikiOperation({
+    workspaceDir: input.workspaceDir,
+    intent: "delete_synthesis_page",
+    owner: "wiki-agent",
+    plannedFiles: [
+      pagePathRelative,
+      indexPathRelative,
+      logPathRelative
+    ],
+    inputs: {
+      pageKey: normalizedPageKey,
+      title,
+      reason: input.reason?.trim() || "User requested wiki page deletion."
+    }
+  });
+  const now = new Date().toISOString();
+  const reason = input.reason?.trim() || "User requested wiki page deletion.";
+
+  await unlink(pagePath);
+  await rewriteWikiIndex(input.workspaceDir);
+  await appendFile(
+    logPath,
+    `\n## [${now.slice(0, 10)}] delete_page | ${title}\n\n- pageKey: \`${normalizedPageKey}\`\n- path: \`${pagePathRelative}\`\n- reason: ${reason}\n`,
+    "utf8"
+  );
+  await completeWikiOperation({
+    workspaceDir: input.workspaceDir,
+    operationId: operation.operationId,
+    writtenFiles: [
+      pagePathRelative,
+      indexPathRelative,
+      logPathRelative
+    ]
+  });
+
+  return {
+    pageKey: normalizedPageKey,
+    title,
+    pagePath: pagePathRelative,
+    operationId: operation.operationId,
+    operationJournalPath: operation.journalPath,
+    indexPath: indexPathRelative,
+    logPath: logPathRelative
   };
 }
 

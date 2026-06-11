@@ -9,7 +9,13 @@ import type { bootstrapPaperWikiPageEvidence } from "./wiki/bootstrap.js";
 import type { applyWikiStructurePlan } from "./wiki/structure-apply.js";
 import type { lintPaperWiki } from "./wiki/lint.js";
 import type { planWikiStructure } from "./wiki/structure-plan.js";
-import type { mergePaperWikiAliases, searchPaperWiki, writePaperWikiPage, writePaperWikiSource } from "./wiki/content.js";
+import type {
+  deletePaperWikiPage,
+  mergePaperWikiAliases,
+  searchPaperWiki,
+  writePaperWikiPage,
+  writePaperWikiSource
+} from "./wiki/content.js";
 import type { PaperWikiPageWorker } from "./wiki/types.js";
 import type { paperWikiRelations } from "./wiki/relations.js";
 import type { generatePaperWikiSummary, PaperSummaryWorker } from "./wiki/summary.js";
@@ -79,6 +85,7 @@ type ToolName =
   | "wiki_health"
   | "wiki_health_fix"
   | "wiki_apply_structure_plan"
+  | "wiki_delete_page"
   | "wiki_lint"
   | "wiki_review_page"
   | "wiki_structure_plan"
@@ -129,7 +136,8 @@ export const TOOL_BOUNDARY_NAMES: Record<ToolBoundaryRole, readonly ToolName[]> 
     "wiki_lint",
     "wiki_review_page",
     "wiki_structure_plan",
-    "wiki_apply_structure_plan"
+    "wiki_apply_structure_plan",
+    "wiki_delete_page"
   ],
   "paper-download-subagent": [
     "list_files",
@@ -214,6 +222,7 @@ export interface ToolDependencies {
   searchPaperText?: typeof searchPaperText;
   writePaperWikiSource?: typeof writePaperWikiSource;
   writePaperWikiPage?: typeof writePaperWikiPage;
+  deletePaperWikiPage?: typeof deletePaperWikiPage;
   generatePaperWikiSummary?: typeof generatePaperWikiSummary;
   paperWikiRelations?: typeof paperWikiRelations;
   bootstrapPaperWikiPageEvidence?: typeof bootstrapPaperWikiPageEvidence;

@@ -419,6 +419,14 @@ type WikiApplyStructurePlanTool = {
   ) => Promise<ToolResult>;
 };
 
+type WikiDeletePageTool = {
+  execute: (
+    toolCallId: string,
+    args: { pageKey: string; reason?: string },
+    signal: undefined,
+  ) => Promise<ToolResult>;
+};
+
 type AnswerPaperWikiQuestionTool = {
   execute: (
     toolCallId: string,
@@ -1057,6 +1065,16 @@ function getWikiApplyStructurePlanTool(
   assert.ok(tool);
   assert.equal(typeof tool.execute, "function");
   return tool as WikiApplyStructurePlanTool;
+}
+
+function getWikiDeletePageTool(
+  workspace: string,
+  dependencies: agentTools.ToolDependencies = {},
+): WikiDeletePageTool {
+  const tool = createTools(workspace, dependencies).find((candidate) => candidate.name === "wiki_delete_page");
+  assert.ok(tool);
+  assert.equal(typeof tool.execute, "function");
+  return tool as WikiDeletePageTool;
 }
 
 function getAnswerPaperWikiQuestionTool(
@@ -3071,6 +3089,7 @@ const EXPECTED_DEFAULT_TOOL_NAMES = [
   "wiki_lint",
   "wiki_structure_plan",
   "wiki_apply_structure_plan",
+  "wiki_delete_page",
   "wiki_health_fix",
 ] as const;
 
@@ -3165,6 +3184,7 @@ test("createToolsForBoundary exposes isolated wiki and worker tool surfaces", as
     assert.ok(wikiAgentTools.some((tool) => tool.name === "search_paper_text"));
     assert.ok(wikiAgentTools.some((tool) => tool.name === "wiki_structure_plan"));
     assert.ok(wikiAgentTools.some((tool) => tool.name === "wiki_apply_structure_plan"));
+    assert.ok(wikiAgentTools.some((tool) => tool.name === "wiki_delete_page"));
     assert.ok(wikiAgentTools.some((tool) => tool.name === "wiki_health_fix"));
     assert.ok(!wikiAgentTools.some((tool) => tool.name === "generate_paper_wiki_summary"));
     assert.ok(!wikiAgentTools.some((tool) => tool.name === "web_search"));
@@ -5967,6 +5987,43 @@ test("wiki_apply_structure_plan delegates to the injected applier and returns de
       runVerification: true,
     }]);
     assert.equal((result.details as { status?: string }).status, "dry_run");
+  } finally {
+    await rm(workspace, { recursive: true, force: true });
+  }
+});
+
+test("wiki_delete_page delegates to the controlled page deleter and returns details", async () => {
+  const workspace = await mkdtemp(path.join(tmpdir(), "pi-agent-tools-"));
+  const capturedCalls: unknown[] = [];
+
+  try {
+    const tool = getWikiDeletePageTool(workspace, {
+      deletePaperWikiPage: async (options) => {
+        capturedCalls.push(options);
+        return {
+          pageKey: options.pageKey,
+          title: "Temporary Source Coverage",
+          pagePath: "knowledge-base/pages/temporary-source-coverage.md",
+          operationId: "delete_synthesis_page-test",
+          operationJournalPath: "knowledge-base/state/wiki-operations.jsonl",
+          indexPath: "knowledge-base/index.md",
+          logPath: "knowledge-base/log.md",
+        };
+      },
+    });
+
+    const result = await tool.execute("wiki-delete-page-call", {
+      pageKey: "temporary-source-coverage",
+      reason: "User rejected this maintenance synthesis page.",
+    }, undefined);
+
+    assert.deepEqual(capturedCalls, [{
+      workspaceDir: workspace,
+      pageKey: "temporary-source-coverage",
+      reason: "User rejected this maintenance synthesis page.",
+    }]);
+    assert.equal((result.details as { pagePath?: string }).pagePath, "knowledge-base/pages/temporary-source-coverage.md");
+    assert.equal((result.details as { operationJournalPath?: string }).operationJournalPath, "knowledge-base/state/wiki-operations.jsonl");
   } finally {
     await rm(workspace, { recursive: true, force: true });
   }

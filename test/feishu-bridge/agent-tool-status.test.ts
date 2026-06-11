@@ -39,6 +39,21 @@ test('formatAgentToolStatus shows wiki tool progress messages', () => {
   assert.match(status?.text ?? '', /superconducting-qubits\.md/);
 });
 
+test('formatAgentToolStatus shows controlled wiki page deletion starts', () => {
+  const status = formatAgentToolStatus({
+    type: 'tool_execution_start',
+    toolName: 'wiki_delete_page',
+    args: {
+      pageKey: 'temporary-source-coverage',
+    },
+  });
+
+  assert.equal(status?.phase, 'start');
+  assert.equal(status?.toolName, 'wiki_delete_page');
+  assert.match(status?.text ?? '', /开始删除 wiki 页面/);
+  assert.match(status?.text ?? '', /temporary-source-coverage/);
+});
+
 test('formatAgentToolStatus ignores tools that are not useful card progress', () => {
   assert.equal(formatAgentToolStatus({
     type: 'tool_execution_start',

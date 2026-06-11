@@ -12,6 +12,7 @@ import {
 } from "../../src/agent/paper/reading/paper-reader.js";
 import { savePaperWebPageParse } from "../../src/agent/paper/reading/engines/webpage.js";
 import {
+  deletePaperWikiPage,
   writePaperWikiPage,
   writePaperWikiSource
 } from "../../src/agent/wiki/content.js";
@@ -615,6 +616,93 @@ test("writePaperWikiPage saves a synthesis page and updates the wiki index", asy
       "knowledge-base/log.md"
     ]);
     assert.equal(complete?.operationId, page.operationId);
+  } finally {
+    await rm(workspace, { recursive: true, force: true });
+  }
+});
+
+test("deletePaperWikiPage removes a page, rebuilds the index, logs the deletion, and keeps journal audit", async () => {
+  const workspace = await createWorkspace();
+  try {
+    const page = await writePaperWikiPage({
+      workspaceDir: workspace,
+      topic: "temporary source coverage page",
+      pageKey: "temporary-source-coverage",
+      title: "Temporary Source Coverage",
+      pageMarkdown: "## Overview\n\nThis maintenance page should be removable [arxiv-2507.09690].",
+      sourceCitations: [
+        {
+          paperKey: "arxiv-2507.09690",
+          title: "Small Quantum LDPC Codes",
+          path: "knowledge-base/sources/arxiv-2507.09690/summary.md"
+        }
+      ]
+    });
+
+    const deletion = await deletePaperWikiPage({
+      workspaceDir: workspace,
+      pageKey: "temporary-source-coverage",
+      reason: "User rejected this maintenance synthesis page."
+    });
+
+    await assert.rejects(readFile(path.join(workspace, page.pagePath), "utf8"), /ENOENT/);
+    assert.equal(deletion.pageKey, "temporary-source-coverage");
+    assert.equal(deletion.pagePath, "knowledge-base/pages/temporary-source-coverage.md");
+    assert.equal(deletion.indexPath, "knowledge-base/index.md");
+    assert.equal(deletion.logPath, "knowledge-base/log.md");
+    assert.equal(deletion.operationJournalPath, "knowledge-base/state/wiki-operations.jsonl");
+
+    const index = await readFile(path.join(workspace, deletion.indexPath), "utf8");
+    assert.doesNotMatch(index, /Temporary Source Coverage/);
+    assert.doesNotMatch(index, /temporary-source-coverage/);
+
+    const log = await readFile(path.join(workspace, deletion.logPath), "utf8");
+    assert.match(log, /delete_page \| Temporary Source Coverage/);
+    assert.match(log, /User rejected this maintenance synthesis page\./);
+    assert.match(log, /knowledge-base\/pages\/temporary-source-coverage\.md/);
+
+    const journal = (await readFile(path.join(workspace, deletion.operationJournalPath), "utf8"))
+      .trim()
+      .split("\n")
+      .map((line) => JSON.parse(line) as Record<string, unknown>);
+    const begin = journal.find((event) => event.phase === "begin" && event.operationId === deletion.operationId);
+    const complete = journal.find((event) => event.phase === "complete" && event.operationId === deletion.operationId);
+    assert.equal(begin?.intent, "delete_synthesis_page");
+    assert.deepEqual(begin?.plannedFiles, [
+      "knowledge-base/pages/temporary-source-coverage.md",
+      "knowledge-base/index.md",
+      "knowledge-base/log.md"
+    ]);
+    assert.deepEqual(complete?.writtenFiles, [
+      "knowledge-base/pages/temporary-source-coverage.md",
+      "knowledge-base/index.md",
+      "knowledge-base/log.md"
+    ]);
+  } finally {
+    await rm(workspace, { recursive: true, force: true });
+  }
+});
+
+test("deletePaperWikiPage refuses non-page paths and missing pages before journaling", async () => {
+  const workspace = await createWorkspace();
+  try {
+    await assert.rejects(
+      deletePaperWikiPage({
+        workspaceDir: workspace,
+        pageKey: "../index",
+        reason: "Bad page key."
+      }),
+      /valid wiki page key/i
+    );
+    await assert.rejects(
+      deletePaperWikiPage({
+        workspaceDir: workspace,
+        pageKey: "missing-page",
+        reason: "Missing page."
+      }),
+      /does not exist/i
+    );
+    await assert.rejects(readFile(path.join(workspace, "knowledge-base/state/wiki-operations.jsonl"), "utf8"));
   } finally {
     await rm(workspace, { recursive: true, force: true });
   }

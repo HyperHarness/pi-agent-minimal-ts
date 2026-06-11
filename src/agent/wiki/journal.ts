@@ -8,6 +8,7 @@ import {
 export type WikiOperationIntent =
   | "write_source_summary"
   | "write_synthesis_page"
+  | "delete_synthesis_page"
   | "merge_aliases"
   | "apply_structure_plan"
   | "rebuild_index"
@@ -93,6 +94,7 @@ export async function completeWikiOperation(input: {
 function isWikiOperationIntent(value: unknown): value is WikiOperationIntent {
   return value === "write_source_summary" ||
     value === "write_synthesis_page" ||
+    value === "delete_synthesis_page" ||
     value === "merge_aliases" ||
     value === "apply_structure_plan" ||
     value === "rebuild_index" ||

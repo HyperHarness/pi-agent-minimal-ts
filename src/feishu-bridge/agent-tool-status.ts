@@ -26,6 +26,7 @@ const WIKI_TOOL_LABELS: Record<string, string> = {
   answer_research_question: '研究问答',
   bootstrap_wiki_page_evidence: '构建 wiki 页面证据',
   build_wiki_page: '生成 wiki 页面',
+  wiki_delete_page: '删除 wiki 页面',
   clarify_research_topic: '澄清研究主题',
   research_topic_bootstrap: '初始化研究主题',
   expand_research_topic: '扩展研究主题',
@@ -73,7 +74,7 @@ function summarizeArgs(args: unknown): string {
     return '';
   }
 
-  const fields = ['path', 'workspacePath', 'texPath', 'query', 'topic', 'question', 'paperKey']
+  const fields = ['path', 'workspacePath', 'texPath', 'query', 'topic', 'question', 'paperKey', 'pageKey']
     .map((key) => getStringField(args, key))
     .filter((value): value is string => Boolean(value));
 

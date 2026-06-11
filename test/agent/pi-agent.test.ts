@@ -112,6 +112,7 @@ test("default system prompt requires wiki evidence for scientific questions", ()
   assert.match(DEFAULT_SYSTEM_PROMPT, /wiki_lint/);
   assert.match(DEFAULT_SYSTEM_PROMPT, /wiki_structure_plan/);
   assert.match(DEFAULT_SYSTEM_PROMPT, /wiki_apply_structure_plan/);
+  assert.match(DEFAULT_SYSTEM_PROMPT, /wiki_delete_page/);
   assert.match(DEFAULT_SYSTEM_PROMPT, /cite/i);
   assert.match(DEFAULT_SYSTEM_PROMPT, /strict wiki-agent entrypoint/);
   assert.match(DEFAULT_SYSTEM_PROMPT, /wiki and paper workflows/);
