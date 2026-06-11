@@ -99,6 +99,7 @@ export interface PaperWebPageHtmlDiagnostic {
 
 const DEFAULT_USER_AGENT = "pi-agent-minimal-ts/1.0";
 const DEFAULT_PANDOC_TIMEOUT_MS = 60_000;
+const DEFAULT_IMAGE_FETCH_TIMEOUT_MS = 60_000;
 const MAX_DIRECT_IMAGE_ASSETS = 200;
 const MAX_DIRECT_IMAGE_BYTES = 25 * 1024 * 1024;
 const execFileAsync = promisify(execFile);
@@ -232,6 +233,20 @@ function isArxivHost(url: URL): boolean {
 function normalizeUserAgent(env: FetchPaperWebPageEnvironment): string {
   const userAgent = env.PI_FETCH_USER_AGENT?.trim();
   return userAgent || DEFAULT_USER_AGENT;
+}
+
+function resolveImageFetchTimeoutMs(env: FetchPaperWebPageEnvironment, pageTimeoutMs: number): number {
+  const rawValue = env.PI_FETCH_IMAGE_TIMEOUT_MS?.trim();
+  if (!rawValue) {
+    return Math.max(pageTimeoutMs, DEFAULT_IMAGE_FETCH_TIMEOUT_MS);
+  }
+
+  const parsedValue = Number(rawValue);
+  if (!Number.isFinite(parsedValue) || parsedValue <= 0 || Math.floor(parsedValue) <= 0) {
+    throw new Error("Invalid PI_FETCH_IMAGE_TIMEOUT_MS value.");
+  }
+
+  return Math.floor(parsedValue);
 }
 
 function decodeHtmlEntities(text: string): string {
@@ -1683,6 +1698,7 @@ export async function fetchPaperWebPage(
   const fetchImpl = options.fetchImpl ?? globalThis.fetch.bind(globalThis);
   const endpoint = normalizeUrl(options.url);
   const requestTimeoutMs = resolveFetchTimeoutMs(env);
+  const imageTimeoutMs = resolveImageFetchTimeoutMs(env, requestTimeoutMs);
   const timeout = withRequestTimeout(requestTimeoutMs);
   const userAgent = normalizeUserAgent(env);
 
@@ -1754,7 +1770,7 @@ export async function fetchPaperWebPage(
       candidates: collectImageAssetCandidates(cleanedBlocks.html, resolveArticleAssetBaseUrl(new URL(finalUrl))),
       fetchImpl,
       userAgent,
-      timeoutMs: requestTimeoutMs
+      timeoutMs: imageTimeoutMs
     });
 
     return assets.length > 0
