@@ -1,6 +1,6 @@
 import { createHash } from "node:crypto";
 import { execFile } from "node:child_process";
-import { access, mkdir, readFile, writeFile } from "node:fs/promises";
+import { access, mkdir, readFile, rm, writeFile } from "node:fs/promises";
 import path from "node:path";
 import { promisify } from "node:util";
 import {
@@ -1452,10 +1452,14 @@ async function tryDownloadArxivTexSource(options: {
     await mkdir(sourceDir, { recursive: true });
     const archivePath = path.join(sourceDir, "source.tar");
     await writeFile(archivePath, bytes);
-    await execFileAsync("tar", ["-xzf", archivePath, "-C", sourceDir], {
-      timeout: 60_000,
-      maxBuffer: 8 * 1024 * 1024
-    }).catch(() => undefined);
+    try {
+      await execFileAsync("tar", ["-xzf", archivePath, "-C", sourceDir], {
+        timeout: 60_000,
+        maxBuffer: 8 * 1024 * 1024
+      }).catch(() => undefined);
+    } finally {
+      await rm(archivePath, { force: true });
+    }
   } catch {
     // TeX source is an enhancement path; PDF download remains the durable baseline.
   }

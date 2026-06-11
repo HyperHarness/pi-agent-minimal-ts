@@ -1,9 +1,11 @@
 import test from "node:test";
 import assert from "node:assert/strict";
+import { execFile } from "node:child_process";
 import { createHash } from "node:crypto";
 import { mkdir, mkdtemp, readFile, rm, writeFile } from "node:fs/promises";
 import os from "node:os";
 import path from "node:path";
+import { promisify } from "node:util";
 import {
   downloadLatestApsPapers,
   downloadPaper,
@@ -31,6 +33,8 @@ type SearchWebCall = {
   query: string;
   maxResults?: number;
 };
+
+const execFileAsync = promisify(execFile);
 
 function stripRecordManifest(record: Record<string, unknown>): Record<string, unknown> {
   const {
@@ -63,6 +67,22 @@ function createWebResult(overrides: Partial<WebSearchResult> = {}): WebSearchRes
     snippet: "web summary",
     ...overrides
   };
+}
+
+async function createTarGzBuffer(workspaceDir: string, files: Record<string, string>): Promise<Buffer> {
+  const sourceDir = path.join(workspaceDir, "tar-source");
+  const archivePath = path.join(workspaceDir, "source.tar");
+  await mkdir(sourceDir, { recursive: true });
+  for (const [filename, content] of Object.entries(files)) {
+    const filePath = path.join(sourceDir, filename);
+    await mkdir(path.dirname(filePath), { recursive: true });
+    await writeFile(filePath, content, "utf8");
+  }
+  await execFileAsync("tar", ["-czf", archivePath, "-C", sourceDir, "."], {
+    timeout: 60_000,
+    maxBuffer: 8 * 1024 * 1024
+  });
+  return readFile(archivePath);
 }
 
 test("searchPapers merges duplicate titles and keeps publisher sources primary", async () => {
@@ -635,6 +655,57 @@ test("downloadPaper downloads arXiv ids, writes the PDF file, and returns downlo
     assert.equal(savedRecord.download.status, "downloaded");
     assert.equal(savedRecord.reading.status, "not_ready");
   } finally {
+    await rm(workspaceDir, { recursive: true, force: true });
+  }
+});
+
+test("downloadPaper unpacks arXiv TeX source without retaining source tarballs", async () => {
+  const workspaceDir = await mkdtemp(path.join(os.tmpdir(), "paper-manager-"));
+  const originalFetch = globalThis.fetch;
+  const pdfBytes = Buffer.from("%PDF-1.4\nmock pdf\n", "utf8");
+
+  try {
+    const tarBytes = await createTarGzBuffer(workspaceDir, {
+      "main.tex": "\\title{Compact source}\\begin{document}Body\\end{document}\n",
+      "figures/figure.png": "fake png bytes"
+    });
+    const fetchCalls: string[] = [];
+    globalThis.fetch = (async (input) => {
+      const url = String(input);
+      fetchCalls.push(url);
+      if (url === "https://arxiv.org/pdf/2401.01234.pdf") {
+        return new Response(pdfBytes, {
+          status: 200,
+          headers: { "content-type": "application/pdf" }
+        });
+      }
+      if (url === "https://arxiv.org/e-print/2401.01234") {
+        return new Response(new Uint8Array(tarBytes), {
+          status: 200,
+          headers: { "content-type": "application/x-gzip" }
+        });
+      }
+      throw new Error(`Unexpected fetch: ${url}`);
+    }) as typeof fetch;
+
+    const result = await downloadPaper({
+      workspaceDir,
+      id: "2401.01234"
+    });
+
+    assert.equal(result.status, "downloaded");
+    assert.deepEqual(fetchCalls, [
+      "https://arxiv.org/pdf/2401.01234.pdf",
+      "https://arxiv.org/e-print/2401.01234"
+    ]);
+    const sourceDir = path.join(workspaceDir, "knowledge-base", "raw", "arxiv-sources", "2401.01234");
+    assert.equal(
+      await readFile(path.join(sourceDir, "main.tex"), "utf8"),
+      "\\title{Compact source}\\begin{document}Body\\end{document}\n"
+    );
+    await assert.rejects(readFile(path.join(sourceDir, "source.tar")), /ENOENT/);
+  } finally {
+    globalThis.fetch = originalFetch;
     await rm(workspaceDir, { recursive: true, force: true });
   }
 });
