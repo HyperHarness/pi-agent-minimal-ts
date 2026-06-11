@@ -21,6 +21,10 @@ import {
   searchPapers
 } from "./acquisition/paper-manager.js";
 import {
+  downloadPaperList,
+  stagePaperDownloadList
+} from "./acquisition/paper-download-list.js";
+import {
   inspectPaper,
   parsePaper,
   readPaperSection,
@@ -74,6 +78,45 @@ const downloadPaperParameters = Type.Object({
     Type.Boolean({
       description:
         "Set true when the user explicitly asks to download publisher supplemental or supplementary materials. For APS papers, this queues a supplemental-material browser extension job even when the main PDF is already downloaded."
+    })
+  )
+});
+
+const paperDownloadListCandidateParameters = Type.Object({
+  id: Type.Optional(Type.String({ description: "arXiv identifier or other paper identifier recognized by download_paper." })),
+  url: Type.Optional(Type.String({ description: "Paper article, DOI resolver, publisher, arXiv, or PDF URL." })),
+  title: Type.Optional(Type.String({ description: "Exact title when known, used for publisher fallback and reporting." })),
+  note: Type.Optional(Type.String({ description: "Optional note about where the candidate came from." }))
+});
+
+const stagePaperDownloadListParameters = Type.Object({
+  candidates: Type.Array(paperDownloadListCandidateParameters, {
+    description:
+      "Candidate papers extracted by the agent from a non-strict reading list. Each candidate should include an id, url, or exact title."
+  }),
+  listPath: Type.Optional(
+    Type.String({
+      description:
+        "Optional workspace-relative path for the temporary list. Defaults to .memory/paper-download-lists/paper-download-list-<timestamp>.md."
+    })
+  )
+});
+
+const downloadPaperListParameters = Type.Object({
+  listPath: Type.String({
+    description:
+      "Workspace-relative temporary paper download list produced by stage_paper_download_list."
+  }),
+  maxItems: Type.Optional(
+    Type.Integer({
+      description: "Maximum missing candidates to attempt in this call. Defaults to 50.",
+      minimum: 0
+    })
+  ),
+  dryRun: Type.Optional(
+    Type.Boolean({
+      description:
+        "When true, compare against the local library and rewrite the list without calling download_paper."
     })
   )
 });
@@ -175,6 +218,8 @@ const searchPaperTextParameters = Type.Object({
 
 type SearchPapersParameters = Static<typeof searchPapersParameters>;
 type DownloadPaperParameters = Static<typeof downloadPaperParameters>;
+type StagePaperDownloadListParameters = Static<typeof stagePaperDownloadListParameters>;
+type DownloadPaperListParameters = Static<typeof downloadPaperListParameters>;
 type BlockPaperDownloadParameters = Static<typeof blockPaperDownloadParameters>;
 type RegisterManualPaperDownloadParameters = Static<typeof registerManualPaperDownloadParameters>;
 type OpenPaperPageForLoginParameters = Static<typeof openPaperPageForLoginParameters>;
@@ -235,6 +280,14 @@ export type DownloadPaperClosedLoopDetails = PaperDownloadResult & {
 type DownloadPaperTool = AgentTool<
   typeof downloadPaperParameters,
   DownloadPaperClosedLoopDetails
+>;
+type StagePaperDownloadListTool = AgentTool<
+  typeof stagePaperDownloadListParameters,
+  Awaited<ReturnType<typeof stagePaperDownloadList>>
+>;
+type DownloadPaperListTool = AgentTool<
+  typeof downloadPaperListParameters,
+  Awaited<ReturnType<typeof downloadPaperList>>
 >;
 type BlockPaperDownloadTool = AgentTool<
   typeof blockPaperDownloadParameters,
@@ -995,6 +1048,68 @@ export function createPaperTools(input: {
     }
   };
 
+  const stagePaperDownloadListTool: StagePaperDownloadListTool = {
+    name: "stage_paper_download_list",
+    label: "Stage Paper Download List",
+    description:
+      "Writes a normalized temporary paper-download list from candidates the agent extracted from a non-strict Markdown/text reading list. Use this after inspecting a free-form local reading list and before download_paper_list. The temporary list lives under .memory/paper-download-lists/ and is rewritten as downloads complete.",
+    parameters: stagePaperDownloadListParameters,
+    executionMode: "sequential",
+    execute: async (_toolCallId: string, args: StagePaperDownloadListParameters) => {
+      const result = await stagePaperDownloadList({
+        workspaceDir: resolvedWorkspaceDir,
+        candidates: args.candidates,
+        ...(args.listPath ? { listPath: args.listPath } : {})
+      });
+
+      return {
+        content: [{ type: "text", text: JSON.stringify(result) }],
+        details: result
+      };
+    }
+  };
+
+  const downloadPaperListTool: DownloadPaperListTool = {
+    name: "download_paper_list",
+    label: "Download Paper List",
+    description:
+      "Compares a temporary paper-download list against the local paper library, skips already downloaded papers, calls download_paper for missing candidates one by one, and rewrites the list so only unresolved candidates remain. Use this instead of manually looping over many missing papers.",
+    parameters: downloadPaperListParameters,
+    executionMode: "sequential",
+    execute: async (_toolCallId: string, args: DownloadPaperListParameters) => {
+      const result = await downloadPaperList({
+        workspaceDir: resolvedWorkspaceDir,
+        listPath: args.listPath,
+        ...(args.maxItems !== undefined ? { maxItems: args.maxItems } : {}),
+        ...(args.dryRun !== undefined ? { dryRun: args.dryRun } : {}),
+        downloadPaperImpl: async (downloadArgs) => {
+          const rawResult = await downloadPaperImpl({
+            workspaceDir: resolvedWorkspaceDir,
+            ...(downloadArgs.id ? { id: downloadArgs.id } : {}),
+            ...(downloadArgs.url ? { url: downloadArgs.url } : {}),
+            ...(downloadArgs.title ? { title: downloadArgs.title } : {}),
+            ...(dependencies.downloadPaper === undefined && citationMetadataFetchImpl
+              ? { citationMetadataFetchImpl }
+              : {}),
+            ...(dependencies.searchArxiv ? { searchArxivImpl: dependencies.searchArxiv } : {})
+          });
+          const reading = shouldDescribeDownloadReadingClosure
+            ? await describeDownloadReadingClosure(rawResult)
+            : undefined;
+          return {
+            ...rawResult,
+            ...(reading ? { reading } : {})
+          };
+        }
+      });
+
+      return {
+        content: [{ type: "text", text: JSON.stringify(result) }],
+        details: result
+      };
+    }
+  };
+
   const blockPaperDownloadTool: BlockPaperDownloadTool = {
     name: "block_paper_download",
     label: "Block Paper Download",
@@ -1172,6 +1287,8 @@ export function createPaperTools(input: {
     defaultTools: [
       searchPapersTool,
       downloadPaperTool,
+      stagePaperDownloadListTool,
+      downloadPaperListTool,
       blockPaperDownloadTool,
       inspectPaperTool,
       readPaperSectionTool,

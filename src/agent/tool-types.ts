@@ -41,6 +41,7 @@ type ToolName =
   | "compile_latex"
   | "delete_file"
   | "download_paper"
+  | "download_paper_list"
   | "expand_research_topic"
   | "fetch_paper_webpage"
   | "fetch_url"
@@ -73,6 +74,7 @@ type ToolName =
   | "search_paper_text"
   | "search_paper_wiki"
   | "search_papers"
+  | "stage_paper_download_list"
   | "web_search"
   | "wiki_health"
   | "wiki_health_fix"
@@ -137,6 +139,8 @@ export const TOOL_BOUNDARY_NAMES: Record<ToolBoundaryRole, readonly ToolName[]> 
     "fetch_url",
     "search_papers",
     "download_paper",
+    "stage_paper_download_list",
+    "download_paper_list",
     "block_paper_download",
     "inspect_paper",
     "read_paper_section",

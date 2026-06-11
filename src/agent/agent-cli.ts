@@ -74,6 +74,8 @@ const ROUTED_AGENT_TOOL_NAMES = [
   "fetch_url",
   "search_papers",
   "download_paper",
+  "stage_paper_download_list",
+  "download_paper_list",
   "block_paper_download",
   "inspect_paper",
   "read_paper_section",

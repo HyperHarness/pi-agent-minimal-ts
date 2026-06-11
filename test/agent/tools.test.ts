@@ -219,6 +219,25 @@ type DownloadPaperTool = {
   ) => Promise<ToolResult>;
 };
 
+type StagePaperDownloadListTool = {
+  execute: (
+    toolCallId: string,
+    args: {
+      candidates: Array<{ id?: string; url?: string; title?: string; note?: string }>;
+      listPath?: string;
+    },
+    signal: undefined,
+  ) => Promise<ToolResult>;
+};
+
+type DownloadPaperListTool = {
+  execute: (
+    toolCallId: string,
+    args: { listPath: string; maxItems?: number; dryRun?: boolean },
+    signal: undefined,
+  ) => Promise<ToolResult>;
+};
+
 type OpenPaperPageForLoginTool = {
   execute: (
     toolCallId: string,
@@ -3032,6 +3051,8 @@ const EXPECTED_DEFAULT_TOOL_NAMES = [
   "fetch_url",
   "search_papers",
   "download_paper",
+  "stage_paper_download_list",
+  "download_paper_list",
   "block_paper_download",
   "inspect_paper",
   "read_paper_section",
@@ -3168,6 +3189,8 @@ test("createToolsForBoundary exposes isolated wiki and worker tool surfaces", as
     assert.ok(downloadTools.some((tool) => tool.name === "read_file"));
     assert.ok(downloadTools.some((tool) => tool.name === "get_time"));
     assert.ok(downloadTools.some((tool) => tool.name === "download_paper"));
+    assert.ok(downloadTools.some((tool) => tool.name === "stage_paper_download_list"));
+    assert.ok(downloadTools.some((tool) => tool.name === "download_paper_list"));
     assert.ok(downloadTools.some((tool) => tool.name === "parse_paper"));
     assert.ok(!downloadTools.some((tool) => tool.name === "build_wiki_page"));
     assert.ok(!downloadTools.some((tool) => tool.name === "wiki_structure_plan"));
@@ -3956,6 +3979,185 @@ test("download_paper refreshes arXiv webpage parsing when only a PDF parse exist
     assert.equal((result.details as { reading?: { status?: string } }).reading?.status, "parsed");
     assert.equal((result.details as { reading?: { strategy?: string } }).reading?.strategy, "webpage");
     assert.equal((result.details as { reading?: { engine?: string } }).reading?.engine, "webpage");
+  } finally {
+    await rm(workspace, { recursive: true, force: true });
+  }
+});
+
+test("stage_paper_download_list writes a normalized temporary candidate list", async () => {
+  const workspace = await mkdtemp(path.join(tmpdir(), "pi-agent-paper-list-"));
+
+  try {
+    const tools = createToolsForBoundary(workspace, "paper-download-subagent");
+    const tool = tools.find((candidate) => candidate.name === "stage_paper_download_list") as
+      | StagePaperDownloadListTool
+      | undefined;
+    assert.ok(tool);
+
+    const result = await tool.execute(
+      "stage-list",
+      {
+        candidates: [
+          { id: "arXiv:2406.07237", title: "First candidate" },
+          { url: "https://arxiv.org/abs/2406.07237", title: "Duplicate candidate" },
+          { url: "https://doi.org/10.1103/PhysRevLett.127.080505", title: "Publisher candidate" }
+        ]
+      },
+      undefined,
+    );
+
+    const details = result.details as {
+      listPath?: string;
+      totalCandidates?: number;
+      retainedCandidates?: number;
+      duplicatesRemoved?: number;
+    };
+    assert.equal(details.totalCandidates, 3);
+    assert.equal(details.retainedCandidates, 2);
+    assert.equal(details.duplicatesRemoved, 1);
+    assert.match(details.listPath ?? "", /^\.memory\/paper-download-lists\/paper-download-list-/);
+
+    const listMarkdown = await readFile(path.join(workspace, details.listPath ?? ""), "utf8");
+    assert.match(listMarkdown, /- id: 2406\.07237/);
+    assert.match(listMarkdown, /- id: 2406\.07237; title: First candidate/);
+    assert.match(listMarkdown, /- url: "https:\/\/doi\.org\/10\.1103\/PhysRevLett\.127\.080505"/);
+    assert.doesNotMatch(listMarkdown, /Duplicate candidate/);
+  } finally {
+    await rm(workspace, { recursive: true, force: true });
+  }
+});
+
+test("download_paper_list skips already downloaded candidates and rewrites the list with unresolved items", async () => {
+  const workspace = await mkdtemp(path.join(tmpdir(), "pi-agent-paper-list-"));
+  const existingPdfPath = path.join(workspace, "knowledge-base", "raw", "pdfs", "arxiv-2406.07237.pdf");
+  const calls: Array<{ id?: string; url?: string; title?: string }> = [];
+
+  try {
+    await mkdir(path.dirname(existingPdfPath), { recursive: true });
+    await writeFile(existingPdfPath, "%PDF-1.7\nmock pdf\n", "utf8");
+    await writePaperRecord({
+      workspaceDir: workspace,
+      record: {
+        source: "arxiv",
+        articleUrl: "https://arxiv.org/abs/2406.07237",
+        recordedAt: "2026-06-11T00:00:00.000Z",
+        handlingMethod: "direct_http",
+        status: "downloaded",
+        canonicalId: "2406.07237",
+        pdfUrl: "https://arxiv.org/pdf/2406.07237.pdf",
+        downloadPath: existingPdfPath,
+      },
+    });
+
+    const tools = createToolsForBoundary(workspace, "paper-download-subagent", {
+      downloadPaper: async (options) => {
+        calls.push({ id: options.id, url: options.url, title: options.title });
+        if (options.id === "2504.15538") {
+          return {
+            status: "downloaded",
+            source: "arxiv",
+            canonicalId: "2504.15538",
+            articleUrl: "https://arxiv.org/abs/2504.15538",
+            finalPdfUrl: "https://arxiv.org/pdf/2504.15538.pdf",
+            path: path.join(workspace, "knowledge-base", "raw", "pdfs", "arxiv-2504.15538.pdf"),
+            recordPath: path.join(workspace, "knowledge-base", "sources", "arxiv-2504.15538", "acquisition.json"),
+            recordedAt: "2026-06-11T00:01:00.000Z",
+          };
+        }
+        throw new Error("publisher unavailable");
+      }
+    });
+    const stageTool = tools.find((candidate) => candidate.name === "stage_paper_download_list") as StagePaperDownloadListTool;
+    const downloadListTool = tools.find((candidate) => candidate.name === "download_paper_list") as
+      | DownloadPaperListTool
+      | undefined;
+    assert.ok(downloadListTool);
+    const staged = await stageTool.execute(
+      "stage-list",
+      {
+        candidates: [
+          { id: "2406.07237", title: "Already downloaded" },
+          { id: "2504.15538", title: "Missing arXiv" },
+          { url: "https://doi.org/10.1234/example", title: "Publisher failure" }
+        ]
+      },
+      undefined,
+    );
+
+    const result = await downloadListTool.execute(
+      "download-list",
+      { listPath: (staged.details as { listPath: string }).listPath },
+      undefined,
+    );
+
+    assert.deepEqual(calls, [
+      { id: "2504.15538", url: undefined, title: "Missing arXiv" },
+      { id: undefined, url: "https://doi.org/10.1234/example", title: "Publisher failure" }
+    ]);
+    const details = result.details as {
+      totalCandidates?: number;
+      skippedAlreadyDownloaded?: number;
+      downloaded?: number;
+      failed?: number;
+      remainingCandidates?: number;
+      listPath?: string;
+    };
+    assert.equal(details.totalCandidates, 3);
+    assert.equal(details.skippedAlreadyDownloaded, 1);
+    assert.equal(details.downloaded, 1);
+    assert.equal(details.failed, 1);
+    assert.equal(details.remainingCandidates, 1);
+
+    const remainingList = await readFile(path.join(workspace, details.listPath ?? ""), "utf8");
+    assert.doesNotMatch(remainingList, /2406\.07237/);
+    assert.doesNotMatch(remainingList, /2504\.15538/);
+    assert.match(remainingList, /https:\/\/doi\.org\/10\.1234\/example/);
+    assert.match(remainingList, /lastError: publisher unavailable/);
+  } finally {
+    await rm(workspace, { recursive: true, force: true });
+  }
+});
+
+test("download_paper_list keeps title-only candidates unresolved instead of calling download_paper", async () => {
+  const workspace = await mkdtemp(path.join(tmpdir(), "pi-agent-paper-list-"));
+  const calls: Array<{ id?: string; url?: string; title?: string }> = [];
+
+  try {
+    const tools = createToolsForBoundary(workspace, "paper-download-subagent", {
+      downloadPaper: async (options) => {
+        calls.push({ id: options.id, url: options.url, title: options.title });
+        throw new Error("download_paper should not be called for title-only candidates");
+      }
+    });
+    const stageTool = tools.find((candidate) => candidate.name === "stage_paper_download_list") as StagePaperDownloadListTool;
+    const downloadListTool = tools.find((candidate) => candidate.name === "download_paper_list") as DownloadPaperListTool;
+    const staged = await stageTool.execute(
+      "stage-list",
+      { candidates: [{ title: "Title without a stable locator" }] },
+      undefined,
+    );
+
+    const result = await downloadListTool.execute(
+      "download-list",
+      { listPath: (staged.details as { listPath: string }).listPath },
+      undefined,
+    );
+
+    assert.deepEqual(calls, []);
+    const details = result.details as {
+      attempted?: number;
+      downloaded?: number;
+      failed?: number;
+      remainingCandidates?: number;
+      listPath?: string;
+    };
+    assert.equal(details.attempted, 0);
+    assert.equal(details.downloaded, 0);
+    assert.equal(details.failed, 1);
+    assert.equal(details.remainingCandidates, 1);
+    const remainingList = await readFile(path.join(workspace, details.listPath ?? ""), "utf8");
+    assert.match(remainingList, /title: Title without a stable locator/);
+    assert.match(remainingList, /lastError: Candidate lacks id or url; search_papers or add a stable locator before retrying\./);
   } finally {
     await rm(workspace, { recursive: true, force: true });
   }

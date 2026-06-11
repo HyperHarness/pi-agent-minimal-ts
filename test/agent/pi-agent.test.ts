@@ -1417,11 +1417,24 @@ test("runSessionPrompt paper download worker reads sibling Markdown reading list
     ].join("\n"),
     "utf8"
   );
+  const stagedListPath = ".memory/paper-download-lists/paper-download-list-test.md";
   registration.setResponses([
     fauxAssistantMessage([fauxToolCall("read_file", { path: listPath })], {
       stopReason: "toolUse"
     }),
-    fauxAssistantMessage([fauxToolCall("download_paper", { url: "https://example.com/research/krantz-superconducting-qubits" })], {
+    fauxAssistantMessage([fauxToolCall("stage_paper_download_list", {
+      listPath: stagedListPath,
+      candidates: [
+        { id: "1904.06560", title: "Krantz et al." },
+        { url: "https://example.com/research/krantz-superconducting-qubits" }
+      ]
+    })], {
+      stopReason: "toolUse"
+    }),
+    fauxAssistantMessage([fauxToolCall("download_paper_list", {
+      listPath: stagedListPath,
+      dryRun: true
+    })], {
       stopReason: "toolUse"
     }),
     fauxAssistantMessage([fauxText("Downloaded papers from the Markdown reading list.")])
@@ -1459,7 +1472,15 @@ test("runSessionPrompt paper download worker reads sibling Markdown reading list
       observedEvents.some(
         (event): event is ToolExecutionEndEvent =>
           event.type === "tool_execution_end" &&
-          event.toolName === "download_paper" &&
+          event.toolName === "stage_paper_download_list" &&
+          !event.isError
+      )
+    );
+    assert.ok(
+      observedEvents.some(
+        (event): event is ToolExecutionEndEvent =>
+          event.type === "tool_execution_end" &&
+          event.toolName === "download_paper_list" &&
           !event.isError
       )
     );
@@ -1469,7 +1490,7 @@ test("runSessionPrompt paper download worker reads sibling Markdown reading list
       toolsUsed?: string[];
     };
     assert.equal(handoff.role, "paper-download-subagent");
-    assert.deepEqual(handoff.toolsUsed, ["read_file", "download_paper"]);
+    assert.deepEqual(handoff.toolsUsed, ["read_file", "stage_paper_download_list", "download_paper_list"]);
   } finally {
     registration.unregister();
     await rm(baseDir, { recursive: true, force: true });
