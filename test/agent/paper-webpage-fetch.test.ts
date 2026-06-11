@@ -611,6 +611,116 @@ test("fetchPaperWebPage downloads direct HTML image assets", async () => {
   }
 });
 
+test("savePaperWebPageParse rewrites root-relative arXiv asset links to local assets", async () => {
+  const workspace = await mkdtemp(path.join(tmpdir(), "pi-paper-webpage-arxiv-root-assets-"));
+  try {
+    const extraction = parsePaperWebPageHtml({
+      url: "https://arxiv.org/html/2203.11451",
+      html: `
+        <html>
+          <head><meta name="citation_title" content="arXiv root-relative assets"></head>
+          <body>
+            <article>
+              <h1>arXiv root-relative assets</h1>
+              <p>${"Article body. ".repeat(200)}</p>
+              <figure>
+                <img src="/html/2203.11451/assets/x5.png" alt="Figure 5">
+                <figcaption>Figure 5: Root-relative figure.</figcaption>
+              </figure>
+            </article>
+          </body>
+        </html>
+      `
+    });
+
+    const result = await savePaperWebPageParse({
+      workspaceDir: workspace,
+      paperKey: "arxiv-2203.11451",
+      extraction: {
+        ...extraction,
+        metadata: {
+          ...extraction.metadata,
+          comments: "14 pages, 1 figure",
+          expectedFigureCount: 1
+        },
+        assets: [
+          {
+            url: "https://arxiv.org/html/2203.11451/assets/x5.png",
+            originalUrl: "/html/2203.11451/assets/x5.png",
+            filename: "x5.png",
+            mimeType: "image/png",
+            dataBase64: Buffer.from("png-5").toString("base64")
+          }
+        ]
+      }
+    });
+
+    const markdown = await readFile(result.artifacts.markdownPath, "utf8");
+    const html = await readFile(path.join(path.dirname(result.artifacts.markdownPath), "document.html"), "utf8");
+    assert.match(markdown, /!\[[^\]]*]\(assets\/x5\.png\)/);
+    assert.doesNotMatch(markdown, /\/html\/2203\.11451\/assets\/x5\.png/);
+    assert.match(html, /src="assets\/x5\.png"/);
+    assert.equal(result.quality.status, "good");
+  } finally {
+    await rm(workspace, { recursive: true, force: true });
+  }
+});
+
+test("savePaperWebPageParse rewrites bare arXiv image links to local assets", async () => {
+  const workspace = await mkdtemp(path.join(tmpdir(), "pi-paper-webpage-arxiv-bare-assets-"));
+  try {
+    const extraction = parsePaperWebPageHtml({
+      url: "https://arxiv.org/html/2409.04967",
+      html: `
+        <html>
+          <head><meta name="citation_title" content="arXiv bare assets"></head>
+          <body>
+            <article>
+              <h1>arXiv bare assets</h1>
+              <p>${"Article body. ".repeat(200)}</p>
+              <figure>
+                <img src="x8.png" alt="Figure A1">
+                <figcaption>Figure A1: Bare figure.</figcaption>
+              </figure>
+            </article>
+          </body>
+        </html>
+      `
+    });
+
+    const result = await savePaperWebPageParse({
+      workspaceDir: workspace,
+      paperKey: "arxiv-2409.04967",
+      extraction: {
+        ...extraction,
+        metadata: {
+          ...extraction.metadata,
+          comments: "27 pages, 1 figure",
+          expectedFigureCount: 1
+        },
+        assets: [
+          {
+            url: "https://arxiv.org/html/2409.04967/x8.png",
+            originalUrl: "x8.png",
+            filename: "x8.png",
+            mimeType: "image/png",
+            dataBase64: Buffer.from("png-8").toString("base64")
+          }
+        ]
+      }
+    });
+
+    const markdown = await readFile(result.artifacts.markdownPath, "utf8");
+    const html = await readFile(path.join(path.dirname(result.artifacts.markdownPath), "document.html"), "utf8");
+    assert.match(markdown, /!\[[^\]]*]\(assets\/x8\.png\)/);
+    assert.doesNotMatch(markdown, /\(x8\.png\)/);
+    assert.match(html, /src="assets\/x8\.png"/);
+    assert.equal(result.quality.status, "good");
+  } finally {
+    await rm(workspace, { recursive: true, force: true });
+  }
+});
+
 test("fetchPaperWebPage does not let one slow arXiv image prevent later image assets", async () => {
   const workspace = await mkdtemp(path.join(tmpdir(), "pi-paper-webpage-arxiv-assets-timeout-"));
   const requestedUrls: string[] = [];

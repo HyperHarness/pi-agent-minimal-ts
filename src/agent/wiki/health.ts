@@ -3,6 +3,12 @@ import type { Dirent } from "node:fs";
 import path from "node:path";
 import { listLocalPapers, type LocalPaperEntry, type LocalPaperParseSummary } from "../paper/storage/local-paper-library.js";
 import { downloadPaper, type DownloadPaperOptions } from "../paper/acquisition/paper-manager.js";
+import {
+  fetchPaperWebPage,
+  type FetchPaperWebPageOptions,
+  type PaperWebPageExtraction
+} from "../paper/acquisition/paper-webpage-fetch.js";
+import { savePaperWebPageParse } from "../paper/reading/engines/webpage.js";
 import { parsePaper, type ParsePaperOptions } from "../paper/reading/paper-reader.js";
 import {
   generatePaperWikiSummary,
@@ -115,6 +121,7 @@ export interface WikiHealthFixOptions extends WikiHealthOptions {
   dryRun?: boolean;
   paperDownloadWorker?: PaperDownloadWorker;
   downloadPaperImpl?: (options: DownloadPaperOptions) => Promise<Awaited<ReturnType<typeof downloadPaper>>>;
+  fetchPaperWebPageImpl?: (options: FetchPaperWebPageOptions) => Promise<PaperWebPageExtraction>;
   parsePaperImpl?: (options: ParsePaperOptions) => Promise<PaperParseResult>;
   generatePaperWikiSummaryImpl?: (
     options: GeneratePaperWikiSummaryOptions
@@ -1195,6 +1202,80 @@ async function updateRecordWithParseResult(input: {
   });
 }
 
+function issueIsArxivMissingWebpageAsset(issue: WikiHealthIssue): boolean {
+  return Boolean(
+    issue.kind === "low_quality" &&
+    issue.source === "arxiv" &&
+    issue.quality?.engine === "webpage" &&
+    issue.articleUrl &&
+    issue.recordPath &&
+    issue.quality.warnings.some((warning) =>
+      /arxiv comments report \d+ figures?, but only \d+ webpage image assets? (?:was|were) downloaded/i.test(warning)
+    )
+  );
+}
+
+async function fixByRefreshingWebpage(input: {
+  workspaceDir: string;
+  issue: WikiHealthIssue;
+  threshold: number;
+  fetchPaperWebPageImpl: NonNullable<WikiHealthFixOptions["fetchPaperWebPageImpl"]>;
+  dryRun: boolean;
+}): Promise<WikiHealthFixItem> {
+  if (!input.issue.articleUrl || !input.issue.recordPath) {
+    return skippedFix(input.issue, "Cannot refresh webpage automatically because the issue lacks articleUrl or recordPath.");
+  }
+  if (input.dryRun) {
+    return {
+      issue: input.issue,
+      status: "skipped",
+      action: "refresh_webpage",
+      message: `Dry run: would refresh webpage parse for ${input.issue.articleUrl}.`
+    };
+  }
+
+  try {
+    const extraction = await input.fetchPaperWebPageImpl({
+      url: input.issue.articleUrl
+    });
+    const result = await savePaperWebPageParse({
+      workspaceDir: input.workspaceDir,
+      paperKey: input.issue.paperKey,
+      extraction,
+      force: true
+    });
+    await updateRecordWithParseResult({
+      workspaceDir: input.workspaceDir,
+      recordPath: input.issue.recordPath,
+      result
+    });
+    if (!parseQualityIsAcceptable(result, input.threshold)) {
+      return {
+        issue: input.issue,
+        status: "failed",
+        action: "refresh_webpage",
+        message:
+          `Webpage refresh completed, but quality is still ${result.quality.status} with score ${result.quality.score}.`,
+        details: result
+      };
+    }
+    return {
+      issue: input.issue,
+      status: "fixed",
+      action: "refresh_webpage",
+      message: `Refreshed webpage parse for ${input.issue.paperKey}; record manifest updated.`,
+      details: result
+    };
+  } catch (error) {
+    return {
+      issue: input.issue,
+      status: "failed",
+      action: "refresh_webpage",
+      message: error instanceof Error ? error.message : "Webpage refresh failed."
+    };
+  }
+}
+
 async function fixByParsing(input: {
   workspaceDir: string;
   issue: WikiHealthIssue;
@@ -1840,6 +1921,23 @@ export async function fixWikiHealth(options: WikiHealthFixOptions): Promise<Wiki
         continue;
       }
       parseAttempted.add(identity);
+      if (issueIsArxivMissingWebpageAsset(issue)) {
+        const webpageResult = await fixByRefreshingWebpage({
+          workspaceDir,
+          issue,
+          threshold,
+          fetchPaperWebPageImpl: options.fetchPaperWebPageImpl ?? fetchPaperWebPage,
+          dryRun: options.dryRun === true
+        });
+        if (webpageResult.status !== "failed") {
+          results.push(webpageResult);
+          continue;
+        }
+        if (options.dryRun === true) {
+          results.push(webpageResult);
+          continue;
+        }
+      }
       results.push(await fixByParsing({
         workspaceDir,
         issue,

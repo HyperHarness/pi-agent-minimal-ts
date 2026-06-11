@@ -447,8 +447,8 @@ function insertOrderedFigureAssetLinks(input: {
   let nextAssetIndex = 0;
   for (const line of lines) {
     if (
-      /^(?:Figure:\s*)?(?:Fig(?:ure)?\.?\s*)?\d+\b/i.test(line) ||
-      /^Figure:\s*Figure\s+\d+\b/i.test(line)
+      /^(?:Figure:\s*)?(?:Fig(?:ure)?\.?\s*)?(?:[A-Z]\d+|\d+)\b/i.test(line) ||
+      /^Figure:\s*Figure\s+(?:[A-Z]\d+|\d+)\b/i.test(line)
     ) {
       if (nextAssetIndex >= figureAssets.length) {
         rewritten.push(line);
@@ -545,10 +545,22 @@ async function materializeWebpageAssets(input: {
     await writeFile(path.join(assetsDir, filename), buffer);
 
     replacements.set(asset.url, relativePath);
+    const basename = path.posix.basename(filename);
+    replacements.set(basename, relativePath);
+    try {
+      const parsedAssetUrl = new URL(asset.url);
+      replacements.set(parsedAssetUrl.pathname, relativePath);
+      replacements.set(path.posix.basename(parsedAssetUrl.pathname), relativePath);
+    } catch {
+      // Non-URL asset references are handled through originalUrl and basename mappings.
+    }
     if (asset.originalUrl) {
       replacements.set(asset.originalUrl, relativePath);
       try {
-        replacements.set(new URL(asset.originalUrl, input.extraction.url).toString(), relativePath);
+        const resolvedOriginalUrl = new URL(asset.originalUrl, input.extraction.url);
+        replacements.set(resolvedOriginalUrl.toString(), relativePath);
+        replacements.set(resolvedOriginalUrl.pathname, relativePath);
+        replacements.set(path.posix.basename(resolvedOriginalUrl.pathname), relativePath);
       } catch {
         // Keep the original link replacement only.
       }
@@ -601,7 +613,7 @@ function elementTypeFromLine(line: string, currentSection?: PaperSection): Paper
   if (/^(?:-|\*)\s+/.test(line)) {
     return "list";
   }
-  if (/^Figure:\s+|^Fig\.\s*\d+/i.test(line)) {
+  if (/^Figure:\s+|^Fig\.\s*(?:[A-Z]\d+|\d+)/i.test(line)) {
     return "caption";
   }
   if (currentSection?.title.toLowerCase().includes("reference")) {

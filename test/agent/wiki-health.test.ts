@@ -2202,6 +2202,151 @@ test("fixWikiHealth parses missing downloaded records and updates the record man
   }
 });
 
+test("fixWikiHealth refreshes arXiv webpage parses when low quality only reports missing webpage image assets", async () => {
+  const workspace = await createWorkspace();
+
+  try {
+    const paperKey = "arxiv-2401.00024";
+    const sourceDir = path.join(workspace, "knowledge-base", "sources", paperKey);
+    const recordPath = path.join(sourceDir, "acquisition.json");
+    const parseDir = path.join(sourceDir, "parses", "webpage");
+    const pdfPath = path.join(workspace, "knowledge-base", "raw", "pdfs", `${paperKey}.pdf`);
+    await writeText(pdfPath, "%PDF-1.4\nexample\n%%EOF\n");
+    await writeJson(recordPath, {
+      source: "arxiv",
+      articleUrl: "https://arxiv.org/abs/2401.00024",
+      recordedAt: "2026-04-28T04:00:00.000Z",
+      handlingMethod: "direct_http",
+      status: "downloaded",
+      canonicalId: "2401.00024",
+      pdfUrl: "https://arxiv.org/pdf/2401.00024.pdf",
+      downloadPath: pdfPath,
+      reading: {
+        status: "ready",
+        preferredSource: "webpage",
+        paperKey,
+        markdownPath: `knowledge-base/sources/${paperKey}/parses/webpage/document.md`,
+        parsePath: `knowledge-base/sources/${paperKey}/parses/webpage/parse.json`,
+        qualityPath: `knowledge-base/sources/${paperKey}/parses/webpage/quality.json`,
+        chunksPath: `knowledge-base/sources/${paperKey}/parses/webpage/chunks.jsonl`,
+        quality: {
+          status: "needs_hybrid",
+          score: 0.65,
+          pages: 1,
+          totalTextLength: 50000,
+          warnings: [
+            "arXiv comments report 2 figures, but only 1 webpage image asset was downloaded."
+          ]
+        }
+      }
+    });
+    await writePaperMetadata(path.join(sourceDir, "metadata.json"), {
+      paperKey,
+      source: "arxiv",
+      canonicalId: "2401.00024",
+      articleUrl: "https://arxiv.org/abs/2401.00024",
+      pdfPath
+    });
+    await writeText(path.join(parseDir, "document.md"), "# Example\n\nLong body");
+    await writeJson(path.join(parseDir, "parse.json"), {
+      paperKey,
+      engine: "webpage"
+    });
+    await writeJson(path.join(parseDir, "quality.json"), {
+      status: "needs_hybrid",
+      score: 0.65,
+      pages: 1,
+      totalTextLength: 50000,
+      warnings: [
+        "arXiv comments report 2 figures, but only 1 webpage image asset was downloaded."
+      ]
+    });
+    await writeText(path.join(parseDir, "chunks.jsonl"), "{}\n");
+
+    let parseCalled = false;
+    const result = await fixWikiHealth({
+      workspaceDir: workspace,
+      issueKinds: ["low_quality"],
+      fetchPaperWebPageImpl: async (options) => {
+        assert.equal(options.url, "https://arxiv.org/abs/2401.00024");
+        return {
+          url: "https://arxiv.org/html/2401.00024",
+          title: "Example",
+          metadata: {
+            source: "arxiv",
+            canonicalId: "2401.00024",
+            comments: "10 pages, 2 figures",
+            expectedFigureCount: 2,
+            authors: []
+          },
+          markdown: [
+            "# Example",
+            "",
+            "## Abstract",
+            "",
+            "This paper studies an example arXiv capture.",
+            "",
+            "![Figure 1](assets/x1.png)",
+            "",
+            "Figure 1: First captured figure.",
+            "",
+            "## Results",
+            "",
+            `${"Long body. ".repeat(2000)}`,
+            "",
+            "![Figure 2](assets/x2.png)",
+            "",
+            "Figure 2: Second captured figure."
+          ].join("\n"),
+          html: "<article><img src=\"assets/x1.png\"><img src=\"assets/x2.png\"></article>",
+          access: { status: "full_text", signals: [] },
+          stats: {
+            chars: 12000,
+            wordsApprox: 2000,
+            navigationLinesRemoved: 0,
+            extractedFrom: "article"
+          },
+          assets: [
+            {
+              url: "https://arxiv.org/html/2401.00024/x1.png",
+              originalUrl: "x1.png",
+              filename: "x1.png",
+              mimeType: "image/png",
+              dataBase64: Buffer.from("png-1").toString("base64")
+            },
+            {
+              url: "https://arxiv.org/html/2401.00024/x2.png",
+              originalUrl: "x2.png",
+              filename: "x2.png",
+              mimeType: "image/png",
+              dataBase64: Buffer.from("png-2").toString("base64")
+            }
+          ]
+        };
+      },
+      parsePaperImpl: async () => {
+        parseCalled = true;
+        throw new Error("parse fallback should not run when webpage refresh succeeds");
+      }
+    });
+
+    assert.equal(parseCalled, false);
+    assert.equal(result.attempted, 1);
+    assert.equal(result.fixed, 1);
+    assert.equal(result.results[0]?.action, "refresh_webpage");
+    const updatedRecord = JSON.parse(await readFile(recordPath, "utf8")) as {
+      reading?: { preferredSource?: string; quality?: { status?: string; score?: number; warnings?: string[] } };
+      webpage?: { status?: string; quality?: { status?: string } };
+    };
+    assert.equal(updatedRecord.reading?.preferredSource, "webpage");
+    assert.equal(updatedRecord.reading?.quality?.status, "good");
+    assert.equal(updatedRecord.reading?.quality?.warnings?.length, 0);
+    assert.equal(updatedRecord.webpage?.status, "parsed");
+  } finally {
+    await rm(workspace, { recursive: true, force: true });
+  }
+});
+
 test("fixWikiHealth re-parses downloaded records when indexed main parse artifacts are missing", async () => {
   const workspace = await createWorkspace();
 
