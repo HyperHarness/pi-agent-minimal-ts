@@ -41,6 +41,7 @@ export type PaperWikiLintIssueKind =
   | "duplicate_section"
   | "weak_synthesis_page"
   | "rendered_wiki_link"
+  | "missing_related_page"
   | "weak_evidence_contract"
   | "missing_claim_provenance"
   | "unresolved_contradiction"
@@ -115,6 +116,7 @@ const ISSUE_KINDS: PaperWikiLintIssueKind[] = [
   "duplicate_section",
   "weak_synthesis_page",
   "rendered_wiki_link",
+  "missing_related_page",
   "weak_evidence_contract",
   "missing_claim_provenance",
   "unresolved_contradiction",
@@ -660,6 +662,7 @@ function summarizeActions(issues: PaperWikiLintIssue[]): string[] {
     ["duplicate_section", "Normalize synthesis pages so each section title appears once."],
     ["weak_synthesis_page", "Convert short uncited pages into aliases or rebuild them with source-backed evidence."],
     ["rendered_wiki_link", "Fix double-bracket wiki links that render to missing local pages."],
+    ["missing_related_page", "Remove frontmatter related_pages entries that point to missing pages, or build those pages."],
     ["weak_evidence_contract", "Add source_refs to paper-backed typed wiki pages or weaken the evidence contract."],
     ["missing_claim_provenance", "Add concrete page, figure, table, element, chunk, or code-output provenance to quantitative claims."],
     ["unresolved_contradiction", "Review contradiction candidates and mark them confirmed or rejected."],
@@ -1037,6 +1040,16 @@ export async function lintPaperWiki(options: PaperWikiLintOptions): Promise<Pape
 
     for (const relatedPage of relatedPages) {
       incomingPageLinks.set(sanitizeWikiFilename(relatedPage), (incomingPageLinks.get(sanitizeWikiFilename(relatedPage)) ?? 0) + 1);
+      const relatedPagePath = path.join(getPaperWikiPagesDir(workspaceDir), `${sanitizeWikiFilename(relatedPage)}.md`);
+      if (!(await pathExists(relatedPagePath))) {
+        issues.push({
+          kind: "missing_related_page",
+          severity: "low",
+          path: relativePath,
+          target: relativeToWorkspace(workspaceDir, relatedPagePath),
+          reason: `Frontmatter related_pages entry "${relatedPage}" has no wiki page.`
+        });
+      }
     }
 
     for (const citationPath of extractSourceCitationPaths(frontmatter)) {

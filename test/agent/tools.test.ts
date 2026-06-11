@@ -5607,6 +5607,7 @@ test("wiki_lint delegates to the injected wiki lint dependency and returns detai
             missing_experiment_ref: 0,
             code_backed_without_experiment: 0,
             rendered_wiki_link: 0,
+            missing_related_page: 0,
           },
           issues: [
             {
@@ -5779,6 +5780,7 @@ test("wiki_structure_plan delegates to the injected planner and returns details"
             missing_experiment_ref: 0,
             code_backed_without_experiment: 0,
             rendered_wiki_link: 0,
+            missing_related_page: 0,
           },
           actionCount: 1,
           actions: [
@@ -5886,6 +5888,7 @@ test("wiki_structure_plan passes goal, focus, growth, and budget options", async
             missing_experiment_ref: 0,
             code_backed_without_experiment: 0,
             rendered_wiki_link: 0,
+            missing_related_page: 0,
           },
           actionCount: 0,
           actions: [],
@@ -6882,10 +6885,14 @@ test("build_wiki_page accepts concept drafts with structured open questions and 
         ].join("\n"),
         tags: ["qldpc", "superconducting-qubits"],
         openQuestions: ["Which connectivity assumptions remain unverified?"],
-        relatedPageKeys: ["superconducting-chip-design"],
+        relatedPageKeys: ["superconducting-chip-design", "phantom-related-page"],
         confidence: "high",
       }),
     });
+
+    const pagesDir = path.join(workspace, "knowledge-base/pages");
+    await mkdir(pagesDir, { recursive: true });
+    await writeFile(path.join(pagesDir, "superconducting-chip-design.md"), "# Superconducting Chip Design\n", "utf8");
 
     const result = await tool.execute("build-concept-structured-sections", {
       topic: "qLDPC concept page",
@@ -6901,6 +6908,8 @@ test("build_wiki_page accepts concept drafts with structured open questions and 
     assert.match(page, /Which connectivity assumptions remain unverified\?/);
     assert.match(page, /## Related Pages/);
     assert.match(page, /\[\[superconducting-chip-design\]\]/);
+    assert.doesNotMatch(page, /\[\[phantom-related-page\]\]/);
+    assert.match(page, /related_pages: \n  - "superconducting-chip-design"\n---/);
   } finally {
     await rm(workspace, { recursive: true, force: true });
   }
@@ -7633,6 +7642,7 @@ Canonical content.
       design_record_without_uses_relation: 0,
       software_doc_version_missing: 0,
       rendered_wiki_link: 0,
+      missing_related_page: 0,
     });
   } finally {
     await rm(workspace, { recursive: true, force: true });
@@ -7931,6 +7941,104 @@ test("wiki_health_fix delegates to the injected health fixer dependency", async 
       (result.details as { checked?: { issues?: Array<{ reason?: string }> } }).checked?.issues?.[0]?.reason,
       "dry:true; kinds:parse_missing; max:3",
     );
+  } finally {
+    await rm(workspace, { recursive: true, force: true });
+  }
+});
+
+test("build_wiki_page pins requiredSourceKeys with local summaries that search misses", async () => {
+  const workspace = await mkdtemp(path.join(tmpdir(), "pi-agent-tools-"));
+
+  try {
+    const pinnedDir = path.join(workspace, "knowledge-base/sources/paper-pinned");
+    await mkdir(pinnedDir, { recursive: true });
+    await writeFile(
+      path.join(pinnedDir, "summary.md"),
+      "# Pinned Evidence\n\nSummary that topic search does not surface.",
+      "utf8",
+    );
+
+    const tool = getBuildWikiPageTool(workspace, {
+      searchPaperWiki: async (options) => ({
+        query: options.query,
+        results: [
+          {
+            paperKey: "paper-a",
+            title: "Evidence A",
+            path: "knowledge-base/sources/paper-a/summary.md",
+            snippet: "source A",
+          },
+        ],
+      }),
+      paperWikiPageWorker: async () => ({
+        title: "Pinned Evidence Page",
+        pageMarkdown: [
+          "## Overview",
+          "",
+          "Synthesis grounded in pinned evidence [paper-pinned].",
+          "",
+          "## Key Concepts",
+          "",
+          "Pinned sources must be citable even when search misses them.",
+          "",
+          "## Evidence",
+          "",
+          "Evidence A and the pinned summary support the synthesis.",
+        ].join("\n"),
+        confidence: "high",
+      }),
+    });
+
+    const result = await tool.execute("build-page-pinned", {
+      topic: "pinned evidence page",
+      pageKey: "pinned-evidence-page",
+      requiredSourceKeys: ["paper-pinned"],
+      evidenceContract: "paper-backed",
+      forbidExternalEvidence: true,
+    }, undefined);
+    const details = result.details as { status?: string; message?: string };
+
+    assert.equal(details.status, "written", details.message);
+    const page = await readFile(path.join(workspace, "knowledge-base/pages/pinned-evidence-page.md"), "utf8");
+    assert.match(page, /paper_key: "paper-pinned"/);
+  } finally {
+    await rm(workspace, { recursive: true, force: true });
+  }
+});
+
+test("build_wiki_page still reports requiredSourceKeys without local summaries", async () => {
+  const workspace = await mkdtemp(path.join(tmpdir(), "pi-agent-tools-"));
+
+  try {
+    const tool = getBuildWikiPageTool(workspace, {
+      searchPaperWiki: async (options) => ({
+        query: options.query,
+        results: [
+          {
+            paperKey: "paper-a",
+            title: "Evidence A",
+            path: "knowledge-base/sources/paper-a/summary.md",
+            snippet: "source A",
+          },
+        ],
+      }),
+      paperWikiPageWorker: async () => ({
+        title: "Unbuildable Page",
+        pageMarkdown: "## Overview\n\nShould not be written.",
+        confidence: "high",
+      }),
+    });
+
+    const result = await tool.execute("build-page-missing-required", {
+      topic: "missing required key page",
+      pageKey: "missing-required-key-page",
+      requiredSourceKeys: ["paper-absent"],
+      forbidExternalEvidence: true,
+    }, undefined);
+    const details = result.details as { status?: string; message?: string };
+
+    assert.equal(details.status, "needs_evidence");
+    assert.match(details.message ?? "", /paper-absent/);
   } finally {
     await rm(workspace, { recursive: true, force: true });
   }

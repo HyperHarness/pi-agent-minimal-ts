@@ -23,6 +23,7 @@ import {
   type PaperSummaryProgress
 } from "./summary.js";
 import { paperWikiRelations } from "./relations.js";
+import { readWikiEvidenceItem } from "./retrieval-contract.js";
 import { buildWikiPageEvidencePack } from "./evidence-pack.js";
 import { applyWikiStructurePlan } from "./structure-apply.js";
 import { planWikiStructure } from "./structure-plan.js";
@@ -392,7 +393,8 @@ const buildWikiPageParameters = Type.Object({
     minimum: 0
   })),
   requiredSourceKeys: Type.Optional(Type.Array(Type.String({
-    description: "Paper keys that must be present in selected source evidence before writing."
+    description:
+      "Paper keys that must be included in the page evidence. Keys with existing local source summaries are pinned into evidence even when topic search does not surface them; keys without local summaries stop the write with needs_evidence."
   }))),
   forbidExternalEvidence: Type.Optional(
     Type.Boolean({ description: "Do not fall back to external evidence acquisition even outside wiki-agent boundary. Defaults to false." })
@@ -914,6 +916,22 @@ function uniqueSourceEvidenceByPaperKey<T extends { paperKey: string }>(items: T
       continue;
     }
     seen.add(key);
+    unique.push(item);
+  }
+  return unique;
+}
+
+function uniqueSourceEvidenceByTitle<T extends { paperKey: string; title?: string }>(items: T[]): T[] {
+  const seen = new Set<string>();
+  const unique: T[] = [];
+  for (const item of items) {
+    const titleKey = (item.title ?? "").trim().toLowerCase().replace(/\s+/g, " ");
+    if (titleKey && seen.has(titleKey)) {
+      continue;
+    }
+    if (titleKey) {
+      seen.add(titleKey);
+    }
     unique.push(item);
   }
   return unique;
@@ -2208,6 +2226,33 @@ export function createWikiTools(input: {
       }
 
       sourceEvidence = uniqueSourceEvidenceByPaperKey(sourceEvidence);
+      sourceEvidence = uniqueSourceEvidenceByTitle(sourceEvidence);
+      const surfacedSourceKeys = new Set(sourceEvidence.map((item) => normalizePaperEvidenceKey(item.paperKey)));
+      for (const requiredKey of args.requiredSourceKeys ?? []) {
+        if (surfacedSourceKeys.has(normalizePaperEvidenceKey(requiredKey))) {
+          continue;
+        }
+        const pinned = await readWikiEvidenceItem({
+          workspaceDir: resolvedWorkspaceDir,
+          kind: "source",
+          key: requiredKey
+        });
+        if (pinned.status !== "ready" || !pinned.item || pinned.item.kind !== "source") {
+          continue;
+        }
+        sourceEvidence.push({
+          kind: "source",
+          key: pinned.item.key,
+          title: pinned.item.title,
+          path: pinned.item.relativePath,
+          snippet: pinned.item.body.slice(0, 280),
+          origin: "local_fallback",
+          paperKey: pinned.item.sourceKey ?? pinned.item.key,
+          ...(pinned.item.sourceKind ? { sourceKind: pinned.item.sourceKind } : {}),
+          ...(pinned.item.tags.length > 0 ? { tags: pinned.item.tags } : {})
+        });
+        surfacedSourceKeys.add(normalizePaperEvidenceKey(requiredKey));
+      }
       evidence = [
         ...sourceEvidence,
         ...evidence.filter((item) => item.kind !== "source")
@@ -2297,7 +2342,7 @@ export function createWikiTools(input: {
         const coordination = await buildCoordination({
           selectedEvidenceCount: evidence.length,
           hasBlockedAcquisition: (research?.blocked.length ?? bootstrap.blocked.length) > 0,
-          insufficientReason: `Required source keys are missing: ${missingRequiredSourceKeys.join(", ")}.`,
+          insufficientReason: `Required source keys have no local source summaries: ${missingRequiredSourceKeys.join(", ")}.`,
           handoff: {
             missingRequiredSourceKeys
           }
@@ -2310,7 +2355,7 @@ export function createWikiTools(input: {
           bootstrap,
           ...(research ? { research } : {}),
           status: "needs_evidence",
-          message: `Cannot write a wiki page because required source keys are missing: ${missingRequiredSourceKeys.join(", ")}.`,
+          message: `Cannot write a wiki page because required source keys have no local source summaries: ${missingRequiredSourceKeys.join(", ")}.`,
           evidence
         };
         return {

@@ -326,6 +326,43 @@ function parseStringArrayItem(rawValue: string): string {
   return typeof parsed === "string" ? parsed.trim() : String(parsed).trim();
 }
 
+function parseFrontmatterListItems(lines: string[], startIndex: number): {
+  values: unknown[];
+  nextIndex: number;
+} {
+  const values: unknown[] = [];
+  let cursor = startIndex;
+  while (cursor < lines.length) {
+    const itemMatch = lines[cursor].match(/^(\s+)-\s+(.*)$/);
+    if (!itemMatch) {
+      break;
+    }
+    const itemIndent = itemMatch[1].length;
+    const itemContent = itemMatch[2];
+    const objectFieldMatch = itemContent.match(/^([A-Za-z_][A-Za-z0-9_]*):\s*(.*)$/);
+    if (!objectFieldMatch) {
+      values.push(parseStringArrayItem(itemContent));
+      cursor += 1;
+      continue;
+    }
+
+    const item: Record<string, unknown> = {
+      [objectFieldMatch[1]]: parseScalarValue(objectFieldMatch[2])
+    };
+    cursor += 1;
+    while (cursor < lines.length) {
+      const continuation = lines[cursor].match(/^(\s+)([A-Za-z_][A-Za-z0-9_]*):\s*(.*)$/);
+      if (!continuation || continuation[1].length <= itemIndent) {
+        break;
+      }
+      item[continuation[2]] = parseScalarValue(continuation[3]);
+      cursor += 1;
+    }
+    values.push(item);
+  }
+  return { values, nextIndex: cursor };
+}
+
 function parseFrontmatter(frontmatter: string, path?: string): {
   metadata: RawWikiPageMetadata;
   errors: WikiPageSchemaError[];
@@ -356,19 +393,9 @@ function parseFrontmatter(frontmatter: string, path?: string): {
       continue;
     }
 
-    const values: string[] = [];
-    let cursor = index + 1;
-    while (cursor < lines.length) {
-      const itemMatch = lines[cursor].match(/^\s+-\s+(.*)$/);
-      if (!itemMatch) {
-        break;
-      }
-      values.push(parseStringArrayItem(itemMatch[1]));
-      cursor += 1;
-    }
-
+    const { values, nextIndex } = parseFrontmatterListItems(lines, index + 1);
     metadata[key] = values;
-    index = cursor - 1;
+    index = nextIndex - 1;
   }
 
   return { metadata, errors };
@@ -807,6 +834,33 @@ export function validateWikiPageMetadata(
   };
 }
 
+// content.ts writes synthesis/alias pages with page_key, wiki-* type names, and a nested
+// sources block; map that shape onto the typed schema so both formats validate.
+function normalizeContentPageMetadata(metadata: RawWikiPageMetadata): RawWikiPageMetadata {
+  const normalized: RawWikiPageMetadata = { ...metadata };
+  if (normalized.type === "wiki-synthesis-page") {
+    normalized.type = "synthesis";
+  }
+  if (normalized.type === "wiki-alias-page") {
+    normalized.type = "alias";
+  }
+  if (!cleanString(normalized.key) && cleanString(normalized.page_key)) {
+    normalized.key = normalized.page_key;
+  }
+  if (cleanStringArray(normalized.source_refs).length === 0 && Array.isArray(normalized.sources)) {
+    const sourceRefs = normalized.sources
+      .map((item) => (isRecord(item) && typeof item.paper_key === "string" ? item.paper_key.trim() : ""))
+      .filter(Boolean);
+    if (sourceRefs.length > 0) {
+      normalized.source_refs = sourceRefs;
+    }
+  }
+  if (normalized.type === "alias" && !cleanString(normalized.evidence_contract)) {
+    normalized.evidence_contract = "none";
+  }
+  return normalized;
+}
+
 export function parseWikiPageMarkdown(markdown: string, path: string): WikiPageParseResult {
   const normalizedMarkdown = markdown.replace(/\r\n/g, "\n");
   const frontmatterMatch = normalizedMarkdown.match(/^---\n([\s\S]*?)\n---(?:\n|$)/);
@@ -821,7 +875,7 @@ export function parseWikiPageMarkdown(markdown: string, path: string): WikiPageP
 
   const parsed = parseFrontmatter(frontmatterMatch[1], path);
   const metadata: Partial<WikiPageMetadata> & RawWikiPageMetadata = {
-    ...parsed.metadata,
+    ...normalizeContentPageMetadata(parsed.metadata),
     ...(hasOwnField(parsed.metadata, "schema_version") ? {} : { schema_version: 1 as const })
   };
   const validation = validateWikiPageMetadata(metadata, path);

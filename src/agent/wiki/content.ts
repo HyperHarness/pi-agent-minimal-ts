@@ -209,6 +209,32 @@ function hasMarkdownSection(markdown: string, title: string): boolean {
     .some((match) => normalizeMarkdownSectionTitle(match[1] ?? "") === expected);
 }
 
+async function listExistingWikiPageKeys(workspaceDir: string): Promise<Set<string>> {
+  const pageFiles = await listPaperWikiPageFiles(workspaceDir);
+  return new Set(pageFiles.map((filePath) => path.basename(filePath, ".md")));
+}
+
+function slugifyWikiLinkTarget(value: string): string {
+  return value
+    .split("|")[0]
+    ?.trim()
+    .toLowerCase()
+    .replace(/[^a-z0-9一-鿿]+/g, "-")
+    .replace(/^-|-$/g, "") ?? "";
+}
+
+// Drafts routinely propose [[links]] to pages that do not exist yet; render those as
+// plain text so written pages never ship broken rendered links.
+function dropMissingWikiLinks(markdown: string, existingPageKeys: Set<string>): string {
+  return markdown.replace(/\[\[([^\]]+)\]\]/g, (full, inner: string) => {
+    const slug = slugifyWikiLinkTarget(inner);
+    if (slug && existingPageKeys.has(slug)) {
+      return full;
+    }
+    return inner.split("|").pop()?.trim() || inner.trim();
+  });
+}
+
 function yamlSourceCitations(values: PaperWikiPageSourceCitation[]): string {
   const cleaned = values.filter((value) => value.paperKey.trim() && value.path.trim());
   if (cleaned.length === 0) {
@@ -687,7 +713,13 @@ export async function writePaperWikiPage(input: PaperWikiPageInput): Promise<Pap
     }
   });
   await ensurePaperWikiScaffold(input.workspaceDir);
-  const openQuestionsSection = hasMarkdownSection(pageMarkdown, "Open Questions")
+  const existingPageKeys = await listExistingWikiPageKeys(input.workspaceDir);
+  existingPageKeys.add(pageKey);
+  const relatedPageKeys = (input.relatedPageKeys ?? []).filter((relatedKey) =>
+    existingPageKeys.has(sanitizeWikiFilename(relatedKey))
+  );
+  const safePageMarkdown = dropMissingWikiLinks(pageMarkdown, existingPageKeys);
+  const openQuestionsSection = hasMarkdownSection(safePageMarkdown, "Open Questions")
     ? ""
     : sectionList("Open Questions", input.openQuestions);
   const markdown = `---
@@ -700,12 +732,12 @@ created_at: ${quoteYaml(now)}
 updated_at: ${quoteYaml(now)}
 tags: ${yamlList(input.tags)}
 sources: ${yamlSourceCitations(input.sourceCitations)}
-related_pages: ${yamlList(input.relatedPageKeys)}
+related_pages: ${yamlList(relatedPageKeys)}
 ---
 
 # ${title}
 
-${pageMarkdown}
+${safePageMarkdown}
 ${openQuestionsSection}
 ## Sources
 

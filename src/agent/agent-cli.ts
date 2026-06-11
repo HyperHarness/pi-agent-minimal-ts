@@ -41,6 +41,7 @@ export interface CliArgs {
   mode: "chat" | "rpc";
   useSession: boolean;
   sessionDir?: string;
+  workerRouting?: WorkerRoutingPolicy;
   help: boolean;
 }
 
@@ -449,7 +450,14 @@ export function parseCliArgs(argv: string[]): CliArgs {
       continue;
     }
 
-    if (arg === "--provider" || arg === "--model" || arg === "--base-url" || arg === "--mode" || arg === "--session-dir") {
+    if (
+      arg === "--provider" ||
+      arg === "--model" ||
+      arg === "--base-url" ||
+      arg === "--mode" ||
+      arg === "--session-dir" ||
+      arg === "--worker-routing"
+    ) {
       const value = argv[index + 1];
       if (!value) {
         throw new Error(`Missing value for ${arg}`);
@@ -466,6 +474,11 @@ export function parseCliArgs(argv: string[]): CliArgs {
           throw new Error(`Unsupported mode: ${value}`);
         }
         parsed.mode = value;
+      } else if (arg === "--worker-routing") {
+        if (value !== "all" && value !== "wiki-paper" && value !== "none") {
+          throw new Error(`Unsupported worker routing policy: ${value}`);
+        }
+        parsed.workerRouting = value;
       } else {
         parsed.sessionDir = value;
       }
@@ -773,7 +786,7 @@ export async function main(options: {
   if (cli.help) {
     const helpEntrypoint = options.profile === "design-agent" ? "design-agent" : "wiki-agent";
     process.stdout.write(
-      `Usage: node dist/src/${helpEntrypoint}.js [--mode chat|rpc] [--session-dir <dir>] [--no-session] [--provider <name>] [--model <id>] [--base-url <url>]\n`
+      `Usage: node dist/src/${helpEntrypoint}.js [--mode chat|rpc] [--session-dir <dir>] [--no-session] [--provider <name>] [--model <id>] [--base-url <url>] [--worker-routing all|wiki-paper|none]\n`
     );
     return;
   }
@@ -792,6 +805,9 @@ export async function main(options: {
   });
   const workspaceDir = process.cwd();
   const entrypointProfile = resolveAgentEntrypointProfile(options.profile ?? "wiki-agent", workspaceDir, runtimeModel);
+  if (cli.workerRouting !== undefined) {
+    entrypointProfile.workerRouting = cli.workerRouting;
+  }
 
   if (cli.mode === "rpc") {
     await runRpcMode({

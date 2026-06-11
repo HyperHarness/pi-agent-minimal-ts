@@ -534,3 +534,67 @@ test("validateWikiPageMetadata rejects invalid knowledge state and last reviewed
     "invalid_last_reviewed_at"
   ]);
 });
+
+test("parseWikiPageMarkdown accepts content-format synthesis pages with nested sources", () => {
+  const markdown = [
+    "---",
+    'type: "wiki-synthesis-page"',
+    'page_key: "purcell-filters"',
+    'title: "Purcell Filter Design"',
+    'topic: "purcell filters"',
+    'evidence_contract: "paper-backed"',
+    'created_at: "2026-06-11T00:00:00.000Z"',
+    'updated_at: "2026-06-11T00:00:00.000Z"',
+    "tags: ",
+    '  - "readout"',
+    "sources: ",
+    '  - paper_key: "arxiv-1003.0142"',
+    '    title: "Fast reset and suppressing spontaneous emission of a superconducting qubit"',
+    '    path: "knowledge-base/sources/arxiv-1003.0142/summary.md"',
+    '  - paper_key: "arxiv-1504.06030"',
+    '    path: "knowledge-base/sources/arxiv-1504.06030/summary.md"',
+    "related_pages: ",
+    '  - "transmon"',
+    "---",
+    "",
+    "# Purcell Filter Design",
+    "",
+    "Grounded body [arxiv-1003.0142]."
+  ].join("\n");
+
+  const parsed = parseWikiPageMarkdown(markdown, "knowledge-base/pages/purcell-filters.md");
+
+  assert.equal(parsed.ok, true, JSON.stringify(parsed.errors));
+  assert.equal(parsed.page?.metadata.type, "synthesis");
+  assert.equal(parsed.page?.metadata.key, "purcell-filters");
+  assert.deepEqual(parsed.page?.metadata.source_refs, ["arxiv-1003.0142", "arxiv-1504.06030"]);
+  assert.deepEqual(parsed.page?.metadata.related_pages, ["transmon"]);
+});
+
+test("parseWikiPageMarkdown accepts content-format alias pages", () => {
+  const markdown = [
+    "---",
+    'type: "wiki-alias-page"',
+    'page_key: "eda"',
+    'title: "EDA"',
+    'canonical_page: "design-automation"',
+    'created_at: "2026-06-11T00:00:00.000Z"',
+    'updated_at: "2026-06-11T00:00:00.000Z"',
+    "tags:",
+    '  - "alias"',
+    "related_pages:",
+    '  - "design-automation"',
+    "---",
+    "",
+    "# EDA",
+    "",
+    "Alias body."
+  ].join("\n");
+
+  const parsed = parseWikiPageMarkdown(markdown, "knowledge-base/pages/eda.md");
+
+  assert.equal(parsed.ok, true, JSON.stringify(parsed.errors));
+  assert.equal(parsed.page?.metadata.type, "alias");
+  assert.equal(parsed.page?.metadata.key, "eda");
+  assert.equal(parsed.page?.metadata.canonical_page, "design-automation");
+});

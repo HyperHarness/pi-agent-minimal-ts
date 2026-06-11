@@ -20,10 +20,11 @@ import {
   runAgentTurn
 } from "../src/pi-agent.js";
 import { resolveInitialModel } from "../src/agent/model-resolver.js";
-import { createTools } from "../src/agent/tools.js";
+import { cleanupTools, createTools } from "../src/agent/tools.js";
 
 test("public entrypoint re-exports the reusable library APIs", () => {
   assert.equal(publicApi.runAgentTurn, runAgentTurn);
+  assert.equal(publicApi.cleanupTools, cleanupTools);
   assert.equal(publicApi.parseCliArgs, parseCliArgs);
   assert.equal(publicApi.applyModelBaseUrlOverride, applyModelBaseUrlOverride);
   assert.equal(publicApi.createReplEventHandler, createReplEventHandler);
