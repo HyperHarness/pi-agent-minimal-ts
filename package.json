@@ -17,6 +17,7 @@
   ],
   "scripts": {
     "build": "node scripts/clean-dist.mjs && tsc -p tsconfig.json",
+    "prepack": "npm run build",
     "test": "npm run build && node --test --experimental-test-isolation=none dist/test/**/*.test.js test/scripts/**/*.test.mjs",
     "wiki-agent": "npm run build && node dist/src/wiki-agent.js",
     "wiki-agent:rpc": "npm run build && node dist/src/wiki-agent.js --mode rpc",

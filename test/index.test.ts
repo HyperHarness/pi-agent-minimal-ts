@@ -68,6 +68,7 @@ test("package.json exposes the library root export for publishing", async () => 
     main?: string;
     types?: string;
     files?: string[];
+    scripts?: Record<string, string>;
     exports?: {
       "."
         ?: {
@@ -81,6 +82,7 @@ test("package.json exposes the library root export for publishing", async () => 
   assert.equal(packageJson.main, "./dist/src/index.js");
   assert.equal(packageJson.types, "./dist/src/index.d.ts");
   assert.deepEqual(packageJson.files, ["dist/src", "README.md"]);
+  assert.equal(packageJson.scripts?.prepack, "npm run build");
   assert.deepEqual(packageJson.exports?.["."], {
     import: "./dist/src/index.js",
     types: "./dist/src/index.d.ts"
