@@ -553,6 +553,22 @@ function countOccurrences(text: string, search: string): number {
   }
 }
 
+// Replaces the first literal occurrence of search without interpreting `$`
+// replacement patterns ($$, $&, $`, $') inside replacement. Matches the
+// split/join semantics used by the replaceAll path.
+function replaceFirstOccurrence(text: string, search: string, replacement: string): string {
+  if (!search) {
+    return text;
+  }
+
+  const index = text.indexOf(search);
+  if (index === -1) {
+    return text;
+  }
+
+  return text.slice(0, index) + replacement + text.slice(index + search.length);
+}
+
 function truncateOutput(text: string, maxChars: number): string {
   if (text.length <= maxChars) {
     return text;
@@ -2262,7 +2278,7 @@ export function createFileTools(input: {
 
       const updated = args.replaceAll
         ? original.split(args.search).join(args.replacement)
-        : original.replace(args.search, args.replacement);
+        : replaceFirstOccurrence(original, args.search, args.replacement);
       await writeFile(resolvedPath, updated, "utf8");
       const relativePath = relativeWorkspacePath(resolvedWorkspaceDir, resolvedPath);
 
@@ -2387,7 +2403,7 @@ export function createFileTools(input: {
 
       const updated = args.replaceAll
         ? original.split(args.search).join(args.replacement)
-        : original.replace(args.search, args.replacement);
+        : replaceFirstOccurrence(original, args.search, args.replacement);
       await writeFile(resolvedPath, updated, "utf8");
       const relativePath = relativeWorkspacePath(resolvedWorkspaceDir, resolvedPath);
 
