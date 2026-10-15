@@ -1,5 +1,5 @@
-import fs from 'node:fs';
 import path from 'node:path';
+import { loadJsonStore, writeJsonFileAtomic } from './atomic-json.js';
 
 export interface KeyMemoryEntry {
   text: string;
@@ -118,21 +118,14 @@ export class KeyMemoryStore {
   }
 
   private load(): KeyMemoryFile {
-    try {
-      if (fs.existsSync(this.filePath)) {
-        const parsed = JSON.parse(fs.readFileSync(this.filePath, 'utf-8')) as unknown;
-        if (isKeyMemoryFile(parsed)) {
-          return parsed;
-        }
-      }
-    } catch {
-      // ignore and create empty store
-    }
-    return { chats: {} };
+    return loadJsonStore<KeyMemoryFile>(this.filePath, {
+      defaultValue: () => ({ chats: {} }),
+      isValid: isKeyMemoryFile,
+      label: 'key memory',
+    }).value;
   }
 
   private save(): void {
-    fs.mkdirSync(path.dirname(this.filePath), { recursive: true });
-    fs.writeFileSync(this.filePath, JSON.stringify(this.cache, null, 2), 'utf-8');
+    writeJsonFileAtomic(this.filePath, this.cache);
   }
 }

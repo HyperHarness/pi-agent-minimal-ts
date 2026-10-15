@@ -1,5 +1,5 @@
-import fs from 'node:fs';
 import path from 'node:path';
+import { loadJsonStore, writeJsonFileAtomic } from './atomic-json.js';
 
 export type LongTermMemoryKind = 'fact' | 'preference';
 
@@ -90,21 +90,14 @@ export class LongTermMemoryStore {
   }
 
   private load(): LongTermMemoryFile {
-    try {
-      if (fs.existsSync(this.filePath)) {
-        const parsed = JSON.parse(fs.readFileSync(this.filePath, 'utf-8')) as unknown;
-        if (isLongTermMemoryFile(parsed)) {
-          return parsed;
-        }
-      }
-    } catch {
-      // ignore broken file and start fresh
-    }
-    return { users: {}, groups: {} };
+    return loadJsonStore<LongTermMemoryFile>(this.filePath, {
+      defaultValue: () => ({ users: {}, groups: {} }),
+      isValid: isLongTermMemoryFile,
+      label: 'long-term memory',
+    }).value;
   }
 
   private save(): void {
-    fs.mkdirSync(path.dirname(this.filePath), { recursive: true });
-    fs.writeFileSync(this.filePath, JSON.stringify(this.cache, null, 2), 'utf-8');
+    writeJsonFileAtomic(this.filePath, this.cache);
   }
 }
