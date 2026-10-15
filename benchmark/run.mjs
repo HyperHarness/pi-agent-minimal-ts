@@ -10,6 +10,10 @@
 // hijacked by the paper-download router), and the repo root as workspace so the
 // agent sees knowledge-base/. Tools are created once and shared across items.
 //
+// Each item runs under a hard timeout that aborts the turn (via AbortSignal) and waits
+// for it to settle before the next item touches the shared tools. A turn that cannot
+// settle stops the benchmark instead of letting two turns drive the same live tools.
+//
 // Baseline mode sends the same question to the bare model with no tools — items the
 // baseline already answers correctly are weak discriminators (pretraining
 // contamination); the grader reports the agent-vs-baseline delta.
@@ -27,6 +31,7 @@ import {
   resolveAgentModel,
   sumUsage
 } from "./lib.mjs";
+import { AbandonedTurnError, runWithTimeout } from "./timeout.mjs";
 import { cleanupTools, resolveAgentEntrypointProfile, runAgentTurn } from "../dist/src/index.js";
 
 function agentPrompt(question) {
@@ -41,18 +46,6 @@ Requirements:
 }
 
 const BASELINE_SYSTEM = `You are an expert in superconducting quantum computing and circuit design. Answer concisely and precisely from your own knowledge, with exact numbers, units, and uncertainties when you know them. If you do not know the specific answer, reply with exactly: NOT_IN_KB`;
-
-async function runWithTimeout(promise, timeoutMs) {
-  let timer;
-  const timeout = new Promise((_, reject) => {
-    timer = setTimeout(() => reject(new Error(`timed out after ${timeoutMs} ms`)), timeoutMs);
-  });
-  try {
-    return await Promise.race([promise, timeout]);
-  } finally {
-    clearTimeout(timer);
-  }
-}
 
 async function main() {
   const args = parseArgs(process.argv.slice(2), {
@@ -81,6 +74,7 @@ async function main() {
   const timeoutMs = Number(args["timeout-s"]) * 1000;
   let tools;
   let profile;
+  let toolsSafeToCleanup = true;
   if (!baseline) {
     profile = resolveAgentEntrypointProfile("wiki-agent", REPO_ROOT, model);
     tools = profile.createTools();
@@ -93,7 +87,7 @@ async function main() {
       try {
         if (baseline) {
           const { text, usage } = await runWithTimeout(
-            callLlm(model, { system: BASELINE_SYSTEM, user: item.question, maxTokens: 2000 }),
+            (signal) => callLlm(model, { system: BASELINE_SYSTEM, user: item.question, maxTokens: 2000, signal }),
             timeoutMs
           );
           record.answer = text;
@@ -101,7 +95,8 @@ async function main() {
         } else {
           const context = { systemPrompt: profile.systemPrompt, messages: [], tools };
           const result = await runWithTimeout(
-            runAgentTurn({ model, workspaceDir: REPO_ROOT, context, prompt: agentPrompt(item.question), workerRouting: "none" }),
+            (signal) =>
+              runAgentTurn({ model, workspaceDir: REPO_ROOT, context, prompt: agentPrompt(item.question), workerRouting: "none", signal }),
             timeoutMs
           );
           record.answer = lastAssistantText(result.newMessages);
@@ -109,6 +104,13 @@ async function main() {
           record.toolCalls = result.newMessages.filter((message) => message?.role === "toolResult").length;
         }
       } catch (error) {
+        if (error instanceof AbandonedTurnError) {
+          // The aborted turn is still driving the shared tool state, so starting the
+          // next item would run two turns against the same live tools. Stop instead.
+          toolsSafeToCleanup = false;
+          console.error(`[${index + 1}/${items.length}] ${item.id} FATAL ${error.message}`);
+          throw error;
+        }
         record.error = error instanceof Error ? error.message : String(error);
         record.answer = "";
       }
@@ -118,7 +120,8 @@ async function main() {
       console.log(`[${index + 1}/${items.length}] ${item.id} (${item.category}) ${status}`);
     }
   } finally {
-    if (tools) {
+    // Cleaning tools while an abandoned turn still uses them would race that turn.
+    if (tools && toolsSafeToCleanup) {
       await cleanupTools(tools).catch(() => {});
     }
   }

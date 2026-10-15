@@ -81,20 +81,64 @@ export function sumUsage(messages) {
 
 const TRANSIENT_PATTERNS = [/overloaded/i, /try again/i, /temporarily/i, /\b429\b/, /\b5\d\d\b/, /timeout/i, /ECONNRESET/i, /fetch failed/i];
 
-export async function callLlm(model, { system, user, maxTokens = 4096, attempts = 4 }) {
+function abortError(signal) {
+  const reason = signal?.reason;
+  if (reason instanceof Error) {
+    return reason;
+  }
+  return Object.assign(new Error("LLM call aborted"), { name: "AbortError" });
+}
+
+function sleepWithSignal(ms, signal) {
+  if (!signal) {
+    return new Promise((resolve) => setTimeout(resolve, ms));
+  }
+  return new Promise((resolve, reject) => {
+    const cleanup = () => {
+      clearTimeout(timer);
+      signal.removeEventListener("abort", onAbort);
+    };
+    const onAbort = () => {
+      cleanup();
+      reject(abortError(signal));
+    };
+    const timer = setTimeout(() => {
+      cleanup();
+      resolve();
+    }, ms);
+    if (signal.aborted) {
+      onAbort();
+      return;
+    }
+    signal.addEventListener("abort", onAbort, { once: true });
+  });
+}
+
+// `signal` is optional: when supplied, the request and the retry backoff are
+// cancelled as soon as the benchmark item times out instead of running on.
+export async function callLlm(model, { system, user, maxTokens = 4096, attempts = 4, signal }) {
   let lastError = "";
   for (let attempt = 0; attempt < attempts; attempt += 1) {
+    if (signal?.aborted) {
+      throw abortError(signal);
+    }
     let response;
     try {
+      // Await the actual request settlement. A raced abort promise would let the
+      // benchmark advance while a provider that ignored cancellation was still live.
       response = await complete(
         model,
         {
           ...(system ? { systemPrompt: system } : {}),
           messages: [{ role: "user", content: user, timestamp: Date.now() }]
         },
-        { apiKey: getEnvApiKey(model.provider), maxTokens }
+        { apiKey: getEnvApiKey(model.provider), maxTokens, ...(signal ? { signal } : {}) }
       );
+      if (signal?.aborted) throw abortError(signal);
     } catch (error) {
+      if (signal?.aborted) {
+        throw abortError(signal);
+      }
       lastError = error instanceof Error ? error.message : String(error);
       response = undefined;
     }
@@ -105,7 +149,7 @@ export async function callLlm(model, { system, user, maxTokens = 4096, attempts 
     if (!TRANSIENT_PATTERNS.some((pattern) => pattern.test(lastError)) && response) {
       break;
     }
-    await new Promise((resolve) => setTimeout(resolve, 2000 * (attempt + 1)));
+    await sleepWithSignal(2000 * (attempt + 1), signal);
   }
   throw new Error(`LLM call failed: ${lastError}`);
 }

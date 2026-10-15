@@ -51,6 +51,9 @@ export interface RunAgentTurnOptions {
   prompt: string;
   onEvent?: AgentMessageEventHandler;
   workerRouting?: WorkerRoutingPolicy;
+  // Optional external cancellation (e.g. a benchmark item timeout). It is combined
+  // with the per-turn tool-loop limiter so both can stop the underlying agent loop.
+  signal?: AbortSignal;
 }
 
 export interface RunAgentTurnResult {
@@ -253,6 +256,23 @@ function createAgentToolLoopLimiter(maxLoops: number): AgentToolLoopLimiter {
   };
 }
 
+// Forwards external cancellation into the limiter's controller so the agent loop keeps
+// receiving one combined signal. Returns a disposer that must run when the turn ends.
+function linkAbortSignal(source: AbortSignal | undefined, target: AbortController): () => void {
+  if (!source) {
+    return () => {};
+  }
+
+  if (source.aborted) {
+    target.abort(source.reason);
+    return () => {};
+  }
+
+  const onAbort = () => target.abort(source.reason);
+  source.addEventListener("abort", onAbort, { once: true });
+  return () => source.removeEventListener("abort", onAbort);
+}
+
 function registerAssistantToolLoop(
   limiter: AgentToolLoopLimiter,
   assistantMessage: AssistantMessage
@@ -391,6 +411,7 @@ async function runRoutedWorkerPrompt(options: {
   routeReason: RoutedWorkerPrompt["reason"];
   instruction: string;
   onEvent?: AgentMessageEventHandler;
+  signal?: AbortSignal;
 }): Promise<{ messages: AgentMessage[]; handoff: WorkerHandoff }> {
   const normalizedRole = normalizeWorkerRole(options.role);
   const wikiEvidenceWorker = options.role === "wiki-evidence-worker"
@@ -416,6 +437,7 @@ async function runRoutedWorkerPrompt(options: {
     timestamp: Date.now()
   };
   const toolLoopLimiter = createAgentToolLoopLimiter(MAX_AGENT_TOOL_LOOPS_PER_TURN);
+  const unlinkAbort = linkAbortSignal(options.signal, toolLoopLimiter.abortController);
   const changedFiles = new Set<string>();
   const artifacts = new Set<string>();
   const sourcePaths = new Set<string>();
@@ -478,6 +500,7 @@ async function runRoutedWorkerPrompt(options: {
       }
     };
   } finally {
+    unlinkAbort();
     await cleanupTools(workerTools);
   }
 }
@@ -546,7 +569,8 @@ export async function runSessionPrompt(
       role: routedWorker.role,
       routeReason: routedWorker.reason,
       instruction: routedWorker.instruction,
-      onEvent: options.onEvent
+      onEvent: options.onEvent,
+      signal: options.signal
     });
     const userMessage: UserMessage = {
       role: "user",
@@ -594,39 +618,46 @@ export async function runAgentTurn(options: RunAgentTurnOptions): Promise<RunAge
   let acceptedTurnMessages: AgentMessage[] = [];
   let newMessages: AgentMessage[] = [];
   const toolLoopLimiter = createAgentToolLoopLimiter(MAX_AGENT_TOOL_LOOPS_PER_TURN);
+  const unlinkAbort = linkAbortSignal(options.signal, toolLoopLimiter.abortController);
 
-  for (let attempt = 0; attempt <= TRANSIENT_MODEL_RETRY_ATTEMPTS; attempt += 1) {
-    const attemptResult = await runAgentLoopAttempt({
-      inputMessages,
-      context: { ...options.context, messages: contextMessages },
-      tools,
-      model: options.model,
-      onEvent: options.onEvent,
-      toolLoopLimiter
-    });
-    const failedAssistant = getFailedAssistantMessage(attemptResult.messages);
-    const shouldRetry =
-      attempt < TRANSIENT_MODEL_RETRY_ATTEMPTS &&
-      isTransientModelFailure(failedAssistant);
+  try {
+    for (let attempt = 0; attempt <= TRANSIENT_MODEL_RETRY_ATTEMPTS; attempt += 1) {
+      const attemptResult = await runAgentLoopAttempt({
+        inputMessages,
+        context: { ...options.context, messages: contextMessages },
+        tools,
+        model: options.model,
+        onEvent: options.onEvent,
+        toolLoopLimiter
+      });
+      const failedAssistant = getFailedAssistantMessage(attemptResult.messages);
+      // An externally cancelled turn must settle immediately, not restart a new attempt.
+      const shouldRetry =
+        !(options.signal?.aborted ?? false) &&
+        attempt < TRANSIENT_MODEL_RETRY_ATTEMPTS &&
+        isTransientModelFailure(failedAssistant);
 
-    if (!shouldRetry) {
+      if (!shouldRetry) {
+        await flushAgentEvents(
+          applyToolLoopLimitToDelayedEvents(attemptResult.delayedEvents, toolLoopLimiter),
+          options.onEvent
+        );
+        newMessages = [...acceptedTurnMessages, ...attemptResult.messages];
+        break;
+      }
+
       await flushAgentEvents(
         applyToolLoopLimitToDelayedEvents(attemptResult.delayedEvents, toolLoopLimiter),
-        options.onEvent
+        options.onEvent,
+        true
       );
-      newMessages = [...acceptedTurnMessages, ...attemptResult.messages];
-      break;
+      const retryMessages = attemptResult.messages.slice(0, -1);
+      acceptedTurnMessages = [...acceptedTurnMessages, ...retryMessages];
+      contextMessages = [...originalMessages, ...acceptedTurnMessages];
+      inputMessages = [];
     }
-
-    await flushAgentEvents(
-      applyToolLoopLimitToDelayedEvents(attemptResult.delayedEvents, toolLoopLimiter),
-      options.onEvent,
-      true
-    );
-    const retryMessages = attemptResult.messages.slice(0, -1);
-    acceptedTurnMessages = [...acceptedTurnMessages, ...retryMessages];
-    contextMessages = [...originalMessages, ...acceptedTurnMessages];
-    inputMessages = [];
+  } finally {
+    unlinkAbort();
   }
 
   options.context.messages = [...originalMessages, ...newMessages];

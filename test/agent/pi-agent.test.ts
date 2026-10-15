@@ -979,6 +979,80 @@ test("runAgentTurn stops after ninety tool loops in one turn", async () => {
   }
 });
 
+test("runAgentTurn aborts the live turn when the caller aborts its signal", async () => {
+  const registration = registerFauxProvider();
+  const controller = new AbortController();
+  const prompt = "Keep using the tool.";
+  registration.setResponses([
+    fauxAssistantMessage([fauxToolCall("abort_the_turn", {})], { stopReason: "toolUse" }),
+    fauxAssistantMessage([fauxText("Text that must never be produced.")]),
+    fauxAssistantMessage([fauxText("Text that must never be produced either.")])
+  ]);
+
+  let executionCount = 0;
+  const context: AgentContext = {
+    systemPrompt: "You are a helpful assistant. Use tools when they are useful.",
+    messages: [],
+    tools: [
+      {
+        name: "abort_the_turn",
+        label: "Abort The Turn",
+        description: "Cancels the calling turn from inside a tool.",
+        parameters: Type.Object({}),
+        execute: async () => {
+          executionCount += 1;
+          controller.abort(new Error("benchmark item timed out"));
+          return {
+            content: [{ type: "text", text: "tool result before the abort" }],
+            details: { aborted: true }
+          };
+        }
+      }
+    ]
+  };
+  const observedEvents: AgentEvent[] = [];
+
+  try {
+    const result = await runAgentTurn({
+      model: registration.getModel(),
+      workspaceDir: process.cwd(),
+      context,
+      prompt,
+      signal: controller.signal,
+      onEvent: (event) => {
+        observedEvents.push(event);
+      }
+    });
+
+    assert.equal(controller.signal.aborted, true);
+    // The external signal reached the agent loop: the tool ran once and the loop did
+    // not keep running after cancellation.
+    assert.equal(executionCount, 1);
+    assert.equal(
+      observedEvents.filter(
+        (event) => event.type === "tool_execution_start" && event.toolName === "abort_the_turn"
+      ).length,
+      1
+    );
+
+    const finalMessage = result.newMessages.at(-1);
+    assert.ok(finalMessage);
+    assert.ok(isAssistantMessage(finalMessage));
+    assert.equal(finalMessage.stopReason, "aborted");
+
+    assert.equal(
+      result.newMessages.some(
+        (message) =>
+          isAssistantMessage(message) && messageHasText(message, "Text that must never be produced.")
+      ),
+      false
+    );
+    assert.deepEqual(context.messages, result.newMessages);
+  } finally {
+    registration.unregister();
+  }
+});
+
 test("runSessionPrompt stops on exit and quit commands", async () => {
   const runSessionPrompt = (
     piAgent as {
