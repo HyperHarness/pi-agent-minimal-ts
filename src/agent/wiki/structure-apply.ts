@@ -213,6 +213,9 @@ function parseYamlStringList(frontmatter: string, key: string): string[] {
   if (inline && inline !== "[]") {
     try {
       const parsed = JSON.parse(inline);
+      if (Array.isArray(parsed)) {
+        return parsed.filter((value): value is string => typeof value === "string").filter(Boolean);
+      }
       return typeof parsed === "string" ? [parsed] : [];
     } catch {
       return [inline.replace(/^"|"$/g, "").trim()].filter(Boolean);

@@ -3412,3 +3412,287 @@ Evidence summary.
     await rm(outside, { recursive: true, force: true });
   }
 });
+
+test("applyWikiStructurePlan preserves inline-array aliases when merging duplicate pages", async () => {
+  const workspace = await createWorkspace();
+
+  try {
+    await writePage(
+      workspace,
+      "surface-code",
+      `
+---
+schema_version: 1
+type: "concept"
+key: "surface-code"
+title: "Surface Code"
+aliases: ["transmon qubit", "transmon"]
+tags: []
+created_at: "2026-05-10T00:00:00.000Z"
+updated_at: "2026-05-10T00:00:00.000Z"
+---
+
+# Surface Code
+
+Canonical content.
+`
+    );
+    await writePage(
+      workspace,
+      "surface-codes",
+      `
+---
+schema_version: 1
+type: "concept"
+key: "surface-codes"
+title: "Surface Codes"
+aliases: []
+tags: []
+created_at: "2026-05-10T00:00:00.000Z"
+updated_at: "2026-05-10T00:00:00.000Z"
+---
+
+# Surface Codes
+
+Redundant plural content.
+`
+    );
+
+    const { applyWikiStructurePlan } = await import("../../src/agent/wiki/structure-apply.js");
+    const applied = await applyWikiStructurePlan({
+      workspaceDir: workspace,
+      dryRun: false,
+      runVerification: false,
+      actions: [{
+        id: "wiki-structure-001",
+        type: "merge_duplicate_pages" as const,
+        priority: "medium" as const,
+        risk: "low" as const,
+        issueKind: "near_duplicate_page" as const,
+        owner: "wiki-agent" as const,
+        path: "knowledge-base/pages/surface-codes.md",
+        target: "surface-code",
+        reason: "Plural duplicate.",
+        recommendedTool: "wiki_apply_structure_plan" as const,
+        recommendedArgs: {
+          canonical: "surface-code",
+          redundant: "surface-codes",
+          alias: "surface-codes",
+          note: "Plural duplicate."
+        }
+      }]
+    });
+
+    assert.equal(applied.status, "applied");
+    await assert.rejects(readFile(path.join(workspace, "knowledge-base/pages/surface-codes.md"), "utf8"));
+    const canonical = await readFile(path.join(workspace, "knowledge-base/pages/surface-code.md"), "utf8");
+    assert.match(canonical, /"transmon qubit"/);
+    assert.match(canonical, /"transmon"/);
+    assert.equal([...canonical.matchAll(/- "surface-codes"/g)].length, 1);
+  } finally {
+    await rm(workspace, { recursive: true, force: true });
+  }
+});
+
+test("applyWikiStructurePlan keeps inline single-string aliases and does not duplicate an existing alias", async () => {
+  const workspace = await createWorkspace();
+
+  try {
+    await writePage(
+      workspace,
+      "surface-code",
+      `
+---
+schema_version: 1
+type: "concept"
+key: "surface-code"
+title: "Surface Code"
+aliases: "transmon"
+tags: []
+created_at: "2026-05-10T00:00:00.000Z"
+updated_at: "2026-05-10T00:00:00.000Z"
+---
+
+# Surface Code
+
+Canonical content.
+`
+    );
+    await writePage(
+      workspace,
+      "surface-codes",
+      `
+---
+schema_version: 1
+type: "concept"
+key: "surface-codes"
+title: "Surface Codes"
+aliases: []
+tags: []
+created_at: "2026-05-10T00:00:00.000Z"
+updated_at: "2026-05-10T00:00:00.000Z"
+---
+
+# Surface Codes
+
+Redundant plural content.
+`
+    );
+
+    const { applyWikiStructurePlan } = await import("../../src/agent/wiki/structure-apply.js");
+    const applied = await applyWikiStructurePlan({
+      workspaceDir: workspace,
+      dryRun: false,
+      runVerification: false,
+      actions: [{
+        id: "wiki-structure-002",
+        type: "merge_duplicate_pages" as const,
+        priority: "medium" as const,
+        risk: "low" as const,
+        issueKind: "near_duplicate_page" as const,
+        owner: "wiki-agent" as const,
+        path: "knowledge-base/pages/surface-codes.md",
+        target: "surface-code",
+        reason: "Plural duplicate.",
+        recommendedTool: "wiki_apply_structure_plan" as const,
+        recommendedArgs: {
+          canonical: "surface-code",
+          redundant: "surface-codes",
+          alias: "surface-codes",
+          note: "Plural duplicate."
+        }
+      }]
+    });
+
+    assert.equal(applied.status, "applied");
+    const canonical = await readFile(path.join(workspace, "knowledge-base/pages/surface-code.md"), "utf8");
+    assert.equal([...canonical.matchAll(/- "transmon"/g)].length, 1);
+    assert.equal([...canonical.matchAll(/- "surface-codes"/g)].length, 1);
+  } finally {
+    await rm(workspace, { recursive: true, force: true });
+  }
+});
+
+test("lintPaperWiki does not flag pages linked only by later files as orphans", async () => {
+  const workspace = await createWorkspace();
+
+  try {
+    await writePage(
+      workspace,
+      "alpha",
+      `
+---
+title: "Alpha"
+aliases: []
+---
+
+# Alpha
+
+Alpha has no related_pages of its own.
+`
+    );
+    await writePage(
+      workspace,
+      "beta",
+      `
+---
+title: "Beta"
+aliases: []
+---
+
+# Beta
+
+Beta has no inbound links at all.
+`
+    );
+    await writePage(
+      workspace,
+      "gamma",
+      `
+---
+title: "Gamma"
+aliases: []
+---
+
+# Gamma
+
+Gamma has no related_pages of its own.
+`
+    );
+    await writePage(
+      workspace,
+      "omega",
+      `
+---
+title: "Omega"
+aliases: []
+---
+
+# Omega
+
+See [Gamma](knowledge-base/pages/gamma.md) for details.
+`
+    );
+    await writePage(
+      workspace,
+      "zeta",
+      `
+---
+title: "Zeta"
+aliases: []
+related_pages:
+  - alpha
+---
+
+# Zeta
+
+Zeta lists alpha as a related page.
+`
+    );
+
+    const result = await lintPaperWiki({
+      workspaceDir: workspace,
+      maxItems: 100
+    });
+
+    const orphanPaths = result.issues
+      .filter((issue) => issue.kind === "orphan_page")
+      .map((issue) => issue.path);
+    // An outgoing Markdown link alone does not give omega an inbound link.
+    assert.deepEqual(orphanPaths, ["knowledge-base/pages/beta.md", "knowledge-base/pages/omega.md"]);
+    assert.equal(result.summary.orphan_page, 2);
+  } finally {
+    await rm(workspace, { recursive: true, force: true });
+  }
+});
+
+test("lintPaperWiki skips the orphan check for a single-page workspace", async () => {
+  const workspace = await createWorkspace();
+
+  try {
+    await writePage(
+      workspace,
+      "solo",
+      `
+---
+title: "Solo"
+aliases: []
+---
+
+# Solo
+
+A lone page with no related_pages and no inbound links.
+`
+    );
+
+    const result = await lintPaperWiki({
+      workspaceDir: workspace,
+      maxItems: 100
+    });
+
+    assert.equal(result.summary.orphan_page, 0);
+    assert.ok(!result.issues.some((issue) => issue.kind === "orphan_page"));
+  } finally {
+    await rm(workspace, { recursive: true, force: true });
+  }
+});

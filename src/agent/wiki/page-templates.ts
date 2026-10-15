@@ -98,6 +98,10 @@ export function inferWikiPageTypeForEvidence(input: InferWikiPageTypeInput): Tem
   return "concept";
 }
 
+function normalizeSectionTitle(value: string): string {
+  return value.toLowerCase().replace(/\s+/g, " ").trim();
+}
+
 export function validateRequiredTemplateSections(input: {
   pageType: TemplatePageType;
   markdown: string;
@@ -107,12 +111,12 @@ export function validateRequiredTemplateSections(input: {
   let match: RegExpExecArray | null;
 
   while ((match = headingPattern.exec(input.markdown)) !== null) {
-    headings.add(match[1].trim());
+    headings.add(normalizeSectionTitle(match[1]));
   }
 
   const template = getWikiPageTemplate(input.pageType);
   return {
-    missingSections: template.requiredSections.filter((section) => !headings.has(section))
+    missingSections: template.requiredSections.filter((section) => !headings.has(normalizeSectionTitle(section)))
   };
 }
 
