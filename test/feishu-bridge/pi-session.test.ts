@@ -48,6 +48,8 @@ test('buildPiClientOptionsForMessage keeps stateless mode unchanged when session
   assert.equal(options.useSession, false);
   assert.equal(options.sessionDir, undefined);
   assert.equal(getPiClientKey(options), 'stateless');
+  assert.notEqual(getPiClientKey(options, 'chat-a'), getPiClientKey(options, 'chat-b'));
+  assert.equal(getPiClientKey(options, 'chat-a'), getPiClientKey(options, 'chat-a'));
 });
 
 test('getPiClientKey reuses the same key for the same chat session directory', () => {

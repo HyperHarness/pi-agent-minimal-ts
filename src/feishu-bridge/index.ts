@@ -40,6 +40,7 @@ import { LongTermMemoryStore } from './memory/long-term-memory.js';
 import { PiRpcClient, type PiEvent } from './pi-client.js';
 import { buildPiClientOptionsForMessage, getPiClientKey } from './pi-session.js';
 import { startPiClientWithRetry } from './pi-client-retry.js';
+import { PiClientPool, type PiClientLease } from './pi-client-pool.js';
 import { buildSearchQuery, formatWebResults, searchWeb } from './web/search.js';
 import { createPerKeyQueue } from './chat-queue.js';
 import {
@@ -63,7 +64,12 @@ const messageQueue = createPerKeyQueue({
 });
 const PROCESSED_CACHE_LIMIT = 1000;
 const defaultPiSessionRoot = config.pi.sessionDir || `${config.memory.dir}/pi-sessions`;
-const piClients = new Map<string, PiRpcClient>();
+const piClientPool = new PiClientPool({
+  idleTtlMs: config.pi.idleTimeoutMs,
+  maxClients: config.pi.maxClients,
+});
+const idleEvictionTimer = setInterval(() => piClientPool.evictIdle(), config.pi.idleTimeoutMs);
+idleEvictionTimer.unref();
 
 function isRecord(value: unknown): value is Record<string, unknown> {
   return typeof value === 'object' && value !== null;
@@ -177,40 +183,31 @@ function trimProcessedCache(): void {
   }
 }
 
-async function ensurePiClient(message: ParsedIncomingMessage): Promise<PiRpcClient> {
+async function ensurePiClient(message: ParsedIncomingMessage): Promise<PiClientLease> {
   const options = buildPiClientOptionsForMessage(config.pi, message, defaultPiSessionRoot);
-  const clientKey = getPiClientKey(options);
-  const existingClient = piClients.get(clientKey);
-  if (existingClient?.isProcessReady()) {
-    return existingClient;
-  }
-
-  if (existingClient) {
-    existingClient.stop();
-    piClients.delete(clientKey);
-  }
-
-  const client = await startPiClientWithRetry({
-    maxAttempts: 2,
-    createClient: () => {
-      const nextClient = new PiRpcClient(options);
-      nextClient.on('stderr', (stderrMessage: string) => log.pi(stderrMessage.trim()));
-      nextClient.on('event', (event: PiEvent) => logPiEvent(clientKey, event));
-      nextClient.on('exit', (code: number) => {
-        log.warn(`PI 进程退出[${clientKey}]: ${code}`);
-        if (piClients.get(clientKey) === nextClient) {
-          piClients.delete(clientKey);
-        }
-      });
-      nextClient.on('error', (error: unknown) => {
-        log.error(`PI 客户端错误[${clientKey}]`, error);
-      });
-      return nextClient;
-    },
+  const clientKey = getPiClientKey(options, message.chatId);
+  return piClientPool.acquire(clientKey, async () => {
+    const client = await startPiClientWithRetry({
+      maxAttempts: 2,
+      createClient: () => {
+        const nextClient = new PiRpcClient(options);
+        nextClient.on('stderr', (stderrMessage: string) => log.pi(stderrMessage.trim()));
+        nextClient.on('event', (event: PiEvent) => logPiEvent(clientKey, event));
+        nextClient.on('exit', (code: number) => {
+          log.warn(`PI 进程退出[${clientKey}]: ${code}`);
+          if (piClientPool.get(clientKey) === nextClient) {
+            piClientPool.remove(clientKey);
+          }
+        });
+        nextClient.on('error', (error: unknown) => {
+          log.error(`PI 客户端错误[${clientKey}]`, error);
+        });
+        return nextClient;
+      },
+    });
+    log.pi(`PI RPC 已连接[${clientKey}]`);
+    return client as PiRpcClient;
   });
-  piClients.set(clientKey, client as PiRpcClient);
-  log.pi(`PI RPC 已连接[${clientKey}]`);
-  return client as PiRpcClient;
 }
 
 function pickSenderId(sender: any): string {
@@ -878,11 +875,11 @@ async function processMessage(client: Lark.Client, message: ParsedIncomingMessag
     ? history
     : history.filter((turn) => turn.role !== 'assistant');
   const piClientOptions = buildPiClientOptionsForMessage(config.pi, message, defaultPiSessionRoot);
+  const piClientKey = getPiClientKey(piClientOptions, message.chatId);
   const userMemoryText = config.memory.longTermEnabled ? longTermMemory.renderUserMemory(message.senderId) : '(无)';
   const groupMemoryText = config.memory.longTermEnabled ? longTermMemory.renderGroupMemory(message.chatId) : '(无)';
   const keyMemoryText = config.memory.longTermEnabled ? keyMemory.render(message.chatId) : '(无)';
   let webContext = '(无联网结果)';
-  const piClientPromise = ensurePiClient(message);
   const maxAgentWebSearchSteps = 7;
 
   const runSearchAndFormat = async (query: string, reason: 'initial' | 'agent'): Promise<string> => {
@@ -955,8 +952,10 @@ async function processMessage(client: Lark.Client, message: ParsedIncomingMessag
   });
 
   let pi: PiRpcClient;
+  let piLease: PiClientLease;
   try {
-    pi = await piClientPromise;
+    piLease = await ensurePiClient(message);
+    pi = piLease.client;
   } catch (error) {
     await reportMessageProcessingError(client, message, error, replyMessageId, replyTargetMessageId);
     return;
@@ -1012,7 +1011,7 @@ async function processMessage(client: Lark.Client, message: ParsedIncomingMessag
           initialWebContext: webContext,
           maxSearchSteps: config.web.enabled ? maxAgentWebSearchSteps : 0,
           buildPrompt: buildPromptForWebContext,
-          promptAgent: async (prompt: string) => pi.prompt(prompt),
+          promptAgent: async (prompt: string) => piClientPool.runPrompt(piClientKey, pi, prompt),
           search: async (query: string) => runSearchAndFormat(query, 'agent'),
           onSearchRequest: async (query: string) => {
             log.info(`Agent主动请求追加联网搜索: ${buildSearchQuery(query)}`);
@@ -1166,6 +1165,8 @@ async function processMessage(client: Lark.Client, message: ParsedIncomingMessag
     log.feishu(`回复完成 message=${message.messageId}`);
   } catch (error) {
     await reportMessageProcessingError(client, message, error, replyMessageId, replyTargetMessageId);
+  } finally {
+    piLease.release();
   }
 }
 
@@ -1231,17 +1232,28 @@ async function main(): Promise<void> {
   log.feishu('飞书桥接服务已启动，等待消息中。');
 }
 
-function shutdown(): void {
-  log.warn('收到退出信号，正在关闭...');
-  for (const client of piClients.values()) {
-    client.stop();
+let shuttingDown = false;
+
+async function shutdown(): Promise<void> {
+  if (shuttingDown) {
+    return;
   }
-  piClients.clear();
-  process.exit(0);
+  shuttingDown = true;
+  log.warn('收到退出信号，正在关闭...');
+  clearInterval(idleEvictionTimer);
+  try {
+    await piClientPool.shutdown();
+  } finally {
+    process.exit(0);
+  }
 }
 
-process.on('SIGINT', shutdown);
-process.on('SIGTERM', shutdown);
+process.on('SIGINT', () => {
+  void shutdown();
+});
+process.on('SIGTERM', () => {
+  void shutdown();
+});
 
 main().catch((error) => {
   log.error('启动失败', error);

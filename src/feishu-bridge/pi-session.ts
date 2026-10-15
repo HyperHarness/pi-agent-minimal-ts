@@ -49,9 +49,9 @@ export function buildPiClientOptionsForMessage(
   };
 }
 
-export function getPiClientKey(options: PiRpcClientOptions): string {
+export function getPiClientKey(options: PiRpcClientOptions, chatId?: string): string {
   if (!options.useSession || !options.sessionDir) {
-    return 'stateless';
+    return chatId === undefined ? 'stateless' : `stateless:${chatId}`;
   }
   return options.sessionDir;
 }
