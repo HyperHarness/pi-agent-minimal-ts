@@ -1,5 +1,6 @@
-import { appendFile, lstat, mkdir, readFile, realpath, unlink, writeFile } from "node:fs/promises";
+import { appendFile, lstat, mkdir, readFile, realpath, unlink } from "node:fs/promises";
 import path from "node:path";
+import { atomicWriteFile } from "./atomic-write.js";
 import {
   listPaperParseEngines,
   readParsedPaperDocument,
@@ -479,7 +480,7 @@ async function rewriteWikiIndex(workspaceDir: string): Promise<void> {
     allowedRoot: getPaperWikiDir(workspaceDir),
     label: "wiki index"
   });
-  await writeFile(indexPath, content, "utf8");
+  await atomicWriteFile(indexPath, content);
 }
 
 export async function rewritePaperWikiIndex(workspaceDir: string): Promise<void> {
@@ -624,7 +625,7 @@ ${sectionList("Open Questions", input.openQuestions)}`;
   };
 
   await mkdir(path.dirname(sourcePath), { recursive: true });
-  await writeFile(sourcePath, markdown.trimEnd() + "\n", "utf8");
+  await atomicWriteFile(sourcePath, markdown.trimEnd() + "\n");
   await writeKnowledgeSourceMetadata({
     workspaceDir: input.workspaceDir,
     metadata
@@ -748,7 +749,7 @@ ${input.sourceCitations.map((source) =>
 ).join("\n")}
 `;
 
-  await writeFile(pagePath, markdown.trimEnd() + "\n", "utf8");
+  await atomicWriteFile(pagePath, markdown.trimEnd() + "\n");
   await rewriteWikiIndex(input.workspaceDir);
   await appendFile(
     logPath,
@@ -1030,7 +1031,7 @@ ${note ? `- Note: ${note}\n` : ""}`;
     });
     await ensurePaperWikiScaffold(input.workspaceDir);
     for (const alias of writableAliases) {
-      await writeFile(alias.pagePath, alias.markdown, "utf8");
+      await atomicWriteFile(alias.pagePath, alias.markdown);
     }
     await rewriteWikiIndex(input.workspaceDir);
     await assertSafePaperWikiWriteTarget({

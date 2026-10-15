@@ -1,5 +1,6 @@
-import { mkdir, readFile, writeFile } from "node:fs/promises";
+import { mkdir, readFile } from "node:fs/promises";
 import path from "node:path";
+import { atomicWriteFile } from "./atomic-write.js";
 import {
   getPaperWikiPagePath,
   listPaperWikiPageFiles,
@@ -171,7 +172,7 @@ export async function writeTypedWikiPage(options: WriteTypedWikiPageOptions): Pr
     body: options.page.body
   });
   await mkdir(path.dirname(filePath), { recursive: true });
-  await writeFile(filePath, markdown, "utf8");
+  await atomicWriteFile(filePath, markdown);
 
   return {
     path: filePath,
