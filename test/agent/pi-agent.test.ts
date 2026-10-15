@@ -689,7 +689,7 @@ test("runAgentTurn cleans up the prior tool set before replacing it on workspace
   }
 });
 
-test("runAgentTurn does not persist a failed turn into context history", async () => {
+test("runAgentTurn persists a failed turn into context history so side effects stay traceable", async () => {
   const registration = registerFauxProvider();
   const prompt = "Try again later";
   const previousMessages: AgentMessage[] = [
@@ -734,7 +734,15 @@ test("runAgentTurn does not persist a failed turn into context history", async (
     assert.equal(failedAssistant.stopReason, "error");
     assert.equal(failedAssistant.errorMessage, "Authentication failed");
 
-    assert.deepEqual(context.messages, previousMessages);
+    assert.deepEqual(context.messages, [...previousMessages, ...result.newMessages]);
+    assert.ok(
+      context.messages.some(
+        (message) =>
+          isAssistantMessage(message) &&
+          message.stopReason === "error" &&
+          message.errorMessage === "Authentication failed"
+      )
+    );
   } finally {
     registration.unregister();
   }
@@ -798,14 +806,13 @@ test("runAgentTurn retries transient overloaded assistant errors without rerunni
       ).length,
       1
     );
-    assert.equal(
+    assert.ok(
       observedEvents.some(
         (event) =>
           event.type === "message_end" &&
           event.message.role === "assistant" &&
           event.message.errorMessage === "Our servers are currently overloaded. Please try again later."
-      ),
-      false
+      )
     );
     assert.ok(
       result.newMessages.some(
@@ -817,6 +824,73 @@ test("runAgentTurn retries transient overloaded assistant errors without rerunni
         (message) =>
           isAssistantMessage(message) &&
           message.errorMessage === "Our servers are currently overloaded. Please try again later."
+      ),
+      false
+    );
+    assert.deepEqual(context.messages, result.newMessages);
+  } finally {
+    registration.unregister();
+  }
+});
+
+test("runAgentTurn emits a terminating event for a transiently-failed attempt before retrying", async () => {
+  const registration = registerFauxProvider();
+  const prompt = "Answer with partial text.";
+  registration.setResponses([
+    fauxAssistantMessage([fauxText("Partial answer before overload.")], {
+      stopReason: "error",
+      errorMessage: "The service is temporarily unavailable. Please try again later."
+    }),
+    fauxAssistantMessage([fauxText("Complete retried answer.")])
+  ]);
+
+  const context: AgentContext = {
+    systemPrompt: "You are a helpful assistant. Use tools when they are useful.",
+    messages: [],
+    tools: []
+  };
+  const observedEvents: AgentEvent[] = [];
+
+  try {
+    const result = await runAgentTurn({
+      model: registration.getModel(),
+      workspaceDir: process.cwd(),
+      context,
+      prompt,
+      onEvent: (event) => {
+        observedEvents.push(event);
+      }
+    });
+
+    const failedMessageEnd = observedEvents.find(
+      (event) =>
+        event.type === "message_end" &&
+        event.message.role === "assistant" &&
+        event.message.errorMessage ===
+          "The service is temporarily unavailable. Please try again later."
+    );
+    assert.ok(failedMessageEnd);
+
+    const retriedMessageEnd = observedEvents.find(
+      (event) =>
+        event.type === "message_end" &&
+        event.message.role === "assistant" &&
+        messageHasText(event.message, "Complete retried answer.")
+    );
+    assert.ok(retriedMessageEnd);
+
+    assert.ok(observedEvents.indexOf(failedMessageEnd) < observedEvents.indexOf(retriedMessageEnd));
+
+    assert.ok(
+      result.newMessages.some(
+        (message) => isAssistantMessage(message) && messageHasText(message, "Complete retried answer.")
+      )
+    );
+    assert.equal(
+      result.newMessages.some(
+        (message) =>
+          isAssistantMessage(message) &&
+          message.errorMessage === "The service is temporarily unavailable. Please try again later."
       ),
       false
     );
@@ -894,7 +968,12 @@ test("runAgentTurn stops after ninety tool loops in one turn", async () => {
     assert.ok(isAssistantMessage(finalMessage));
     assert.equal(finalMessage.stopReason, "aborted");
     assert.match(finalMessage.errorMessage ?? "", /stopped after 90 tool loops/);
-    assert.deepEqual(context.messages, []);
+    assert.deepEqual(context.messages, result.newMessages);
+    assert.ok(
+      context.messages.some(
+        (message) => isUserMessage(message) && userMessageHasPrompt(message, prompt)
+      )
+    );
   } finally {
     registration.unregister();
   }
@@ -1048,8 +1127,8 @@ test("runSessionPrompt routes paper write commands to the paper-writing worker b
   });
   assert.deepEqual(routeChatPromptToWorker!("design 写一个芯片设计 failure record"), {
     role: "design-agent",
-    instruction: "写一个芯片设计 failure record",
-    reason: "explicit"
+    instruction: "design 写一个芯片设计 failure record",
+    reason: "intent"
   });
   assert.deepEqual(routeChatPromptToWorker!("design-agent 安装 gdsfactory"), {
     role: "design-agent",
@@ -1160,6 +1239,84 @@ test("runSessionPrompt routes paper write commands to the paper-writing worker b
     assert.deepEqual(handoff.toolsUsed, ["load_paper_writing_skill", "write_file"]);
     assert.equal(handoff.finalResponse, "Paper-writing worker finished.");
     assert.equal(handoff.nextSuggestedOwner, "wiki-agent");
+    assert.deepEqual(context.messages, result.newMessages);
+  } finally {
+    registration.unregister();
+    await rm(workspace, { recursive: true, force: true });
+  }
+});
+
+test("bare-word design and evidence prompts are not hijacked into clean-context workers", () => {
+  const routeChatPromptToWorker = (
+    piAgent as {
+      routeChatPromptToWorker?: (text: string) => {
+        role:
+          | "paper-writing-worker"
+          | "paper-download-subagent"
+          | "wiki-evidence-worker"
+          | "design-agent"
+          | "design-subagent";
+        instruction: string;
+        reason: "explicit" | "intent";
+      } | null;
+    }
+  ).routeChatPromptToWorker;
+  assert.equal(typeof routeChatPromptToWorker, "function");
+
+  // Conversational prompts that merely begin with "design"/"evidence" must not be
+  // force-routed with reason "explicit" into a clean-context worker.
+  assert.equal(
+    routeChatPromptToWorker!("Design an experiment to compare transmon coherence baselines"),
+    null
+  );
+  assert.equal(routeChatPromptToWorker!("Evidence that the design is correct"), null);
+
+  // Slash-prefixed explicit commands still route.
+  assert.deepEqual(routeChatPromptToWorker!("/design 安装 gdsfactory"), {
+    role: "design-agent",
+    instruction: "安装 gdsfactory",
+    reason: "explicit"
+  });
+  assert.deepEqual(routeChatPromptToWorker!("/evidence summarize the papers"), {
+    role: "wiki-evidence-worker",
+    instruction: "summarize the papers",
+    reason: "explicit"
+  });
+});
+
+test("runSessionPrompt persists the user prompt and failed-worker handoff into context", async () => {
+  const registration = registerFauxProvider();
+  const workspace = await mkdtemp(path.join(tmpdir(), "pi-agent-failed-worker-"));
+  registration.setResponses([
+    fauxAssistantMessage([], {
+      stopReason: "error",
+      errorMessage: "Authentication failed"
+    })
+  ]);
+
+  const context: AgentContext = {
+    systemPrompt: "You are a helpful assistant. Use tools when they are useful.",
+    messages: [],
+    tools: []
+  };
+
+  try {
+    const result = await piAgent.runSessionPrompt({
+      model: registration.getModel(),
+      workspaceDir: workspace,
+      context,
+      prompt: "paper write polish the abstract"
+    });
+
+    assert.equal(result.action, "continue");
+    assert.equal(result.newMessages.length, 2);
+    assert.ok(isUserMessage(result.newMessages[0]));
+    assert.ok(isAssistantMessage(result.newMessages[1]));
+
+    const handoff = parseWorkerHandoff(result.newMessages[1]) as { role?: string; status?: string };
+    assert.equal(handoff.role, "paper-writing-worker");
+    assert.equal(handoff.status, "failed");
+
     assert.deepEqual(context.messages, result.newMessages);
   } finally {
     registration.unregister();

@@ -81,7 +81,7 @@ Inside the wiki/paper flow, the runtime detects high-confidence worker intents a
 - evidence construction, paper summarization, and source-summary relation requests -> `wiki-evidence-worker`
 - chip-design/layout engineering requests, dependency installation, verification records, or design-failure cases -> use the separate `design-agent` entrypoint
 
-Explicit prefixes are still supported when precision matters inside routed/internal contexts: `paper write ...`, `paper download ...`, `download paper ...`, `wiki evidence ...`, `evidence ...`, `/paper-writing-worker ...`, `/paper-download-subagent ...`, and `/wiki-evidence-worker ...`. If no wiki/paper worker route matches, the prompt goes to the wiki-agent coordinator.
+Explicit prefixes are still supported when precision matters inside routed/internal contexts: `paper write ...`, `paper download ...`, `download paper ...`, `wiki evidence ...`, `/evidence ...`, `/paper-writing-worker ...`, `/paper-download-subagent ...`, and `/wiki-evidence-worker ...`. If no wiki/paper worker route matches, the prompt goes to the wiki-agent coordinator.
 
 Worker turns do not share the main agent's full context. The router runs each worker in a clean context, streams the worker's normal reply to the user, then injects a compact structured handoff back into the main context. The handoff records the worker role, instruction, route reason, status, changed files, produced artifacts, source/page/design-record paths, tools used, failed tools, final worker response, and the next suggested owner. This keeps the main chat history continuous without copying the worker's full tool transcript into the prompt.
 
@@ -630,5 +630,5 @@ npm test
 ## Notes
 
 - conversation history is kept in memory only for local REPL sessions
-- failed assistant turns are not persisted into the ongoing context
+- failed or aborted turns preserve completed tool work and failure markers in the ongoing context
 - `read_file` uses bounded paged reads by default and reports truncation metadata so agents can recognize when a file needs another page or a search-oriented workflow

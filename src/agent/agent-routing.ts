@@ -106,7 +106,7 @@ export function routeChatPromptToWorker(text: string): RoutedWorkerPrompt | null
     ]) ??
     matchExplicitWorkerRoute(trimmed, "wiki-evidence-worker", [
       /^\/?wiki\s+evidence\s+([\s\S]+)$/i,
-      /^\/?evidence\s+([\s\S]+)$/i,
+      /^\/evidence\s+([\s\S]+)$/i,
       /^\/?wiki-evidence-worker\s+([\s\S]+)$/i,
       /^\/?证据整理\s+([\s\S]+)$/i,
       /^\/?文献总结\s+([\s\S]+)$/i
@@ -116,7 +116,7 @@ export function routeChatPromptToWorker(text: string): RoutedWorkerPrompt | null
       /^\/?design\s+agent\s+([\s\S]+)$/i,
       /^\/?design-subagent\s+([\s\S]+)$/i,
       /^\/?design\s+subagent\s+([\s\S]+)$/i,
-      /^\/?design\s+([\s\S]+)$/i,
+      /^\/design\s+([\s\S]+)$/i,
       /^\/?芯片设计\s+([\s\S]+)$/i,
       /^\/?设计任务\s+([\s\S]+)$/i
     ]);

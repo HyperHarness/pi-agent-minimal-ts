@@ -25,7 +25,7 @@ import {
 } from "./agent-routing.js";
 
 type LlmMessage = UserMessage | AssistantMessage | ToolResultMessage;
-type AgentMessageEventHandler = (event: AgentEvent) => Promise<void> | void;
+type AgentMessageEventHandler = (event: AgentEvent & { willRetry?: boolean }) => Promise<void> | void;
 export type WorkerRoutingPolicy = "all" | "wiki-paper" | "none";
 const contextWorkspaceDirs = new WeakMap<AgentContext, string>();
 const TRANSIENT_MODEL_RETRY_ATTEMPTS = 5;
@@ -326,14 +326,15 @@ function applyToolLoopLimitToDelayedEvents(
 
 async function flushAgentEvents(
   events: AgentEvent[],
-  onEvent: AgentMessageEventHandler | undefined
+  onEvent: AgentMessageEventHandler | undefined,
+  willRetry = false
 ): Promise<void> {
   if (!onEvent) {
     return;
   }
 
   for (const event of events) {
-    await onEvent(event);
+    await onEvent(willRetry ? { ...event, willRetry: true } : event);
   }
 }
 
@@ -555,9 +556,7 @@ export async function runSessionPrompt(
     const handoffMessage = createWorkerHandoffMessage(workerResult.handoff);
     const newMessages: AgentMessage[] = [userMessage, handoffMessage];
 
-    if (!isFailedTurn(workerResult.messages)) {
-      options.context.messages = [...options.context.messages, ...newMessages];
-    }
+    options.context.messages = [...options.context.messages, ...newMessages];
 
     return { action: "continue", newMessages };
   }
@@ -619,15 +618,18 @@ export async function runAgentTurn(options: RunAgentTurnOptions): Promise<RunAge
       break;
     }
 
+    await flushAgentEvents(
+      applyToolLoopLimitToDelayedEvents(attemptResult.delayedEvents, toolLoopLimiter),
+      options.onEvent,
+      true
+    );
     const retryMessages = attemptResult.messages.slice(0, -1);
     acceptedTurnMessages = [...acceptedTurnMessages, ...retryMessages];
     contextMessages = [...originalMessages, ...acceptedTurnMessages];
     inputMessages = [];
   }
 
-  if (!isFailedTurn(newMessages)) {
-    options.context.messages = [...originalMessages, ...newMessages];
-  }
+  options.context.messages = [...originalMessages, ...newMessages];
   options.context.tools = tools;
   contextWorkspaceDirs.set(options.context, workspaceDir);
 

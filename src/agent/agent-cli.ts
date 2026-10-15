@@ -507,7 +507,7 @@ function extractRpcPromptMessage(command: unknown): string | undefined {
   return typeof message === "string" ? message : undefined;
 }
 
-async function runRpcMode(options: {
+export async function runRpcMode(options: {
   model: Model<Api>;
   workspaceDir: string;
   entrypointProfile: ResolvedAgentEntrypointProfile;
@@ -594,6 +594,15 @@ async function runRpcMode(options: {
           prompt: message,
           workerRouting: options.entrypointProfile.workerRouting,
           onEvent: (event) => {
+            if (event.type === "message_start" || event.type === "message_end") {
+              writeRpcEvent(options.output, {
+                type: event.type,
+                message: event.message,
+                ...(event.willRetry ? { willRetry: true } : {})
+              });
+              return;
+            }
+
             if (event.type === "message_update") {
               writeRpcEvent(options.output, {
                 type: "message_update",
