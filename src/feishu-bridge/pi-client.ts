@@ -212,6 +212,9 @@ export class PiRpcClient extends EventEmitter {
 
       this.once('event', onReady);
       this.once('error', onError);
+    }).catch((error) => {
+      this.stop();
+      throw error;
     });
   }
 

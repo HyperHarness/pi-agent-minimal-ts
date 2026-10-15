@@ -56,7 +56,11 @@ const memory = new ChatMemoryStore(config.memory.dir, config.memory.historyLimit
 const longTermMemory = new LongTermMemoryStore(config.memory.dir);
 const keyMemory = new KeyMemoryStore(config.memory.dir, 50);
 const processedMessageIds = new Set<string>();
-const messageQueue = createPerKeyQueue();
+const messageQueue = createPerKeyQueue({
+  onError: (error: unknown, key: string) => {
+    log.error(`消息队列任务失败[${key}]`, error);
+  },
+});
 const PROCESSED_CACHE_LIMIT = 1000;
 const defaultPiSessionRoot = config.pi.sessionDir || `${config.memory.dir}/pi-sessions`;
 const piClients = new Map<string, PiRpcClient>();
@@ -749,6 +753,22 @@ function storePassiveMemory(message: ParsedIncomingMessage): void {
   saveLongTermMemory(message);
 }
 
+async function reportMessageProcessingError(
+  client: Lark.Client,
+  message: ParsedIncomingMessage,
+  error: unknown,
+  replyMessageId: string | undefined,
+  replyTargetMessageId: string | undefined,
+): Promise<void> {
+  const fallback = `抱歉，处理消息时出现错误：${error instanceof Error ? error.message : String(error)}`;
+  try {
+    await sendErrorMessage(client, message.chatId, fallback, replyMessageId, replyTargetMessageId);
+  } catch (sendError) {
+    log.error('发送错误消息失败', sendError);
+  }
+  log.error('处理飞书消息失败', error);
+}
+
 async function processMessage(client: Lark.Client, message: ParsedIncomingMessage): Promise<void> {
   if (!message.chatId || !message.messageId || !message.text.trim()) {
     return;
@@ -757,7 +777,13 @@ async function processMessage(client: Lark.Client, message: ParsedIncomingMessag
   log.feishu(`收到消息 chat=${message.chatId} sender=${message.senderName}: ${message.text}`);
 
   const replyTargetMessageId = resolveReplyToMessageId(message.messageId, message.isDirectMessage);
-  const replyMessageId = await sendThinkingMessage(client, message.chatId, message.senderName, replyTargetMessageId);
+  let replyMessageId: string | undefined;
+  try {
+    replyMessageId = await sendThinkingMessage(client, message.chatId, message.senderName, replyTargetMessageId);
+  } catch (error) {
+    await reportMessageProcessingError(client, message, error, replyMessageId, replyTargetMessageId);
+    return;
+  }
   const repoCommand = parseManagedRepoCommand(message.text);
   if (repoCommand) {
     try {
@@ -928,7 +954,13 @@ async function processMessage(client: Lark.Client, message: ParsedIncomingMessag
     },
   });
 
-  const pi = await piClientPromise;
+  let pi: PiRpcClient;
+  try {
+    pi = await piClientPromise;
+  } catch (error) {
+    await reportMessageProcessingError(client, message, error, replyMessageId, replyTargetMessageId);
+    return;
+  }
   let repoSnapshots: ManagedRepoSnapshot[] = [];
   try {
     repoSnapshots = await captureManagedRepoSnapshots(config.managedRepos);
@@ -1133,13 +1165,7 @@ async function processMessage(client: Lark.Client, message: ParsedIncomingMessag
     saveLongTermMemory(message);
     log.feishu(`回复完成 message=${message.messageId}`);
   } catch (error) {
-    const fallback = `抱歉，处理消息时出现错误：${error instanceof Error ? error.message : String(error)}`;
-    try {
-      await sendErrorMessage(client, message.chatId, fallback, replyMessageId, replyTargetMessageId);
-    } catch (sendError) {
-      log.error('发送错误消息失败', sendError);
-    }
-    log.error('处理飞书消息失败', error);
+    await reportMessageProcessingError(client, message, error, replyMessageId, replyTargetMessageId);
   }
 }
 

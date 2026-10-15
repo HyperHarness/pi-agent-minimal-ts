@@ -122,6 +122,22 @@ test('PiRpcClient start rejects when startup readiness times out', async () => {
   );
 
   await assert.rejects(client.start(), /PI RPC 启动超时/);
+  assert.equal(child.killCalled, true);
+  assert.equal(client.isProcessReady(), false);
+});
+
+test('PiRpcClient terminates a child that emits invalid startup output', async () => {
+  const child = new FakeChildProcess();
+  const client = new PiRpcClient({ command: 'pi', useSession: false }, {
+    spawnFn: () => child as never,
+    startupTimeoutMs: 1000,
+    requireReadyEvent: true,
+  });
+  const startup = client.start();
+  child.stdout.emit('data', Buffer.from('unexpected banner\n'));
+  await assert.rejects(startup);
+  assert.equal(child.killCalled, true);
+  assert.equal(client.isProcessReady(), false);
 });
 
 test('PiRpcClient start can treat a live process as ready without an initial event', async () => {
