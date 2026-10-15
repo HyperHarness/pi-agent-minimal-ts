@@ -1,6 +1,6 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
-import { mkdir, mkdtemp, rm, writeFile } from 'node:fs/promises';
+import { mkdir, mkdtemp, rm, writeFile, symlink } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import path from 'node:path';
 import {
@@ -10,11 +10,61 @@ import {
   parseCompiledPaperPdfDeliveryCommand,
   resolveDownloadedPdfAttachmentsForQueuedJobs,
   resolveCompiledPaperPdfAttachment,
+  openPdfForUpload,
 } from '../../src/feishu-bridge/feishu/pdf-delivery.js';
 
 async function createWorkspaceDir(): Promise<string> {
   return mkdtemp(path.join(tmpdir(), 'feishu-pdf-delivery-'));
 }
+
+test('PDF extraction rejects host paths, sibling prefixes and traversal', () => {
+  assert.deepEqual(extractPdfAttachmentsFromText(
+    '/etc/private.pdf /tmp/workspace-other/private.pdf knowledge-base/../../../private.pdf',
+    '/tmp/workspace',
+  ), []);
+  for (const filePath of ['/etc/private.pdf', '../private.pdf', '/tmp/workspace-other/private.pdf']) {
+    assert.equal(extractDownloadedPdfAttachment({
+      type: 'tool_execution_end', toolName: 'download_paper',
+      result: { details: { status: 'downloaded', path: filePath } },
+    }, '/tmp/workspace'), null);
+  }
+  assert.equal(resolveCompiledPaperPdfAttachment({ dir: '/tmp/paper', compiledPdfPath: '../private.pdf' }), null);
+});
+
+test('PDF upload validates real paths and reads only a bounded workspace file', async () => {
+  const workspace = await createWorkspaceDir();
+  const outside = await createWorkspaceDir();
+  try {
+    const safe = path.join(workspace, 'safe.pdf');
+    const secret = path.join(outside, 'secret.pdf');
+    await writeFile(safe, '%PDF-safe');
+    await writeFile(secret, '%PDF-secret');
+    await assert.rejects(openPdfForUpload(secret, [workspace], 100), /outside/);
+    await assert.rejects(openPdfForUpload(safe, [workspace], 1), /size limit/);
+    await mkdir(path.join(workspace, 'directory.pdf'));
+    await assert.rejects(openPdfForUpload(path.join(workspace, 'directory.pdf'), [workspace], 100), /regular file/);
+    const file = await openPdfForUpload(safe, [workspace, path.join(workspace, 'missing-root')], 100);
+    try { assert.equal(await file.readFile('utf8'), '%PDF-safe'); }
+    finally { await file.close(); }
+    // Both direct and parent-directory symlinks must be checked at upload time.
+    if (process.platform !== 'win32') {
+      await symlink(secret, path.join(workspace, 'link.pdf'));
+      await symlink(outside, path.join(workspace, 'linked-directory'));
+      for (const target of ['link.pdf', 'linked-directory/secret.pdf']) {
+        await assert.rejects(openPdfForUpload(path.join(workspace, target), [workspace], 100), /symlink escapes/);
+      }
+      await symlink(safe, path.join(workspace, 'safe-link.pdf'));
+      const linked = await openPdfForUpload(path.join(workspace, 'safe-link.pdf'), [workspace], 100);
+      await linked.close();
+    }
+    // An explicitly configured paper workspace can be outside the bridge cwd.
+    const paper = await openPdfForUpload(secret, [workspace, outside], 100);
+    await paper.close();
+  } finally {
+    await rm(workspace, { recursive: true, force: true });
+    await rm(outside, { recursive: true, force: true });
+  }
+});
 
 test('extractDownloadedPdfAttachment resolves successful download_paper results', () => {
   const attachment = extractDownloadedPdfAttachment(
@@ -199,7 +249,7 @@ test('resolveDownloadedPdfAttachmentsForQueuedJobs finds completed extension dow
           status: 'downloaded',
           articleUrl: 'https://www.nature.com/articles/s41586-025-09061-4',
           source: 'nature',
-          downloadPath: String.raw`\\wsl.localhost\Ubuntu-24.04\home\ququan2\pi-agent-minimal-ts\knowledge-base\raw\pdfs\nature-s41586-025-09061-4.pdf`,
+          downloadPath: path.join(workspaceDir, 'knowledge-base/raw/pdfs/nature-s41586-025-09061-4.pdf'),
         }),
         '',
       ].join('\n'),
@@ -210,7 +260,7 @@ test('resolveDownloadedPdfAttachmentsForQueuedJobs finds completed extension dow
       await resolveDownloadedPdfAttachmentsForQueuedJobs(workspaceDir, [{ jobId: 'paper-nature-1' }]),
       [
         {
-          path: '/home/ququan2/pi-agent-minimal-ts/knowledge-base/raw/pdfs/nature-s41586-025-09061-4.pdf',
+          path: path.join(workspaceDir, 'knowledge-base/raw/pdfs/nature-s41586-025-09061-4.pdf'),
           fileName: 'nature-s41586-025-09061-4.pdf',
           status: 'downloaded',
           source: 'nature',

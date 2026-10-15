@@ -1,5 +1,3 @@
-import { createReadStream } from 'node:fs';
-import { stat } from 'node:fs/promises';
 import * as Lark from '@larksuiteoapi/node-sdk';
 import { log } from './colors.js';
 import { loadConfig } from './config.js';
@@ -30,6 +28,7 @@ import {
   parseCompiledPaperPdfDeliveryCommand,
   resolveDownloadedPdfAttachmentsForQueuedJobs,
   resolveCompiledPaperPdfAttachment,
+  openPdfForUpload,
   type DownloadedPdfAttachment,
   type QueuedPdfDeliveryJob,
 } from './feishu/pdf-delivery.js';
@@ -379,19 +378,30 @@ async function sendTextMessageChunks(
 }
 
 async function uploadPdfFile(client: Lark.Client, attachment: DownloadedPdfAttachment): Promise<string> {
-  const response = await client.im.v1.file.create({
-    data: {
-      file_type: 'pdf',
-      file_name: attachment.fileName,
-      file: createReadStream(attachment.path),
-    },
-  });
+  const file = await openPdfForUpload(
+    attachment.path,
+    [process.cwd(), ...(config.paperWorkspace.dir ? [config.paperWorkspace.dir] : [])],
+    config.feishu.maxPdfUploadMb * 1024 * 1024,
+  );
+  const stream = file.createReadStream({ autoClose: false });
+  try {
+    const response = await client.im.v1.file.create({
+      data: {
+        file_type: 'pdf',
+        file_name: attachment.fileName,
+        file: stream,
+      },
+    });
 
-  if (!response?.file_key) {
-    throw new Error('飞书文件上传未返回 file_key');
+    if (!response?.file_key) {
+      throw new Error('飞书文件上传未返回 file_key');
+    }
+
+    return response.file_key;
+  } finally {
+    stream.destroy();
+    await file.close();
   }
-
-  return response.file_key;
 }
 
 async function deliverPdfAttachment(
@@ -400,17 +410,6 @@ async function deliverPdfAttachment(
   attachment: DownloadedPdfAttachment,
   replyToMessageId?: string,
 ): Promise<string> {
-  const info = await stat(attachment.path);
-  if (!info.isFile()) {
-    throw new Error(`PDF 路径不是文件：${attachment.path}`);
-  }
-
-  if (info.size > config.feishu.maxPdfUploadMb * 1024 * 1024) {
-    throw new Error(
-      `PDF 文件超过飞书上传限制：${attachment.fileName} (${Math.ceil(info.size / 1024 / 1024)} MB > ${config.feishu.maxPdfUploadMb} MB)`,
-    );
-  }
-
   const fileKey = await uploadPdfFile(client, attachment);
   await sendFileMessage(client, chatId, fileKey, replyToMessageId);
   log.feishu(`PDF 文件已发送: ${attachment.fileName}`);
