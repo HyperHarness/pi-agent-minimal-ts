@@ -116,6 +116,13 @@ function bytesLookLikePdf(bytes: Buffer): boolean {
   return bytes.subarray(0, 5).toString("ascii") === "%PDF-";
 }
 
+function isDownloadStartNavigationError(error: unknown): boolean {
+  const message = error instanceof Error ? error.message : String(error);
+  // Chromium aborts the navigation once a download starts, which Playwright
+  // surfaces as net::ERR_ABORTED or "Download is starting".
+  return message.includes("net::ERR_ABORTED") || message.includes("Download is starting");
+}
+
 async function waitForAntiBotChallengeToClear(options: {
   page: {
     waitForTimeout: (timeout: number) => Promise<void>;
@@ -390,7 +397,20 @@ export function createAttachedPaperBrowserSession(options: {
           typeof page.waitForEvent === "function"
             ? page.waitForEvent("download", { timeout: 30_000 }).catch(() => null)
             : Promise.resolve(null);
-        let response = await page.goto(url, { waitUntil: "domcontentloaded" });
+        let response: AttachedPaperBrowserResponse | null = null;
+        let downloadNavigationStarted = false;
+
+        try {
+          response = await page.goto(url, { waitUntil: "domcontentloaded" });
+        } catch (error) {
+          // Attachment responses make page.goto reject while the download
+          // starts; only these expected errors may fall through to the
+          // pending download event.
+          if (!isDownloadStartNavigationError(error)) {
+            throw error;
+          }
+          downloadNavigationStarted = true;
+        }
         let contentType = response?.headers()["content-type"]?.toLowerCase();
 
         if (response && contentType?.includes("application/pdf")) {
@@ -407,41 +427,43 @@ export function createAttachedPaperBrowserSession(options: {
           }
         }
 
-        const html = await page.content();
-        if (isAntiBotChallengePage(html)) {
-          const challengeCleared = await waitForAntiBotChallengeToClear({
-            page,
-            isCleared: async () => {
-              response = await page.goto(url, { waitUntil: "domcontentloaded" });
-              contentType = response?.headers()["content-type"]?.toLowerCase();
+        if (!downloadNavigationStarted) {
+          const html = await page.content();
+          if (isAntiBotChallengePage(html)) {
+            const challengeCleared = await waitForAntiBotChallengeToClear({
+              page,
+              isCleared: async () => {
+                response = await page.goto(url, { waitUntil: "domcontentloaded" });
+                contentType = response?.headers()["content-type"]?.toLowerCase();
 
-              if (response && contentType?.includes("application/pdf")) {
-                const pdfBytes = await response.body();
-                if (bytesLookLikePdf(pdfBytes)) {
-                  await writeFile(destinationPath, pdfBytes);
-                  return true;
+                if (response && contentType?.includes("application/pdf")) {
+                  const pdfBytes = await response.body();
+                  if (bytesLookLikePdf(pdfBytes)) {
+                    await writeFile(destinationPath, pdfBytes);
+                    return true;
+                  }
+
+                  const requestPdfBytes = await fetchPdfBytesFromRequest();
+                  if (requestPdfBytes) {
+                    await writeFile(destinationPath, requestPdfBytes);
+                    return true;
+                  }
                 }
 
-                const requestPdfBytes = await fetchPdfBytesFromRequest();
-                if (requestPdfBytes) {
-                  await writeFile(destinationPath, requestPdfBytes);
-                  return true;
-                }
+                return false;
               }
+            });
 
-              return false;
+            if (response && contentType?.includes("application/pdf")) {
+              return;
             }
-          });
 
-          if (response && contentType?.includes("application/pdf")) {
-            return;
-          }
-
-          if (!challengeCleared) {
-            throw new PaperBrowserSessionError(
-              "authorization_failed",
-              "Cloudflare verification blocked the PDF request. Complete the verification in the browser and retry."
-            );
+            if (!challengeCleared) {
+              throw new PaperBrowserSessionError(
+                "authorization_failed",
+                "Cloudflare verification blocked the PDF request. Complete the verification in the browser and retry."
+              );
+            }
           }
         }
 

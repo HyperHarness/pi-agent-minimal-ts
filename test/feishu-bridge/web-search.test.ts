@@ -69,6 +69,41 @@ Title: 上海 明天 天气 at DuckDuckGo
   assert.match(results[0].snippet, /上海明天多云/);
 });
 
+test('parseJinaSearchMarkdown keeps multi-line snippets intact including the final item', () => {
+  const markdown = [
+    '## [First](https://example.com/first)',
+    'first line one',
+    'first line two',
+    '## [Second](https://example.com/second)',
+    'second line one',
+    'second line two',
+  ].join('\n');
+
+  const results = parseJinaSearchMarkdown(markdown, 5);
+  assert.equal(results.length, 2);
+  assert.equal(results[0].title, 'First');
+  assert.equal(results[0].snippet, 'first line one first line two');
+  assert.equal(results[1].title, 'Second');
+  assert.equal(results[1].snippet, 'second line one second line two');
+});
+
+test('parseJinaSearchMarkdown handles CRLF input without leaking carriage returns', () => {
+  const markdown = [
+    '## [Crlf A](https://example.com/a)',
+    'alpha one',
+    'alpha two',
+    '## [Crlf B](https://example.com/b)',
+    'beta one',
+    'beta two',
+  ].join('\r\n');
+
+  const results = parseJinaSearchMarkdown(markdown, 5);
+  assert.equal(results.length, 2);
+  assert.equal(results[0].url, 'https://example.com/a');
+  assert.equal(results[0].snippet, 'alpha one alpha two');
+  assert.equal(results[1].snippet, 'beta one beta two');
+});
+
 test('shouldTreatSearchPageAsError detects rate limits and error pages', () => {
   assert.equal(shouldTreatSearchPageAsError('Error 451: blocked temporarily'), true);
   assert.equal(shouldTreatSearchPageAsError('Too Many Requests\nCAPTCHA required'), true);
