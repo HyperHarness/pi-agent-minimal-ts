@@ -6,7 +6,9 @@ import path from "node:path";
 import { promisify } from "node:util";
 import { MathMLToLaTeX } from "mathml-to-latex";
 import {
+  cancelResponseBody,
   getResponseStatusError,
+  readResponseBytes,
   resolveFetchTimeoutMs,
   withRequestTimeout
 } from "../../network.js";
@@ -534,13 +536,15 @@ async function fetchImageAssets(input: {
         signal: timeout.signal
       });
       if (!response.ok) {
+        await cancelResponseBody(response);
         return undefined;
       }
       const contentType = response.headers.get("content-type") ?? "";
       if (!isImageContentType(contentType)) {
+        await cancelResponseBody(response);
         return undefined;
       }
-      const bytes = Buffer.from(await response.arrayBuffer());
+      const bytes = Buffer.from(await readResponseBytes(response, MAX_DIRECT_IMAGE_BYTES));
       if (bytes.byteLength === 0 || bytes.byteLength > MAX_DIRECT_IMAGE_BYTES) {
         return undefined;
       }

@@ -8,6 +8,19 @@ type FetchRequest = {
   init?: RequestInit;
 };
 
+test("searchWeb cancels an unsuccessful response body", async () => {
+  let canceled = false;
+  const response = new Response(new ReadableStream({
+    cancel() { canceled = true; }
+  }, { highWaterMark: 0 }), { status: 429 });
+  await assert.rejects(searchWeb({
+    query: "test",
+    env: { PI_SEARCH_API_URL: "https://search.example.test" },
+    fetchImpl: async () => response
+  }), /HTTP 429/);
+  assert.equal(canceled, true);
+});
+
 function createJsonResponse(status: number, body: unknown) {
   return {
     status,

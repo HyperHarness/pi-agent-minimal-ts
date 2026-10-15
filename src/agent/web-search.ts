@@ -1,4 +1,5 @@
 import {
+  cancelResponseBody,
   getBearerHeaders,
   getResponseStatusError,
   parseJsonResponse,
@@ -110,6 +111,7 @@ export async function searchWeb(
     });
 
     if (!response.ok) {
+      await cancelResponseBody(response);
       throw getResponseStatusError(response, "web search request");
     }
 

@@ -1,5 +1,7 @@
 import {
+  cancelResponseBody,
   getResponseStatusError,
+  readResponseBytes,
   resolveFetchTimeoutMs,
   withRequestTimeout
 } from "./network.js";
@@ -14,6 +16,7 @@ export interface FetchWebPageEnvironment extends NodeJS.ProcessEnv {}
 
 const DEFAULT_USER_AGENT = "pi-agent-minimal-ts/1.0";
 const MAX_TEXT_LENGTH = 12_000;
+const MAX_RESPONSE_BYTES = 2 * 1024 * 1024;
 
 function normalizeUrl(url: string): URL {
   const trimmedUrl = url.trim();
@@ -71,16 +74,19 @@ export async function fetchWebPage(
     });
 
     if (!response.ok) {
+      await cancelResponseBody(response);
       throw getResponseStatusError(response, "web page fetch");
     }
 
     const contentType = response.headers.get("content-type")?.toLowerCase() ?? "";
     const mediaType = contentType.split(";", 1)[0]?.trim();
     if (mediaType !== "text/html") {
+      await cancelResponseBody(response);
       throw new Error("Expected text/html content-type.");
     }
 
-    return cleanHtml(await response.text()).slice(0, MAX_TEXT_LENGTH);
+    const bytes = await readResponseBytes(response, MAX_RESPONSE_BYTES);
+    return cleanHtml(new TextDecoder().decode(bytes)).slice(0, MAX_TEXT_LENGTH);
   } finally {
     timeout.dispose();
   }
