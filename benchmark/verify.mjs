@@ -188,6 +188,7 @@ async function main() {
     return orderDelta !== 0 ? orderDelta : a.question.localeCompare(b.question);
   });
   const frozen = accepted.map((item) => freezeItem(item));
+  await writeJsonl(args.rejected, rejected);
   const duplicates = duplicateItemIds(frozen);
   if (duplicates.length > 0) {
     throw new Error(
@@ -197,7 +198,6 @@ async function main() {
   }
 
   await writeJsonl(args.out, frozen);
-  await writeJsonl(args.rejected, rejected);
 
   const byCategory = {};
   const bySplit = { dev: 0, holdout: 0 };
