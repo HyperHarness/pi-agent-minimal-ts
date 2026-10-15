@@ -13,16 +13,19 @@
 //      - abstention items: the (truncated) full parse must NOT contain the info.
 //      - synthesis items: every rubric point must be supported by its source summary.
 //
-// Survivors are frozen to benchmark.jsonl with stable ids and a dev/holdout split
+// Survivors are frozen to benchmark.jsonl with content-derived ids (stable
+// across re-verifies that accept a different subset) and a dev/holdout split
 // (~20% holdout, assigned by question hash so it is reproducible).
 import path from "node:path";
 import { readFile } from "node:fs/promises";
 import {
   BENCHMARK_DIR,
   callLlm,
+  duplicateItemIds,
   extractJson,
   findQuote,
-  fnv1a,
+  freezeItem,
+  itemEvidence,
   listSources,
   pLimit,
   parseArgs,
@@ -84,16 +87,6 @@ Reject ("fail") if any rubric point is unsupported by its named source summary, 
 Output STRICT JSON: {"verdict": "pass" | "fail", "reason": "one sentence"}`;
 }
 
-function itemEvidence(item) {
-  if (Array.isArray(item.evidence)) {
-    return item.evidence;
-  }
-  if (item.evidence_quote && item.anchor_source) {
-    return [{ sourceKey: item.anchor_source, quote: item.evidence_quote }];
-  }
-  return [];
-}
-
 async function verifyItem(item, sourcesByKey, model) {
   const category = item.category;
 
@@ -148,24 +141,6 @@ async function verifyItem(item, sourcesByKey, model) {
   return { verdict: "fail", reason: `unknown category ${category}` };
 }
 
-function freezeItem(item, sequence) {
-  const id = `sq-${String(sequence).padStart(3, "0")}`;
-  const split = fnv1a(`${item.category}::${item.question}`) % 5 === 0 ? "holdout" : "dev";
-  return {
-    id,
-    category: item.category,
-    question: item.question,
-    gold_answer: item.gold_answer ?? null,
-    gold_sources: item.gold_sources ?? [],
-    evidence: itemEvidence(item),
-    rubric: item.rubric ?? undefined,
-    absence_claim: item.absence_claim ?? undefined,
-    answerable: item.category !== "abstention",
-    difficulty: item.difficulty ?? "medium",
-    split
-  };
-}
-
 async function main() {
   const args = parseArgs(process.argv.slice(2), {
     in: path.join(BENCHMARK_DIR, "candidates.jsonl"),
@@ -212,7 +187,14 @@ async function main() {
     const orderDelta = categoryOrder.indexOf(a.category) - categoryOrder.indexOf(b.category);
     return orderDelta !== 0 ? orderDelta : a.question.localeCompare(b.question);
   });
-  const frozen = accepted.map((item, index) => freezeItem(item, index + 1));
+  const frozen = accepted.map((item) => freezeItem(item));
+  const duplicates = duplicateItemIds(frozen);
+  if (duplicates.length > 0) {
+    throw new Error(
+      `duplicate benchmark ids ${duplicates.join(", ")}: identical category+question accepted more than once; ` +
+        `dedupe ${args.in} and re-verify so each id stays bound to exactly one item`
+    );
+  }
 
   await writeJsonl(args.out, frozen);
   await writeJsonl(args.rejected, rejected);

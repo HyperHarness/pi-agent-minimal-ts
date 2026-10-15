@@ -24,6 +24,8 @@ import {
   BENCHMARK_DIR,
   REPO_ROOT,
   appendJsonl,
+  assertResponsesCurrent,
+  benchmarkItemFingerprint,
   callLlm,
   lastAssistantText,
   parseArgs,
@@ -57,18 +59,21 @@ async function main() {
   const mode = baseline ? "baseline" : "agent";
   const out = args.out ?? path.join(BENCHMARK_DIR, "results", `${mode}-${args.split}.jsonl`);
 
-  const model = resolveAgentModel();
-  console.log(`mode: ${mode}; model: ${model.provider}/${model.id} (baseUrl: ${model.baseUrl ?? "default"})`);
-
+  // Validate the resume file against the current benchmark before doing any
+  // work: ids whose content changed (or vanished) since the run mean the file
+  // predates this freeze and must be rejected, not silently resumed.
   let items = await readJsonl(args.benchmark);
+  const done = assertResponsesCurrent(await readJsonl(out), items, out);
   if (args.split !== "all") {
     items = items.filter((item) => item.split === args.split);
   }
-  const done = new Set((await readJsonl(out)).map((record) => record.id));
   items = items.filter((item) => !done.has(item.id));
   if (args.limit) {
     items = items.slice(0, Number(args.limit));
   }
+
+  const model = resolveAgentModel();
+  console.log(`mode: ${mode}; model: ${model.provider}/${model.id} (baseUrl: ${model.baseUrl ?? "default"})`);
   console.log(`items to run: ${items.length} (already done: ${done.size}) -> ${out}`);
 
   const timeoutMs = Number(args["timeout-s"]) * 1000;
@@ -83,7 +88,13 @@ async function main() {
   try {
     for (const [index, item] of items.entries()) {
       const startedAt = Date.now();
-      const record = { id: item.id, category: item.category, mode, model: `${model.provider}/${model.id}` };
+      const record = {
+        id: item.id,
+        fingerprint: benchmarkItemFingerprint(item),
+        category: item.category,
+        mode,
+        model: `${model.provider}/${model.id}`
+      };
       try {
         if (baseline) {
           const { text, usage } = await runWithTimeout(

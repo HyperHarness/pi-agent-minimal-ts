@@ -22,6 +22,7 @@ import path from "node:path";
 import { writeFile, mkdir } from "node:fs/promises";
 import {
   BENCHMARK_DIR,
+  assertResponsesCurrent,
   callLlm,
   extractJson,
   listSources,
@@ -199,18 +200,25 @@ async function main() {
   if (!args.responses) {
     throw new Error("--responses <file> is required");
   }
-  const model = resolveBenchToolModel();
-  console.log(`judge model: ${model.provider}/${model.id}`);
-
+  // Validate the responses file against the current benchmark before any
+  // grading work: records that no longer bind to a benchmark item (unknown id,
+  // or changed gold/evidence under the same id) must be rejected instead of
+  // silently skipped or scored against different content.
   const benchmark = await readJsonl(args.benchmark);
   const benchmarkById = new Map(benchmark.map((item) => [item.id, item]));
   const responses = await readJsonl(args.responses);
+  assertResponsesCurrent(responses, benchmark, args.responses);
+  const compareResponses = args.compare ? await readJsonl(args.compare) : undefined;
+  if (compareResponses) assertResponsesCurrent(compareResponses, benchmark, args.compare);
+
+  const model = resolveBenchToolModel();
+  console.log(`judge model: ${model.provider}/${model.id}`);
+
   const knownKeys = (await listSources()).map((source) => source.sourceKey);
 
   const limit = pLimit(Number(args.concurrency));
   const grades = await Promise.all(
     responses
-      .filter((response) => benchmarkById.has(response.id))
       .map((response) =>
         limit(async () => {
           const item = benchmarkById.get(response.id);
@@ -242,11 +250,10 @@ async function main() {
 
   let compareSection = "";
   let discriminative;
-  if (args.compare) {
-    const compareResponses = await readJsonl(args.compare);
+  if (compareResponses) {
     const compareGrades = await Promise.all(
       compareResponses
-        .filter((response) => benchmarkById.has(response.id) && gradesById.has(response.id))
+        .filter((response) => gradesById.has(response.id))
         .map((response) =>
           limit(async () => {
             const item = benchmarkById.get(response.id);

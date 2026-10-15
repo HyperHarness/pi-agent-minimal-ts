@@ -29,7 +29,7 @@ node benchmark/grade.mjs --responses benchmark/results/agent-dev.jsonl \
 Frozen item schema (`benchmark.jsonl`):
 
 ```json
-{"id": "sq-001", "category": "numerical", "question": "...",
+{"id": "sq-0123456789abcdef01234567", "category": "numerical", "question": "...",
  "gold_answer": "99.13 ± 0.15%", "gold_sources": ["arxiv-2308.09240"],
  "evidence": [{"sourceKey": "arxiv-2308.09240", "quote": "..."}],
  "answerable": true, "difficulty": "medium", "split": "dev"}
@@ -63,6 +63,12 @@ Frozen item schema (`benchmark.jsonl`):
 
 ## Caveats
 
+- Newly frozen item IDs derive from category and question content, so filtering or
+  reordering candidates does not renumber survivors. Response records also include
+  a SHA-256 fingerprint of the question, gold answer, evidence, and rubric. Resume
+  and grading validate these bindings before calling a model, including comparison
+  response files. A changed answer/evidence or a legacy file without fingerprints
+  requires a fresh run with a new `--out` path; do not guess or backfill identities.
 - `benchmark.jsonl` is frozen output: don't regenerate it casually, version it in
   git, and treat score history as comparable only while the file is unchanged.
 - Synthesis rubrics are seeded from source summaries (breadth questions), unlike
