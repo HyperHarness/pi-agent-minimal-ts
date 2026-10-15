@@ -131,7 +131,7 @@ export function buildArxivPdfUrl(id: string): string {
 function extractArxivIdFromUrl(input: string): string | null {
   try {
     const url = new URL(input);
-    if (url.hostname !== "arxiv.org") {
+    if (!/(^|\.)arxiv\.org$/i.test(url.hostname)) {
       return null;
     }
 

@@ -368,7 +368,7 @@ function classifyPaperUrl(
   try {
     const url = new URL(input);
 
-    if (url.hostname === "arxiv.org") {
+    if (/(^|\.)arxiv\.org$/i.test(url.hostname)) {
       const path = url.pathname.replace(/\/+$/, "");
       if (path.startsWith("/abs/")) {
         const canonicalId = decodeURIComponent(path.slice("/abs/".length).replace(/\.pdf$/i, ""));

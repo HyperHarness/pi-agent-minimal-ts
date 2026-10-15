@@ -4311,7 +4311,7 @@ test("download_paper_list keeps title-only candidates unresolved instead of call
     assert.equal(details.remainingCandidates, 1);
     const remainingList = await readFile(path.join(workspace, details.listPath ?? ""), "utf8");
     assert.match(remainingList, /title: Title without a stable locator/);
-    assert.match(remainingList, /lastError: Candidate lacks id or url; search_papers or add a stable locator before retrying\./);
+    assert.match(remainingList, /lastError: "Candidate lacks id or url; search_papers or add a stable locator before retrying\."/);
   } finally {
     await rm(workspace, { recursive: true, force: true });
   }

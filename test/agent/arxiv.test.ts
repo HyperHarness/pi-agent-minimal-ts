@@ -187,3 +187,44 @@ test("searchArxiv rejects queries that were mangled into question marks before h
 
   assert.equal(fetchCalled, false);
 });
+
+test("parseArxivLocator canonicalizes www and export arXiv subdomain URLs", () => {
+  for (const input of [
+    "https://www.arxiv.org/abs/2401.01234",
+    "https://export.arxiv.org/abs/2401.01234v2",
+    "https://export.arxiv.org/pdf/2401.01234.pdf",
+    "https://ARXIV.ORG/abs/2401.01234"
+  ]) {
+    assert.deepEqual(parseArxivLocator(input), {
+      id: "2401.01234",
+      absUrl: "https://arxiv.org/abs/2401.01234",
+      htmlUrl: "https://arxiv.org/html/2401.01234",
+      pdfUrl: "https://arxiv.org/pdf/2401.01234.pdf"
+    });
+  }
+});
+
+test("parseArxivLocator still rejects hosts that merely contain arxiv.org", () => {
+  assert.throws(() => parseArxivLocator("https://notarxiv.org/abs/2401.01234"), /arXiv/i);
+  assert.throws(() => parseArxivLocator("https://arxiv.org.evil.example/abs/2401.01234"), /arXiv/i);
+});
+
+test("downloadArxivPdf canonicalizes export subdomain URLs to the canonical pdf endpoint", async () => {
+  const observedUrls: string[] = [];
+
+  const result = await downloadArxivPdf({
+    input: "https://export.arxiv.org/abs/2401.01234",
+    fetchImpl: async (input: RequestInfo | URL) => {
+      observedUrls.push(String(input));
+      return new Response(Buffer.from("%PDF-1.4\nmock pdf\n"), {
+        status: 200,
+        headers: { "content-type": "application/pdf" }
+      });
+    }
+  });
+
+  assert.deepEqual(observedUrls, ["https://arxiv.org/pdf/2401.01234.pdf"]);
+  assert.equal(result.canonicalId, "2401.01234");
+  assert.equal(result.articleUrl, "https://arxiv.org/abs/2401.01234");
+  assert.equal(result.finalPdfUrl, "https://arxiv.org/pdf/2401.01234.pdf");
+});
