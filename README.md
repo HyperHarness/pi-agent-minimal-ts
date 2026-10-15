@@ -587,6 +587,9 @@ By default the Feishu bridge starts the built-in wiki-agent RPC command. Leave i
 
 ## Install
 
+Use Node.js 22.8.0 or newer. The test runner requires this minimum version.
+To reject unsupported runtimes during installation, run `npm install --engine-strict`.
+
 Choose the setup guide for your shell:
 
 - Windows PowerShell or Codex Desktop on Windows: [docs/windows-powershell-codex-quickstart.md](docs/windows-powershell-codex-quickstart.md)

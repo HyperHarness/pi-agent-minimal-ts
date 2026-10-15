@@ -68,6 +68,7 @@ test("package.json exposes the library root export for publishing", async () => 
     main?: string;
     types?: string;
     files?: string[];
+    engines?: { node?: string };
     exports?: {
       "."
         ?: {
@@ -78,6 +79,9 @@ test("package.json exposes the library root export for publishing", async () => 
   };
 
   assert.equal(packageJson.private, false);
+  assert.equal(packageJson.engines?.node, ">=22.8.0");
+  const lockfile = JSON.parse(await readFile(new URL("../../package-lock.json", import.meta.url), "utf8"));
+  assert.deepEqual(lockfile.packages[""].engines, packageJson.engines);
   assert.equal(packageJson.main, "./dist/src/index.js");
   assert.equal(packageJson.types, "./dist/src/index.d.ts");
   assert.deepEqual(packageJson.files, ["dist/src", "README.md"]);
