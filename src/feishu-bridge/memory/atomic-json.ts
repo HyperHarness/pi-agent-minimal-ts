@@ -135,12 +135,13 @@ function logCorruption(label: string, filePath: string, error: Error, backupPath
 }
 
 /** Rotates the current file into the last-good backup before replacement. */
-function rotateBackup(filePath: string, dir: string): void {
+function rotateBackup(filePath: string, dir: string, isValid?: (value: unknown) => boolean): void {
   const backupPath = backupPathFor(filePath);
   let previous: string;
   try {
     previous = fs.readFileSync(filePath, 'utf-8');
-    JSON.parse(previous); // only back up parseable last-good content
+    const parsed: unknown = JSON.parse(previous);
+    if (isValid && !isValid(parsed)) throw new Error('Refusing to replace invalid memory data or rotate it over a good backup.');
   } catch (error) {
     if (isNoSuchFileError(error)) return;
     throw error;
@@ -173,7 +174,7 @@ function rotateBackup(filePath: string, dir: string): void {
  * Any failure cleans the temporary file up and rethrows, leaving the previous
  * file content intact.
  */
-export function writeJsonFileAtomic(filePath: string, value: unknown): void {
+export function writeJsonFileAtomic(filePath: string, value: unknown, isValid?: (value: unknown) => boolean): void {
   const dir = path.dirname(filePath);
   fs.mkdirSync(dir, { recursive: true });
   const payload = JSON.stringify(value, null, 2);
@@ -189,7 +190,7 @@ export function writeJsonFileAtomic(filePath: string, value: unknown): void {
     fs.fsyncSync(fd);
     closeQuietly(fd);
     fd = undefined;
-    rotateBackup(filePath, dir);
+    rotateBackup(filePath, dir, isValid);
     fs.renameSync(tempPath, filePath);
   } catch (error) {
     if (fd !== undefined) {

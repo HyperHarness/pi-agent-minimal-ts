@@ -107,6 +107,19 @@ test('a save refuses to overwrite corruption introduced after the store was load
   assert.deepEqual(fs.readdirSync(dir), ['chats.json']);
 });
 
+test('invalid memory shape introduced after load cannot replace the last good backup', () => {
+  const dir = makeTempDir();
+  const store = new ChatMemoryStore(dir, 10);
+  store.appendTurn('chat', { role: 'user', text: 'one', timestamp: 'now' });
+  store.appendTurn('chat', { role: 'user', text: 'two', timestamp: 'now' });
+  const target = path.join(dir, 'chats.json');
+  const goodBackup = fs.readFileSync(backupPathFor(target), 'utf8');
+  fs.writeFileSync(target, '{"chats":42}');
+  assert.throws(() => store.appendTurn('chat', { role: 'user', text: 'three', timestamp: 'now' }), /invalid memory/);
+  assert.equal(fs.readFileSync(target, 'utf8'), '{"chats":42}');
+  assert.equal(fs.readFileSync(backupPathFor(target), 'utf8'), goodBackup);
+});
+
 test('readJsonFile distinguishes a missing file from corruption and read failures', () => {
   const dir = makeTempDir();
 

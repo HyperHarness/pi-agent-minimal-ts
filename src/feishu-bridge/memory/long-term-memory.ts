@@ -98,6 +98,6 @@ export class LongTermMemoryStore {
   }
 
   private save(): void {
-    writeJsonFileAtomic(this.filePath, this.cache);
+    writeJsonFileAtomic(this.filePath, this.cache, isLongTermMemoryFile);
   }
 }

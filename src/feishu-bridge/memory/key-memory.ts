@@ -126,6 +126,6 @@ export class KeyMemoryStore {
   }
 
   private save(): void {
-    writeJsonFileAtomic(this.filePath, this.cache);
+    writeJsonFileAtomic(this.filePath, this.cache, isKeyMemoryFile);
   }
 }
