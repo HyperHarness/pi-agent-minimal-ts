@@ -181,7 +181,7 @@ test("run.mjs refuses to resume from a stale results file", () => {
     const run = spawnSync(
       process.execPath,
       ["benchmark/run.mjs", "--benchmark", benchmarkPath, "--out", outPath, "--split", "all"],
-      { cwd: REPO_ROOT, encoding: "utf8", timeout: 30_000, env: offlineEnv }
+      { cwd: REPO_ROOT, encoding: "utf8", timeout: 30_000, env: { ...offlineEnv, HOME: dir } }
     );
     assert.notEqual(run.status, 0, `expected non-zero exit, got ${run.status}; stderr: ${run.stderr}`);
     assert.match(run.stderr, /stale responses/);
@@ -203,7 +203,7 @@ test("grade.mjs refuses to grade responses whose item is gone from the benchmark
     const grade = spawnSync(
       process.execPath,
       ["benchmark/grade.mjs", "--responses", responsesPath, "--benchmark", benchmarkPath],
-      { cwd: REPO_ROOT, encoding: "utf8", timeout: 30_000, env: offlineEnv }
+      { cwd: REPO_ROOT, encoding: "utf8", timeout: 30_000, env: { ...offlineEnv, HOME: dir } }
     );
     assert.notEqual(grade.status, 0, `expected non-zero exit, got ${grade.status}; stderr: ${grade.stderr}`);
     assert.match(grade.stderr, /stale responses/);
@@ -222,7 +222,7 @@ test("grade.mjs rejects a stale comparison file before resolving or calling a ju
     writeFileSync(responsesPath, `${JSON.stringify({ id: item.id, fingerprint: benchmarkItemFingerprint(item), answer: "answer" })}\n`);
     writeFileSync(comparisonPath, `${JSON.stringify({ id: item.id, fingerprint: "stale", answer: "old answer" })}\n`);
     const grade = spawnSync(process.execPath, ["benchmark/grade.mjs", "--responses", responsesPath, "--compare", comparisonPath, "--benchmark", benchmarkPath], {
-      cwd: REPO_ROOT, encoding: "utf8", timeout: 30_000, env: offlineEnv,
+      cwd: REPO_ROOT, encoding: "utf8", timeout: 30_000, env: { ...offlineEnv, HOME: dir },
     });
     assert.notEqual(grade.status, 0);
     assert.match(grade.stderr, /stale responses/);
