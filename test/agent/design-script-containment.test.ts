@@ -2,10 +2,10 @@ import assert from "node:assert/strict";
 import { chmod, mkdir, mkdtemp, readFile, rm, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import path from "node:path";
-import test from "node:test";
+import { registerFullSuiteDesignCase } from "./design-script-reviewed-full-suite.js";
 import { createToolsForBoundary } from "../../src/agent/tools.js";
 
-test("standalone actual bwrap proves script start and denied original workspace writes", { skip: process.platform === "win32" ? "requires Linux bwrap and executable shell fixture" : false }, async () => {
+registerFullSuiteDesignCase(import.meta.url, "standalone actual bwrap proves script start and denied original workspace writes", { skip: process.platform === "win32" ? "requires Linux bwrap and executable shell fixture" : false }, async () => {
   const workspace = await mkdtemp(path.join(tmpdir(), "design-live-containment-"));
   const project = path.join(workspace, "design-repo", "design-code");
   const python = path.join(workspace, ".venv", "bin", "python");

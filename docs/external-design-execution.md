@@ -1,11 +1,14 @@
 # Default-off external design execution adapter
 
-This is a local implementation against public `HyperHarness/pi-agent-minimal-ts`
-commit `3be8d53f975e771a32141de443d046303a727d2a`, tree
-`890fe2270890556d16936a4e658b859e2a6c35a5`. The actual adapted/deployed candidate
-for agentd #108 is unknown. This directory is a separate source snapshot, not a
-modification or validation of that deployed candidate. `SOURCE_MANIFEST.json`
-and `SOURCE_ADDITIONAL_MANIFEST.json` record fetched Git blob identities.
+The initial adapter was developed against public `HyperHarness/pi-agent-minimal-ts`
+commit `3be8d53f975e771a32141de443d046303a727d2a`. The complete-suite routing
+update is based on published PR #38 head
+`7c3a69bd7c4c4498cbf19d7d1e905ae3e5ff0d2c`, tree
+`b7aeee5a58f0057735067c3b1749c7be00f2160e`. This local source snapshot is not the
+owner's integrated candidate. The owner reports actual integrated candidate
+`29651fe709eecf0167fd8a0060a0ca14a59ce140`; its extra source/tests are not available
+in this snapshot, and its acceptance must be rerun against the newly frozen
+candidate rather than inferred from public-repository results.
 
 ## Selection and authority
 
@@ -165,7 +168,7 @@ without exact process ownership likewise remains recovery-required.
 - `npm test`: the package-script project suite, overlapping the focused lanes.
   Recursive discovery additionally includes tests omitted by its shell glob.
 
-All external positive tests use a clearly labeled synthetic helper which does
+The local offline external contract/callback tests use a clearly labeled synthetic helper which does
 not authenticate a controller or execute the design script/root shim. They
 prove data contracts, routing, and synthetic state-machine interoperability, never Linux namespaces, resource
 accounting, shared admission, descendant cleanup, runtime equivalence, or a
@@ -173,3 +176,131 @@ managed integration receipt. Actual controller, OS boundary, topology and exact-
 qualification remain required before
 activation. No deployment, host setup, resource change or paid model invocation
 is part of this implementation.
+
+
+## Explicit reviewed complete-suite registration
+
+The owner reports a real service-owned selected pilot of three cases passing at
+PR #38 `7c3a69b` with agentd `ba17c32`, but the same integrated candidate's complete
+managed run remained **1112/1116**, with four default self-sandbox registrations
+failing. Public host **964/964** and integrated host **1116/1116** are separate
+observations. These are owner-reported retained results, not new local live
+validation: [issue #108 acceptance report](https://github.com/cying22/agentd/issues/108#issuecomment-6218503537)
+and [PR #38 report](https://github.com/HyperHarness/pi-agent-minimal-ts/pull/38#issuecomment-6218504890).
+
+The new test-only `registerReviewedDesignScriptFullSuite(pins)` export in
+`dist/test/agent/design-script-reviewed-full-suite.js` fills that registration
+gap using the existing fixed independent-pin loader/backend. It adds no agentd
+schema, protocol, execution subsystem or activation switch. Default/standalone backend selection and original callback bodies/assertions
+stay unchanged; the new regression file adds registrations to ordinary discovery. This module is deliberately not a `.test.js` file.
+
+An independently reviewed/pinned owner launch module must be the **sole test
+file argument in a fresh process**, after the frozen candidate is built:
+
+```sh
+node --test --experimental-test-isolation=none /run/reviewed-full-suite-entry.mjs
+```
+
+The owner module imports the new export from that exact frozen candidate,
+top-level-awaits it with independent code-constant interpreter/helper/capability
+pins, and saves or prints its returned `{ files, mapping }` inventory. Do not run
+it alongside the normal recursive glob or preload either mapped test module.
+Do not derive pins from candidate content, the client document, arguments or
+ENV. No optional loader, importer, root or factory can be supplied to this API.
+The loader finishes before any test-file imports. Source discovery and required-module
+inventory validation settle before sequential imports begin; exact registration
+accounting is then checked after all imports.
+
+Discovery recursively reads every `dist/test/**/*.test.js` and
+`test/**/*.test.mjs` in the **actual candidate**, including arbitrarily nested
+extra candidate tests and browser-extension MJS tests. It does not use a fixed
+public inventory. Missing mapped modules, symlinks in these roots, duplicate
+file identities, missing/duplicate/unmatched mapped registrations and already
+registered standalone modules fail closed. Each awaited module import has a
+private registration scope with its exact URL and an explicit close in `finally`.
+Callbacks use factories captured during registration, so inherited async scope
+does not become runtime backend-selection authority. There is no exported
+context setter or process-global writable backend registry.
+
+Returned file paths and SHA-256s are **registration inventory**, not completion
+or pass evidence and not an atomic snapshot of mutable source. The owner's
+frozen exact-candidate/read-only-source binding remains required. Compare the
+inventory against that candidate's frozen recursive baseline and account for
+all extras. Node can start callbacks while later imports await; a late failure
+must not count a partial run as success. The entry both rejects and registers an
+explicit failing registration test on any entry error. This is necessary because
+Node 24 with test isolation disabled can otherwise omit a late entry-import
+rejection and exit zero after earlier cases pass. Successful registration adds
+no extra test. Preserve final Node exit/TAP totals and real controller receipts
+separately; an inventory receipt alone never establishes full acceptance.
+
+### Exact standalone/external mapping
+
+Four explicit mapped registrations retain the original total case count:
+
+1. Parent-root venv selection: reuse the unchanged original callback with the
+   verified external factory, preserving nested-venv rejection, exact root-shim
+   bytes, command display and declared output assertions.
+2. Declared-output isolation: reuse the unchanged original callback with that
+   factory, preserving output bytes and absence of undeclared wiki publication.
+3. Protected wiki write: replace only the external registration with the accepted
+   separately named direct-write B canary. Require exact operation/target ENOENT,
+   bound raw script exit 1, verified adapter failure/closure fields, unchanged
+   protected tree and no failed-output publication. The original standalone
+   callback and its permission/read-only assertions remain unchanged.
+4. `standalone actual bwrap proves script start and denied original workspace
+   writes`: preserve its callback and errno **13/30** assertions in default mode.
+   The separately named external counterpart attempts all three original host
+   targets: `package.json`, parent `.venv/bin/python`, and protected wiki file.
+   It requires a started marker, exact ordered `Path.write_text` operations and
+   **ENOENT for every target**, exact returned error filename/type, exit zero,
+   one declared `execution-proof.txt` with neutral external proof content, and
+   unchanged original bytes and stable metadata. This proves the expected
+   namespace nonvisibility at the application assertion layer, not equivalence
+   to read-only-mounted originals. It cannot be replaced by another wiki-only B.
+
+Two additional registrations are explicitly accounted without changing their
+bodies: missing-root Python remains prelaunch validation with no submitted call;
+absolute-parent workspace write uses the captured external factory. The latter's
+legacy broad error regex is insufficient alone, so a case-local guard requires
+exactly one call and one provenance-backed script failure with raw exit 1,
+exact script/input-manifest/root hashes, final target-bound ENOENT and
+reaped/stopped closure with `outputFrozen=false`. Its postcondition runs
+**outside** the original callback, so even a swallowed startup, generic or guard
+error fails the mapped test. Failed responses cannot publish outputs.
+
+Consequently this mapping requires **five real submitted calls**: three
+completed (two original positives and three-target containment) and two raw
+script failures (B and parent write). This is an owner-side reviewed budget and
+receipt requirement, not an automatic budget/resource-policy change. New
+candidate tests may require further accounting. Retain the original total
+resource policy and independently verify every call/stage journal, closure and
+output receipt. The earlier pilot's reviewed runtime split was client/check
+Python **3.14.8** and the fixture shell shim's read-only system Python **3.12.3**;
+this update adds no runtime alias or real-venv/KLayout compatibility claim.
+
+### Offline regression evidence and remaining acceptance
+
+The new regression file has 13 local tests for recursive extra-file discovery,
+identity/mapping rejection, the three-target counterpart, strict parent-write
+postconditions and actual private registration-scope behavior. Scope tests copy
+compiled dependencies to a disposable tree, substitute exactly one fixed-loader
+import with an explicitly synthetic helper, and record original/transformed
+hashes. The shipped API has no test injection hook. They reuse original compiled
+parent/preflight callback bodies, require exactly five synthetic requests, and
+exercise stale scopes, preloaded modules, missing/duplicate/unsupported mappings,
+and late imports. An additional Node test autorun timing case waits for an
+explicit synthetic request marker before failing a late import; it is separate
+from the owner-command `--test` cases. Every negative entry scenario must return
+an actual nonzero subprocess exit, including a caller that catches rejection.
+These synthetic Python helpers manufacture transport responses; no submitted
+fixture script or root shim, actual bwrap, cgroup, service/controller or full
+managed acceptance is exercised.
+
+The accessible public discovery is 71 compiled files plus two source MJS files,
+with this one regression file adding 13 registrations to the earlier public
+baseline. A separate recording-only discovery observes 977 default registrations;
+its callbacks never execute, so this is not a 977-test runtime pass. The integrated candidate has additional tests: never use a fixed
+1116 count or this public manifest to exclude them. Record its actual updated
+inventory and final totals. The full service-owned rerun, exact runtime/startup
+pins and real failure/recovery qualifications remain owner-side acceptance.

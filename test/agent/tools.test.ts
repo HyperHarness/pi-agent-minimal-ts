@@ -21,7 +21,7 @@ import {
   writePaperRecord
 } from "../../src/agent/paper/storage/paper-store.js";
 import { writeTypedWikiPage } from "../../src/agent/wiki/typed-store.js";
-import { registerOriginalDesignScriptCases } from "./fixtures/design-script-original-cases.js";
+import { captureDesignScriptTestToolFactory, registerFullSuiteDesignCase, registerFullSuiteOriginalDesignCases } from "./design-script-reviewed-full-suite.js";
 import type { PaperWikiPageWorkerInput } from "../../src/agent/wiki/types.js";
 
 type ToolContentItem = {
@@ -668,7 +668,7 @@ function getReplaceDesignCodeFileTextTool(workspaceDir: string) {
   return tool as ReplaceDesignCodeFileTextTool;
 }
 
-function getRunDesignScriptTool(workspace: string): RunDesignScriptTool {
+function getStandaloneRunDesignScriptTool(workspace: string): RunDesignScriptTool {
   const tools = createTools(workspace, { toolProfile: "full" }) as ReadonlyArray<{
     name: string;
     execute?: RunDesignScriptTool["execute"];
@@ -678,6 +678,8 @@ function getRunDesignScriptTool(workspace: string): RunDesignScriptTool {
   assert.equal(typeof runDesignScriptTool.execute, "function");
   return runDesignScriptTool as RunDesignScriptTool;
 }
+
+const getRunDesignScriptTool = captureDesignScriptTestToolFactory(import.meta.url, getStandaloneRunDesignScriptTool) as typeof getStandaloneRunDesignScriptTool;
 
 function getSubmitDesignSimulationTool(workspace: string): SubmitDesignSimulationTool {
   const tools = createTools(workspace, { toolProfile: "full" }) as ReadonlyArray<{
@@ -1787,7 +1789,7 @@ test("replace_design_code_file_text replaces all occurrences when replaceAll is 
   }
 });
 
-test("run_design_script rejects Python scripts when the root venv Python is missing", async () => {
+registerFullSuiteDesignCase(import.meta.url, "run_design_script rejects Python scripts when the root venv Python is missing", {}, async () => {
   const workspace = await mkdtemp(path.join(tmpdir(), "pi-agent-tools-"));
   const projectDir = path.join(workspace, "design-repo", "design-code");
   const scriptDir = path.join(projectDir, "scripts");
@@ -1916,9 +1918,9 @@ test("submit_design_simulation runs the fixed remote solver workflow with the co
   }
 });
 
-registerOriginalDesignScriptCases(getRunDesignScriptTool);
+registerFullSuiteOriginalDesignCases(import.meta.url, getRunDesignScriptTool);
 
-test("run_design_script cannot mutate absolute parent workspace paths", { skip: process.platform === "win32" ? "fake python.exe shell-script shims are not executable on Windows" : false }, async () => {
+registerFullSuiteDesignCase(import.meta.url, "run_design_script cannot mutate absolute parent workspace paths", { skip: process.platform === "win32" ? "fake python.exe shell-script shims are not executable on Windows" : false }, async () => {
   const workspace = await mkdtemp(path.join(tmpdir(), "pi-agent-tools-"));
   const projectDir = path.join(workspace, "design-repo", "design-code");
   const scriptDir = path.join(projectDir, "scripts");
