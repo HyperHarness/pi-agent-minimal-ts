@@ -43,6 +43,32 @@ export interface DesignExecutionRequest {
   readonly input_manifest_sha256: string;
 }
 
+/** Validated adapter failure data, not independent controller authentication.
+ * A synthetic configured helper can produce this data in transport tests. */
+export interface DesignExecutionFailureEvidence {
+  readonly status: string;
+  readonly exitCode: number | null;
+  readonly requestId: string;
+  readonly requestSha256: string;
+  readonly callId: string;
+  readonly scriptPath: string;
+  readonly scriptSha256: string;
+  readonly inputManifestSha256: string;
+  readonly rootEntrySha256: string | null;
+  readonly closure: Readonly<{
+    launcherReaped: boolean;
+    descendantsStopped: boolean;
+    outputFrozen: boolean;
+  }>;
+}
+const designFailureEvidence = new WeakMap<Error, Readonly<DesignExecutionFailureEvidence>>();
+
+/** Only errors emitted by the validated failed-response branch have evidence.
+ * Copying properties or constructing an Error does not confer this provenance. */
+export function getDesignExecutionFailureEvidence(error: unknown): Readonly<DesignExecutionFailureEvidence> | undefined {
+  return error instanceof Error ? designFailureEvidence.get(error) : undefined;
+}
+
 const backendBrand: unique symbol = Symbol("controller-configured-design-execution");
 export interface AgentdDesignExecution {
   readonly mode: "external-agentd";
@@ -261,7 +287,22 @@ function validateCompletedResponse(value: unknown, request: DesignExecutionReque
   if (response.status !== "completed") {
     if (!Array.isArray(response.outputs) || response.outputs.length !== 0) throw new Error("environment_unverified: failed calls cannot publish outputs");
     const diagnostics = [response.stdout && `stdout:\n${response.stdout}`, response.stderr && `stderr:\n${response.stderr}`].filter(Boolean).join("\n");
-    throw new Error(`run_design_script external-agentd ${response.status}: ${diagnostics || "no outputs published"}`);
+    const error = new Error(`run_design_script external-agentd ${response.status}: ${diagnostics || "no outputs published"}`);
+    designFailureEvidence.set(error, Object.freeze({
+      status: response.status, exitCode: response.exit_code as number | null,
+      requestId: request.request_id, requestSha256: response.request_sha256 as string,
+      callId: response.call_id as string, scriptPath: request.script_path,
+      scriptSha256: request.files.find(file => file.path === request.script_path)!.sha256,
+      inputManifestSha256: request.input_manifest_sha256,
+      rootEntrySha256: request.root_entry?.sha256 ?? null,
+      closure: Object.freeze({
+        launcherReaped: closure.launcher_reaped as boolean,
+        descendantsStopped: closure.descendants_stopped as boolean,
+        outputFrozen: closure.output_frozen as boolean,
+      }),
+    }));
+    Object.freeze(error);
+    throw error;
   }
   if (response.exit_code !== 0) throw new Error("environment_unverified: completed response has nonzero exit status");
   if (closure.launcher_reaped !== true || closure.descendants_stopped !== true || closure.output_frozen !== true) throw new Error("cleanup_unverified: controller did not close the execution lifecycle");
