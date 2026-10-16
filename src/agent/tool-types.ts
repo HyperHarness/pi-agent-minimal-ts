@@ -1,3 +1,4 @@
+import type { DesignScriptExecution } from "./design-script-execution.js";
 import type { AgentTool } from "@mariozechner/pi-agent-core";
 import type { resolveDefaultPaperBrowserSessionFactory } from "./paper/browser/browser-session.js";
 import type { PaperBrowserManagerClient } from "./paper/browser/paper-browser-manager-client.js";
@@ -207,6 +208,8 @@ export type OpenPaperPageForLoginDependency = (input: {
 }>;
 
 export interface ToolDependencies {
+  /** Trusted startup configuration only; never a tool argument or ENV switch. */
+  designScriptExecution?: DesignScriptExecution;
   searchWeb?: typeof searchWeb;
   fetchWebPage?: typeof fetchWebPage;
   fetchPaperWebPage?: typeof fetchPaperWebPage;
@@ -247,6 +250,7 @@ export interface ToolDependencies {
 }
 
 export interface ToolSetMetadata {
+  designScriptExecution?: DesignScriptExecution;
   cleanup: () => Promise<void>;
   workspaceDir: string;
 }

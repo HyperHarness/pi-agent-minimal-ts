@@ -16,6 +16,10 @@ import {
   type ToolSetMetadata,
 } from "./tool-types.js";
 
+export { loadReviewedAgentdDesignExecution, runReviewedAgentdDesignAgent } from "./agentd-design-entrypoint.js";
+export type { ReviewedAgentdDesignPins } from "./agentd-design-entrypoint.js";
+export { createAgentdDesignExecution } from "./design-script-execution.js";
+export type { AgentdDesignExecution, DesignScriptExecution, DesignExecutionLimits } from "./design-script-execution.js";
 export type { AgentTools, ToolDependencies } from "./tool-types.js";
 export { TOOL_BOUNDARY_NAMES };
 
@@ -33,9 +37,13 @@ export function getToolsWorkspaceDir(
   return typeof workspaceDir === "string" ? workspaceDir : undefined;
 }
 
+export function getToolsDesignScriptExecution(tools: ReadonlyArray<AgentTool<any>> | undefined) {
+  return (tools as Partial<ToolSetMetadata> | undefined)?.designScriptExecution;
+}
+
 export function createTools(workspaceDir: string, dependencies: ToolDependencies = {}): AgentTools {
   const resolvedWorkspaceDir = path.resolve(workspaceDir);
-  const fileTools = createFileTools({ workspaceDir: resolvedWorkspaceDir });
+  const fileTools = createFileTools({ workspaceDir: resolvedWorkspaceDir, designScriptExecution: dependencies.designScriptExecution });
   const webTools = createWebTools({
     workspaceDir: resolvedWorkspaceDir,
     dependencies
@@ -88,6 +96,7 @@ export function createTools(workspaceDir: string, dependencies: ToolDependencies
   ];
 
   Object.defineProperties(tools, {
+    designScriptExecution: { enumerable: false, value: dependencies.designScriptExecution },
     cleanup: {
       enumerable: false,
       value: async () => {
@@ -130,6 +139,7 @@ export function createToolsForBoundary(
     .filter((tool): tool is AgentTool<any> => Boolean(tool)) as unknown as AgentTools;
 
   Object.defineProperties(tools, {
+    designScriptExecution: { enumerable: false, value: baseTools.designScriptExecution },
     cleanup: {
       enumerable: false,
       value: baseTools.cleanup
