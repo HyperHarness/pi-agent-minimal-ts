@@ -18,6 +18,9 @@
   "scripts": {
     "build": "node scripts/clean-dist.mjs && tsc -p tsconfig.json",
     "test": "npm run build && node --test --experimental-test-isolation=none dist/test/**/*.test.js test/scripts/**/*.test.mjs",
+    "test:design:external-contract": "npm run build && node --test --experimental-test-isolation=none dist/test/agent/design-script-execution.test.js dist/test/agent/design-script-tools.test.js",
+    "test:design:cross-language": "npm run build && node scripts/test-design-cross-language.mjs",
+    "test:design:standalone": "npm run build && node --test --experimental-test-isolation=none --test-name-pattern=\"run_design_script|standalone actual bwrap\" dist/test/agent/tools.test.js dist/test/agent/design-script-containment.test.js",
     "wiki-agent": "npm run build && node dist/src/wiki-agent.js",
     "wiki-agent:rpc": "npm run build && node dist/src/wiki-agent.js --mode rpc",
     "design-agent": "npm run build && node dist/src/design-agent.js",

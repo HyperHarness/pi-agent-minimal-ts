@@ -5,6 +5,7 @@ import path from "node:path";
 import { promisify } from "node:util";
 import { Type, type Static } from "@mariozechner/pi-ai";
 import type { AgentTool } from "@mariozechner/pi-agent-core";
+import { assertDesignScriptExecution, executeExternalDesignScript, type DesignScriptExecution } from "./design-script-execution.js";
 import { sanitizeWikiFilename } from "./wiki/store.js";
 
 const execFileAsync = promisify(execFile);
@@ -1524,6 +1525,7 @@ async function updateDesignDependency(input: {
 
 async function runDesignScript(input: {
   workspaceDir: string;
+  execution?: DesignScriptExecution;
   scriptPath: string;
   runner?: RunDesignScriptParameters["runner"];
   outputPaths?: readonly string[];
@@ -1560,6 +1562,21 @@ async function runDesignScript(input: {
     workspaceDir: input.workspaceDir
   });
   const commandLine = commandSpec.commandLine;
+  if (input.execution?.mode === "external-agentd") {
+    const result = await executeExternalDesignScript({
+      backend: input.execution,
+      designCodeDir: realDesignCodeDir,
+      scriptPath: scriptProjectRelativePath.split(path.sep).join("/"),
+      runner,
+      rootVenvPython: runner === "python" ? commandSpec.command : undefined,
+      outputPaths: (input.outputPaths ?? []).map(output => designCodeRelativeRequestedPath(output)),
+      maxOutputChars: input.maxOutputChars
+    });
+    return {
+      status: "completed", runner, scriptPath: relativeWorkspacePath(input.workspaceDir, resolvedScriptPath),
+      command: commandLine, exitCode: 0, ...result
+    };
+  }
   const isolatedWorkspace = await createIsolatedDesignScriptWorkspace(input.workspaceDir);
   const protectedSnapshots = await snapshotDesignScriptProtectedPaths(input.workspaceDir);
 
@@ -2116,12 +2133,15 @@ interface PaperWritingSkillDetails {
 
 export function createFileTools(input: {
   workspaceDir: string;
+  designScriptExecution?: DesignScriptExecution;
 }): {
   defaultTools: AgentTool<any>[];
   prependFullTools: AgentTool<any>[];
   artifactFullTools: AgentTool<any>[];
   tailFullTools: AgentTool<any>[];
 } {
+  assertDesignScriptExecution(input.designScriptExecution);
+  const designScriptExecution = input.designScriptExecution;
   const resolvedWorkspaceDir = path.resolve(input.workspaceDir);
 
   const getTimeTool: GetTimeTool = {
@@ -2479,6 +2499,7 @@ export function createFileTools(input: {
       const maxOutputChars = normalizeDesignToolOutputChars(args.maxOutputChars);
       const result = await runDesignScript({
         workspaceDir: resolvedWorkspaceDir,
+        execution: designScriptExecution,
         scriptPath: args.scriptPath,
         runner: args.runner,
         outputPaths: args.outputPaths,

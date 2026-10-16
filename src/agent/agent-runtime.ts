@@ -11,7 +11,7 @@ import {
 import { agentLoop, type AgentContext, type AgentEvent, type AgentMessage } from "@mariozechner/pi-agent-core";
 import { createQueuedPaperExtensionBridge } from "./paper/extension/paper-extension-bridge.js";
 import { createWikiEvidenceWorker } from "./wiki/worker.js";
-import { cleanupTools, createTools, createToolsForBoundary, getToolsWorkspaceDir } from "./tools.js";
+import { cleanupTools, createTools, createToolsForBoundary, getToolsWorkspaceDir, getToolsDesignScriptExecution } from "./tools.js";
 import {
   createWorkerHandoffMessage,
   extractWorkerHandoffPaths,
@@ -585,6 +585,9 @@ export async function runAgentTurn(options: RunAgentTurnOptions): Promise<RunAge
   if (existingTools.length === 0) {
     tools = createRuntimeTools(workspaceDir, options.model, options.workerRouting ?? "all");
   } else if (previousWorkspaceDir !== undefined && previousWorkspaceDir !== workspaceDir) {
+    if (getToolsDesignScriptExecution(existingTools)?.mode === "external-agentd") {
+      throw new Error("External design execution cannot change workspace without fresh trusted tool configuration");
+    }
     await cleanupTools(existingTools);
     tools = createRuntimeTools(workspaceDir, options.model, options.workerRouting ?? "all");
   }
