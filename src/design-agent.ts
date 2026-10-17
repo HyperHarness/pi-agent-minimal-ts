@@ -1,13 +1,11 @@
 import process from "node:process";
-import type { DesignScriptExecution } from "./agent/design-script-execution.js";
 import { pathToFileURL } from "node:url";
 import { main as runAgentCli } from "./agent/agent-cli.js";
 
-export async function main(options: { argv?: string[]; designScriptExecution?: DesignScriptExecution } = {}): Promise<void> {
+export async function main(options: { argv?: string[] } = {}): Promise<void> {
   await runAgentCli({
     argv: options.argv,
-    profile: "design-agent",
-    designScriptExecution: options.designScriptExecution
+    profile: "design-agent"
   });
 }
 
