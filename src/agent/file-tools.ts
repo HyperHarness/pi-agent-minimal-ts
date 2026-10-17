@@ -5,7 +5,6 @@ import path from "node:path";
 import { promisify } from "node:util";
 import { Type, type Static } from "@mariozechner/pi-ai";
 import type { AgentTool } from "@mariozechner/pi-agent-core";
-import { assertDesignScriptExecution, executeExternalDesignScript, type DesignScriptExecution } from "./design-script-execution.js";
 import { sanitizeWikiFilename } from "./wiki/store.js";
 
 const execFileAsync = promisify(execFile);
@@ -1525,7 +1524,6 @@ async function updateDesignDependency(input: {
 
 async function runDesignScript(input: {
   workspaceDir: string;
-  execution?: DesignScriptExecution;
   scriptPath: string;
   runner?: RunDesignScriptParameters["runner"];
   outputPaths?: readonly string[];
@@ -1562,21 +1560,6 @@ async function runDesignScript(input: {
     workspaceDir: input.workspaceDir
   });
   const commandLine = commandSpec.commandLine;
-  if (input.execution?.mode === "external-agentd") {
-    const result = await executeExternalDesignScript({
-      backend: input.execution,
-      designCodeDir: realDesignCodeDir,
-      scriptPath: scriptProjectRelativePath.split(path.sep).join("/"),
-      runner,
-      rootVenvPython: runner === "python" ? commandSpec.command : undefined,
-      outputPaths: (input.outputPaths ?? []).map(output => designCodeRelativeRequestedPath(output)),
-      maxOutputChars: input.maxOutputChars
-    });
-    return {
-      status: "completed", runner, scriptPath: relativeWorkspacePath(input.workspaceDir, resolvedScriptPath),
-      command: commandLine, exitCode: 0, ...result
-    };
-  }
   const isolatedWorkspace = await createIsolatedDesignScriptWorkspace(input.workspaceDir);
   const protectedSnapshots = await snapshotDesignScriptProtectedPaths(input.workspaceDir);
 
@@ -2133,15 +2116,12 @@ interface PaperWritingSkillDetails {
 
 export function createFileTools(input: {
   workspaceDir: string;
-  designScriptExecution?: DesignScriptExecution;
 }): {
   defaultTools: AgentTool<any>[];
   prependFullTools: AgentTool<any>[];
   artifactFullTools: AgentTool<any>[];
   tailFullTools: AgentTool<any>[];
 } {
-  assertDesignScriptExecution(input.designScriptExecution);
-  const designScriptExecution = input.designScriptExecution;
   const resolvedWorkspaceDir = path.resolve(input.workspaceDir);
 
   const getTimeTool: GetTimeTool = {
@@ -2344,198 +2324,6 @@ export function createFileTools(input: {
     }
   };
 
-  const writeDesignArtifactTool: WriteDesignArtifactTool = {
-    name: "write_design_artifact",
-    label: "Write Design Artifact",
-    description:
-      "Writes a structured chip-design artifact under design-repo/design-records/. Use this for minimal design-subagent outputs: design records, verification reports, failure records, and benchmark cases. This tool cannot write wiki pages, paper source summaries, or arbitrary workspace files.",
-    parameters: writeDesignArtifactParameters,
-    executionMode: "sequential",
-    execute: async (_toolCallId: string, args: WriteDesignArtifactParameters) => {
-      const result = await writeDesignArtifact(resolvedWorkspaceDir, args);
-
-      return {
-        content: [{ type: "text", text: JSON.stringify(result) }],
-        details: result
-      };
-    }
-  };
-
-  const writeDesignCodeFileTool: WriteDesignCodeFileTool = {
-    name: "write_design_code_file",
-    label: "Write Design Code File",
-    description:
-      "Creates or overwrites a UTF-8 file only under design-repo/design-code/. Accepts paths relative to that design-code project or prefixed with design-repo/design-code/. This is not a generic workspace file writer.",
-    parameters: writeDesignCodeFileParameters,
-    executionMode: "sequential",
-    execute: async (_toolCallId: string, args: WriteDesignCodeFileParameters) => {
-      const resolvedPath = await resolveDesignCodeWritableFilePath(resolvedWorkspaceDir, args.path);
-      await writeFile(resolvedPath, args.content, "utf8");
-      const relativePath = relativeWorkspacePath(resolvedWorkspaceDir, resolvedPath);
-
-      return {
-        content: [{ type: "text", text: `Wrote ${relativePath}.` }],
-        details: {
-          path: relativePath,
-          bytes: Buffer.byteLength(args.content, "utf8")
-        }
-      };
-    }
-  };
-
-  const replaceDesignCodeFileTextTool: ReplaceDesignCodeFileTextTool = {
-    name: "replace_design_code_file_text",
-    label: "Replace Design Code File Text",
-    description:
-      "Replaces an exact text block in a UTF-8 file only under design-repo/design-code/. Use read_file first, then replace the smallest exact block. This is not a generic workspace file editor.",
-    parameters: replaceDesignCodeFileTextParameters,
-    executionMode: "sequential",
-    execute: async (_toolCallId: string, args: ReplaceDesignCodeFileTextParameters) => {
-      if (!args.search) {
-        throw new Error("Search text is required.");
-      }
-
-      const resolvedPath = await resolveDesignCodeWritableFilePath(resolvedWorkspaceDir, args.path);
-      const original = await readFile(resolvedPath, "utf8");
-      const occurrences = countOccurrences(original, args.search);
-      if (occurrences === 0) {
-        throw new Error("Search text was not found in the file.");
-      }
-      if (!args.replaceAll && occurrences !== 1) {
-        throw new Error(`Search text occurs ${occurrences} times; set replaceAll=true or use a more specific block.`);
-      }
-
-      const updated = args.replaceAll
-        ? original.split(args.search).join(args.replacement)
-        : original.replace(args.search, args.replacement);
-      await writeFile(resolvedPath, updated, "utf8");
-      const relativePath = relativeWorkspacePath(resolvedWorkspaceDir, resolvedPath);
-
-      return {
-        content: [{ type: "text", text: `Replaced text in ${relativePath}.` }],
-        details: {
-          path: relativePath,
-          replacements: args.replaceAll ? occurrences : 1,
-          bytes: Buffer.byteLength(updated, "utf8")
-        }
-      };
-    }
-  };
-
-  const updateDesignDependencyTool: UpdateDesignDependencyTool = {
-    name: "update_design_dependency",
-    label: "Update Design Dependency",
-    description:
-      "Updates dependency declarations in design-repo/design-code/pyproject.toml without running pip or arbitrary uv commands. Follow this with sync_design_environment to install the declared environment.",
-    parameters: updateDesignDependencyParameters,
-    executionMode: "sequential",
-    execute: async (_toolCallId: string, args: UpdateDesignDependencyParameters) => {
-      const result = await updateDesignDependency({
-        workspaceDir: resolvedWorkspaceDir,
-        name: args.name,
-        specifier: args.specifier,
-        group: args.group ?? "main"
-      });
-
-      return {
-        content: [{ type: "text", text: JSON.stringify(result) }],
-        details: result
-      };
-    }
-  };
-
-  const syncDesignEnvironmentTool: SyncDesignEnvironmentTool = {
-    name: "sync_design_environment",
-    label: "Sync Design Environment",
-    description:
-      "Runs uv sync for design-repo/design-code while forcing the shared root .venv as the project environment. This is not a general shell and cannot sync arbitrary projects.",
-    parameters: syncDesignEnvironmentParameters,
-    executionMode: "sequential",
-    execute: async (_toolCallId: string, args: SyncDesignEnvironmentParameters) => {
-      const maxOutputChars = normalizeDesignToolOutputChars(args.maxOutputChars);
-      const result = await syncDesignEnvironment({
-        workspaceDir: resolvedWorkspaceDir,
-        projectPath: args.projectPath,
-        maxOutputChars
-      });
-
-      return {
-        content: [{ type: "text", text: JSON.stringify(result) }],
-        details: result
-      };
-    }
-  };
-
-  const verifyDesignPythonImportTool: VerifyDesignPythonImportTool = {
-    name: "verify_design_python_import",
-    label: "Verify Design Python Import",
-    description:
-      "Verifies a Python module imports with the repository root .venv Python after sync_design_environment. This is used after package install requests.",
-    parameters: verifyDesignPythonImportParameters,
-    executionMode: "sequential",
-    execute: async (_toolCallId: string, args: VerifyDesignPythonImportParameters) => {
-      const maxOutputChars = normalizeDesignToolOutputChars(args.maxOutputChars);
-      const result = await verifyDesignPythonImport({
-        workspaceDir: resolvedWorkspaceDir,
-        moduleName: args.moduleName,
-        maxOutputChars
-      });
-
-      return {
-        content: [{ type: "text", text: JSON.stringify(result) }],
-        details: result
-      };
-    }
-  };
-
-  const runDesignScriptTool: RunDesignScriptTool = {
-    name: "run_design_script",
-    label: "Run Design Script",
-    description:
-      "Runs a workspace-local Python design layout or verification script with the repository root .venv Python or KLayout batch mode, then verifies expected generated files such as .gds outputs. This is not a general shell.",
-    parameters: runDesignScriptParameters,
-    executionMode: "sequential",
-    execute: async (_toolCallId: string, args: RunDesignScriptParameters) => {
-      const maxOutputChars = normalizeDesignToolOutputChars(args.maxOutputChars);
-      const result = await runDesignScript({
-        workspaceDir: resolvedWorkspaceDir,
-        execution: designScriptExecution,
-        scriptPath: args.scriptPath,
-        runner: args.runner,
-        outputPaths: args.outputPaths,
-        maxOutputChars
-      });
-
-      return {
-        content: [{ type: "text", text: JSON.stringify(result) }],
-        details: result
-      };
-    }
-  };
-
-  const submitDesignSimulationTool: SubmitDesignSimulationTool = {
-    name: "submit_design_simulation",
-    label: "Submit Design Simulation",
-    description:
-      "Submits a fixed pi-chip-design electromagnetic simulation workflow to a remote solver-runner service using the repository root .venv Python. Use this for EM, Q3D, HFSS, AEDT, capacitance-extraction, or frequency-validation requests before claiming simulation is unavailable. The solver URL comes from solverUrl, PI_DESIGN_SOLVER_URL, or PI_SOLVER_URL.",
-    parameters: submitDesignSimulationParameters,
-    executionMode: "sequential",
-    execute: async (_toolCallId: string, args: Static<typeof submitDesignSimulationParameters>) => {
-      const maxOutputChars = normalizeDesignToolOutputChars(args.maxOutputChars);
-      const result = await submitDesignSimulation({
-        workspaceDir: resolvedWorkspaceDir,
-        workflow: args.workflow,
-        solverUrl: args.solverUrl,
-        maxOutputChars
-      });
-
-      return {
-        content: [{ type: "text", text: JSON.stringify(result) }],
-        details: result
-      };
-    }
-  };
-
   return {
     defaultTools: [
       listFilesTool,
@@ -2548,16 +2336,7 @@ export function createFileTools(input: {
     prependFullTools: [
       getTimeTool
     ],
-    artifactFullTools: [
-      writeDesignArtifactTool,
-      writeDesignCodeFileTool,
-      replaceDesignCodeFileTextTool,
-      updateDesignDependencyTool,
-      syncDesignEnvironmentTool,
-      verifyDesignPythonImportTool,
-      runDesignScriptTool,
-      submitDesignSimulationTool
-    ],
+    artifactFullTools: [],
     tailFullTools: [
       loadPaperWritingSkillTool
     ]

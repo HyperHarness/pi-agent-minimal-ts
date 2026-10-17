@@ -10,7 +10,8 @@ import {
   type Model
 } from "@mariozechner/pi-ai";
 import type { AgentContext, AgentEvent } from "@mariozechner/pi-agent-core";
-import { DEFAULT_SYSTEM_PROMPT, DESIGN_AGENT_SYSTEM_PROMPT } from "./agent-prompts.js";
+import { DEFAULT_SYSTEM_PROMPT } from "./agent-prompts.js";
+import { DESIGN_AGENT_DISABLED_MESSAGE } from "./tool-types.js";
 import { configureEnvProxy } from "./env-proxy.js";
 import { resolveInitialModel } from "./model-resolver.js";
 import {
@@ -18,8 +19,7 @@ import {
   createTools,
   createToolsForBoundary,
   getToolBoundaryToolNames,
-  type AgentTools,
-  type DesignScriptExecution
+  type AgentTools
 } from "./tools.js";
 import { readPaperDownloadJobEvents, summarizePaperDownloadJobs } from "./paper/extension/paper-download-jobs.js";
 import { createQueuedPaperExtensionBridge } from "./paper/extension/paper-extension-bridge.js";
@@ -131,12 +131,8 @@ function createWikiAgentTools(workspaceDir: string, model: Model<Api>): AgentToo
 export function resolveAgentEntrypointProfile(
   profile: AgentEntrypointProfile,
   workspaceDir: string,
-  model: Model<Api>,
-  trustedOptions: { designScriptExecution?: DesignScriptExecution } = {}
+  model: Model<Api>
 ): ResolvedAgentEntrypointProfile {
-  if (trustedOptions.designScriptExecution && profile !== "design-agent") {
-    throw new Error("Explicit design execution configuration requires the design-agent entrypoint");
-  }
   if (profile === "wiki-agent") {
     return {
       systemPrompt: DEFAULT_SYSTEM_PROMPT,
@@ -147,12 +143,7 @@ export function resolveAgentEntrypointProfile(
   }
 
   if (profile === "design-agent") {
-    return {
-      systemPrompt: DESIGN_AGENT_SYSTEM_PROMPT,
-      workerRouting: "none",
-      createTools: () => createToolsForBoundary(workspaceDir, "design-agent", { designScriptExecution: trustedOptions.designScriptExecution }),
-      toolNames: getToolBoundaryToolNames("design-agent")
-    };
+    throw new Error(DESIGN_AGENT_DISABLED_MESSAGE);
   }
 
   return {
@@ -785,17 +776,15 @@ export async function consumePromptLines(options: {
 export async function main(options: {
   argv?: string[];
   profile?: AgentEntrypointProfile;
-  /** Programmatic trusted-startup option; never parsed from CLI arguments or ENV. */
-  designScriptExecution?: DesignScriptExecution;
 } = {}): Promise<void> {
+  if (options.profile === "design-agent") {
+    throw new Error(DESIGN_AGENT_DISABLED_MESSAGE);
+  }
   configureEnvProxy();
 
   const cli = parseCliArgs(options.argv ?? process.argv.slice(2));
-  if (options.designScriptExecution && ((options.profile ?? "wiki-agent") !== "design-agent" || (cli.workerRouting !== undefined && cli.workerRouting !== "none"))) {
-    throw new Error("Explicit external design execution cannot select another profile or routed worker");
-  }
   if (cli.help) {
-    const helpEntrypoint = options.profile === "design-agent" ? "design-agent" : "wiki-agent";
+    const helpEntrypoint = "wiki-agent";
     process.stdout.write(
       `Usage: node dist/src/${helpEntrypoint}.js [--mode chat|rpc] [--session-dir <dir>] [--no-session] [--provider <name>] [--model <id>] [--base-url <url>] [--worker-routing all|wiki-paper|none]\n`
     );
@@ -815,7 +804,7 @@ export async function main(options: {
     envBaseUrl: process.env.PI_BASE_URL
   });
   const workspaceDir = process.cwd();
-  const entrypointProfile = resolveAgentEntrypointProfile(options.profile ?? "wiki-agent", workspaceDir, runtimeModel, { designScriptExecution: options.designScriptExecution });
+  const entrypointProfile = resolveAgentEntrypointProfile(options.profile ?? "wiki-agent", workspaceDir, runtimeModel);
   if (cli.workerRouting !== undefined) {
     entrypointProfile.workerRouting = cli.workerRouting;
   }

@@ -1,4 +1,3 @@
-import type { DesignScriptExecution } from "./design-script-execution.js";
 import type { AgentTool } from "@mariozechner/pi-agent-core";
 import type { resolveDefaultPaperBrowserSessionFactory } from "./paper/browser/browser-session.js";
 import type { PaperBrowserManagerClient } from "./paper/browser/paper-browser-manager-client.js";
@@ -95,13 +94,9 @@ type ToolName =
   | "write_file"
   | "write_paper_wiki_source";
 
-export const DESIGN_AGENT_TOOL_NAMES = [
-  "list_files",
-  "read_file",
-  "answer_paper_wiki_question",
-  "search_paper_wiki",
-  "search_local_papers",
-  "list_local_papers",
+export const DESIGN_AGENT_DISABLED_MESSAGE = "design-agent and its dedicated tools are disabled.";
+
+export const RETIRED_DESIGN_TOOL_NAMES = [
   "update_design_dependency",
   "sync_design_environment",
   "verify_design_python_import",
@@ -111,6 +106,8 @@ export const DESIGN_AGENT_TOOL_NAMES = [
   "write_design_code_file",
   "replace_design_code_file_text"
 ] as const satisfies readonly ToolName[];
+
+export const DESIGN_AGENT_TOOL_NAMES = [] as const;
 
 export const TOOL_BOUNDARY_NAMES: Record<ToolBoundaryRole, readonly ToolName[]> = {
   "wiki-agent": [
@@ -194,6 +191,9 @@ export const TOOL_BOUNDARY_NAMES: Record<ToolBoundaryRole, readonly ToolName[]> 
 };
 
 export function getToolBoundaryToolNames(role: ToolBoundaryRole): string[] {
+  if (role === "design-agent" || role === "design-subagent") {
+    throw new Error(DESIGN_AGENT_DISABLED_MESSAGE);
+  }
   return [...TOOL_BOUNDARY_NAMES[role]];
 }
 
@@ -208,8 +208,6 @@ export type OpenPaperPageForLoginDependency = (input: {
 }>;
 
 export interface ToolDependencies {
-  /** Trusted startup configuration only; never a tool argument or ENV switch. */
-  designScriptExecution?: DesignScriptExecution;
   searchWeb?: typeof searchWeb;
   fetchWebPage?: typeof fetchWebPage;
   fetchPaperWebPage?: typeof fetchPaperWebPage;
@@ -250,7 +248,6 @@ export interface ToolDependencies {
 }
 
 export interface ToolSetMetadata {
-  designScriptExecution?: DesignScriptExecution;
   cleanup: () => Promise<void>;
   workspaceDir: string;
 }

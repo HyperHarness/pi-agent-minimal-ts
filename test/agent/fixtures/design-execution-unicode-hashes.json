@@ -1,9 +1,0 @@
-{
-  "input_manifest_sha256": "63f4f735decd30c6dd5ec4279d5152aaa875927e583c87da8a4fc8a01651569e",
-  "request_sha256": "26e1b1dd2d2b648ad0fabf6806db8467cc54eea6f2309a77a24b1d69142a8f4a",
-  "files": [
-    "é.py",
-    "Ｚ.txt",
-    "😀.txt"
-  ]
-}
