@@ -31,3 +31,16 @@ entry points reject before model/network calls; no factory exposes design tools.
 agentd relevant regressions, schema generation and historical-result checks pass.
 Verify a real ordinary service-owned full-project check without design execution.
 Keep model calls and business dispatch paused during this withdrawal.
+
+## Implemented validation
+
+The complete recursive suite discovers 68 test entries and passes 867 tests,
+with no failures, cancellations or skips. This includes browser-extension tests.
+PR #38's exclusive external-execution suites retire with that adapter. The 31
+original dedicated design-tool cases retire with the disabled tools; remaining
+boundary/profile/routing tests now assert rejection or absence. New regressions
+cover direct CLI help, programmatic profiles, both legacy boundary names, all
+factories and cached/injected retired tools before a model can be called.
+
+Private implementation helpers remain dormant for a reversible disable. No
+factory constructs or returns dedicated design tools; no runtime opt-in exists.

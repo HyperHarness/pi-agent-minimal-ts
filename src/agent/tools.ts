@@ -116,7 +116,7 @@ export function createToolsForBoundary(
   role: ToolBoundaryRole,
   dependencies: ToolDependencies = {}
 ): AgentTools {
-  const boundaryNames = new Set(TOOL_BOUNDARY_NAMES[role]);
+  const boundaryNames = new Set(getToolBoundaryToolNames(role));
   const baseTools = createTools(workspaceDir, {
     ...dependencies,
     toolProfile: "full",
