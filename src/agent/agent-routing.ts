@@ -1,6 +1,6 @@
+import { DESIGN_AGENT_DISABLED_MESSAGE } from "./tool-types.js";
 import type { AssistantMessage } from "@mariozechner/pi-ai";
 import {
-  DESIGN_AGENT_SYSTEM_PROMPT,
   PAPER_DOWNLOAD_SUBAGENT_SYSTEM_PROMPT,
   PAPER_WRITING_WORKER_SYSTEM_PROMPT,
   WIKI_EVIDENCE_WORKER_SYSTEM_PROMPT
@@ -110,15 +110,6 @@ export function routeChatPromptToWorker(text: string): RoutedWorkerPrompt | null
       /^\/?wiki-evidence-worker\s+([\s\S]+)$/i,
       /^\/?证据整理\s+([\s\S]+)$/i,
       /^\/?文献总结\s+([\s\S]+)$/i
-    ]) ??
-    matchExplicitWorkerRoute(trimmed, "design-agent", [
-      /^\/?design-agent\s+([\s\S]+)$/i,
-      /^\/?design\s+agent\s+([\s\S]+)$/i,
-      /^\/?design-subagent\s+([\s\S]+)$/i,
-      /^\/?design\s+subagent\s+([\s\S]+)$/i,
-      /^\/design\s+([\s\S]+)$/i,
-      /^\/?芯片设计\s+([\s\S]+)$/i,
-      /^\/?设计任务\s+([\s\S]+)$/i
     ]);
 
   if (explicit) {
@@ -159,23 +150,6 @@ export function routeChatPromptToWorker(text: string): RoutedWorkerPrompt | null
     return { role: "wiki-evidence-worker", instruction: trimmed, reason: "intent" };
   }
 
-  const designScopeIntent =
-    /(design[-\s]?agent|design[-\s]?subagent|design-code|gdsfactory|klayout|\bgds\b|版图|layout|chip|qubit|resonator|coupler|芯片|量子)/i.test(
-      trimmed
-    );
-  const dependencyIntent =
-    /(python\s*(?:包|package)|依赖|dependenc(?:y|ies)|uv\s*环境|\buv\b|uv\s+environment|uv\s+sync|\bpyproject(?:\.toml)?\b)/i.test(
-      trimmed
-    );
-  const actionIntent =
-    /(安装|同步|更新|添加|声明|运行|生成|检查|验证|仿真|失败|记录|install|sync|update|add|declare|run|generate|check|verify|simulate|failure|record|artifact|benchmark|layout)/i.test(
-      trimmed
-    );
-  const designExecutionIntent = designScopeIntent && (actionIntent || dependencyIntent);
-  if (designExecutionIntent) {
-    return { role: "design-agent", instruction: trimmed, reason: "intent" };
-  }
-
   return null;
 }
 
@@ -190,7 +164,7 @@ export function systemPromptForWorker(role: RoutedWorkerRole): string {
   if (normalizedRole === "wiki-evidence-worker") {
     return WIKI_EVIDENCE_WORKER_SYSTEM_PROMPT;
   }
-  return DESIGN_AGENT_SYSTEM_PROMPT;
+  throw new Error(DESIGN_AGENT_DISABLED_MESSAGE);
 }
 
 function addString(set: Set<string>, value: unknown): void {

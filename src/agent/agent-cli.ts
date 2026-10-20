@@ -10,7 +10,8 @@ import {
   type Model
 } from "@mariozechner/pi-ai";
 import type { AgentContext, AgentEvent } from "@mariozechner/pi-agent-core";
-import { DEFAULT_SYSTEM_PROMPT, DESIGN_AGENT_SYSTEM_PROMPT } from "./agent-prompts.js";
+import { DEFAULT_SYSTEM_PROMPT } from "./agent-prompts.js";
+import { DESIGN_AGENT_DISABLED_MESSAGE } from "./tool-types.js";
 import { configureEnvProxy } from "./env-proxy.js";
 import { resolveInitialModel } from "./model-resolver.js";
 import {
@@ -142,12 +143,7 @@ export function resolveAgentEntrypointProfile(
   }
 
   if (profile === "design-agent") {
-    return {
-      systemPrompt: DESIGN_AGENT_SYSTEM_PROMPT,
-      workerRouting: "none",
-      createTools: () => createToolsForBoundary(workspaceDir, "design-agent"),
-      toolNames: getToolBoundaryToolNames("design-agent")
-    };
+    throw new Error(DESIGN_AGENT_DISABLED_MESSAGE);
   }
 
   return {
@@ -790,11 +786,14 @@ export async function main(options: {
   argv?: string[];
   profile?: AgentEntrypointProfile;
 } = {}): Promise<void> {
+  if (options.profile === "design-agent") {
+    throw new Error(DESIGN_AGENT_DISABLED_MESSAGE);
+  }
   configureEnvProxy();
 
   const cli = parseCliArgs(options.argv ?? process.argv.slice(2));
   if (cli.help) {
-    const helpEntrypoint = options.profile === "design-agent" ? "design-agent" : "wiki-agent";
+    const helpEntrypoint = "wiki-agent";
     process.stdout.write(
       `Usage: node dist/src/${helpEntrypoint}.js [--mode chat|rpc] [--session-dir <dir>] [--no-session] [--provider <name>] [--model <id>] [--base-url <url>] [--worker-routing all|wiki-paper|none]\n`
     );

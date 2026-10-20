@@ -118,7 +118,7 @@ test("default system prompt requires wiki evidence for scientific questions", ()
   assert.match(DEFAULT_SYSTEM_PROMPT, /wiki and paper workflows/);
   assert.match(DEFAULT_SYSTEM_PROMPT, /wiki_health_fix/);
   assert.match(DEFAULT_SYSTEM_PROMPT, /source summaries/);
-  assert.match(DEFAULT_SYSTEM_PROMPT, /design-agent outputs/);
+  assert.match(DEFAULT_SYSTEM_PROMPT, /existing design artifacts/);
   assert.match(DEFAULT_SYSTEM_PROMPT, /fetch_paper_webpage/);
   assert.match(DEFAULT_SYSTEM_PROMPT, /force=true/);
   assert.match(DEFAULT_SYSTEM_PROMPT, /do not use download_paper/i);
@@ -152,14 +152,7 @@ test("router worker system prompts describe isolated responsibilities", () => {
   assert.match(downloadPrompt as string, /get_time first/);
   assert.match(downloadPrompt as string, /past N years/);
   assert.match(designPrompt as string, /design-agent/);
-  assert.match(designPrompt as string, /layout-code/);
-  assert.match(designPrompt as string, /design-repo\/design-code/);
-  assert.match(designPrompt as string, /sync_design_environment/);
-  assert.match(designPrompt as string, /root \.venv/);
-  assert.match(designPrompt as string, /Do not install packages ad hoc with pip/);
-  assert.match(designPrompt as string, /submit_design_simulation/);
-  assert.match(designPrompt as string, /remote solver/);
-  assert.match(designPrompt as string, /design-projects\/.*deprecated/);
+  assert.match(designPrompt as string, /disabled/);
 });
 
 test("agent CLI profiles initialize strict prompts, routing, and tool boundaries", async () => {
@@ -171,11 +164,7 @@ test("agent CLI profiles initialize strict prompts, routing, and tool boundaries
     workspaceDir,
     registration.getModel()
   );
-  const designProfile = agentCli.resolveAgentEntrypointProfile(
-    "design-agent",
-    workspaceDir,
-    registration.getModel()
-  );
+  assert.throws(() => agentCli.resolveAgentEntrypointProfile("design-agent", workspaceDir, registration.getModel()), /disabled/);
   const routedProfile = agentCli.resolveAgentEntrypointProfile(
     "routed-agent",
     workspaceDir,
@@ -186,10 +175,6 @@ test("agent CLI profiles initialize strict prompts, routing, and tool boundaries
   assert.equal(wikiProfile.workerRouting, "wiki-paper");
   assert.deepEqual(wikiProfile.toolNames, toolsModule.getToolBoundaryToolNames("wiki-agent"));
 
-  assert.equal(designProfile.systemPrompt, DESIGN_AGENT_SYSTEM_PROMPT);
-  assert.equal(designProfile.workerRouting, "none");
-  assert.deepEqual(designProfile.toolNames, toolsModule.getToolBoundaryToolNames("design-agent"));
-
   assert.equal(routedProfile.systemPrompt, DEFAULT_SYSTEM_PROMPT);
   assert.equal(routedProfile.workerRouting, "all");
 
@@ -199,14 +184,6 @@ test("agent CLI profiles initialize strict prompts, routing, and tool boundaries
     assert.deepEqual(wikiTools.map((tool) => tool.name), toolsModule.getToolBoundaryToolNames("wiki-agent"));
   } finally {
     await cleanupTools(wikiTools);
-  }
-
-  const designTools = designProfile.createTools();
-  try {
-    assert.deepEqual(designTools.map((tool) => tool.name), designProfile.toolNames);
-    assert.deepEqual(designTools.map((tool) => tool.name), toolsModule.getToolBoundaryToolNames("design-agent"));
-  } finally {
-    await cleanupTools(designTools);
   }
 
   const routedTools = routedProfile.createTools();
@@ -1199,41 +1176,13 @@ test("runSessionPrompt routes paper write commands to the paper-writing worker b
     instruction: "下载最新的超导量子芯片设计论文",
     reason: "intent"
   });
-  assert.deepEqual(routeChatPromptToWorker!("design 写一个芯片设计 failure record"), {
-    role: "design-agent",
-    instruction: "design 写一个芯片设计 failure record",
-    reason: "intent"
-  });
-  assert.deepEqual(routeChatPromptToWorker!("design-agent 安装 gdsfactory"), {
-    role: "design-agent",
-    instruction: "安装 gdsfactory",
-    reason: "explicit"
-  });
-  assert.deepEqual(routeChatPromptToWorker!("design subagent 安装 gdsfactory"), {
-    role: "design-agent",
-    instruction: "安装 gdsfactory",
-    reason: "explicit"
-  });
-  assert.deepEqual(routeChatPromptToWorker!("请让design subagent安装gdsfactory这个python包"), {
-    role: "design-agent",
-    instruction: "请让design subagent安装gdsfactory这个python包",
-    reason: "intent"
-  });
-  assert.deepEqual(routeChatPromptToWorker!("请同步 design-repo/design-code 的 uv 环境"), {
-    role: "design-agent",
-    instruction: "请同步 design-repo/design-code 的 uv 环境",
-    reason: "intent"
-  });
-  assert.deepEqual(routeChatPromptToWorker!("update design-code python dependency"), {
-    role: "design-agent",
-    instruction: "update design-code python dependency",
-    reason: "intent"
-  });
-  assert.deepEqual(routeChatPromptToWorker!("check pyproject dependencies for gdsfactory layout"), {
-    role: "design-agent",
-    instruction: "check pyproject dependencies for gdsfactory layout",
-    reason: "intent"
-  });
+  assert.equal(routeChatPromptToWorker!("design 写一个芯片设计 failure record"), null);
+  assert.equal(routeChatPromptToWorker!("design-agent 安装 gdsfactory"), null);
+  assert.equal(routeChatPromptToWorker!("design subagent 安装 gdsfactory"), null);
+  assert.equal(routeChatPromptToWorker!("请让design subagent安装gdsfactory这个python包"), null);
+  assert.equal(routeChatPromptToWorker!("请同步 design-repo/design-code 的 uv 环境"), null);
+  assert.equal(routeChatPromptToWorker!("update design-code python dependency"), null);
+  assert.equal(routeChatPromptToWorker!("check pyproject dependencies for gdsfactory layout"), null);
   assert.equal(routeChatPromptToWorker!("sync uv environment"), null);
   assert.equal(routeChatPromptToWorker!("update python dependency"), null);
   assert.equal(routeChatPromptToWorker!("install python package"), null);
@@ -1346,11 +1295,7 @@ test("bare-word design and evidence prompts are not hijacked into clean-context 
   assert.equal(routeChatPromptToWorker!("Evidence that the design is correct"), null);
 
   // Slash-prefixed explicit commands still route.
-  assert.deepEqual(routeChatPromptToWorker!("/design 安装 gdsfactory"), {
-    role: "design-agent",
-    instruction: "安装 gdsfactory",
-    reason: "explicit"
-  });
+  assert.equal(routeChatPromptToWorker!("/design 安装 gdsfactory"), null);
   assert.deepEqual(routeChatPromptToWorker!("/evidence summarize the papers"), {
     role: "wiki-evidence-worker",
     instruction: "summarize the papers",
@@ -1398,7 +1343,7 @@ test("runSessionPrompt persists the user prompt and failed-worker handoff into c
   }
 });
 
-test("runSessionPrompt routes design package requests to design-agent boundary", async () => {
+test("runSessionPrompt does not hand off design package requests", async () => {
   const registration = registerFauxProvider();
   registration.setResponses([
     fauxAssistantMessage([fauxText("Design dependency checked.")])
@@ -1429,17 +1374,17 @@ test("runSessionPrompt routes design package requests to design-agent boundary",
       })
       .find((candidate) => candidate?.role === "design-agent");
 
-    assert.ok(handoff);
-    assert.equal(handoff.instruction, "请让design subagent安装gdsfactory这个python包");
+    assert.equal(handoff, undefined);
+    await cleanupTools(context.tools);
   } finally {
     registration.unregister();
   }
 });
 
-test("runSessionPrompt can disable worker routing for fixed design-agent sessions", async () => {
+test("runSessionPrompt disabling worker routing retains only the wiki boundary", async () => {
   const registration = registerFauxProvider();
   registration.setResponses([
-    fauxAssistantMessage([fauxText("Handled inside the fixed design-agent session.")])
+    fauxAssistantMessage([fauxText("Handled with worker routing disabled.")])
   ]);
 
   const context: AgentContext = {
@@ -1459,7 +1404,7 @@ test("runSessionPrompt can disable worker routing for fixed design-agent session
 
     const assistantMessages = result.newMessages.filter(isAssistantMessage);
     assert.ok(
-      assistantMessages.some((message) => messageHasText(message, "Handled inside the fixed design-agent session."))
+      assistantMessages.some((message) => messageHasText(message, "Handled with worker routing disabled."))
     );
     assert.equal(
       assistantMessages.some((message) => JSON.stringify(message.content).includes("worker_handoff")),
@@ -1471,7 +1416,7 @@ test("runSessionPrompt can disable worker routing for fixed design-agent session
     );
     assert.deepEqual(
       (context.tools ?? []).map((tool) => tool.name),
-      toolsModule.getToolBoundaryToolNames("design-agent")
+      toolsModule.getToolBoundaryToolNames("wiki-agent")
     );
   } finally {
     await cleanupTools(context.tools);

@@ -1,12 +1,14 @@
 # pi-agent-minimal-ts
 
+Design execution is disabled: no design CLI, routed worker, or dedicated tools are available. Existing design assets are retained. See [scope decision](docs/SCOPE_REDUCTION_SPEC.md).
+
 Minimal TypeScript research agent built on [`@mariozechner/pi-ai`](https://www.npmjs.com/package/@mariozechner/pi-ai) and [`@mariozechner/pi-agent-core`](https://www.npmjs.com/package/@mariozechner/pi-agent-core).
 
 This repository is a practical agent harness for literature ingestion, local wiki growth, Feishu chat operation, and manuscript/design workflows. It is intentionally small at the runtime layer, but the tool boundaries are explicit so another agent can reuse it without guessing which component owns each capability.
 
 ## What It Does
 
-- runs strict wiki-agent and design-agent terminal chat / REPL entrypoints
+- runs the strict wiki-agent terminal chat / REPL entrypoint
 - runs the wiki-agent as a JSONL RPC process for the Feishu bridge
 - exposes a Feishu long-connection bridge with streaming replies and per-chat memory
 - searches, downloads, parses, summarizes, and indexes papers into a local knowledge base
@@ -37,7 +39,6 @@ Feishu bridge
 Local terminal / harness
         |
         +--> wiki-agent CLI/RPC          -> wiki and paper knowledge work
-        +--> design-agent CLI/RPC        -> design code, dependencies, layout scripts, records
         +--> bridge repo manager         -> git status/diff/log/commit/push for configured repos
 ```
 
@@ -62,16 +63,14 @@ The public entrypoints are intentionally explicit. Do not start a generic agent 
 | --- | --- | --- | --- | --- |
 | `npm run wiki-agent` | wiki, paper, evidence, synthesis, page governance, manuscript coordination | `knowledge-base/pages/`, aliases, source/page indexes, paper-backed knowledge records, manuscript files through the paper-writing worker | local wiki, local paper library, design records/artifacts/summaries | direct design-code editing, dependency installation, layout-script execution |
 | `npm run wiki-agent:rpc` | JSONL RPC wiki-agent for Feishu or another compatible bridge | same as `wiki-agent` | same as `wiki-agent` | same as `wiki-agent` |
-| `npm run design-agent` | design/code/dependency/layout/verification work | `design-repo/design-code/`, `design-repo/design-records/`, declared design-code outputs | local wiki and local paper evidence through read-only retrieval tools | wiki page writes, paper downloads, web search, arbitrary workspace writes |
-| `npm run design-agent:rpc` | JSONL RPC design-agent for local harnesses or future direct integrations | same as `design-agent` | same as `design-agent` | Feishu bridge default operation |
 
 `npm run agent` and `npm run agent:rpc` are intentionally not public scripts. Use the specific entrypoint that matches the work.
 
-The Feishu bridge is configured to connect to `wiki-agent:rpc` by default. Design work should be started separately with `npm run design-agent`. The design-agent can use wiki/paper retrieval tools for context, but it cannot update wiki pages; the wiki-agent later reads design-agent outputs and promotes durable conclusions into wiki pages and source summaries.
+The Feishu bridge connects to `wiki-agent:rpc` by default. The wiki agent can curate existing design artifacts without executing design work.
 
 ### Router Layer
 
-The lower-level runtime still has a lightweight router layer for internal/routed-agent compatibility. Public users should not rely on a generic entrypoint to infer design work from natural language; start design/code/dependency/layout/verification work with `npm run design-agent`.
+The lower-level runtime retains routing for paper and wiki workers. Design execution routing is disabled.
 
 Inside the wiki/paper flow, the runtime detects high-confidence worker intents and runs the requested turn in a clean worker context with the corresponding boundary tools:
 
@@ -79,7 +78,7 @@ Inside the wiki/paper flow, the runtime detects high-confidence worker intents a
 - PaperOrchestra-style full manuscript generation, outline, draft refinement, or submission-package requests -> `paper-writing-worker`
 - paper search, paper download, acquisition fallback, and citation-metadata repair requests -> `paper-download-subagent`
 - evidence construction, paper summarization, and source-summary relation requests -> `wiki-evidence-worker`
-- chip-design/layout engineering requests, dependency installation, verification records, or design-failure cases -> use the separate `design-agent` entrypoint
+- chip-design/layout execution and dependency installation -> disabled
 
 Explicit prefixes are still supported when precision matters inside routed/internal contexts: `paper write ...`, `paper download ...`, `download paper ...`, `wiki evidence ...`, `/evidence ...`, `/paper-writing-worker ...`, `/paper-download-subagent ...`, and `/wiki-evidence-worker ...`. If no wiki/paper worker route matches, the prompt goes to the wiki-agent coordinator.
 
@@ -128,7 +127,7 @@ The intended workflow keeps production and curation separate:
 paper-download-subagent -> wiki-evidence-worker -> wiki-agent -> paper-writing-worker
 acquisition/raw/parses  -> sources/*/summary.md + page drafts -> pages/*.md -> manuscript files
 
-design-agent -> design-code/artifacts/records -> wiki-agent -> curated wiki pages
+existing design artifacts -> wiki-agent -> curated wiki pages
 layout code  -> GDS/logs/reports/records    -> evidence-backed synthesis
 ```
 
@@ -145,7 +144,7 @@ cp docs/feishu-bridge.env.example .env
 npm run feishu-bridge
 ```
 
-The bridge starts the repository wiki-agent RPC entrypoint by default (`node dist/src/wiki-agent.js --mode rpc`). Set `PI_COMMAND` only when the bridge should target another compatible wiki-agent RPC process. Design work should be run separately with `npm run design-agent`, outside the Feishu bridge.
+The bridge starts the repository wiki-agent RPC entrypoint by default (`node dist/src/wiki-agent.js --mode rpc`). Set `PI_COMMAND` only when the bridge should target another compatible wiki-agent RPC process.
 
 Common Feishu-side commands:
 
@@ -195,55 +194,7 @@ assistant> I found several relevant papers...
 > exit
 ```
 
-Use `design-agent` for local interactive design/code/dependency/layout/verification work:
-
-```sh
-npm run design-agent -- --provider openai --model gpt-5.4
-```
-
-Typical design-agent requests are:
-
-```text
-> add gdstk as a design-code dependency, sync the shared venv, and verify the import
-> create a reusable resonator layout module under design-repo/design-code/src/pi_chip_design/
-> run the layout script and verify the declared GDS output
-> write a verification report for the failed coupler-spacing attempt
-```
-
-The design-agent writes design code only through the design-code file tools, installs declared Python dependencies through `uv sync` into the repository root `.venv`, and runs scripts through the `bwrap`-sandboxed `run_design_script` tool. It can retrieve local wiki/paper evidence, but it cannot call `build_wiki_page`, write `knowledge-base/pages/`, download papers, or use a general shell.
-
-The wiki-agent handles wiki and paper workflows. For manuscript edits or writing-quality review, either ask naturally in the wiki/paper flow or prefix the request with `paper write` when you want an explicit paper-writing worker route:
-
-```text
-> Agreed, please revise the manuscript
-[tool:start] load_paper_writing_skill
-[tool:end] load_paper_writing_skill ok
-...
-[tool:start] compile_latex texPath=paper-projects/million-superconducting-qubits/manuscript/main.tex
-[tool:end] compile_latex ok
-
-> paper write revise paper-projects/million-superconducting-qubits/manuscript/main.tex, load the sciwrite skill first, polish the abstract, and recompile
-[tool:start] load_paper_writing_skill
-[tool:end] load_paper_writing_skill ok
-...
-[tool:start] compile_latex texPath=paper-projects/million-superconducting-qubits/manuscript/main.tex
-[tool:end] compile_latex ok
-```
-
-The paper-writing worker receives only the `paper-writing-worker` boundary tools: project-local writing skills, manuscript file edits, LaTeX compilation, local wiki retrieval, and wiki linting. It cannot download papers, run web search, build wiki pages, or create raw source summaries.
-
-For PaperOrchestra-style workflows, keep the writing workspace under a private paper project, for example `paper-projects/current/paper-orchestra/`. The worker can prepare and validate the controlled layout, run draft gates, apply refinement accept/revert decisions, and write a provenance snapshot, while upstream paper acquisition and wiki evidence construction remain owned by the download and evidence workers.
-
-Other explicit worker routes:
-
-```text
-> paper download latest superconducting qubit chip design papers
-> wiki evidence summarize arxiv-2406.06015 and maintain related_papers
-```
-
-Start design/code/dependency/layout/verification work with `npm run design-agent`; do not route those tasks through wiki-agent chat examples.
-
-Use `exit` or `quit` to stop. Conversation history is kept in memory for the current process only.
+Design execution is disabled. Existing design files remain available for read-only curation.
 
 ### Non-Interactive Chat
 
@@ -266,11 +217,7 @@ Use this when another local bridge or harness wants to drive the same agent proc
 npm run wiki-agent:rpc -- --provider openai --model gpt-5.4 --session-dir .memory/pi-sessions/example
 ```
 
-Local design harnesses should use the design-agent RPC entrypoint instead:
-
-```sh
-npm run design-agent:rpc -- --provider openai --model gpt-5.4 --session-dir .memory/pi-sessions/design-example
-```
+The previous design-agent RPC entrypoint is disabled, including direct CLI invocation.
 
 RPC mode reads one JSON command per stdin line and writes JSON events to stdout:
 
@@ -318,6 +265,14 @@ These tools reject paths that resolve outside the workspace, including escaping 
 
 - `web_search`: searches the configured search provider
 - `fetch_url`: fetches a URL and extracts useful page text
+
+`fetch_url` accepts public HTTP/HTTPS destinations. It rejects credentials, private
+or special-use IP addresses, and DNS responses containing any non-public address;
+redirect targets are checked again. Connections use the validated addresses, with
+at most 2 MiB read before text extraction. HTTP/HTTPS environment proxies and
+`NO_PROXY` are supported; proxy CONNECT targets are pinned while HTTP Host and TLS
+certificate verification retain the original hostname. SOCKS proxies are rejected
+for this tool because its transport requires a pinned HTTP CONNECT destination.
 
 These are general web tools. In strict wiki-agent benchmark mode they are not exposed, because evidence acquisition should be fixed or delegated.
 
@@ -395,9 +350,6 @@ This is deterministic schema, retrieval, review, and lint support. It does not r
 
 ### Design And Paper-Writing Tools
 
-- `write_design_artifact`: full-mode / design-agent tool that writes structured design records, verification reports, failure records, and benchmark cases under `design-repo/design-records/`
-- `sync_design_environment`: full-mode / design-agent tool that runs `uv sync` for `design-repo/design-code/` while forcing the shared repository root `.venv` as the Python project environment. This is not a general shell and cannot sync arbitrary projects.
-- `run_design_script`: full-mode / design-agent tool that runs `.py` layout or verification scripts from `design-repo/design-code/` in a `bwrap` sandbox with a writable temporary design-code copy, then copies back only declared design-code outputs. For Python scripts it requires the repository root `.venv/bin/python`; if it is missing, run `sync_design_environment` first. KLayout scripts still run through `klayout -b -r`.
 - `load_paper_writing_skill`: full-mode / paper-writing-worker tool that loads worker-scoped writing prompt modules such as `skills/paper-writing-worker/sciwrite/prompt.md`
 - `paper_orchestra_prepare_workspace`: full-mode / paper-writing-worker tool that creates and validates the controlled PaperOrchestra writing workspace layout
 - `paper_orchestra_check_draft`: full-mode / paper-writing-worker tool that runs orphan-citation, LaTeX sanity, and anonymous anti-leakage draft gates
@@ -406,25 +358,22 @@ This is deterministic schema, retrieval, review, and lint support. It does not r
 - paper-writing-worker tools: project-local writing skill loading, manuscript file reading/writing, PaperOrchestra writing gates, LaTeX compilation, local wiki retrieval, and wiki-grounded Q&A
 - `get_time`: full-mode diagnostic tool for checking the current local time
 
-The design-agent is the engineering owner for executable layout code, dependency declarations, bounded verification scripts, and design records. It works in the parent-managed `design-repo/design-code/` Python package, declares dependencies there, uses `sync_design_environment` to run `uv sync` into the root `.venv`, executes only bounded design-code scripts through `run_design_script`, and returns artifacts or records to the wiki-agent for durable curation. The package provides base GDS layout drawing helpers on top of `gdstk`: the agent updates `design-repo/design-code/pyproject.toml`, runs `uv sync` into `.venv`, verifies imports, and then uses that shared interpreter for layout scripts. `design-subagent` remains an accepted compatibility alias.
-
-Design code, reusable Python packages, scripts, generated-layout setup, and design notes should live under `design-repo/design-code/`. This directory is tracked by the parent agent project, while generated outputs stay ignored. Keep one Python environment at the repository root `.venv` so `run_design_script` uses the same interpreter regardless of whether the agent was started from WSL, Feishu bridge, or another entrypoint.
+Design execution and its eight dedicated tools are disabled in all profiles. Existing design assets and environments are retained.
 
 ### Tool Profiles And Worker Boundaries
 
 | Surface | Purpose | Exposes | Does not expose |
 | --- | --- | --- | --- |
 | `default` | interactive agent surface | compact file, web, paper, wiki, health tools | full diagnostics and raw source writers |
-| `full` | development and diagnostics | all default tools plus raw paper/wiki/design utilities | no extra filesystem escape permissions |
+| `full` | development and diagnostics | all default tools plus raw paper/wiki utilities | no extra filesystem escape permissions |
 | `wiki-agent` | durable knowledge coordinator | local wiki search, page construction, user-confirmed page deletion, aliases, wiki health/lint, paper search/download | web search, source-summary generation, generic file deletion |
 | `paper-download-subagent` | literature acquisition | search/download, browser/manual fallback, webpage capture, local-parse/arXiv/Crossref citation metadata refresh, parsing, health repair | wiki page writes, source-summary authoring |
 | `wiki-evidence-worker` | evidence construction | source summaries, relation maintenance, fixed-evidence page draft output | paper download, external search, autonomous acquisition |
-| `design-agent` | chip-design/layout engineering | `list_files`/`read_file` for inspection; local wiki/paper retrieval; bounded dependency management via `update_design_dependency`; root `.venv` sync via `sync_design_environment`; import verification via `verify_design_python_import`; design-code write/replace under `design-repo/design-code/` via `write_design_code_file` and `replace_design_code_file_text`; isolated design-code `run_design_script`; `write_design_artifact` | web search, paper download, wiki page writes, arbitrary file writes |
 | `paper-writing-worker` | manuscript writing | project-local writing skills, manuscript read/write, PaperOrchestra workspace/gate/provenance tools, LaTeX compile, wiki retrieval/Q&A | paper download, source-summary generation, wiki page construction, web search |
 
 Use the boundary APIs in benchmarks so each model is evaluated under the same tool surface.
 
-`design-subagent` is retained only as a compatibility alias for older prompts and bridge integrations; public worker handoff records use `design-agent`.
+`design-agent` and `design-subagent` are disabled compatibility names; boundary/profile APIs reject them before model calls.
 
 The main wiki/research tools also return compact coordination metadata. This is meant for agents and bridge logs: it records the detected intent, the decision path, ordered steps, worker owners, blocked/insufficient-evidence reasons, and the suggested next owner. `wiki-synthesis-worker` is a logical owner label for synthesis/page-writing steps, not a separate router prefix or durable runtime role. Coordination metadata is not a replacement for the worker boundary; it is an audit trail for why the boundary was chosen.
 
@@ -470,11 +419,11 @@ design-repo/
     outputs/
 ```
 
-Use `design-repo/design-code/` for maintained executable design code, Python package modules, simulations, generated-layout scripts, and project-local tests. Use `design-repo/design-records/` for structured design evidence. These are design-agent-owned assets; `knowledge-base/` remains wiki-agent-owned and should only contain distilled wiki knowledge pages that cite design assets when the wiki-agent promotes design results.
+Use `design-repo/design-code/` for maintained executable design code, Python package modules, simulations, generated-layout scripts, and project-local tests. Use `design-repo/design-records/` for structured design evidence. These retained assets are read-only inputs to the agent; `knowledge-base/` remains wiki-agent-owned and should only contain distilled wiki knowledge pages that cite design assets when the wiki-agent promotes design results.
 
 `design-repo/design-code/` is the parent-managed `pi-chip-design` Python package. The parent repo tracks package source, tests, `pyproject.toml`, and `uv.lock`; generated layout outputs, caches, and egg-info metadata remain ignored.
 
-Use `design-repo/design-artifacts/<experiment-key>/` for design-agent experiment outputs and design-side source records. These are not wiki source summaries; they stay in the design repository until the wiki-agent distills them into durable knowledge pages. The path contract is:
+Use `design-repo/design-artifacts/<experiment-key>/` for existing experiment outputs and design-side source records. These are not wiki source summaries; they stay in the design repository until the wiki-agent distills them into durable knowledge pages. The path contract is:
 
 ```text
 design-repo/design-artifacts/<experiment-key>/
@@ -494,9 +443,7 @@ The initial design workspace is the `pi_chip_design` Python package under `desig
 UV_PROJECT_ENVIRONMENT="$PWD/.venv" uv sync --project "$PWD/design-repo/design-code" --extra dev
 ```
 
-The design-agent normally performs this through `sync_design_environment`; it does not require the parent agent process to activate this environment. `run_design_script` requires the repository root `.venv/bin/python` and the local `bwrap` sandbox command, runs scripts from an isolated copy of `design-repo/design-code/`, copies back only declared design-code outputs, and reports that `sync_design_environment` should be run first if the root interpreter is missing.
-
-The design-agent must not call `pip install` directly, create `design-repo/design-code/.venv`, or install into a design-project-local environment. Dependency requests should be handled as declarative `pyproject.toml` changes followed by `sync_design_environment` and import/script verification.
+This manual workspace setup is retained for existing assets. The agent no longer installs dependencies or runs design scripts.
 
 Recommended paper-to-wiki path:
 
@@ -583,7 +530,7 @@ Start from [docs/feishu-bridge.env.example](docs/feishu-bridge.env.example). Cor
 - `BRIDGE_PAPER_GIT_AUTO_PUSH`: push after automatic paper commits
 - `BRIDGE_INCLUDE_AGENT_MESSAGES_IN_HISTORY`: include prior assistant replies in prompt history; default is false
 
-By default the Feishu bridge starts the built-in wiki-agent RPC command. Leave it that way for normal chat operation so Feishu can update wiki/paper knowledge but cannot accidentally run design-code package installation or layout scripts. Use `PI_COMMAND` only to point at another compatible wiki-agent RPC process; do not point Feishu at `design-agent:rpc` unless you are intentionally building a separate design-only bridge.
+By default the Feishu bridge starts the built-in wiki-agent RPC command. Use `PI_COMMAND` only for another compatible wiki-agent RPC process.
 
 ## Install
 
@@ -609,9 +556,7 @@ If you run `npm install --ignore-scripts`, build/test still work, but browser to
 - `npm test`: run the automated test suite, including compiled TypeScript tests and script-level `.mjs` tests
 - `npm run wiki-agent`: build and start the wiki/paper terminal chat / REPL agent
 - `npm run wiki-agent:rpc`: build and start the wiki-agent JSONL RPC process used by Feishu
-- `npm run design-agent`: build and start the design/code/dependency/layout/verification terminal chat / REPL agent
-- `npm run design-agent:rpc`: build and start the design-agent JSONL RPC process for local harnesses
-- `npm run agent` and `npm run agent:rpc`: intentionally absent; choose `wiki-agent` or `design-agent`
+- `npm run agent` and `npm run agent:rpc`: intentionally absent; use `wiki-agent`
 - `npm run feishu-bridge`: build and start the Feishu bridge
 - `npm run wiki:web`: serve the local wiki and graph viewer
 

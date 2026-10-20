@@ -1,6 +1,10 @@
 import test from "node:test";
 import assert from "node:assert/strict";
-import { fetchWebPage } from "../../src/agent/web-fetch.js";
+import { fetchWebPage as fetchWithPolicy, type FetchWebPageOptions } from "../../src/agent/web-fetch.js";
+
+const fetchWebPage = (options: FetchWebPageOptions) => fetchWithPolicy({
+  env: {}, resolveHostname: async () => [{ address: "8.8.8.8", family: 4 }], ...options,
+});
 
 function createHtmlResponse(status: number, body: string, contentType = "text/html; charset=utf-8") {
   return new Response(body, {

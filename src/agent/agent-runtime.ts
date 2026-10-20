@@ -1,4 +1,5 @@
 import path from "node:path";
+import { DESIGN_AGENT_DISABLED_MESSAGE, RETIRED_DESIGN_TOOL_NAMES } from "./tool-types.js";
 import {
   getEnvApiKey,
   type Api,
@@ -511,7 +512,7 @@ function createRuntimeTools(
   workerRouting: WorkerRoutingPolicy
 ) {
   if (workerRouting === "none") {
-    return createToolsForBoundary(workspaceDir, "design-agent");
+    return createToolsForBoundary(workspaceDir, "wiki-agent");
   }
 
   const wikiEvidenceWorker = createWikiEvidenceWorker(model, workspaceDir);
@@ -594,6 +595,10 @@ export async function runSessionPrompt(
 }
 
 export async function runAgentTurn(options: RunAgentTurnOptions): Promise<RunAgentTurnResult> {
+  if (options.context.tools?.some((tool) =>
+    RETIRED_DESIGN_TOOL_NAMES.some((name) => name === tool.name))) {
+    throw new Error(DESIGN_AGENT_DISABLED_MESSAGE);
+  }
   const userMessage: UserMessage = {
     role: "user",
     content: options.prompt,

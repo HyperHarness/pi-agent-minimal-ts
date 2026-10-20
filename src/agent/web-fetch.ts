@@ -5,11 +5,13 @@ import {
   resolveFetchTimeoutMs,
   withRequestTimeout
 } from "./network.js";
+import { createPublicUrlDispatcher, resolvePublicUrl, type PublicUrlResolver } from "./public-url-policy.js";
 
 export interface FetchWebPageOptions {
   url: string;
   env?: FetchWebPageEnvironment;
   fetchImpl?: (input: RequestInfo | URL, init?: RequestInit) => Promise<Response>;
+  resolveHostname?: PublicUrlResolver;
 }
 
 export interface FetchWebPageEnvironment extends NodeJS.ProcessEnv {}
@@ -62,31 +64,46 @@ export async function fetchWebPage(
 ): Promise<string> {
   const env = options.env ?? process.env;
   const fetchImpl = options.fetchImpl ?? globalThis.fetch.bind(globalThis);
-  const endpoint = normalizeUrl(options.url);
+  let endpoint = normalizeUrl(options.url);
   const timeout = withRequestTimeout(resolveFetchTimeoutMs(env));
 
   try {
-    const response = await fetchImpl(endpoint, {
-      headers: new Headers({
-        "user-agent": normalizeUserAgent(env)
-      }),
-      signal: timeout.signal
-    });
+    for (let redirects = 0; redirects <= 10; redirects++) {
+      const target = await resolvePublicUrl(endpoint, options.resolveHostname, timeout.signal);
+      const dispatcher = createPublicUrlDispatcher(target, env);
+      try {
+        const init: RequestInit & { dispatcher: typeof dispatcher } = {
+          headers: new Headers({ "user-agent": normalizeUserAgent(env) }),
+          signal: timeout.signal, redirect: "manual", dispatcher,
+        };
+        const response = await fetchImpl(target.url, init);
+        const location = response.headers.get("location");
+        if ([301, 302, 303, 307, 308].includes(response.status) && location !== null) {
+          await cancelResponseBody(response);
+          if (redirects === 10) throw new Error("Too many web page redirects.");
+          endpoint = new URL(location, target.url);
+          continue;
+        }
 
-    if (!response.ok) {
-      await cancelResponseBody(response);
-      throw getResponseStatusError(response, "web page fetch");
+        if (!response.ok) {
+          await cancelResponseBody(response);
+          throw getResponseStatusError(response, "web page fetch");
+        }
+
+        const contentType = response.headers.get("content-type")?.toLowerCase() ?? "";
+        const mediaType = contentType.split(";", 1)[0]?.trim();
+        if (mediaType !== "text/html") {
+          await cancelResponseBody(response);
+          throw new Error("Expected text/html content-type.");
+        }
+
+        const bytes = await readResponseBytes(response, MAX_RESPONSE_BYTES);
+        return cleanHtml(new TextDecoder().decode(bytes)).slice(0, MAX_TEXT_LENGTH);
+      } finally {
+        await dispatcher.destroy().catch(() => {});
+      }
     }
-
-    const contentType = response.headers.get("content-type")?.toLowerCase() ?? "";
-    const mediaType = contentType.split(";", 1)[0]?.trim();
-    if (mediaType !== "text/html") {
-      await cancelResponseBody(response);
-      throw new Error("Expected text/html content-type.");
-    }
-
-    const bytes = await readResponseBytes(response, MAX_RESPONSE_BYTES);
-    return cleanHtml(new TextDecoder().decode(bytes)).slice(0, MAX_TEXT_LENGTH);
+    throw new Error("Too many web page redirects.");
   } finally {
     timeout.dispose();
   }

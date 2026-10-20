@@ -132,7 +132,7 @@ test("publishing rebuilds dist so a fresh checkout can never pack a missing or s
   assert.equal(packageJson.scripts?.prepack, "npm run build");
 });
 
-test("package.json exposes strict wiki and design agent scripts", () => {
+test("package.json exposes wiki scripts and retires design scripts", () => {
   const packageJson = JSON.parse(readFileSync(new URL("../../package.json", import.meta.url), "utf8")) as {
     scripts?: Record<string, string>;
   };
@@ -141,6 +141,6 @@ test("package.json exposes strict wiki and design agent scripts", () => {
   assert.equal(packageJson.scripts?.["agent:rpc"], undefined);
   assert.equal(packageJson.scripts?.["wiki-agent"], "npm run build && node dist/src/wiki-agent.js");
   assert.equal(packageJson.scripts?.["wiki-agent:rpc"], "npm run build && node dist/src/wiki-agent.js --mode rpc");
-  assert.equal(packageJson.scripts?.["design-agent"], "npm run build && node dist/src/design-agent.js");
-  assert.equal(packageJson.scripts?.["design-agent:rpc"], "npm run build && node dist/src/design-agent.js --mode rpc");
+  assert.equal(packageJson.scripts?.["design-agent"], undefined);
+  assert.equal(packageJson.scripts?.["design-agent:rpc"], undefined);
 });
