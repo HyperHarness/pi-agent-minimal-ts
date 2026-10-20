@@ -1,140 +1,286 @@
-import { lookup } from 'node:dns/promises';
-import type { LookupAddress } from 'node:dns';
-import { isIP, type LookupFunction } from 'node:net';
-import { EnvHttpProxyAgent, Pool, type Dispatcher } from 'undici';
+import { lookup } from "node:dns/promises";
+import type { LookupAddress } from "node:dns";
+import { isIP, type LookupFunction } from "node:net";
+import { EnvHttpProxyAgent, Pool, type Dispatcher } from "undici";
+
+import { isPublicIpAddress } from "./public-ip-policy.js";
+
+/**
+ * Public URL validation and pinned transport for issue #21 (phase 2).
+ *
+ * Every decision about an address is delegated to the adopted
+ * `isPublicIpAddress` classifier: this module never re-implements IP policy. It
+ * adds the network-shaped parts around that classifier — resolving all answers
+ * through an injectable resolver, re-validating every redirect hop, and
+ * building a connector that pins the validated addresses so that no later code
+ * path can resolve the same name a second time.
+ */
 
 export type PublicUrlResolver = (hostname: string) => Promise<LookupAddress[]>;
-export interface PublicUrlTarget { url: URL; addresses: LookupAddress[] }
 
-function ipv4Value(address: string): number {
-  return address.split('.').reduce((value, part) => value * 256 + Number(part), 0);
+export interface PublicUrlTarget {
+  url: URL;
+  addresses: LookupAddress[];
 }
 
-function ipv6Value(address: string): bigint {
-  let text = address;
-  const dotted = /(?:\d+\.){3}\d+$/.exec(text);
-  if (dotted) {
-    const value = ipv4Value(dotted[0]);
-    text = text.slice(0, dotted.index) + `${Math.floor(value / 65536).toString(16)}:${(value % 65536).toString(16)}`;
-  }
-  const [left, right] = text.split('::');
-  const head = left ? left.split(':') : [];
-  const tail = right ? right.split(':') : [];
-  const groups = right === undefined ? head : [...head, ...Array(8 - head.length - tail.length).fill('0'), ...tail];
-  return groups.reduce((value, group) => (value << 16n) | BigInt(`0x${group}`), 0n);
-}
+const DEFAULT_PORTS: Record<string, string> = { "http:": "80", "https:": "443" };
+const BLOCKED_HOST_SUFFIXES = [".localhost", ".local", ".internal", ".home.arpa"];
+const SUPPORTED_PROXY_PROTOCOLS = new Set(["http:", "https:"]);
 
-export function isPublicIpAddress(address: string): boolean {
-  const family = isIP(address);
-  if (family === 4) {
-    const value = ipv4Value(address);
-    const blocked: Array<[string, number]> = [
-      ['0.0.0.0', 8], ['10.0.0.0', 8], ['100.64.0.0', 10], ['127.0.0.0', 8],
-      ['169.254.0.0', 16], ['172.16.0.0', 12], ['192.0.0.0', 24], ['192.0.2.0', 24],
-      ['192.88.99.0', 24], ['192.168.0.0', 16], ['198.18.0.0', 15], ['198.51.100.0', 24],
-      ['203.0.113.0', 24], ['224.0.0.0', 4], ['240.0.0.0', 4],
-    ];
-    return !blocked.some(([base, bits]) => (value >>> (32 - bits)) === (ipv4Value(base) >>> (32 - bits)));
-  }
-  if (family !== 6) return false;
-  const value = ipv6Value(address);
-  if ((value >> 32n) === 0xffffn) {
-    const tail = Number(value & 0xffffffffn);
-    return isPublicIpAddress([24, 16, 8, 0].map(shift => (tail >>> shift) & 255).join('.'));
-  }
-  // Only global unicast, excluding documentation and special/tunnel ranges.
-  if ((value >> 125n) !== 1n) return false;
-  return ![
-    [ipv6Value('2001::'), 23n], [ipv6Value('2001:db8::'), 32n],
-    [ipv6Value('2002::'), 16n], [ipv6Value('3fff::'), 20n],
-  ].some(([base, bits]) => (value >> (128n - bits)) === (base >> (128n - bits)));
-}
-
+/** Host part of a URL, without IPv6 brackets, trailing dot or case. */
 function hostName(url: URL): string {
-  return url.hostname.replace(/^\[|\]$/g, '').replace(/\.$/, '').toLowerCase();
+  return url.hostname.replace(/^\[|\]$/g, "").replace(/\.$/, "").toLowerCase();
 }
 
-async function abortable<T>(promise: Promise<T>, signal?: AbortSignal): Promise<T> {
+function defaultResolver(hostname: string): Promise<LookupAddress[]> {
+  return lookup(hostname, { all: true, verbatim: true });
+}
+
+/** Rejects with the request reason as soon as the request signal aborts. */
+function abortable<T>(promise: Promise<T>, signal?: AbortSignal): Promise<T> {
   if (!signal) return promise;
+  const reason = () => signal.reason ?? new Error("Request aborted.");
+  if (signal.aborted) return Promise.reject(reason());
+
   return new Promise<T>((resolve, reject) => {
-    const onAbort = () => { cleanup(); reject(signal.reason ?? new Error('Request aborted.')); };
-    const cleanup = () => signal.removeEventListener('abort', onAbort);
-    promise.then(value => { cleanup(); resolve(value); }, error => { cleanup(); reject(error); });
-    if (signal.aborted) onAbort();
-    else signal.addEventListener('abort', onAbort, { once: true });
+    const onAbort = () => {
+      signal.removeEventListener("abort", onAbort);
+      reject(reason());
+    };
+    signal.addEventListener("abort", onAbort, { once: true });
+    promise.then(
+      (value) => { signal.removeEventListener("abort", onAbort); resolve(value); },
+      (error) => { signal.removeEventListener("abort", onAbort); reject(error); }
+    );
   });
 }
 
-export async function resolvePublicUrl(
-  value: string | URL,
-  resolver: PublicUrlResolver = hostname => lookup(hostname, { all: true, verbatim: true }),
-  signal?: AbortSignal,
-): Promise<PublicUrlTarget> {
-  if (signal?.aborted) throw signal.reason ?? new Error('Request aborted.');
-  const url = new URL(value);
-  if (url.protocol !== 'http:' && url.protocol !== 'https:') throw new Error('Only http and https URLs are supported.');
-  if (url.username || url.password) throw new Error('URL credentials are not allowed.');
-  const hostname = hostName(url);
-  if (hostname === 'localhost' || /\.(?:localhost|local|internal|home\.arpa)$/.test(hostname)) {
-    throw new Error('URL must address a public host.');
-  }
-  const literalFamily = isIP(hostname);
-  const resolved = literalFamily ? [{ address: hostname, family: literalFamily }] : await abortable(Promise.resolve().then(() => resolver(hostname)), signal);
-  if (!resolved.length || resolved.some(item => isIP(item.address) !== item.family || !isPublicIpAddress(item.address))) {
-    throw new Error('URL must resolve exclusively to public IP addresses.');
-  }
-  return { url, addresses: resolved.map(item => ({ address: item.address, family: item.family })) };
+function isAllowedAddress(answer: LookupAddress | undefined): answer is LookupAddress {
+  if (!answer || typeof answer.address !== "string") return false;
+  if (answer.family !== 4 && answer.family !== 6) return false;
+  // A literal whose spelling disagrees with the reported family is unusable,
+  // because the classifier and the socket would then disagree about the host.
+  if (isIP(answer.address) !== answer.family) return false;
+  return isPublicIpAddress(answer.address);
 }
 
-/** No second DNS lookup is allowed after validation, including IPv4/IPv6 fallback. */
-export function createPinnedLookup(target: PublicUrlTarget): LookupFunction {
-  const addresses = target.addresses.map(item => ({ ...item }));
-  const expected = hostName(target.url);
+/**
+ * Validates `value` and resolves it, through `resolver`, to the public
+ * addresses a connection may use. The URL itself is normalized by the WHATWG
+ * parser, so exotic IPv4 spellings such as `http://127.1/` or `http://0x7f000001/`
+ * reach the classifier as the literal they really denote.
+ */
+export async function resolvePublicUrl(
+  value: string | URL,
+  resolver: PublicUrlResolver = defaultResolver,
+  signal?: AbortSignal
+): Promise<PublicUrlTarget> {
+  if (signal?.aborted) throw signal.reason ?? new Error("Request aborted.");
+
+  const url = new URL(value);
+  if (url.protocol !== "http:" && url.protocol !== "https:") {
+    throw new Error("Only http and https URLs are supported.");
+  }
+  if (url.username || url.password) {
+    throw new Error("URL credentials are not allowed.");
+  }
+
+  const hostname = hostName(url);
+  if (!hostname) {
+    throw new Error("URL must address a public host.");
+  }
+  if (hostname === "localhost" || BLOCKED_HOST_SUFFIXES.some((suffix) => hostname.endsWith(suffix))) {
+    throw new Error("URL must address a public host.");
+  }
+
+  const literalFamily = isIP(hostname);
+  const answers = literalFamily !== 0
+    ? [{ address: hostname, family: literalFamily }]
+    : await abortable(Promise.resolve().then(() => resolver(hostname)), signal);
+
+  if (!Array.isArray(answers) || answers.length === 0) {
+    throw new Error("URL must resolve exclusively to public IP addresses.");
+  }
+
+  const addresses: LookupAddress[] = [];
+  for (const answer of answers) {
+    if (!isAllowedAddress(answer)) {
+      throw new Error("URL must resolve exclusively to public IP addresses.");
+    }
+    addresses.push({ address: answer.address, family: answer.family });
+  }
+
+  return { url, addresses };
+}
+
+export type PinnedLookup = LookupFunction;
+
+/**
+ * A DNS lookup that only ever returns the addresses validated for `target`.
+ *
+ * Undici hands this to the socket layer, so the connect call cannot perform a
+ * second, attacker-influenced resolution. Answers are copied out of the target,
+ * and any other hostname or an unmatched family fails the connection.
+ */
+export function createPinnedLookup(target: PublicUrlTarget): PinnedLookup {
+  const addresses = target.addresses.map((item) => ({ address: item.address, family: item.family }));
+  const expectedHost = hostName(target.url);
+
   return (hostname, options, callback) => {
-    const selected = addresses.filter(item => !options.family || item.family === options.family);
-    if (hostname.replace(/\.$/, '').toLowerCase() !== expected || !selected.length) {
-      callback(Object.assign(new Error('Unexpected host or address family for pinned connection.'), { code: 'ENOTFOUND' }), '');
+    const requestedHost = hostname.replace(/\.$/, "").toLowerCase();
+    const family = options.family === "IPv4" ? 4 : options.family === "IPv6" ? 6 : options.family;
+    const selected = addresses.filter((item) => !family || item.family === family);
+    if (requestedHost !== expectedHost || selected.length === 0) {
+      callback(
+        Object.assign(new Error(`Unexpected host ${hostname} for a connection pinned to ${expectedHost}.`), { code: "ENOTFOUND" }),
+        ""
+      );
       return;
     }
-    callback(null, options.all ? selected : selected[0].address, selected[0].family);
+
+    if (options.all) {
+      callback(null, selected.map((item) => ({ ...item })));
+      return;
+    }
+    callback(null, selected[0].address, selected[0].family);
   };
 }
 
-/** Keeps proxy routing while CONNECT uses a validated IP, never remote DNS. */
-export function createPublicUrlDispatcher(target: PublicUrlTarget, env: NodeJS.ProcessEnv): Dispatcher {
-  if (!target.addresses.length || target.addresses.some(item => !isPublicIpAddress(item.address) || isIP(item.address) !== item.family)) {
-    throw new Error('Cannot connect without validated public IP addresses.');
+interface ConnectAuthority {
+  host: string;
+  port: string;
+}
+
+/** Splits an HTTP CONNECT authority-form target into host and port. */
+function parseConnectAuthority(value: string): ConnectAuthority {
+  const authority = value.trim();
+  if (!authority) {
+    throw new Error("Refusing a proxy CONNECT request without a target authority.");
   }
-  const port = target.url.port || (target.url.protocol === 'https:' ? '443' : '80');
-  const expectedAuthority = `${target.url.hostname}:${port}`;
-  const address = target.addresses[0].address;
-  const pinnedAuthority = `${isIP(address) === 6 ? `[${address}]` : address}:${port}`;
-  const disabled = env.PI_AGENT_DISABLE_ENV_PROXY === '1';
-  const httpProxy = disabled ? '' : env.http_proxy?.trim() || env.HTTP_PROXY?.trim() || '';
-  const httpsProxy = disabled ? '' : env.https_proxy?.trim() || env.HTTPS_PROXY?.trim() || '';
-  for (const proxy of [httpProxy, httpsProxy]) {
-    if (proxy && !['http:', 'https:'].includes(new URL(proxy).protocol)) {
-      throw new Error('Public URL fetching supports only HTTP/HTTPS proxies with pinned CONNECT targets.');
+
+  if (authority.startsWith("[")) {
+    const end = authority.indexOf("]");
+    if (end === -1) {
+      throw new Error(`Refusing to proxy an invalid CONNECT authority: ${authority}`);
+    }
+    const rest = authority.slice(end + 1);
+    if (rest !== "" && !rest.startsWith(":")) {
+      throw new Error(`Refusing to proxy an invalid CONNECT authority: ${authority}`);
+    }
+    return { host: authority.slice(1, end), port: rest.slice(1) };
+  }
+
+  const separator = authority.lastIndexOf(":");
+  if (separator === -1) {
+    return { host: authority, port: "" };
+  }
+  return { host: authority.slice(0, separator), port: authority.slice(separator + 1) };
+}
+
+/** Rewrites the Host header of a CONNECT request to the pinned authority. */
+function toPinnedHeaders(
+  headers: Dispatcher.ConnectOptions["headers"],
+  authority: string
+): Dispatcher.ConnectOptions["headers"] {
+  if (Array.isArray(headers)) {
+    const pairs: string[] = [];
+    for (let index = 0; index + 1 < headers.length; index += 2) {
+      if (String(headers[index]).toLowerCase() !== "host") {
+        pairs.push(String(headers[index]), String(headers[index + 1]));
+      }
+    }
+    pairs.push("host", authority);
+    return pairs;
+  }
+
+  const source = (headers ?? {}) as Record<string, string | string[] | undefined>;
+  const merged: Record<string, string | string[]> = {};
+  for (const [name, value] of Object.entries(source)) {
+    if (value !== undefined && name.toLowerCase() !== "host") {
+      merged[name] = value;
     }
   }
+  merged.host = authority;
+  return merged;
+}
+
+function assertSupportedProxy(proxy: string): void {
+  if (!proxy) return;
+  let protocol: string;
+  try {
+    protocol = new URL(proxy).protocol;
+  } catch {
+    throw new Error("Invalid proxy URL for public URL fetching.");
+  }
+  if (!SUPPORTED_PROXY_PROTOCOLS.has(protocol)) {
+    throw new Error(
+      `Unsupported proxy protocol ${protocol}: only HTTP and HTTPS proxies are supported for public URL fetching.`
+    );
+  }
+}
+
+/**
+ * Dispatcher for a single validated target.
+ *
+ * Proxy routing from the environment is preserved (including `NO_PROXY`, which
+ * keeps local traffic on the pinned direct connector), but the tunnel always
+ * asks the proxy to reach a validated IP: the CONNECT authority and its Host
+ * header carry the pinned address, while the request Host and the TLS SNI /
+ * certificate name stay the original URL host, so certificate verification is
+ * never relaxed.
+ */
+export function createPublicUrlDispatcher(target: PublicUrlTarget, env: NodeJS.ProcessEnv): Dispatcher {
+  if (target.addresses.length === 0 || target.addresses.some((item) => !isAllowedAddress(item))) {
+    throw new Error("Cannot connect without validated public IP addresses.");
+  }
+
+  const urlHost = hostName(target.url);
+  const urlPort = target.url.port || DEFAULT_PORTS[target.url.protocol] || "";
+  const address = target.addresses[0].address;
+  const pinnedAuthority = `${isIP(address) === 6 ? `[${address}]` : address}:${urlPort}`;
+
+  const proxyDisabled = env.PI_AGENT_DISABLE_ENV_PROXY === "1";
+  const httpProxy = proxyDisabled ? "" : env.http_proxy?.trim() || env.HTTP_PROXY?.trim() || "";
+  const httpsProxy = proxyDisabled ? "" : env.https_proxy?.trim() || env.HTTPS_PROXY?.trim() || "";
+  for (const proxy of [httpProxy, httpsProxy]) {
+    assertSupportedProxy(proxy);
+  }
+
   class PinnedProxyPool extends Pool {
-    override connect(options: Omit<Dispatcher.ConnectOptions, 'origin'>, callback: (error: Error | null, data: Dispatcher.ConnectData) => void): void;
-    override connect(options: Omit<Dispatcher.ConnectOptions, 'origin'>): Promise<Dispatcher.ConnectData>;
-    override connect(options: Omit<Dispatcher.ConnectOptions, 'origin'>, callback?: (error: Error | null, data: Dispatcher.ConnectData) => void): void | Promise<Dispatcher.ConnectData> {
-      if (options.path !== expectedAuthority) throw new Error('Unexpected proxy CONNECT destination.');
-      const pinned = {
-        ...options, path: pinnedAuthority,
-        headers: { ...(options.headers as Record<string, string>), host: pinnedAuthority },
+    connect(options: Omit<Dispatcher.ConnectOptions, "origin">): Promise<Dispatcher.ConnectData>;
+    connect(
+      options: Omit<Dispatcher.ConnectOptions, "origin">,
+      callback: (error: Error | null, data: Dispatcher.ConnectData) => void
+    ): void;
+    connect(
+      options: Omit<Dispatcher.ConnectOptions, "origin">,
+      callback?: (error: Error | null, data: Dispatcher.ConnectData) => void
+    ): void | Promise<Dispatcher.ConnectData> {
+      const authority = parseConnectAuthority(options.path);
+      if (authority.host.replace(/\.$/, "").toLowerCase() !== urlHost) {
+        throw new Error(`Refusing to tunnel ${authority.host} through a connection pinned to ${urlHost}.`);
+      }
+      if (authority.port && authority.port !== urlPort) {
+        throw new Error(`Refusing to tunnel port ${authority.port} through a connection pinned to port ${urlPort}.`);
+      }
+
+      const pinned: Omit<Dispatcher.ConnectOptions, "origin"> = {
+        ...options,
+        path: pinnedAuthority,
+        headers: toPinnedHeaders(options.headers, pinnedAuthority)
       };
       return callback ? super.connect(pinned, callback) : super.connect(pinned);
     }
   }
+
   return new EnvHttpProxyAgent({
-    httpProxy, httpsProxy,
-    noProxy: disabled ? '*' : env.no_proxy ?? env.NO_PROXY ?? '',
+    httpProxy,
+    httpsProxy,
+    noProxy: proxyDisabled ? "*" : env.no_proxy ?? env.NO_PROXY ?? "",
     proxyTunnel: true,
     connect: { lookup: createPinnedLookup(target) },
-    requestTls: { servername: isIP(hostName(target.url)) ? undefined : hostName(target.url) },
-    clientFactory: (origin, options) => new PinnedProxyPool(origin, options),
+    requestTls: isIP(urlHost) === 0 ? { servername: urlHost } : {},
+    clientFactory: (origin: URL, options: object): Dispatcher =>
+      new PinnedProxyPool(origin, options as Pool.Options)
   });
 }
