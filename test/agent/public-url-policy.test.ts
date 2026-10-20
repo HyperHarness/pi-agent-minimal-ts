@@ -341,6 +341,122 @@ test("the actual direct connector uses the pinned lookup instead of resolving ag
   assert.equal(resolutions, 3);
 });
 
+test("NO_PROXY and no_proxy bypass the proxy with no CONNECT and a pinned direct connection", async (t) => {
+  const proxyAttempts: string[] = [];
+  const proxy = createServer();
+  proxy.on("connect", (request, socket) => {
+    proxyAttempts.push(`CONNECT ${request.url ?? ""}`);
+    socket.end("HTTP/1.1 502 Bad Gateway\r\n\r\n");
+  });
+  proxy.on("request", (request, response) => {
+    proxyAttempts.push(`${request.method ?? ""} ${request.url ?? ""}`);
+    response.writeHead(502, { "content-type": "text/plain" });
+    response.end();
+  });
+  const proxyPort = await listen(t, proxy);
+
+  const hosts: string[] = [];
+  const origin = createServer((request, response) => {
+    hosts.push(String(request.headers.host ?? ""));
+    response.writeHead(200, { "content-type": "text/html" });
+    response.end("<p>direct</p>");
+  });
+  const originPort = await listen(t, origin);
+
+  const originalConnect = net.connect;
+  const lookups: unknown[] = [];
+  t.after(
+    replaceExport(net, "connect", (options: net.TcpNetConnectOpts & { lookup?: TestLookup }) => {
+      if (options.host === "example.test") {
+        options.lookup?.("example.test", { all: true }, (error, addresses) => {
+          assert.equal(error, null);
+          lookups.push(addresses);
+        });
+        // The fixture is local; the pinned address above is only inspected.
+        return originalConnect({ host: "127.0.0.1", port: originPort });
+      }
+      return originalConnect(options);
+    })
+  );
+
+  // Both environment spellings must bypass: uppercase first, then the
+  // lowercase pair that takes precedence when both are present.
+  for (const env of [
+    { HTTP_PROXY: `http://127.0.0.1:${proxyPort}`, NO_PROXY: "example.test" },
+    { http_proxy: `http://127.0.0.1:${proxyPort}`, no_proxy: "example.test", NO_PROXY: "other.test" }
+  ]) {
+    assert.equal(await fetchWebPage({ url: "http://example.test/page", env, resolveHostname }), "direct");
+  }
+
+  assert.deepEqual(proxyAttempts, []);
+  assert.deepEqual(hosts, ["example.test", "example.test"]);
+  assert.deepEqual(lookups, [[publicAddress], [publicAddress]]);
+});
+
+test("PI_AGENT_DISABLE_ENV_PROXY ignores malformed proxy URLs instead of interpreting them", async (t) => {
+  const server = createServer((request, response) => {
+    response.writeHead(200, { "content-type": "text/html" });
+    response.end(`<p>${request.headers.host === "example.test" ? "disabled" : "wrong-host"}</p>`);
+  });
+  const port = await listen(t, server);
+
+  const originalConnect = net.connect;
+  const lookups: unknown[] = [];
+  t.after(
+    replaceExport(net, "connect", (options: net.TcpNetConnectOpts & { lookup?: TestLookup }) => {
+      if (options.host === "example.test") {
+        options.lookup?.("example.test", { all: true }, (error, addresses) => {
+          assert.equal(error, null);
+          lookups.push(addresses);
+        });
+        // The fixture is local; the pinned address above is only inspected.
+        return originalConnect({ host: "127.0.0.1", port });
+      }
+      return originalConnect(options);
+    })
+  );
+
+  const malformed = ["http://[::1", "not a proxy url", "://missing-scheme"];
+  for (const proxy of malformed) {
+    assert.equal(
+      await fetchWebPage({
+        url: "http://example.test/page",
+        env: {
+          HTTP_PROXY: proxy,
+          http_proxy: proxy,
+          HTTPS_PROXY: proxy,
+          https_proxy: proxy,
+          PI_AGENT_DISABLE_ENV_PROXY: "1"
+        },
+        resolveHostname
+      }),
+      "disabled",
+      proxy
+    );
+  }
+  assert.deepEqual(lookups, malformed.map(() => [publicAddress]));
+
+  // The same values are rejected rather than silently used when the explicit
+  // disable is absent, so the disable test above is not vacuous.
+  for (const proxy of malformed) {
+    let fetched = false;
+    await assert.rejects(
+      fetchWebPage({
+        url: "http://example.test/page",
+        env: { HTTP_PROXY: proxy },
+        resolveHostname,
+        fetchImpl: async () => {
+          fetched = true;
+          return html();
+        }
+      }),
+      /Invalid proxy URL/,
+      proxy
+    );
+    assert.equal(fetched, false);
+  }
+});
+
 test("HTTP proxy CONNECT targets the validated IP while the request Host is preserved", async (t) => {
   const server = createServer();
   const authorities: string[] = [];
