@@ -25,3 +25,23 @@ current mainline. The retired design-agent entry points and tools remain disable
 Verification uses offline fixtures; no real model, publisher login, or Feishu
 delivery is required. A passing regression suite does not claim production
 provider authentication, live browser compatibility, or benchmark quality.
+
+## Final verification
+
+On Node 22.22.2, the final integrated source passed the actual `npm test` command:
+**1024 passed**, zero failed, cancelled or skipped. Its recursive discovery covers
+75 compiled TypeScript and 7 source MJS entries, including browser-extension.
+The three follow-up candidates passed separate service-owned build/full-suite
+checks and independent external review before explicit adoption. The combined
+files match their adopted candidate blobs exactly.
+
+From a missing `dist` tree, actual `npm pack` ran prepack/build and produced a
+240-entry package containing the public JavaScript and declaration entry points.
+The unpacked public API imported successfully. Three newly dispatched workers
+ended normally; historical canceled tasks retain their original outcomes.
+
+Benchmark results without the new content fingerprints require a rerun; old
+results are not relabeled. Incomplete explicit model requests and non-public
+web-fetch targets now fail explicitly. Runtime validation here used Linux;
+Windows, the minimum declared Node version, and live external integrations were
+not separately executed.
