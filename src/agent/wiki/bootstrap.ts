@@ -317,7 +317,12 @@ function collectParsedFallbacks(input: {
       }));
       parsedFallbackMatches.push(...matches);
 
-      if (result.paper.hasWikiSummary && result.paper.wikiSummaryPath && !seenFallbackSources.has(result.paper.paperKey)) {
+      if (
+        result.paper.hasWikiSummary &&
+        result.paper.wikiSummaryPath &&
+        !seenFallbackSources.has(result.paper.paperKey) &&
+        !input.existingSourceKeys.has(result.paper.paperKey)
+      ) {
         seenFallbackSources.add(result.paper.paperKey);
         fallbackSourceEvidence.push({
           kind: "source",
@@ -419,7 +424,7 @@ export async function bootstrapPaperWikiPageEvidence(
     sourceDocuments,
     maxSources
   });
-  const seenSourceKeys = new Set(sourceEvidence.map((item) => item.key));
+  const seenSourceKeys = new Set(sourceEvidence.map((item) => `${item.kind}:${item.key}`));
   const expandedSources = expandRelatedSources({
     selected: sourceEvidence,
     sourceDocuments,
@@ -428,6 +433,11 @@ export async function bootstrapPaperWikiPageEvidence(
   for (const item of expandedSources) {
     addEvidence(sourceEvidence, seenSourceKeys, item, maxSources);
   }
+  // Bare paper keys of every already-selected source, kept separate from the
+  // prefixed dedupe keys addEvidence consumes, for fallback dedupe decisions.
+  const selectedSourcePaperKeys = new Set(
+    sourceEvidence.flatMap((item) => (item.paperKey ? [item.paperKey] : []))
+  );
 
   let parsedFallbackMatches: PaperWikiPageBootstrapParsedFallback[] = [];
   let missingSummaries: PaperWikiPageBootstrapMissingSummary[] = [];
@@ -449,7 +459,7 @@ export async function bootstrapPaperWikiPageEvidence(
     }
     const fallback = collectParsedFallbacks({
       results: localResults,
-      existingSourceKeys: seenSourceKeys
+      existingSourceKeys: selectedSourcePaperKeys
     });
     parsedFallbackMatches = fallback.parsedFallbackMatches;
     missingSummaries = fallback.missingSummaries;

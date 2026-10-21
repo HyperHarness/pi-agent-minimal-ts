@@ -1,19 +1,26 @@
 import {
+  cancelResponseBody,
   getResponseStatusError,
+  readResponseBytes,
   resolveFetchTimeoutMs,
   withRequestTimeout
 } from "./network.js";
+import { createPublicUrlDispatcher, resolvePublicUrl, type PublicUrlResolver } from "./public-url-policy.js";
 
 export interface FetchWebPageOptions {
   url: string;
   env?: FetchWebPageEnvironment;
   fetchImpl?: (input: RequestInfo | URL, init?: RequestInit) => Promise<Response>;
+  resolveHostname?: PublicUrlResolver;
 }
 
 export interface FetchWebPageEnvironment extends NodeJS.ProcessEnv {}
 
 const DEFAULT_USER_AGENT = "pi-agent-minimal-ts/1.0";
 const MAX_TEXT_LENGTH = 12_000;
+const MAX_RESPONSE_BYTES = 2 * 1024 * 1024;
+const MAX_REDIRECTS = 10;
+const REDIRECT_STATUSES = new Set([301, 302, 303, 307, 308]);
 
 function normalizeUrl(url: string): URL {
   const trimmedUrl = url.trim();
@@ -59,28 +66,60 @@ export async function fetchWebPage(
 ): Promise<string> {
   const env = options.env ?? process.env;
   const fetchImpl = options.fetchImpl ?? globalThis.fetch.bind(globalThis);
-  const endpoint = normalizeUrl(options.url);
+  let endpoint = normalizeUrl(options.url);
   const timeout = withRequestTimeout(resolveFetchTimeoutMs(env));
 
   try {
-    const response = await fetchImpl(endpoint, {
-      headers: new Headers({
-        "user-agent": normalizeUserAgent(env)
-      }),
-      signal: timeout.signal
-    });
+    // Every hop, including a relative or same-host redirect, is normalized and
+    // re-resolved from scratch: a validated answer is only ever used for the
+    // single request it was validated for.
+    for (let redirects = 0; redirects <= MAX_REDIRECTS; redirects += 1) {
+      const target = await resolvePublicUrl(endpoint, options.resolveHostname, timeout.signal);
+      const dispatcher = createPublicUrlDispatcher(target, env);
+      try {
+        const init: RequestInit = {
+          headers: new Headers({
+            "user-agent": normalizeUserAgent(env)
+          }),
+          signal: timeout.signal,
+          redirect: "manual"
+        };
+        // Node's fetch reads the undici `dispatcher` extension from the request
+        // init; it is attached explicitly because ambient `RequestInit` typing
+        // is not guaranteed to declare that extension.
+        Reflect.set(init, "dispatcher", dispatcher);
 
-    if (!response.ok) {
-      throw getResponseStatusError(response, "web page fetch");
+        const response = await fetchImpl(target.url, init);
+        const location = response.headers.get("location");
+        if (REDIRECT_STATUSES.has(response.status) && location !== null) {
+          await cancelResponseBody(response);
+          if (redirects === MAX_REDIRECTS) {
+            throw new Error("Too many web page redirects.");
+          }
+          endpoint = new URL(location, target.url);
+          continue;
+        }
+
+        if (!response.ok) {
+          await cancelResponseBody(response);
+          throw getResponseStatusError(response, "web page fetch");
+        }
+
+        const contentType = response.headers.get("content-type")?.toLowerCase() ?? "";
+        const mediaType = contentType.split(";", 1)[0]?.trim();
+        if (mediaType !== "text/html") {
+          await cancelResponseBody(response);
+          throw new Error("Expected text/html content-type.");
+        }
+
+        const bytes = await readResponseBytes(response, MAX_RESPONSE_BYTES);
+        return cleanHtml(new TextDecoder().decode(bytes)).slice(0, MAX_TEXT_LENGTH);
+      } finally {
+        await dispatcher.destroy().catch(() => { /* Teardown never hides the fetch result. */ });
+      }
     }
 
-    const contentType = response.headers.get("content-type")?.toLowerCase() ?? "";
-    const mediaType = contentType.split(";", 1)[0]?.trim();
-    if (mediaType !== "text/html") {
-      throw new Error("Expected text/html content-type.");
-    }
-
-    return cleanHtml(await response.text()).slice(0, MAX_TEXT_LENGTH);
+    throw new Error("Too many web page redirects.");
   } finally {
     timeout.dispose();
   }

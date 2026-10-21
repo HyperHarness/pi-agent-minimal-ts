@@ -1,6 +1,8 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
-import { mkdir, mkdtemp, rm, writeFile } from 'node:fs/promises';
+import { execFileSync, spawn } from 'node:child_process';
+import { existsSync } from 'node:fs';
+import { lstat, mkdir, mkdtemp, rm, writeFile, symlink } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import path from 'node:path';
 import {
@@ -10,11 +12,127 @@ import {
   parseCompiledPaperPdfDeliveryCommand,
   resolveDownloadedPdfAttachmentsForQueuedJobs,
   resolveCompiledPaperPdfAttachment,
+  openPdfForUpload,
 } from '../../src/feishu-bridge/feishu/pdf-delivery.js';
 
 async function createWorkspaceDir(): Promise<string> {
   return mkdtemp(path.join(tmpdir(), 'feishu-pdf-delivery-'));
 }
+
+test('PDF extraction rejects host paths, sibling prefixes and traversal', () => {
+  assert.deepEqual(extractPdfAttachmentsFromText(
+    '/etc/private.pdf /tmp/workspace-other/private.pdf knowledge-base/../../../private.pdf',
+    '/tmp/workspace',
+  ), []);
+  for (const filePath of ['/etc/private.pdf', '../private.pdf', '/tmp/workspace-other/private.pdf']) {
+    assert.equal(extractDownloadedPdfAttachment({
+      type: 'tool_execution_end', toolName: 'download_paper',
+      result: { details: { status: 'downloaded', path: filePath } },
+    }, '/tmp/workspace'), null);
+  }
+  assert.equal(resolveCompiledPaperPdfAttachment({ dir: '/tmp/paper', compiledPdfPath: '../private.pdf' }), null);
+});
+
+test('PDF upload validates real paths and reads only a bounded workspace file', async () => {
+  const workspace = await createWorkspaceDir();
+  const outside = await createWorkspaceDir();
+  try {
+    const safe = path.join(workspace, 'safe.pdf');
+    const secret = path.join(outside, 'secret.pdf');
+    await writeFile(safe, '%PDF-safe');
+    await writeFile(secret, '%PDF-secret');
+    await assert.rejects(openPdfForUpload(secret, [workspace], 100), /outside/);
+    await assert.rejects(openPdfForUpload(safe, [workspace], 1), /size limit/);
+    await mkdir(path.join(workspace, 'directory.pdf'));
+    await assert.rejects(openPdfForUpload(path.join(workspace, 'directory.pdf'), [workspace], 100), /regular file/);
+    const file = await openPdfForUpload(safe, [workspace, path.join(workspace, 'missing-root')], 100);
+    try { assert.equal(await file.readFile('utf8'), '%PDF-safe'); }
+    finally { await file.close(); }
+    // Both direct and parent-directory symlinks must be checked at upload time.
+    if (process.platform !== 'win32') {
+      await symlink(secret, path.join(workspace, 'link.pdf'));
+      await symlink(outside, path.join(workspace, 'linked-directory'));
+      for (const target of ['link.pdf', 'linked-directory/secret.pdf']) {
+        await assert.rejects(openPdfForUpload(path.join(workspace, target), [workspace], 100), /symlink escapes/);
+      }
+      await symlink(safe, path.join(workspace, 'safe-link.pdf'));
+      const linked = await openPdfForUpload(path.join(workspace, 'safe-link.pdf'), [workspace], 100);
+      await linked.close();
+    }
+    // An explicitly configured paper workspace can be outside the bridge cwd.
+    const paper = await openPdfForUpload(secret, [workspace, outside], 100);
+    await paper.close();
+  } finally {
+    await rm(workspace, { recursive: true, force: true });
+    await rm(outside, { recursive: true, force: true });
+  }
+});
+
+test('workspace FIFO PDF is rejected without blocking', { timeout: 15_000 }, async (t) => {
+  if (process.platform !== 'linux') {
+    t.skip('the POSIX FIFO regression runs only on Linux');
+    return;
+  }
+
+  const workspace = await createWorkspaceDir();
+  const fifoPath = path.join(workspace, 'pending.pdf');
+  const probePath = path.join(workspace, 'fifo-probe.mjs');
+  try {
+    execFileSync('mkfifo', [fifoPath]);
+    assert.equal((await lstat(fifoPath)).isFIFO(), true, 'fixture must be a FIFO with no writer');
+
+    // Probe from a child process: if open() blocks on the FIFO, it pins a libuv
+    // thread and never returns, so an in-process await would hang the whole suite.
+    const probeSource = [
+      'const [moduleUrl, fifoPath, workspace, maxBytes] = process.argv.slice(2);',
+      'const { openPdfForUpload } = await import(moduleUrl);',
+      'try {',
+      '  const file = await openPdfForUpload(fifoPath, [workspace], Number(maxBytes));',
+      '  await file.close();',
+      "  process.stdout.write('ACCEPTED\\n');",
+      '  process.exitCode = 2;',
+      '} catch (error) {',
+      "  process.stdout.write(`REJECTED:${error instanceof Error ? error.message : String(error)}\\n`);",
+      '}',
+      '',
+    ].join('\n');
+    await writeFile(probePath, probeSource, 'utf8');
+    const moduleUrl = new URL('../../src/feishu-bridge/feishu/pdf-delivery.js', import.meta.url).href;
+
+    const child = spawn(process.execPath, [probePath, moduleUrl, fifoPath, workspace, '1024'], {
+      stdio: ['ignore', 'pipe', 'pipe'],
+    });
+    let stdout = '';
+    let stderr = '';
+    child.stdout.setEncoding('utf8');
+    child.stderr.setEncoding('utf8');
+    child.stdout.on('data', (chunk: string) => { stdout += chunk; });
+    child.stderr.on('data', (chunk: string) => { stderr += chunk; });
+
+    let timedOut = false;
+    const outcome = await new Promise<{ code: number | null; signal: NodeJS.Signals | null; error?: Error }>((resolve) => {
+      const timer = setTimeout(() => {
+        timedOut = true;
+        child.kill('SIGKILL');
+      }, 5_000);
+      const settle = (value: { code: number | null; signal: NodeJS.Signals | null; error?: Error }) => {
+        clearTimeout(timer);
+        resolve(value);
+      };
+      child.once('error', (error: Error) => settle({ code: null, signal: null, error }));
+      child.once('close', (code, signal) => settle({ code, signal }));
+    });
+
+    assert.equal(outcome.error, undefined, `probe failed to spawn: ${outcome.error?.message ?? ''}`);
+    assert.equal(timedOut, false, `probe hung opening the FIFO and was killed; stderr: ${stderr}`);
+    assert.equal(outcome.code, 0, `probe exited with ${String(outcome.code)}/${String(outcome.signal)}; stdout: ${stdout} stderr: ${stderr}`);
+    assert.match(stdout, /REJECTED:PDF path is not a regular file\./);
+  } finally {
+    await rm(workspace, { recursive: true, force: true });
+  }
+  // The probe and its FIFO fixture must be gone after the regression runs.
+  assert.equal(existsSync(fifoPath), false);
+});
 
 test('extractDownloadedPdfAttachment resolves successful download_paper results', () => {
   const attachment = extractDownloadedPdfAttachment(
@@ -199,7 +317,7 @@ test('resolveDownloadedPdfAttachmentsForQueuedJobs finds completed extension dow
           status: 'downloaded',
           articleUrl: 'https://www.nature.com/articles/s41586-025-09061-4',
           source: 'nature',
-          downloadPath: String.raw`\\wsl.localhost\Ubuntu-24.04\home\ququan2\pi-agent-minimal-ts\knowledge-base\raw\pdfs\nature-s41586-025-09061-4.pdf`,
+          downloadPath: path.join(workspaceDir, 'knowledge-base/raw/pdfs/nature-s41586-025-09061-4.pdf'),
         }),
         '',
       ].join('\n'),
@@ -210,7 +328,7 @@ test('resolveDownloadedPdfAttachmentsForQueuedJobs finds completed extension dow
       await resolveDownloadedPdfAttachmentsForQueuedJobs(workspaceDir, [{ jobId: 'paper-nature-1' }]),
       [
         {
-          path: '/home/ququan2/pi-agent-minimal-ts/knowledge-base/raw/pdfs/nature-s41586-025-09061-4.pdf',
+          path: path.join(workspaceDir, 'knowledge-base/raw/pdfs/nature-s41586-025-09061-4.pdf'),
           fileName: 'nature-s41586-025-09061-4.pdf',
           status: 'downloaded',
           source: 'nature',

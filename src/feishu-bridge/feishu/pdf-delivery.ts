@@ -1,4 +1,6 @@
 import path from 'node:path';
+import { constants } from 'node:fs';
+import { open, realpath, type FileHandle } from 'node:fs/promises';
 import { readPaperDownloadJobEvents, summarizePaperDownloadJobs } from '../../agent/paper/extension/paper-download-jobs.js';
 
 export interface DownloadedPdfAttachment {
@@ -19,6 +21,43 @@ export interface QueuedPdfDeliveryJob {
 export interface CompiledPaperPdfConfig {
   dir?: string;
   compiledPdfPath?: string;
+}
+
+function isInside(root: string, target: string): boolean {
+  const relative = path.relative(path.resolve(root), target);
+  return relative !== '' && relative !== '..' && !relative.startsWith(`..${path.sep}`) && !path.isAbsolute(relative);
+}
+
+/** Validate again at the read boundary; model text and tool results are untrusted. */
+export async function openPdfForUpload(filePath: string, allowedRoots: string[], maxBytes: number): Promise<FileHandle> {
+  const resolved = path.resolve(filePath);
+  if (path.extname(resolved).toLowerCase() !== '.pdf' || !allowedRoots.some(root => isInside(root, resolved))) {
+    throw new Error('PDF path is outside the configured workspace.');
+  }
+  const roots = await Promise.all(allowedRoots.map(async root => {
+    try { return await realpath(root); }
+    catch (error) { if ((error as NodeJS.ErrnoException).code === 'ENOENT') return undefined; throw error; }
+  }));
+  const permitted = (target: string) => roots.some(root => root !== undefined && isInside(root, target));
+  const canonical = await realpath(resolved);
+  if (!permitted(canonical)) throw new Error('PDF symlink escapes the configured workspace.');
+  // O_NONBLOCK keeps open() from waiting for a writer when the path is a FIFO;
+  // the opened-descriptor checks below reject anything that is not a regular file.
+  const nonBlocking = process.platform === 'win32' ? 0 : (constants.O_NONBLOCK ?? 0);
+  const file = await open(canonical, constants.O_RDONLY | (constants.O_NOFOLLOW ?? 0) | nonBlocking);
+  try {
+    // On Linux validate the opened file itself, including parent-directory races.
+    if (process.platform === 'linux' && !permitted(await realpath(`/proc/self/fd/${file.fd}`))) {
+      throw new Error('PDF file escaped the configured workspace while opening.');
+    }
+    const info = await file.stat();
+    if (!info.isFile()) throw new Error('PDF path is not a regular file.');
+    if (info.size > maxBytes) throw new Error('PDF file exceeds the upload size limit.');
+    return file;
+  } catch (error) {
+    await file.close();
+    throw error;
+  }
 }
 
 function isRecord(value: unknown): value is Record<string, unknown> {
@@ -61,7 +100,7 @@ function buildDownloadedPdfAttachment(input: {
   articleUrl?: string;
 }): DownloadedPdfAttachment | null {
   const resolvedPath = resolveLocalPath(input.rawPath, input.workspaceDir);
-  if (path.extname(resolvedPath).toLowerCase() !== '.pdf') {
+  if (path.extname(resolvedPath).toLowerCase() !== '.pdf' || !isInside(input.workspaceDir, resolvedPath)) {
     return null;
   }
 
@@ -188,7 +227,7 @@ export function resolveCompiledPaperPdfAttachment(config: CompiledPaperPdfConfig
   const resolvedPath = path.isAbsolute(configuredPath)
     ? path.normalize(configuredPath)
     : path.resolve(config.dir, configuredPath);
-  if (path.extname(resolvedPath).toLowerCase() !== '.pdf') {
+  if (path.extname(resolvedPath).toLowerCase() !== '.pdf' || !isInside(config.dir, resolvedPath)) {
     return null;
   }
 

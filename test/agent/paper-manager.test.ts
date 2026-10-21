@@ -2427,3 +2427,58 @@ test("downloadLatestApsPapers skips all automatic APS downloads when a recent Cl
     await rm(workspaceDir, { recursive: true, force: true });
   }
 });
+
+test("downloadPaper treats www and export arXiv subdomain URLs as arXiv papers", async () => {
+  const workspaceDir = await mkdtemp(path.join(os.tmpdir(), "paper-manager-"));
+  const pdfBytes = Buffer.from("%PDF-1.4\nmock pdf\n", "utf8");
+
+  try {
+    for (const [url, canonicalId] of [
+      ["https://www.arxiv.org/abs/2401.01234", "2401.01234"],
+      ["https://export.arxiv.org/html/2401.01235v1", "2401.01235"]
+    ] as const) {
+      const fetchCalls: string[] = [];
+      const result = await downloadPaper({
+        workspaceDir,
+        url,
+        fetchImpl: async (input) => {
+          fetchCalls.push(String(input));
+          return new Response(pdfBytes, {
+            status: 200,
+            headers: { "content-type": "application/pdf" }
+          });
+        }
+      });
+
+      assert.equal(result.status, "downloaded");
+      assert.equal(result.source, "arxiv");
+      assert.equal(result.canonicalId, canonicalId);
+      assert.equal(result.articleUrl, `https://arxiv.org/abs/${canonicalId}`);
+      assert.deepEqual(fetchCalls, [`https://arxiv.org/pdf/${canonicalId}.pdf`]);
+    }
+  } finally {
+    await rm(workspaceDir, { recursive: true, force: true });
+  }
+});
+
+test("downloadPaper keeps lookalike arXiv hosts on the external flow", async () => {
+  const workspaceDir = await mkdtemp(path.join(os.tmpdir(), "paper-manager-"));
+
+  try {
+    for (const url of [
+      "https://arxiv.org.evil.example/abs/2401.01234",
+      "https://notarxiv.org/abs/2401.01234"
+    ]) {
+      const result = await downloadPaper({
+        workspaceDir,
+        url
+      });
+
+      assert.equal(result.status, "extension_unavailable");
+      assert.equal(result.source, "external");
+      assert.equal(result.articleUrl, url);
+    }
+  } finally {
+    await rm(workspaceDir, { recursive: true, force: true });
+  }
+});

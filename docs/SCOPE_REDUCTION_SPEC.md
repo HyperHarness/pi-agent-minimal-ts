@@ -44,3 +44,13 @@ factories and cached/injected retired tools before a model can be called.
 
 Private implementation helpers remain dormant for a reversible disable. No
 factory constructs or returns dedicated design tools; no runtime opt-in exists.
+
+## Current workspace integration
+
+The independent public-main candidate above is separate from this working branch,
+which contains additional issue fixes and user drafts. The disable change was
+merged into this workspace while preserving those changes, including public-URL
+transport work, literal replacement handling, publishing and router regressions.
+The resulting complete recursive workspace suite passed 1015/1015, with zero
+failures, cancellations or skips. Its 32 dedicated design-tool cases retire with
+the disabled capability; all other existing tests remain.

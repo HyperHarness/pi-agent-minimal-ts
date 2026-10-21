@@ -1550,6 +1550,106 @@ test("replace_file_text requires a unique block unless replaceAll is true", asyn
   }
 });
 
+test("replace_file_text inserts $-patterns in the replacement literally", async () => {
+  const workspace = await mkdtemp(path.join(tmpdir(), "pi-agent-tools-"));
+  const target = path.join(workspace, "manuscript.tex");
+  await writeFile(target, "Before\nE = mc^2\nAfter\n", "utf8");
+
+  // Every JavaScript replacement pattern that String.prototype.replace with a
+  // string replacement would otherwise interpret: $$, $&, $`, $' and $1.
+  const replacement = "$$E = mc^2$$ and $& plus $` and $' and $1 and $";
+
+  try {
+    const replaceFileTextTool = getReplaceFileTextTool(workspace);
+    const result = await replaceFileTextTool.execute(
+      "call-replace-dollar-1",
+      { path: "manuscript.tex", search: "E = mc^2", replacement },
+      undefined,
+    );
+
+    const updated = `Before\n${replacement}\nAfter\n`;
+    assert.equal(await readFile(target, "utf8"), updated);
+    assert.deepEqual(result.details, {
+      path: "manuscript.tex",
+      replacements: 1,
+      bytes: Buffer.byteLength(updated, "utf8"),
+    });
+  } finally {
+    await rm(workspace, { recursive: true, force: true });
+  }
+});
+
+test("replace_file_text inserts $-patterns literally when search also contains $", async () => {
+  const workspace = await mkdtemp(path.join(tmpdir(), "pi-agent-tools-"));
+  const target = path.join(workspace, "display-math.tex");
+  await writeFile(target, "A\n$$x$$\nB\n", "utf8");
+
+  try {
+    const replaceFileTextTool = getReplaceFileTextTool(workspace);
+    // Search text contains regex/replacement-significant characters; it must be
+    // matched literally, not as a pattern.
+    const result = await replaceFileTextTool.execute(
+      "call-replace-dollar-2",
+      { path: "display-math.tex", search: "$$x$$", replacement: "$$y$$" },
+      undefined,
+    );
+
+    assert.equal(await readFile(target, "utf8"), "A\n$$y$$\nB\n");
+    assert.deepEqual(result.details, {
+      path: "display-math.tex",
+      replacements: 1,
+      bytes: Buffer.byteLength("A\n$$y$$\nB\n", "utf8"),
+    });
+  } finally {
+    await rm(workspace, { recursive: true, force: true });
+  }
+});
+
+test("replace_file_text replaceAll inserts $-patterns literally", async () => {
+  const workspace = await mkdtemp(path.join(tmpdir(), "pi-agent-tools-"));
+  const target = path.join(workspace, "repeat.tex");
+  await writeFile(target, "E = mc^2\nE = mc^2\n", "utf8");
+
+  try {
+    const replaceFileTextTool = getReplaceFileTextTool(workspace);
+    const result = await replaceFileTextTool.execute(
+      "call-replace-dollar-3",
+      { path: "repeat.tex", search: "E = mc^2", replacement: "$$E = mc^2$$", replaceAll: true },
+      undefined,
+    );
+
+    assert.equal(await readFile(target, "utf8"), "$$E = mc^2$$\n$$E = mc^2$$\n");
+    assert.deepEqual(result.details, {
+      path: "repeat.tex",
+      replacements: 2,
+      bytes: Buffer.byteLength("$$E = mc^2$$\n$$E = mc^2$$\n", "utf8"),
+    });
+  } finally {
+    await rm(workspace, { recursive: true, force: true });
+  }
+});
+
+test("replace_file_text still rejects a missing search block", async () => {
+  const workspace = await mkdtemp(path.join(tmpdir(), "pi-agent-tools-"));
+  const target = path.join(workspace, "manuscript.tex");
+  await writeFile(target, "Only text\n", "utf8");
+
+  try {
+    const replaceFileTextTool = getReplaceFileTextTool(workspace);
+    await assert.rejects(
+      () => replaceFileTextTool.execute(
+        "call-replace-dollar-missing",
+        { path: "manuscript.tex", search: "Missing $block$", replacement: "$$other$$" },
+        undefined,
+      ),
+      /Search text was not found in the file/,
+    );
+    assert.equal(await readFile(target, "utf8"), "Only text\n");
+  } finally {
+    await rm(workspace, { recursive: true, force: true });
+  }
+});
+
 test("delete_file deletes text and LaTeX files inside the workspace", async () => {
   const workspace = await mkdtemp(path.join(tmpdir(), "pi-agent-tools-"));
   const texPath = path.join(workspace, "paper-projects/current/obsolete.tex");
@@ -2939,7 +3039,7 @@ test("download_paper_list keeps title-only candidates unresolved instead of call
     assert.equal(details.remainingCandidates, 1);
     const remainingList = await readFile(path.join(workspace, details.listPath ?? ""), "utf8");
     assert.match(remainingList, /title: Title without a stable locator/);
-    assert.match(remainingList, /lastError: Candidate lacks id or url; search_papers or add a stable locator before retrying\./);
+    assert.match(remainingList, /lastError: "Candidate lacks id or url; search_papers or add a stable locator before retrying\."/);
   } finally {
     await rm(workspace, { recursive: true, force: true });
   }

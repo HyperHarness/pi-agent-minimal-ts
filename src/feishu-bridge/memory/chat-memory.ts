@@ -1,6 +1,6 @@
-import fs from 'node:fs';
 import path from 'node:path';
 import type { ChatMemoryFile, ChatTurn } from '../types.js';
+import { loadJsonStore, writeJsonFileAtomic } from './atomic-json.js';
 
 const FILE_NAME = 'chats.json';
 
@@ -57,22 +57,14 @@ export class ChatMemoryStore {
   }
 
   private load(): ChatMemoryFile {
-    try {
-      if (fs.existsSync(this.filePath)) {
-        const parsed = JSON.parse(fs.readFileSync(this.filePath, 'utf-8')) as unknown;
-        if (isChatMemoryFile(parsed)) {
-          return parsed;
-        }
-      }
-    } catch {
-      // fall back to empty cache
-    }
-
-    return { chats: {} };
+    return loadJsonStore<ChatMemoryFile>(this.filePath, {
+      defaultValue: () => ({ chats: {} }),
+      isValid: isChatMemoryFile,
+      label: 'chat memory',
+    }).value;
   }
 
   private save(): void {
-    fs.mkdirSync(path.dirname(this.filePath), { recursive: true });
-    fs.writeFileSync(this.filePath, JSON.stringify(this.cache, null, 2), 'utf-8');
+    writeJsonFileAtomic(this.filePath, this.cache, isChatMemoryFile);
   }
 }

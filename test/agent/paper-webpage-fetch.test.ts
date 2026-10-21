@@ -23,6 +23,40 @@ function createHtmlResponse(status: number, body: string, contentType = "text/ht
   });
 }
 
+test("fetchPaperWebPage bounds streamed image bytes and cancels rejected asset bodies", async () => {
+  const canceled = new Set<string>();
+  let streamedPulls = 0;
+  const chunk = new Uint8Array(13 * 1024 * 1024);
+  const names = ["error", "nonimage", "declared", "streamed"];
+  const result = await fetchPaperWebPage({
+    url: "https://example.test/article",
+    fetchImpl: async (input) => {
+      const url = new URL(String(input));
+      if (url.pathname === "/article") {
+        return createHtmlResponse(200, `<html><body><article><h1>Article</h1><p>${"Article body. ".repeat(200)}</p>${names.map(name => `<figure><img src="/${name}.png"><figcaption>${name}</figcaption></figure>`).join("")}</article></body></html>`);
+      }
+      const name = url.pathname.slice(1, -4);
+      const body = new ReadableStream<Uint8Array>({
+        pull(controller) {
+          if (name === "streamed") { streamedPulls += 1; controller.enqueue(chunk); }
+          else throw new Error("Rejected bodies must not be read");
+        },
+        cancel() { canceled.add(name); }
+      }, { highWaterMark: 0 });
+      return new Response(body, {
+        status: name === "error" ? 403 : 200,
+        headers: {
+          "content-type": name === "nonimage" ? "text/plain" : "image/png",
+          "content-length": name === "declared" ? String(25 * 1024 * 1024 + 1) : "1"
+        }
+      });
+    }
+  });
+  assert.deepEqual(result.assets ?? [], []);
+  assert.deepEqual([...canceled].sort(), names.slice().sort());
+  assert.equal(streamedPulls, 2);
+});
+
 async function writeExecutableScript(workspace: string, filename: string, source: string): Promise<string> {
   const scriptPath = path.join(workspace, filename);
   await writeFile(scriptPath, source, "utf8");

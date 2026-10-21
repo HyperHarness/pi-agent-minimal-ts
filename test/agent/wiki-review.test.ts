@@ -155,3 +155,83 @@ test("reviewWikiPageEvidence treats singular Known uncertainty as a caveat secti
     assert.equal(kinds.includes("missing_caveat"), false);
   });
 });
+
+test("reviewWikiPageEvidence classifies an existing page without frontmatter as malformed, not missing", async () => {
+  await withWorkspace("wiki-review-no-frontmatter-", async (workspaceDir) => {
+    const pagesDir = path.join(workspaceDir, "knowledge-base", "pages");
+    await mkdir(pagesDir, { recursive: true });
+    await writeFile(path.join(pagesDir, "handwritten.md"), [
+      "# Handwritten page",
+      "",
+      "Body text written without any frontmatter."
+    ].join("\n"), "utf8");
+
+    const result = await reviewWikiPageEvidence({
+      workspaceDir,
+      pageKey: "handwritten"
+    });
+
+    assert.equal(result.status, "malformed");
+    assert.deepEqual(result.findings, []);
+    assert.ok(result.diagnostics.some((message) => /frontmatter/.test(message)));
+  });
+});
+
+test("reviewWikiPageEvidence audits claims of an existing page whose frontmatter is preceded by a BOM", async () => {
+  await withWorkspace("wiki-review-bom-frontmatter-", async (workspaceDir) => {
+    const pagesDir = path.join(workspaceDir, "knowledge-base", "pages");
+    await mkdir(pagesDir, { recursive: true });
+    const markdown = [
+      "---",
+      "schema_version: 1",
+      'type: "finding"',
+      'key: "bom-quantitative"',
+      'title: "BOM quantitative"',
+      "aliases: []",
+      "tags: []",
+      'evidence_contract: "paper-backed"',
+      'source_refs: ["arxiv-2406.06015"]',
+      `claims: ${JSON.stringify([{
+        claimId: "claim-bom",
+        kind: "quantitative",
+        statement: "The paper reports a 1e-3 logical error rate.",
+        sourceRefs: ["arxiv-2406.06015"],
+        evidence: [{
+          paperKey: "arxiv-2406.06015",
+          quote: "The authors report a 1e-3 logical error rate.",
+          note: "Paper claim only."
+        }],
+        confidence: "medium"
+      }])}`,
+      'created_at: "2026-05-10T00:00:00.000Z"',
+      'updated_at: "2026-05-10T00:00:00.000Z"',
+      "---",
+      "",
+      "# BOM quantitative"
+    ].join("\n");
+    await writeFile(path.join(pagesDir, "bom-quantitative.md"), `${String.fromCharCode(0xfeff)}${markdown}`, "utf8");
+
+    const result = await reviewWikiPageEvidence({
+      workspaceDir,
+      pageKey: "bom-quantitative"
+    });
+
+    assert.equal(result.status, "malformed");
+    assert.ok(result.diagnostics.some((message) => /frontmatter/.test(message)));
+    const weakProvenance = result.findings.find((finding) => finding.kind === "weak_quantitative_provenance");
+    assert.equal(weakProvenance?.target, "claim-bom");
+  });
+});
+
+test("reviewWikiPageEvidence still reports a page that does not exist on disk as missing", async () => {
+  await withWorkspace("wiki-review-missing-page-", async (workspaceDir) => {
+    const result = await reviewWikiPageEvidence({
+      workspaceDir,
+      pageKey: "does-not-exist"
+    });
+
+    assert.equal(result.status, "missing");
+    assert.deepEqual(result.findings, []);
+    assert.ok(result.diagnostics.some((message) => /does not exist/.test(message)));
+  });
+});

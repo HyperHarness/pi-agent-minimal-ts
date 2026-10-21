@@ -86,7 +86,7 @@ function isPiErrorEvent(event: PiEvent): boolean {
   const direct = event as { stopReason?: unknown; message?: { stopReason?: unknown } };
   const assistantMessageEvent = (event as { assistantMessageEvent?: PiAssistantMessageEvent }).assistantMessageEvent;
   const stopReason = direct.stopReason ?? direct.message?.stopReason ?? assistantMessageEvent?.stopReason ?? assistantMessageEvent?.message?.stopReason;
-  return event.type === 'error' || stopReason === 'error' || Boolean(extractPiErrorMessage(event));
+  return event.type === 'error' || stopReason === 'error' || stopReason === 'aborted' || Boolean(extractPiErrorMessage(event));
 }
 
 function getEffectiveProvider(options: PiRpcClientOptions): string | undefined {
@@ -120,6 +120,7 @@ export class PiRpcClient extends EventEmitter {
   private readonly pendingResponses = new Map<string, { resolve: (value: unknown) => void; reject: (reason?: unknown) => void }>();
   private isReady = false;
   private currentResponse = '';
+  private currentAssistantOffset = 0;
   private responseCallback: ((text: string) => void) | null = null;
   private responseReject: ((reason?: unknown) => void) | null = null;
   private stderrHistory: string[] = [];
@@ -211,6 +212,9 @@ export class PiRpcClient extends EventEmitter {
 
       this.once('event', onReady);
       this.once('error', onError);
+    }).catch((error) => {
+      this.stop();
+      throw error;
     });
   }
 
@@ -237,6 +241,7 @@ export class PiRpcClient extends EventEmitter {
     }
 
     this.currentResponse = '';
+    this.currentAssistantOffset = 0;
     return new Promise(async (resolve, reject) => {
       this.responseCallback = (text: string) => {
         this.responseCallback = null;
@@ -356,6 +361,16 @@ export class PiRpcClient extends EventEmitter {
 
   private handleEvent(event: PiEvent): void {
     this.emit('event', event);
+
+    if (event.type === 'message_start' && (event.message as { role?: string } | undefined)?.role === 'assistant') {
+      this.currentAssistantOffset = this.currentResponse.length;
+      return;
+    }
+    if (event.type === 'message_end' && event.willRetry === true) {
+      this.currentResponse = this.currentResponse.slice(0, this.currentAssistantOffset);
+      this.emit('text_reset', this.currentResponse);
+      return;
+    }
 
     if (isPiErrorEvent(event)) {
       const errorMessage = extractPiErrorMessage(event) || 'PI agent returned an error';

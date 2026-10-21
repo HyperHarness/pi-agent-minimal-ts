@@ -486,3 +486,340 @@ test("downloadPdf leaves a failed publisher page open for manual download", asyn
     await rm(workspaceDir, { recursive: true, force: true });
   }
 });
+
+test("downloadPdf saves the download event when navigation aborts because a download is starting", async () => {
+  const originalLaunchPersistentContext = chromium.launchPersistentContext.bind(chromium);
+  const workspaceDir = await mkdtemp(path.join(os.tmpdir(), "paper-browser-download-start-"));
+  const destinationPath = path.join(workspaceDir, "science.pdf");
+  const pdfBytes = Buffer.from("%PDF-science-download");
+  let savedAs = "";
+  let closeCalls = 0;
+
+  chromium.launchPersistentContext = (async () => ({
+    newPage: async () =>
+      ({
+        waitForEvent: async () => ({
+          saveAs: async (destination: string) => {
+            savedAs = destination;
+            await writeFile(destination, pdfBytes);
+          }
+        }),
+        goto: async () => {
+          throw new Error("page.goto: net::ERR_ABORTED");
+        },
+        close: async () => {
+          closeCalls += 1;
+        }
+      }) as never,
+    close: async () => {}
+  })) as unknown as typeof chromium.launchPersistentContext;
+
+  try {
+    const factory = resolveDefaultPaperBrowserSessionFactory({ workspaceDir });
+    const session = await factory();
+
+    await session.downloadPdf(
+      "https://www.science.org/doi/pdf/10.1126/science.adz8659?download=true",
+      destinationPath
+    );
+
+    const writtenBytes = await readFile(destinationPath);
+    assert.deepEqual(writtenBytes, pdfBytes);
+    assert.equal(savedAs, destinationPath);
+    assert.equal(closeCalls, 1);
+  } finally {
+    chromium.launchPersistentContext = originalLaunchPersistentContext;
+    await rm(workspaceDir, { recursive: true, force: true });
+  }
+});
+
+test("downloadPdf reports the timeout when an aborted download-start navigation never yields a download", async () => {
+  const originalLaunchPersistentContext = chromium.launchPersistentContext.bind(chromium);
+  const workspaceDir = await mkdtemp(path.join(os.tmpdir(), "paper-browser-download-timeout-"));
+  const destinationPath = path.join(workspaceDir, "science.pdf");
+  let closeCalls = 0;
+
+  chromium.launchPersistentContext = (async () => ({
+    newPage: async () =>
+      ({
+        waitForEvent: async () => null,
+        goto: async () => {
+          throw new Error("page.goto: Download is starting");
+        },
+        close: async () => {
+          closeCalls += 1;
+        }
+      }) as never,
+    close: async () => {}
+  })) as unknown as typeof chromium.launchPersistentContext;
+
+  try {
+    const factory = resolveDefaultPaperBrowserSessionFactory({ workspaceDir });
+    const session = await factory();
+
+    await assert.rejects(
+      () =>
+        session.downloadPdf(
+          "https://www.science.org/doi/pdf/10.1126/science.adz8659?download=true",
+          destinationPath
+        ),
+      /Timed out waiting for PDF download/i
+    );
+    assert.equal(closeCalls, 0);
+  } finally {
+    chromium.launchPersistentContext = originalLaunchPersistentContext;
+    await rm(workspaceDir, { recursive: true, force: true });
+  }
+});
+
+test("downloadPdf saves the download event when a challenge retry navigation aborts because a download is starting", async () => {
+  const originalLaunchPersistentContext = chromium.launchPersistentContext.bind(chromium);
+  const workspaceDir = await mkdtemp(path.join(os.tmpdir(), "paper-browser-challenge-download-aborted-"));
+  const destinationPath = path.join(workspaceDir, "aps.pdf");
+  const pdfBytes = Buffer.from("%PDF-challenge-download-aborted");
+  const challengeHtml =
+    "<html><body>This website uses a security service to protect itself from malicious automated programs. During verification that you are not an automated program, this page will be shown.</body></html>";
+  let gotoCalls = 0;
+  let contentCalls = 0;
+  let waitCalls = 0;
+  let savedAs = "";
+  let closeCalls = 0;
+
+  chromium.launchPersistentContext = (async () => ({
+    newPage: async () =>
+      ({
+        waitForEvent: async () => ({
+          saveAs: async (destination: string) => {
+            savedAs = destination;
+            await writeFile(destination, pdfBytes);
+          }
+        }),
+        goto: async () => {
+          gotoCalls += 1;
+          if (gotoCalls === 1) {
+            return {
+              headers: () => ({ "content-type": "text/html; charset=utf-8" }),
+              body: async () => Buffer.from(challengeHtml)
+            };
+          }
+
+          throw new Error("page.goto: net::ERR_ABORTED");
+        },
+        content: async () => {
+          contentCalls += 1;
+          return challengeHtml;
+        },
+        waitForTimeout: async () => {
+          waitCalls += 1;
+        },
+        close: async () => {
+          closeCalls += 1;
+        }
+      }) as never,
+    close: async () => {}
+  })) as unknown as typeof chromium.launchPersistentContext;
+
+  try {
+    const factory = resolveDefaultPaperBrowserSessionFactory({ workspaceDir });
+    const session = await factory();
+
+    await session.downloadPdf(
+      "https://journals.aps.org/prl/pdf/10.1103/PhysRevLett.134.090601",
+      destinationPath
+    );
+
+    const writtenBytes = await readFile(destinationPath);
+    assert.deepEqual(writtenBytes, pdfBytes);
+    assert.equal(savedAs, destinationPath);
+    assert.equal(gotoCalls, 2);
+    assert.equal(contentCalls, 1);
+    assert.equal(waitCalls, 1);
+    assert.equal(closeCalls, 1);
+  } finally {
+    chromium.launchPersistentContext = originalLaunchPersistentContext;
+    await rm(workspaceDir, { recursive: true, force: true });
+  }
+});
+
+test("downloadPdf saves the download event when a challenge retry navigation reports that a download is starting", async () => {
+  const originalLaunchPersistentContext = chromium.launchPersistentContext.bind(chromium);
+  const workspaceDir = await mkdtemp(path.join(os.tmpdir(), "paper-browser-challenge-download-starting-"));
+  const destinationPath = path.join(workspaceDir, "aps.pdf");
+  const pdfBytes = Buffer.from("%PDF-challenge-download-starting");
+  const challengeHtml =
+    "<html><body>This website uses a security service to protect itself from malicious automated programs. During verification that you are not an automated program, this page will be shown.</body></html>";
+  let gotoCalls = 0;
+  let contentCalls = 0;
+  let waitCalls = 0;
+  let savedAs = "";
+  let closeCalls = 0;
+
+  chromium.launchPersistentContext = (async () => ({
+    newPage: async () =>
+      ({
+        waitForEvent: async () => ({
+          saveAs: async (destination: string) => {
+            savedAs = destination;
+            await writeFile(destination, pdfBytes);
+          }
+        }),
+        goto: async () => {
+          gotoCalls += 1;
+          if (gotoCalls === 1) {
+            return {
+              headers: () => ({ "content-type": "text/html; charset=utf-8" }),
+              body: async () => Buffer.from(challengeHtml)
+            };
+          }
+
+          throw new Error("page.goto: Download is starting");
+        },
+        content: async () => {
+          contentCalls += 1;
+          return challengeHtml;
+        },
+        waitForTimeout: async () => {
+          waitCalls += 1;
+        },
+        close: async () => {
+          closeCalls += 1;
+        }
+      }) as never,
+    close: async () => {}
+  })) as unknown as typeof chromium.launchPersistentContext;
+
+  try {
+    const factory = resolveDefaultPaperBrowserSessionFactory({ workspaceDir });
+    const session = await factory();
+
+    await session.downloadPdf(
+      "https://journals.aps.org/prl/pdf/10.1103/PhysRevLett.134.090601",
+      destinationPath
+    );
+
+    const writtenBytes = await readFile(destinationPath);
+    assert.deepEqual(writtenBytes, pdfBytes);
+    assert.equal(savedAs, destinationPath);
+    assert.equal(gotoCalls, 2);
+    assert.equal(contentCalls, 1);
+    assert.equal(waitCalls, 1);
+    assert.equal(closeCalls, 1);
+  } finally {
+    chromium.launchPersistentContext = originalLaunchPersistentContext;
+    await rm(workspaceDir, { recursive: true, force: true });
+  }
+});
+
+test("downloadPdf propagates unrelated challenge retry navigation errors without saving", async () => {
+  const originalLaunchPersistentContext = chromium.launchPersistentContext.bind(chromium);
+  const workspaceDir = await mkdtemp(path.join(os.tmpdir(), "paper-browser-challenge-retry-unrelated-"));
+  const destinationPath = path.join(workspaceDir, "aps.pdf");
+  const challengeHtml =
+    "<html><body>This website uses a security service to protect itself from malicious automated programs. During verification that you are not an automated program, this page will be shown.</body></html>";
+  let gotoCalls = 0;
+  let waitCalls = 0;
+  let saveCalls = 0;
+  let closeCalls = 0;
+
+  chromium.launchPersistentContext = (async () => ({
+    newPage: async () =>
+      ({
+        waitForEvent: async () => ({
+          saveAs: async () => {
+            saveCalls += 1;
+          }
+        }),
+        goto: async () => {
+          gotoCalls += 1;
+          if (gotoCalls === 1) {
+            return {
+              headers: () => ({ "content-type": "text/html; charset=utf-8" }),
+              body: async () => Buffer.from(challengeHtml)
+            };
+          }
+
+          throw new Error("page.goto: net::ERR_NAME_NOT_RESOLVED at https://journals.aps.org");
+        },
+        content: async () => challengeHtml,
+        waitForTimeout: async () => {
+          waitCalls += 1;
+        },
+        close: async () => {
+          closeCalls += 1;
+        }
+      }) as never,
+    close: async () => {}
+  })) as unknown as typeof chromium.launchPersistentContext;
+
+  try {
+    const factory = resolveDefaultPaperBrowserSessionFactory({ workspaceDir });
+    const session = await factory();
+
+    await assert.rejects(
+      () =>
+        session.downloadPdf(
+          "https://journals.aps.org/prl/pdf/10.1103/PhysRevLett.134.090601",
+          destinationPath
+        ),
+      (error: unknown) => {
+        assert.ok(error instanceof Error);
+        assert.match(error.message, /net::ERR_NAME_NOT_RESOLVED/);
+        assert.doesNotMatch(error.message, /Timed out waiting for PDF download/i);
+        return true;
+      }
+    );
+    assert.equal(gotoCalls, 2);
+    assert.equal(waitCalls, 1);
+    assert.equal(saveCalls, 0);
+    assert.equal(closeCalls, 0);
+  } finally {
+    chromium.launchPersistentContext = originalLaunchPersistentContext;
+    await rm(workspaceDir, { recursive: true, force: true });
+  }
+});
+
+test("downloadPdf preserves unrelated navigation errors instead of waiting for a download", async () => {
+  const originalLaunchPersistentContext = chromium.launchPersistentContext.bind(chromium);
+  const workspaceDir = await mkdtemp(path.join(os.tmpdir(), "paper-browser-download-unrelated-"));
+  const destinationPath = path.join(workspaceDir, "science.pdf");
+  let saveCalls = 0;
+  let closeCalls = 0;
+
+  chromium.launchPersistentContext = (async () => ({
+    newPage: async () =>
+      ({
+        waitForEvent: async () => ({
+          saveAs: async () => {
+            saveCalls += 1;
+          }
+        }),
+        goto: async () => {
+          throw new Error("page.goto: net::ERR_NAME_NOT_RESOLVED at https://www.science.org");
+        },
+        close: async () => {
+          closeCalls += 1;
+        }
+      }) as never,
+    close: async () => {}
+  })) as unknown as typeof chromium.launchPersistentContext;
+
+  try {
+    const factory = resolveDefaultPaperBrowserSessionFactory({ workspaceDir });
+    const session = await factory();
+
+    await assert.rejects(
+      () => session.downloadPdf("https://www.science.org/doi/pdf/10.1126/science.adz8659", destinationPath),
+      (error: unknown) => {
+        assert.ok(error instanceof Error);
+        assert.match(error.message, /net::ERR_NAME_NOT_RESOLVED/);
+        assert.doesNotMatch(error.message, /Timed out waiting for PDF download/i);
+        return true;
+      }
+    );
+    assert.equal(saveCalls, 0);
+    assert.equal(closeCalls, 0);
+  } finally {
+    chromium.launchPersistentContext = originalLaunchPersistentContext;
+    await rm(workspaceDir, { recursive: true, force: true });
+  }
+});

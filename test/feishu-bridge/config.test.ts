@@ -256,6 +256,53 @@ test('loadConfig lets PI_COMMAND override the built-in agent entrypoint', () => 
   );
 });
 
+test('loadConfig defaults and overrides the PI client pool bounds', () => {
+  withEnv(
+    {
+      FEISHU_APP_ID: 'cli-test-app',
+      FEISHU_APP_SECRET: 'cli-test-secret',
+    },
+    () => {
+      const config = loadConfig(makeTempDir());
+
+      assert.equal(config.pi.idleTimeoutMs, 10 * 60 * 1000);
+      assert.equal(config.pi.maxClients, 20);
+    },
+  );
+
+  withEnv(
+    {
+      FEISHU_APP_ID: 'cli-test-app',
+      FEISHU_APP_SECRET: 'cli-test-secret',
+      PI_IDLE_TIMEOUT_MS: '30000',
+      PI_MAX_CLIENTS: '3',
+    },
+    () => {
+      const config = loadConfig(makeTempDir());
+
+      assert.equal(config.pi.idleTimeoutMs, 30000);
+      assert.equal(config.pi.maxClients, 3);
+    },
+  );
+});
+
+test('loadConfig falls back to defaults for invalid PI client pool bounds', () => {
+  withEnv(
+    {
+      FEISHU_APP_ID: 'cli-test-app',
+      FEISHU_APP_SECRET: 'cli-test-secret',
+      PI_IDLE_TIMEOUT_MS: '0',
+      PI_MAX_CLIENTS: '2.5',
+    },
+    () => {
+      const config = loadConfig(makeTempDir());
+
+      assert.equal(config.pi.idleTimeoutMs, 10 * 60 * 1000);
+      assert.equal(config.pi.maxClients, 20);
+    },
+  );
+});
+
 test('loadConfig rejects invalid OpenAI-compatible relay URLs before starting pi', () => {
   withEnv(
     {

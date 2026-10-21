@@ -69,11 +69,15 @@ export function createPaperChunks(
       continue;
     }
 
+    // Compare sections strictly so an unsectioned chunk (currentSectionId
+    // undefined, the normal case for webpage parses that begin before the
+    // first heading) still flushes when a sectioned element arrives, instead
+    // of absorbing every following section until the size limit.
     if (
       currentText &&
       (
         currentText.length + text.length + 2 > maxChars ||
-        (currentSectionId !== undefined && element.sectionId !== currentSectionId)
+        element.sectionId !== currentSectionId
       )
     ) {
       flush();

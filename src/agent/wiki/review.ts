@@ -1,4 +1,4 @@
-import { readFile } from "node:fs/promises";
+import { readFile, stat } from "node:fs/promises";
 import { readTypedWikiPage, type WikiPageDiagnostic } from "./typed-store.js";
 import { getPaperWikiPagePath, relativeToWorkspace } from "./store.js";
 import type {
@@ -57,11 +57,27 @@ function diagnosticsToMessages(diagnostics: WikiPageDiagnostic[]): string[] {
   );
 }
 
-function pageReadStatus(diagnostics: WikiPageDiagnostic[]): "missing" | "malformed" {
-  const isMissing = diagnostics.some((diagnostic) =>
+async function pageReadStatus(
+  options: ReviewWikiPageEvidenceOptions,
+  diagnostics: WikiPageDiagnostic[]
+): Promise<"missing" | "malformed"> {
+  const hasMissingFrontmatterError = diagnostics.some((diagnostic) =>
     diagnostic.errors.some((error) => error.code === "missing_frontmatter")
   );
-  return isMissing ? "missing" : "malformed";
+  if (!hasMissingFrontmatterError) {
+    return "malformed";
+  }
+  // The typed store reports an unreadable file (read ENOENT) with the same
+  // "missing_frontmatter" code it uses when an existing file's markdown does
+  // not start with frontmatter. Only a page that is absent on disk is missing;
+  // a present page without leading frontmatter is malformed so its claims
+  // still get audited.
+  try {
+    await stat(getPaperWikiPagePath(options.workspaceDir, options.pageKey));
+  } catch (error) {
+    return (error as NodeJS.ErrnoException).code === "ENOENT" ? "missing" : "malformed";
+  }
+  return "malformed";
 }
 
 function finding(
@@ -309,7 +325,7 @@ export async function reviewWikiPageEvidence(
   const diagnostics = diagnosticsToMessages(readResult.diagnostics);
 
   if (!readResult.page) {
-    const status = pageReadStatus(readResult.diagnostics);
+    const status = await pageReadStatus(options, readResult.diagnostics);
     const findings: WikiReviewFinding[] = [];
     if (status === "malformed") {
       await reviewMalformedPageClaims(options, findings);

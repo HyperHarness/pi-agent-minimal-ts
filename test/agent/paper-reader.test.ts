@@ -10,6 +10,7 @@ import {
   readPaperSection,
   searchPaperText
 } from "../../src/agent/paper/reading/paper-reader.js";
+import { createPaperChunks } from "../../src/agent/paper/reading/chunks.js";
 import { savePaperWebPageParse } from "../../src/agent/paper/reading/engines/webpage.js";
 import {
   deletePaperWikiPage,
@@ -21,7 +22,11 @@ import {
   evaluateParseQuality,
   evaluateParseQualityWithMarkdown
 } from "../../src/agent/paper/reading/quality.js";
-import { PaperReaderError, type ParsedPaperDocument } from "../../src/agent/paper/reading/types.js";
+import {
+  PaperReaderError,
+  type PaperElement,
+  type ParsedPaperDocument
+} from "../../src/agent/paper/reading/types.js";
 import { parsePaperWebPageHtml } from "../../src/agent/paper/acquisition/paper-webpage-fetch.js";
 import { appendPaperDownloadJobEvent } from "../../src/agent/paper/extension/paper-download-jobs.js";
 
@@ -1480,4 +1485,94 @@ test("parsePaper rejects PDFs outside knowledge-base/raw/pdfs", async () => {
   } finally {
     await rm(workspace, { recursive: true, force: true });
   }
+});
+
+function createChunkDocument(elements: PaperElement[]): ParsedPaperDocument {
+  return {
+    paperKey: "webpage-chunking-check",
+    engine: "webpage",
+    pdfSha256: "sha256",
+    createdAt: "2026-10-15T00:00:00.000Z",
+    title: "Webpage chunking check",
+    pages: 1,
+    elements,
+    sections: []
+  };
+}
+
+test("createPaperChunks flushes on section transitions when a chunk starts with an unsectioned element", () => {
+  // Webpage parses leave elements before the first heading unsectioned, so the
+  // opening chunk seeds currentSectionId as undefined and must still flush
+  // when the first sectioned element arrives.
+  const document = createChunkDocument([
+    { id: "e1", type: "paragraph", text: "Pre-heading standfirst text.", page: 1 },
+    { id: "e2", type: "heading", text: "Introduction", page: 1, headingLevel: 2, sectionId: "s1" },
+    { id: "e3", type: "paragraph", text: "Introduction body text.", page: 1, sectionId: "s1" },
+    { id: "e4", type: "heading", text: "Methods", page: 1, headingLevel: 2, sectionId: "s2" },
+    { id: "e5", type: "paragraph", text: "Methods body text.", page: 1, sectionId: "s2" }
+  ]);
+
+  const chunks = createPaperChunks(document, 10000);
+
+  assert.deepEqual(chunks.map((chunk) => chunk.elementIds), [["e1"], ["e2", "e3"], ["e4", "e5"]]);
+  assert.equal(chunks[0]?.sectionId, undefined);
+  assert.equal(Object.hasOwn(chunks[0] ?? {}, "sectionId"), false);
+  assert.equal(chunks[1]?.sectionId, "s1");
+  assert.equal(chunks[2]?.sectionId, "s2");
+  assert.match(chunks[0]?.text ?? "", /Pre-heading standfirst text\./);
+  assert.doesNotMatch(chunks[0]?.text ?? "", /Introduction|Methods/);
+  assert.match(chunks[1]?.text ?? "", /Introduction body text\./);
+  assert.doesNotMatch(chunks[1]?.text ?? "", /Methods body text\./);
+  assert.match(chunks[2]?.text ?? "", /Methods body text\./);
+});
+
+test("createPaperChunks keeps consecutive unsectioned elements in a single chunk", () => {
+  const document = createChunkDocument([
+    { id: "e1", type: "paragraph", text: "First unsectioned element.", page: 1 },
+    { id: "e2", type: "paragraph", text: "Second unsectioned element.", page: 1 },
+    { id: "e3", type: "paragraph", text: "Third unsectioned element.", page: 1 }
+  ]);
+
+  const chunks = createPaperChunks(document, 10000);
+
+  assert.equal(chunks.length, 1);
+  assert.equal(chunks[0]?.sectionId, undefined);
+  assert.deepEqual(chunks[0]?.elementIds, ["e1", "e2", "e3"]);
+});
+
+test("createPaperChunks flushes when unsectioned content follows a sectioned chunk", () => {
+  const document = createChunkDocument([
+    { id: "e1", type: "paragraph", text: "Sectioned body text.", page: 1, sectionId: "s1" },
+    { id: "e2", type: "paragraph", text: "Unsectioned closing text.", page: 1 },
+    { id: "e3", type: "paragraph", text: "Back in the first section.", page: 1, sectionId: "s1" }
+  ]);
+
+  const chunks = createPaperChunks(document, 10000);
+
+  assert.deepEqual(
+    chunks.map((chunk) => [chunk.elementIds, chunk.sectionId]),
+    [[["e1"], "s1"], [["e2"], undefined], [["e3"], "s1"]]
+  );
+});
+
+test("createPaperChunks still splits only on the size limit within one section", () => {
+  const oversized = createChunkDocument([
+    { id: "e1", type: "paragraph", text: "a".repeat(30), page: 1, sectionId: "s1" },
+    { id: "e2", type: "paragraph", text: "b".repeat(30), page: 1, sectionId: "s1" }
+  ]);
+  // 19 + 19 + 2 == 40, exactly at the limit, so both elements stay together.
+  const exactlyAtLimit = createChunkDocument([
+    { id: "e1", type: "paragraph", text: "a".repeat(19), page: 1, sectionId: "s1" },
+    { id: "e2", type: "paragraph", text: "b".repeat(19), page: 1, sectionId: "s1" }
+  ]);
+
+  const split = createPaperChunks(oversized, 40);
+  assert.equal(split.length, 2);
+  assert.deepEqual(split.map((chunk) => chunk.elementIds), [["e1"], ["e2"]]);
+  assert.equal(split.every((chunk) => chunk.sectionId === "s1"), true);
+
+  const joined = createPaperChunks(exactlyAtLimit, 40);
+  assert.equal(joined.length, 1);
+  assert.deepEqual(joined[0]?.elementIds, ["e1", "e2"]);
+  assert.equal(joined[0]?.sectionId, "s1");
 });

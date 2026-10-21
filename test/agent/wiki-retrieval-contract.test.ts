@@ -14,6 +14,7 @@ import {
   type KnowledgeSourceMetadata
 } from "../../src/agent/wiki/source-metadata-store.js";
 import { writeTypedWikiPage } from "../../src/agent/wiki/typed-store.js";
+import { bootstrapPaperWikiPageEvidence } from "../../src/agent/wiki/bootstrap.js";
 
 async function withWorkspace(
   name: string,
@@ -1115,5 +1116,219 @@ test("retrieval contract list filters are conjunctive with negative controls", a
     assert.equal(nonmatchingSourceRef.items.length, 0);
     assert.equal(nonmatchingEvidenceContract.items.length, 0);
     assert.equal(nonmatchingKey.items.length, 0);
+  });
+});
+
+test("bootstrapPaperWikiPageEvidence does not duplicate papers between seed search and local fallback", async () => {
+  await withWorkspace("wiki-bootstrap-dedupe-", async (workspaceDir) => {
+    const result = await bootstrapPaperWikiPageEvidence({
+      workspaceDir,
+      topic: "transmon qubit coherence",
+      maxSources: 6
+    }, {
+      searchPaperWikiImpl: async (options) => ({
+        query: options.query,
+        results: [
+          {
+            kind: "source",
+            key: "arxiv-x",
+            paperKey: "arxiv-x",
+            title: "Seed selected paper",
+            path: "knowledge-base/sources/arxiv-x/summary.md",
+            snippet: "seed search hit"
+          },
+          {
+            kind: "source",
+            key: "arxiv-z",
+            paperKey: "arxiv-z",
+            title: "Seed selected parsed paper",
+            path: "knowledge-base/sources/arxiv-z/summary.md",
+            snippet: "seed search hit"
+          }
+        ]
+      }),
+      searchWikiEvidenceImpl: async (options) => ({
+        status: "insufficient_evidence",
+        query: options.query,
+        results: []
+      }),
+      searchLocalPapersImpl: async (options) => ({
+        query: options.query,
+        count: 3,
+        results: [
+          {
+            paper: {
+              paperKey: "arxiv-x",
+              title: "Seed selected paper",
+              hasPdf: true,
+              hasParsedArtifacts: true,
+              hasWikiSummary: true,
+              wikiSummaryPath: "knowledge-base/sources/arxiv-x/summary.md",
+              parses: []
+            },
+            score: 4,
+            matches: [
+              {
+                field: "wiki_summary",
+                path: "knowledge-base/sources/arxiv-x/summary.md",
+                snippet: "fallback hit for the seed-selected paper"
+              }
+            ]
+          },
+          {
+            paper: {
+              paperKey: "arxiv-y",
+              title: "Fallback only paper",
+              hasPdf: true,
+              hasParsedArtifacts: true,
+              hasWikiSummary: true,
+              wikiSummaryPath: "knowledge-base/sources/arxiv-y/summary.md",
+              parses: []
+            },
+            score: 3,
+            matches: [
+              {
+                field: "wiki_summary",
+                path: "knowledge-base/sources/arxiv-y/summary.md",
+                snippet: "fallback hit for a new paper"
+              }
+            ]
+          },
+          {
+            paper: {
+              paperKey: "arxiv-z",
+              title: "Seed selected parsed paper",
+              hasPdf: true,
+              hasParsedArtifacts: true,
+              hasWikiSummary: false,
+              parses: []
+            },
+            score: 2,
+            matches: [
+              {
+                field: "parsed_markdown",
+                path: "knowledge-base/sources/arxiv-z/parses/tex-source/document.md",
+                engine: "tex-source",
+                snippet: "parsed fallback hit for the seed-selected paper"
+              }
+            ]
+          }
+        ]
+      })
+    });
+
+    assert.equal(result.status, "ready");
+    const paperKeys = result.sourceEvidence.map((item) => item.paperKey);
+    assert.equal(paperKeys.filter((key) => key === "arxiv-x").length, 1);
+    assert.equal(paperKeys.filter((key) => key === "arxiv-y").length, 1);
+    assert.equal(paperKeys.filter((key) => key === "arxiv-z").length, 1);
+    assert.equal(result.sourceEvidence.length, 3);
+    assert.equal(
+      new Set(result.sourceEvidence.map((item) => `${item.kind}:${item.key}`)).size,
+      result.sourceEvidence.length
+    );
+    assert.equal(result.sourceEvidence.find((item) => item.paperKey === "arxiv-x")?.origin, "seed_search");
+    assert.equal(result.sourceEvidence.find((item) => item.paperKey === "arxiv-y")?.origin, "local_fallback");
+    assert.deepEqual(result.missingSummaries.map((item) => item.paperKey), []);
+    assert.ok(result.parsedFallbackMatches.some((match) => match.paperKey === "arxiv-x"));
+  });
+});
+
+test("bootstrapPaperWikiPageEvidence does not let fallback duplicates consume the maxSources budget", async () => {
+  await withWorkspace("wiki-bootstrap-budget-", async (workspaceDir) => {
+    const result = await bootstrapPaperWikiPageEvidence({
+      workspaceDir,
+      topic: "transmon qubit coherence",
+      maxSources: 2
+    }, {
+      searchPaperWikiImpl: async (options) => ({
+        query: options.query,
+        results: [
+          {
+            kind: "source",
+            key: "arxiv-x",
+            paperKey: "arxiv-x",
+            title: "Seed selected paper",
+            path: "knowledge-base/sources/arxiv-x/summary.md",
+            snippet: "seed search hit"
+          }
+        ]
+      }),
+      searchWikiEvidenceImpl: async (options) => ({
+        status: "insufficient_evidence",
+        query: options.query,
+        results: []
+      }),
+      searchLocalPapersImpl: async (options) => ({
+        query: options.query,
+        count: 3,
+        results: [
+          {
+            paper: {
+              paperKey: "arxiv-x",
+              title: "Seed selected paper",
+              hasPdf: true,
+              hasParsedArtifacts: true,
+              hasWikiSummary: true,
+              wikiSummaryPath: "knowledge-base/sources/arxiv-x/summary.md",
+              parses: []
+            },
+            score: 5,
+            matches: [
+              {
+                field: "wiki_summary",
+                path: "knowledge-base/sources/arxiv-x/summary.md",
+                snippet: "fallback hit for the seed-selected paper"
+              }
+            ]
+          },
+          {
+            paper: {
+              paperKey: "arxiv-y",
+              title: "Fallback only paper",
+              hasPdf: true,
+              hasParsedArtifacts: true,
+              hasWikiSummary: true,
+              wikiSummaryPath: "knowledge-base/sources/arxiv-y/summary.md",
+              parses: []
+            },
+            score: 4,
+            matches: [
+              {
+                field: "wiki_summary",
+                path: "knowledge-base/sources/arxiv-y/summary.md",
+                snippet: "fallback hit for a new paper"
+              }
+            ]
+          },
+          {
+            paper: {
+              paperKey: "arxiv-w",
+              title: "Fallback overflow paper",
+              hasPdf: true,
+              hasParsedArtifacts: true,
+              hasWikiSummary: true,
+              wikiSummaryPath: "knowledge-base/sources/arxiv-w/summary.md",
+              parses: []
+            },
+            score: 3,
+            matches: [
+              {
+                field: "wiki_summary",
+                path: "knowledge-base/sources/arxiv-w/summary.md",
+                snippet: "fallback hit beyond the budget"
+              }
+            ]
+          }
+        ]
+      })
+    });
+
+    assert.equal(result.status, "ready");
+    assert.deepEqual(
+      [...new Set(result.sourceEvidence.map((item) => item.paperKey))].sort(),
+      ["arxiv-x", "arxiv-y"]
+    );
+    assert.equal(result.sourceEvidence.length, 2);
   });
 });

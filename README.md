@@ -80,7 +80,7 @@ Inside the wiki/paper flow, the runtime detects high-confidence worker intents a
 - evidence construction, paper summarization, and source-summary relation requests -> `wiki-evidence-worker`
 - chip-design/layout execution and dependency installation -> disabled
 
-Explicit prefixes are still supported when precision matters inside routed/internal contexts: `paper write ...`, `paper download ...`, `download paper ...`, `wiki evidence ...`, `evidence ...`, `/paper-writing-worker ...`, `/paper-download-subagent ...`, and `/wiki-evidence-worker ...`. If no wiki/paper worker route matches, the prompt goes to the wiki-agent coordinator.
+Explicit prefixes are still supported when precision matters inside routed/internal contexts: `paper write ...`, `paper download ...`, `download paper ...`, `wiki evidence ...`, `/evidence ...`, `/paper-writing-worker ...`, `/paper-download-subagent ...`, and `/wiki-evidence-worker ...`. If no wiki/paper worker route matches, the prompt goes to the wiki-agent coordinator.
 
 Worker turns do not share the main agent's full context. The router runs each worker in a clean context, streams the worker's normal reply to the user, then injects a compact structured handoff back into the main context. The handoff records the worker role, instruction, route reason, status, changed files, produced artifacts, source/page/design-record paths, tools used, failed tools, final worker response, and the next suggested owner. This keeps the main chat history continuous without copying the worker's full tool transcript into the prompt.
 
@@ -265,6 +265,14 @@ These tools reject paths that resolve outside the workspace, including escaping 
 
 - `web_search`: searches the configured search provider
 - `fetch_url`: fetches a URL and extracts useful page text
+
+`fetch_url` accepts public HTTP/HTTPS destinations. It rejects credentials, private
+or special-use IP addresses, and DNS responses containing any non-public address;
+redirect targets are checked again. Connections use the validated addresses, with
+at most 2 MiB read before text extraction. HTTP/HTTPS environment proxies and
+`NO_PROXY` are supported; proxy CONNECT targets are pinned while HTTP Host and TLS
+certificate verification retain the original hostname. SOCKS proxies are rejected
+for this tool because its transport requires a pinned HTTP CONNECT destination.
 
 These are general web tools. In strict wiki-agent benchmark mode they are not exposed, because evidence acquisition should be fixed or delegated.
 
@@ -526,6 +534,9 @@ By default the Feishu bridge starts the built-in wiki-agent RPC command. Use `PI
 
 ## Install
 
+Use Node.js 22.8.0 or newer. The test runner requires this minimum version.
+To reject unsupported runtimes during installation, run `npm install --engine-strict`.
+
 Choose the setup guide for your shell:
 
 - Windows PowerShell or Codex Desktop on Windows: [docs/windows-powershell-codex-quickstart.md](docs/windows-powershell-codex-quickstart.md)
@@ -567,5 +578,5 @@ npm test
 ## Notes
 
 - conversation history is kept in memory only for local REPL sessions
-- failed assistant turns are not persisted into the ongoing context
+- failed or aborted turns preserve completed tool work and failure markers in the ongoing context
 - `read_file` uses bounded paged reads by default and reports truncation metadata so agents can recognize when a file needs another page or a search-oriented workflow

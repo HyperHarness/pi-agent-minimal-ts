@@ -1,6 +1,17 @@
 import test from "node:test";
 import assert from "node:assert/strict";
-import { fetchWebPage } from "../../src/agent/web-fetch.js";
+import { fetchWebPage as fetchWithPolicy, type FetchWebPageOptions } from "../../src/agent/web-fetch.js";
+
+/**
+ * These tests inject both the HTTP client and DNS: nothing here resolves a real
+ * hostname or makes an external request.
+ */
+const fetchWebPage = (options: FetchWebPageOptions) =>
+  fetchWithPolicy({
+    env: {},
+    resolveHostname: async () => [{ address: "8.8.8.8", family: 4 }],
+    ...options
+  });
 
 function createHtmlResponse(status: number, body: string, contentType = "text/html; charset=utf-8") {
   return new Response(body, {
@@ -20,6 +31,23 @@ test("fetchWebPage rejects non-http URLs", async () => {
   );
 });
 
+test("fetchWebPage rejects non-public destinations before fetching", async () => {
+  let fetched = false;
+  await assert.rejects(
+    () =>
+      fetchWebPage({
+        url: "https://example.test/page",
+        resolveHostname: async () => [{ address: "192.168.5.5", family: 4 }],
+        fetchImpl: async () => {
+          fetched = true;
+          return createHtmlResponse(200, "<html></html>");
+        }
+      }),
+    /public IP/
+  );
+  assert.equal(fetched, false);
+});
+
 test("fetchWebPage removes scripts and returns cleaned text", async () => {
   const result = await fetchWebPage({
     url: "https://example.test/page",
@@ -31,6 +59,23 @@ test("fetchWebPage removes scripts and returns cleaned text", async () => {
   });
 
   assert.equal(result, "Test Hello World & friends");
+});
+
+test("fetchWebPage sends the default user agent unless the environment overrides it", async () => {
+  const seen: string[] = [];
+  const capture = async (_url: RequestInfo | URL, init?: RequestInit) => {
+    seen.push(new Headers(init?.headers).get("user-agent") ?? "");
+    return createHtmlResponse(200, "<html></html>");
+  };
+
+  await fetchWebPage({ url: "https://example.test/page", fetchImpl: capture });
+  await fetchWebPage({
+    url: "https://example.test/page",
+    env: { PI_FETCH_USER_AGENT: "  custom-agent  " },
+    fetchImpl: capture
+  });
+
+  assert.deepEqual(seen, ["pi-agent-minimal-ts/1.0", "custom-agent"]);
 });
 
 test("fetchWebPage rejects non-html responses", async () => {
@@ -66,4 +111,31 @@ test("fetchWebPage truncates very large pages", async () => {
 
   assert.equal(result.length, 12_000);
   assert.equal(result, "a".repeat(12_000));
+});
+
+test("fetchWebPage cancels bodies rejected for status or content type", async () => {
+  for (const [status, contentType] of [[403, "text/html"], [200, "application/json"]] as const) {
+    let canceled = false;
+    await assert.rejects(fetchWebPage({
+      url: "https://example.test/page",
+      fetchImpl: async () => new Response(new ReadableStream({ cancel() { canceled = true; } }), {
+        status, headers: { "content-type": contentType }
+      })
+    }));
+    assert.equal(canceled, true);
+  }
+});
+
+test("fetchWebPage stops an unbounded HTML stream before buffering the whole response", async () => {
+  let reads = 0;
+  let canceled = false;
+  await assert.rejects(fetchWebPage({
+    url: "https://example.test/page",
+    fetchImpl: async () => new Response(new ReadableStream<Uint8Array>({
+      pull(controller) { reads++; controller.enqueue(new Uint8Array(1024 * 1024)); },
+      cancel() { canceled = true; }
+    }, { highWaterMark: 0 }), { headers: { "content-type": "text/html" } })
+  }), /byte limit/);
+  assert.equal(reads, 3);
+  assert.equal(canceled, true);
 });

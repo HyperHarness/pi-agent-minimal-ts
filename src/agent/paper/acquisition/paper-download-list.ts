@@ -56,7 +56,7 @@ export interface DownloadPaperListResult {
 
 const DEFAULT_LIST_DIR = ".memory/paper-download-lists";
 const DEFAULT_MAX_DOWNLOAD_ITEMS = 50;
-const YAML_SPECIAL_CHARS = /[:#\-\[\]{}&,*!|>'"%@`]/;
+const YAML_SPECIAL_CHARS = /[:;#\-\[\]{}&,*!|>'"%@`]/;
 
 function compactText(value: string | undefined): string | undefined {
   const compact = value?.replace(/\s+/g, " ").trim();
@@ -196,13 +196,57 @@ function parseYamlScalar(value: string): string {
   return trimmed;
 }
 
+// Split a candidate body into "key: value" fields on the ";" separators,
+// ignoring semicolons inside a quoted value so quoted strings round-trip
+// intact. A quote only opens a quoted span at the start of a value, matching
+// the values emitted by quoteYamlValue.
+function splitCandidateFields(body: string): string[] {
+  const fields: string[] = [];
+  let index = 0;
+  while (index < body.length) {
+    const fieldStart = index;
+    const keyMatch = /^[A-Za-z][A-Za-z0-9]*:\s*/.exec(body.slice(index));
+    if (keyMatch?.[0]) {
+      index += keyMatch[0].length;
+    }
+    const quote = body[index];
+    if (quote === "\"" || quote === "'") {
+      index = scanQuotedSpan(body, index);
+    }
+    while (index < body.length && body[index] !== ";") {
+      index += 1;
+    }
+    fields.push(body.slice(fieldStart, index));
+    const separator = /^\s*;\s*/.exec(body.slice(index));
+    if (!separator?.[0]) {
+      break;
+    }
+    index += separator[0].length;
+  }
+  return fields;
+}
+
+function scanQuotedSpan(body: string, openIndex: number): number {
+  const quote = body[openIndex];
+  for (let index = openIndex + 1; index < body.length; index += 1) {
+    if (quote === "\"" && body[index] === "\\") {
+      index += 1;
+      continue;
+    }
+    if (body[index] === quote) {
+      return index + 1;
+    }
+  }
+  return body.length;
+}
+
 function parseCandidateLine(line: string): PaperDownloadListCandidate | undefined {
   const body = line.replace(/^\s*-\s*/, "").trim();
   if (!body) {
     return undefined;
   }
   const candidate: PaperDownloadListCandidate = {};
-  for (const part of body.split(/\s*;\s*/)) {
+  for (const part of splitCandidateFields(body)) {
     const match = part.match(/^([A-Za-z][A-Za-z0-9]*):\s*([\s\S]*)$/);
     if (!match?.[1]) {
       continue;
@@ -258,6 +302,30 @@ async function candidateAlreadyDownloaded(workspaceDir: string, candidate: Paper
     maxResults: 10000
   });
   return papers.results.some((paper) => localPaperMatchesCandidate(paper, candidate));
+}
+
+// download_paper signals most failures by resolving with a result object
+// (status "extension_unavailable", "blocked", "publisher_pending", ...) rather
+// than throwing, so the resolved status decides whether a candidate really
+// finished downloading.
+function readDownloadPaperStatus(details: unknown): string | undefined {
+  if (!details || typeof details !== "object") {
+    return undefined;
+  }
+  const status = (details as { status?: unknown }).status;
+  return typeof status === "string" ? status : undefined;
+}
+
+function readDownloadPaperFailureMessage(details: unknown): string | undefined {
+  if (!details || typeof details !== "object") {
+    return undefined;
+  }
+  const failure = (details as { failure?: unknown }).failure;
+  if (!failure || typeof failure !== "object") {
+    return undefined;
+  }
+  const message = (failure as { message?: unknown }).message;
+  return typeof message === "string" && message.trim() ? message : undefined;
 }
 
 export async function stagePaperDownloadList(
@@ -329,19 +397,13 @@ export async function downloadPaperList(
     }
 
     attempted += 1;
+    let details: unknown;
     try {
-      const details = await options.downloadPaperImpl({
+      details = await options.downloadPaperImpl({
         workspaceDir: options.workspaceDir,
         ...(candidate.id ? { id: candidate.id } : {}),
         ...(candidate.url && !candidate.id ? { url: candidate.url } : {}),
         ...(candidate.title ? { title: candidate.title } : {})
-      });
-      downloaded += 1;
-      results.push({
-        candidate,
-        status: "downloaded",
-        message: "download_paper completed for this candidate.",
-        details
       });
     } catch (error) {
       failed += 1;
@@ -355,7 +417,40 @@ export async function downloadPaperList(
         status: "failed",
         message
       });
+      continue;
     }
+
+    const downloadStatus = readDownloadPaperStatus(details);
+    if (downloadStatus === "downloaded" || downloadStatus === "already_downloaded") {
+      downloaded += 1;
+      results.push({
+        candidate,
+        status: downloadStatus,
+        message:
+          downloadStatus === "already_downloaded"
+            ? "download_paper reports this candidate is already downloaded."
+            : "download_paper completed for this candidate.",
+        details
+      });
+      continue;
+    }
+
+    failed += 1;
+    const message =
+      readDownloadPaperFailureMessage(details) ??
+      (downloadStatus
+        ? `download_paper returned status "${downloadStatus}" without a downloaded paper.`
+        : "download_paper did not report a downloaded paper.");
+    remaining.push({
+      ...candidate,
+      lastError: message
+    });
+    results.push({
+      candidate,
+      status: "failed",
+      message,
+      details
+    });
   }
 
   await writeFile(resolvedListPath, serializeDownloadList(remaining), "utf8");

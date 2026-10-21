@@ -2,7 +2,11 @@ export interface KeyedTaskQueue {
   enqueue(key: string, task: () => Promise<void>): void;
 }
 
-export function createPerKeyQueue(): KeyedTaskQueue {
+export interface KeyedTaskQueueOptions {
+  onError?: (error: unknown, key: string) => void | Promise<void>;
+}
+
+export function createPerKeyQueue(options: KeyedTaskQueueOptions = {}): KeyedTaskQueue {
   const queues = new Map<string, Array<() => Promise<void>>>();
   const activeKeys = new Set<string>();
 
@@ -20,7 +24,15 @@ export function createPerKeyQueue(): KeyedTaskQueue {
           queues.delete(key);
           break;
         }
-        await task();
+        try {
+          await task();
+        } catch (error) {
+          try {
+            await options.onError?.(error, key);
+          } catch {
+            // A throwing or rejecting observer must not take down the queue.
+          }
+        }
       }
     } finally {
       activeKeys.delete(key);

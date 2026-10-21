@@ -1081,12 +1081,17 @@ export async function lintPaperWiki(options: PaperWikiLintOptions): Promise<Pape
         incomingPageLinks.set(pageMatch[1], (incomingPageLinks.get(pageMatch[1]) ?? 0) + 1);
       }
     }
+  }
 
-    if (pageFiles.length > 1 && relatedPages.length === 0 && (incomingPageLinks.get(pageKey) ?? 0) === 0) {
+  // incomingPageLinks is only complete once every source and page has been
+  // read, so the orphan check must run in a second pass against the full map;
+  // checking inside the loop above flags pages linked only by later files.
+  for (const page of pageMetadata) {
+    if (pageFiles.length > 1 && page.relatedPages.length === 0 && (incomingPageLinks.get(page.pageKey) ?? 0) === 0) {
       issues.push({
         kind: "orphan_page",
         severity: "low",
-        path: relativePath,
+        path: page.path,
         reason: "Synthesis page has no related_pages and no inbound page links."
       });
     }

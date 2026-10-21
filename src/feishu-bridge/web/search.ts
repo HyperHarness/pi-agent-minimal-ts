@@ -92,7 +92,9 @@ function decodeDuckDuckGoRedirect(url: string): string {
 
 export function parseJinaSearchMarkdown(markdown: string, limit: number): WebSearchResult[] {
   const results: WebSearchResult[] = [];
-  const regex = /^## \[(.+?)\]\((.+?)\)\n([\s\S]*?)(?=\n## \[|$)/gm;
+  // `$(?![\s\S])` anchors the lookahead to the true end of input: with the
+  // `m` flag a bare `$` would end every snippet at its first line.
+  const regex = /^## \[(.+?)\]\((.+?)\)\r?\n([\s\S]*?)(?=\r?\n## \[|$(?![\s\S]))/gm;
   let match: RegExpExecArray | null;
 
   while ((match = regex.exec(markdown)) && results.length < limit) {
@@ -100,7 +102,7 @@ export function parseJinaSearchMarkdown(markdown: string, limit: number): WebSea
     const url = decodeDuckDuckGoRedirect(match[2].trim());
     const snippet = decodeHtml(
       match[3]
-        .replace(/\n+/g, ' ')
+        .replace(/[\r\n]+/g, ' ')
         .trim(),
     );
 

@@ -30,6 +30,8 @@ export interface Config {
     model?: string;
     baseUrl?: string;
     apiKey?: string;
+    idleTimeoutMs: number;
+    maxClients: number;
   };
   memory: {
     dir: string;
@@ -98,6 +100,11 @@ function parseBoolean(value: string | undefined, fallback: boolean): boolean {
 function parseNumber(value: string | undefined, fallback: number): number {
   const parsed = Number(value);
   return Number.isFinite(parsed) && parsed > 0 ? parsed : fallback;
+}
+
+function parseInteger(value: string | undefined, fallback: number): number {
+  const parsed = Number(value);
+  return Number.isInteger(parsed) && parsed > 0 ? parsed : fallback;
 }
 
 function parseStreamMode(value: string | undefined): 'card' | 'text' | 'card_to_text' {
@@ -286,6 +293,8 @@ export function loadConfig(cwd: string = process.cwd()): Config {
       model: getEnvVar('PI_MODEL'),
       baseUrl: piBaseUrl,
       apiKey: openAiApiKey,
+      idleTimeoutMs: parseNumber(process.env.PI_IDLE_TIMEOUT_MS, 10 * 60 * 1000),
+      maxClients: parseInteger(process.env.PI_MAX_CLIENTS, 20),
     },
     memory: {
       dir: process.env.BRIDGE_MEMORY_DIR || path.join(cwd, '.memory'),

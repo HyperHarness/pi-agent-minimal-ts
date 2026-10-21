@@ -76,7 +76,7 @@ test("resolveInitialModel derives an explicit missing model from the provider te
   assert.equal(result.model.baseUrl, "https://example.test/v1");
 });
 
-test("resolveInitialModel ignores a partial CLI override and honors a complete env pair", () => {
+test("resolveInitialModel merges a partial CLI provider with the env model instead of dropping it", () => {
   const availableModels = [
     createModel("openai", "gpt-5.4"),
     createModel("anthropic", "claude-opus-4-6")
@@ -91,8 +91,100 @@ test("resolveInitialModel ignores a partial CLI override and honors a complete e
     hasConfiguredAuth: () => true
   });
 
-  assert.equal(result.provider, "openai");
+  // The explicit CLI provider must not be overridden by the unrelated env pair.
+  assert.equal(result.provider, "anthropic");
   assert.equal(result.model.id, "gpt-5.4");
+});
+
+test("resolveInitialModel merges a CLI model with the env provider", () => {
+  const availableModels = [
+    createModel("openai", "gpt-5.4"),
+    createModel("anthropic", "claude-opus-4-6")
+  ];
+
+  const result = resolveInitialModel({
+    cliProvider: undefined,
+    cliModel: "gpt-5.5",
+    envProvider: "openai",
+    envModel: "gpt-5.4",
+    availableModels,
+    hasConfiguredAuth: () => true
+  });
+
+  assert.equal(result.provider, "openai");
+  assert.equal(result.model.id, "gpt-5.5");
+});
+
+test("resolveInitialModel throws when only a CLI model is specified", () => {
+  const availableModels = [
+    createModel("openai", "gpt-5.4"),
+    createModel("anthropic", "claude-opus-4-6")
+  ];
+
+  assert.throws(() => {
+    resolveInitialModel({
+      cliProvider: undefined,
+      cliModel: "gpt-5.4",
+      envProvider: undefined,
+      envModel: undefined,
+      availableModels,
+      hasConfiguredAuth: () => true
+    });
+  }, /Incomplete explicit model request: model was specified without a provider/);
+});
+
+test("resolveInitialModel throws when only a CLI provider is specified", () => {
+  const availableModels = [
+    createModel("openai", "gpt-5.4"),
+    createModel("anthropic", "claude-opus-4-6")
+  ];
+
+  assert.throws(() => {
+    resolveInitialModel({
+      cliProvider: "anthropic",
+      cliModel: undefined,
+      envProvider: undefined,
+      envModel: undefined,
+      availableModels,
+      hasConfiguredAuth: () => true
+    });
+  }, /Incomplete explicit model request: provider was specified without a model/);
+});
+
+test("resolveInitialModel throws when only PI_MODEL is specified", () => {
+  const availableModels = [
+    createModel("openai", "gpt-5.4"),
+    createModel("anthropic", "claude-opus-4-6")
+  ];
+
+  assert.throws(() => {
+    resolveInitialModel({
+      cliProvider: undefined,
+      cliModel: undefined,
+      envProvider: undefined,
+      envModel: "gpt-5.4",
+      availableModels,
+      hasConfiguredAuth: () => true
+    });
+  }, /Incomplete explicit model request: model was specified without a provider/);
+});
+
+test("resolveInitialModel throws when only PI_PROVIDER is specified", () => {
+  const availableModels = [
+    createModel("openai", "gpt-5.4"),
+    createModel("anthropic", "claude-opus-4-6")
+  ];
+
+  assert.throws(() => {
+    resolveInitialModel({
+      cliProvider: undefined,
+      cliModel: undefined,
+      envProvider: "openai",
+      envModel: undefined,
+      availableModels,
+      hasConfiguredAuth: () => true
+    });
+  }, /Incomplete explicit model request: provider was specified without a model/);
 });
 
 test("resolveInitialModel falls back to the preferred default model among authenticated providers", () => {

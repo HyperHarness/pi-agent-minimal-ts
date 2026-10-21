@@ -1,5 +1,6 @@
-import { mkdir, readFile, writeFile } from "node:fs/promises";
+import { mkdir, readFile } from "node:fs/promises";
 import path from "node:path";
+import { atomicWriteFile } from "./atomic-write.js";
 import {
   getPaperWikiSourcesDir,
   relativeToWorkspace,
@@ -191,7 +192,7 @@ export async function writeKnowledgeSourceMetadata(input: {
   const metadataPath = getKnowledgeSourceMetadataPath(input.workspaceDir, input.metadata.sourceKey);
   const metadata = normalizeKnowledgeSourceMetadataPaths(input.workspaceDir, input.metadata);
   await mkdir(path.dirname(metadataPath), { recursive: true });
-  await writeFile(metadataPath, `${JSON.stringify(metadata, null, 2)}\n`, "utf8");
+  await atomicWriteFile(metadataPath, `${JSON.stringify(metadata, null, 2)}\n`);
   return relativeToWorkspace(input.workspaceDir, metadataPath);
 }
 

@@ -58,12 +58,20 @@ function createCustomModelFromProviderTemplate<TModel extends ModelIdentity>(
 }
 
 function getExplicitRequest(options: ModelResolverOptions<ModelIdentity>) {
-  if (options.cliProvider && options.cliModel) {
-    return { provider: options.cliProvider, modelId: options.cliModel };
+  const provider = options.cliProvider ?? options.envProvider;
+  const modelId = options.cliModel ?? options.envModel;
+
+  if (provider && modelId) {
+    return { provider, modelId };
   }
 
-  if (options.envProvider && options.envModel) {
-    return { provider: options.envProvider, modelId: options.envModel };
+  if (provider || modelId) {
+    const specified = provider ? "provider" : "model";
+    const missing = provider ? "model" : "provider";
+    throw new Error(
+      `Incomplete explicit model request: ${specified} was specified without a ${missing}. ` +
+        "Specify both --provider and --model (or both PI_PROVIDER and PI_MODEL)."
+    );
   }
 
   return undefined;

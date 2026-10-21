@@ -2,12 +2,12 @@ import { PiRpcClient } from './pi-client.js';
 
 export interface StartPiClientWithRetryOptions {
   maxAttempts: number;
-  createClient: () => Pick<PiRpcClient, 'start' | 'getRecentStderrSummary'>;
+  createClient: () => Pick<PiRpcClient, 'start' | 'getRecentStderrSummary' | 'stop'>;
 }
 
 export async function startPiClientWithRetry(
   options: StartPiClientWithRetryOptions,
-): Promise<Pick<PiRpcClient, 'start' | 'getRecentStderrSummary'>> {
+): Promise<Pick<PiRpcClient, 'start' | 'getRecentStderrSummary' | 'stop'>> {
   let lastError: unknown;
   let lastSummary = '';
 
@@ -19,6 +19,11 @@ export async function startPiClientWithRetry(
     } catch (error) {
       lastError = error;
       lastSummary = client.getRecentStderrSummary();
+      try {
+        client.stop();
+      } catch {
+        // Preserve the original startup error diagnostics if cleanup fails.
+      }
     }
   }
 

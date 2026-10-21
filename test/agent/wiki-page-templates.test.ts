@@ -67,3 +67,68 @@ test("validateRequiredTemplateSections reports missing method inputs and outputs
 
   assert.deepEqual(result.missingSections, ["Inputs", "Outputs", "Failure Modes", "Design Use"]);
 });
+
+test("validateRequiredTemplateSections accepts case and whitespace heading variants", () => {
+  const result = validateRequiredTemplateSections({
+    pageType: "concept",
+    markdown: [
+      "# Concept page",
+      "",
+      "## overview",
+      "Intro.",
+      "",
+      "## Key   Concepts",
+      "Details.",
+      "",
+      "## Evidence ##",
+      "Refs.",
+      "",
+      "## open questions",
+      "None yet.",
+      "",
+      "## RELATED  PAGES",
+      "None."
+    ].join("\n")
+  });
+
+  assert.deepEqual(result.missingSections, []);
+});
+
+test("validateRequiredTemplateSections still reports genuinely missing sections with variant headings present", () => {
+  const result = validateRequiredTemplateSections({
+    pageType: "finding",
+    markdown: [
+      "# Finding page",
+      "",
+      "## claim",
+      "",
+      "## Evidence",
+      "",
+      "## SCOPE",
+      "",
+      "## Confidence",
+      "",
+      "## implications"
+    ].join("\n")
+  });
+
+  assert.deepEqual(result.missingSections, ["Contradictions or Open Checks"]);
+});
+
+test("validateRequiredTemplateSections requires headings, not body mentions, to satisfy sections", () => {
+  const result = validateRequiredTemplateSections({
+    pageType: "capability-boundary",
+    markdown: [
+      "# Boundary page",
+      "",
+      "## can support",
+      "Mentions escalation criteria only in body text.",
+      "",
+      "## cannot support yet ##",
+      "",
+      "## Evidence Boundary"
+    ].join("\n")
+  });
+
+  assert.deepEqual(result.missingSections, ["Escalation Criteria"]);
+});
