@@ -1,6 +1,8 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
-import { mkdir, mkdtemp, rm, writeFile, symlink } from 'node:fs/promises';
+import { execFileSync, spawn } from 'node:child_process';
+import { existsSync } from 'node:fs';
+import { lstat, mkdir, mkdtemp, rm, writeFile, symlink } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import path from 'node:path';
 import {
@@ -64,6 +66,72 @@ test('PDF upload validates real paths and reads only a bounded workspace file', 
     await rm(workspace, { recursive: true, force: true });
     await rm(outside, { recursive: true, force: true });
   }
+});
+
+test('workspace FIFO PDF is rejected without blocking', { timeout: 15_000 }, async (t) => {
+  if (process.platform !== 'linux') {
+    t.skip('the POSIX FIFO regression runs only on Linux');
+    return;
+  }
+
+  const workspace = await createWorkspaceDir();
+  const fifoPath = path.join(workspace, 'pending.pdf');
+  const probePath = path.join(workspace, 'fifo-probe.mjs');
+  try {
+    execFileSync('mkfifo', [fifoPath]);
+    assert.equal((await lstat(fifoPath)).isFIFO(), true, 'fixture must be a FIFO with no writer');
+
+    // Probe from a child process: if open() blocks on the FIFO, it pins a libuv
+    // thread and never returns, so an in-process await would hang the whole suite.
+    const probeSource = [
+      'const [moduleUrl, fifoPath, workspace, maxBytes] = process.argv.slice(2);',
+      'const { openPdfForUpload } = await import(moduleUrl);',
+      'try {',
+      '  const file = await openPdfForUpload(fifoPath, [workspace], Number(maxBytes));',
+      '  await file.close();',
+      "  process.stdout.write('ACCEPTED\\n');",
+      '  process.exitCode = 2;',
+      '} catch (error) {',
+      "  process.stdout.write(`REJECTED:${error instanceof Error ? error.message : String(error)}\\n`);",
+      '}',
+      '',
+    ].join('\n');
+    await writeFile(probePath, probeSource, 'utf8');
+    const moduleUrl = new URL('../../src/feishu-bridge/feishu/pdf-delivery.js', import.meta.url).href;
+
+    const child = spawn(process.execPath, [probePath, moduleUrl, fifoPath, workspace, '1024'], {
+      stdio: ['ignore', 'pipe', 'pipe'],
+    });
+    let stdout = '';
+    let stderr = '';
+    child.stdout.setEncoding('utf8');
+    child.stderr.setEncoding('utf8');
+    child.stdout.on('data', (chunk: string) => { stdout += chunk; });
+    child.stderr.on('data', (chunk: string) => { stderr += chunk; });
+
+    let timedOut = false;
+    const outcome = await new Promise<{ code: number | null; signal: NodeJS.Signals | null; error?: Error }>((resolve) => {
+      const timer = setTimeout(() => {
+        timedOut = true;
+        child.kill('SIGKILL');
+      }, 5_000);
+      const settle = (value: { code: number | null; signal: NodeJS.Signals | null; error?: Error }) => {
+        clearTimeout(timer);
+        resolve(value);
+      };
+      child.once('error', (error: Error) => settle({ code: null, signal: null, error }));
+      child.once('close', (code, signal) => settle({ code, signal }));
+    });
+
+    assert.equal(outcome.error, undefined, `probe failed to spawn: ${outcome.error?.message ?? ''}`);
+    assert.equal(timedOut, false, `probe hung opening the FIFO and was killed; stderr: ${stderr}`);
+    assert.equal(outcome.code, 0, `probe exited with ${String(outcome.code)}/${String(outcome.signal)}; stdout: ${stdout} stderr: ${stderr}`);
+    assert.match(stdout, /REJECTED:PDF path is not a regular file\./);
+  } finally {
+    await rm(workspace, { recursive: true, force: true });
+  }
+  // The probe and its FIFO fixture must be gone after the regression runs.
+  assert.equal(existsSync(fifoPath), false);
 });
 
 test('extractDownloadedPdfAttachment resolves successful download_paper results', () => {

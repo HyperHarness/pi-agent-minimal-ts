@@ -41,7 +41,10 @@ export async function openPdfForUpload(filePath: string, allowedRoots: string[],
   const permitted = (target: string) => roots.some(root => root !== undefined && isInside(root, target));
   const canonical = await realpath(resolved);
   if (!permitted(canonical)) throw new Error('PDF symlink escapes the configured workspace.');
-  const file = await open(canonical, constants.O_RDONLY | (constants.O_NOFOLLOW ?? 0));
+  // O_NONBLOCK keeps open() from waiting for a writer when the path is a FIFO;
+  // the opened-descriptor checks below reject anything that is not a regular file.
+  const nonBlocking = process.platform === 'win32' ? 0 : (constants.O_NONBLOCK ?? 0);
+  const file = await open(canonical, constants.O_RDONLY | (constants.O_NOFOLLOW ?? 0) | nonBlocking);
   try {
     // On Linux validate the opened file itself, including parent-directory races.
     if (process.platform === 'linux' && !permitted(await realpath(`/proc/self/fd/${file.fd}`))) {
