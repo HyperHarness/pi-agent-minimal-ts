@@ -433,7 +433,19 @@ export function createAttachedPaperBrowserSession(options: {
             const challengeCleared = await waitForAntiBotChallengeToClear({
               page,
               isCleared: async () => {
-                response = await page.goto(url, { waitUntil: "domcontentloaded" });
+                try {
+                  response = await page.goto(url, { waitUntil: "domcontentloaded" });
+                } catch (error) {
+                  // The retry navigation can start an attachment download just
+                  // like the initial one. Only those expected errors may stop
+                  // challenge polling and fall through to the pending download
+                  // event; anything else must still propagate.
+                  if (!isDownloadStartNavigationError(error)) {
+                    throw error;
+                  }
+                  downloadNavigationStarted = true;
+                  return true;
+                }
                 contentType = response?.headers()["content-type"]?.toLowerCase();
 
                 if (response && contentType?.includes("application/pdf")) {
@@ -454,7 +466,7 @@ export function createAttachedPaperBrowserSession(options: {
               }
             });
 
-            if (response && contentType?.includes("application/pdf")) {
+            if (!downloadNavigationStarted && response && contentType?.includes("application/pdf")) {
               return;
             }
 
